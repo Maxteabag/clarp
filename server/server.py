@@ -1516,85 +1516,117 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         from lib import hotseat_status
         self._send(200, json.dumps(hotseat_status.payload()).encode(), "application/json")
 
+    def _hotseat_desk(self):
+        """The desk object build_server put on the context, or None once this
+        answered: 404 like any unknown route while the owner has the desk
+        turned off ([hotseat] desk = false), 503 on a Host without the object."""
+        from lib import server_identity
+        if not server_identity.hotseat_desk_enabled():
+            self._send(404, b"not found")
+            return None
+        desk = getattr(self.ctx, "hotseat_desk", None)
+        if desk is None:
+            self._json_error(503, "hotseat desk unavailable")
+        return desk
+
     def _handle_hotseat_desk(self):
-        """Full Hotseat TUI desk snapshot (`refresh=1` runs a single-flight live CLI read)."""
-        from lib import hotseat_desk
+        """Full Hotseat TUI desk snapshot (`refresh=1` asks for a live CLI read;
+        the desk allows one per minimum interval and says when the next may run)."""
+        desk = self._hotseat_desk()
+        if desk is None:
+            return
         qs = self._query()
         force = any(str(v).lower() in {"1", "true", "yes"} for v in qs.get("refresh", []))
-        self._send(200, json.dumps(hotseat_desk.payload(refresh=force)).encode(), "application/json")
+        self._send(200, json.dumps(desk.payload(refresh=force)).encode(), "application/json")
 
     def _handle_hotseat_switch(self):
         """Switch the machine-wide default Claude or Codex account via Hotseat."""
-        from lib import hotseat_desk
+        desk = self._hotseat_desk()
+        if desk is None:
+            return
         data = self._read_json()
         if not isinstance(data, dict):
             return self._json_error(400, "bad json")
-        status, body = hotseat_desk.switch_default(
+        status, body = desk.switch_default(
             str(data.get("provider") or ""),
             str(data.get("alias") or ""),
         )
         return self._json(status, body)
 
+    def _hotseat_send_prompt(self, session: str, text: str, client_msg_id: str) -> dict:
+        """The desk's resume prompt, dispatched in this process the way every
+        scheduler dispatches: no call to this Host's own listener, no admin
+        token, nothing admitted in the administrator's name. `client_msg_id`
+        is the stop's id, so the dispatcher starts at most one turn for it.
+
+        `queue_if_busy`: the desk checked that the agent is idle, but that
+        check cannot be atomic with the dispatch. A turn that started in
+        between is waited for; without this an automation send preempts it.
+        The answer says `queued` when the prompt waits behind such a turn."""
+        from lib import turn_queue
+        from lib.dispatch_adapters import ORIGIN_AUTOMATION
+        from lib.turn_dispatch import UNCONFIRMED_DELIVERY
+        try:
+            result = TurnDispatchService(self.ctx).submit(DispatchCommand(
+                text=text, requested_session=session, forced_session=session,
+                trace_id=_trace.new_trace_id(), client_msg_id=client_msg_id,
+                synthesize_audio=False, origin=ORIGIN_AUTOMATION, queue_if_busy=True))
+        except DispatchError as exc:
+            self._hotseat_withdraw_unstarted(session, client_msg_id)
+            return {"ok": False, "error": f"{exc.status}: {exc}",
+                    "unconfirmed": str(exc) == UNCONFIRMED_DELIVERY}
+        return {"ok": True, "queued": bool(result.queued)}
+
+    def _hotseat_withdraw_unstarted(self, session: str, queue_id: str) -> None:
+        """A start that failed leaves the desk's prompt as a `queued` row of the
+        agent's queue. The dispatcher has no proof that it never reached a
+        backend, so nothing would ever run it: it would sit in the chat as a
+        waiting message that cannot be sent and hold the agent's automation
+        back. Take it out again. Only a row still `queued` is removed; one that
+        was claimed or started belongs to a turn."""
+        from lib import turn_queue
+        try:
+            if turn_queue.status(queue_id) != "queued" or not turn_queue.remove(queue_id):
+                return
+            agent = identity.lookup(session)
+            if agent:
+                self._broadcast_turn_queue(str(agent["agent_id"]), session)
+            log("hotseatDeskPromptWithdrawn", f"session={session}")
+        except Exception as exc:  # noqa: BLE001 - the failure itself is already being reported
+            log_exception("hotseatDeskWithdrawFail", exc, detail=session)
+
+    def _hotseat_unpause_queue(self, agent_id: str, session: str) -> dict:
+        """Lift a Stop's pause; whoever owns turns picks the waiting ones up."""
+        from lib import turn_queue
+        changed = turn_queue.set_paused(agent_id, False)
+        if changed:
+            log("queueResumed", f"session={session} source=hotseat_desk")
+            runtime_client = getattr(self.ctx, "runtime_client", None)
+            try:
+                if runtime_client is not None:
+                    runtime_client.recover_queued()
+                else:
+                    TurnDispatchService(self.ctx).recover_queued()
+            except Exception as exc:  # noqa: BLE001
+                log_exception("queueResumeRecoverFail", exc, detail=session)
+        self._broadcast_turn_queue(agent_id, session)
+        return turn_queue.state(agent_id)
+
     def _handle_hotseat_resume(self):
         """Continue a stopped Clarp agent, unpause its queue, or get a native resume command."""
-        import urllib.error
-        import urllib.request
-        from lib import hotseat_desk, turn_queue
+        desk = self._hotseat_desk()
+        if desk is None:
+            return
         data = self._read_json()
         if not isinstance(data, dict):
             return self._json_error(400, "bad json")
-
-        def send_prompt(session: str, text: str) -> dict:
-            port = int(self.server.server_address[1])
-            payload = {
-                "session": session,
-                "text": text,
-                "force_session": True,
-                "synthesize_audio": False,
-                "hands_free": False,
-                "origin": "automation",
-                "client_msg_id": f"hotseat-resume-{secrets.token_hex(8)}",
-            }
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/send",
-                data=json.dumps(payload).encode(),
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            token = getattr(self.ctx, "auth_token", "") or ""
-            if token:
-                req.add_header("Authorization", f"Bearer {token}")
-            try:
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    resp.read()
-                return {"ok": True}
-            except urllib.error.HTTPError as exc:
-                return {"ok": False, "error": f"HTTP {exc.code}: {exc.read(200).decode('utf-8', 'replace')}"}
-            except OSError as exc:
-                return {"ok": False, "error": type(exc).__name__}
-
-        def unpause_queue(agent_id: str, session: str) -> dict:
-            changed = turn_queue.set_paused(agent_id, False)
-            if changed:
-                log("queueResumed", f"session={session} source=hotseat_desk")
-                runtime_client = getattr(self.ctx, "runtime_client", None)
-                try:
-                    if runtime_client is not None:
-                        runtime_client.recover_queued()
-                    else:
-                        TurnDispatchService(self.ctx).recover_queued()
-                except Exception as exc:  # noqa: BLE001
-                    log_exception("queueResumeRecoverFail", exc, detail=session)
-            self._broadcast_turn_queue(agent_id, session)
-            return turn_queue.state(agent_id)
-
-        status, body = hotseat_desk.resume_work(
+        status, body = desk.resume_work(
             str(data.get("id") or ""),
             kind=str(data.get("kind") or "clarp"),
             backend=str(data.get("backend") or ""),
             action=str(data.get("action") or "continue"),
-            send_prompt=send_prompt,
-            unpause_fn=unpause_queue,
+            send_prompt=self._hotseat_send_prompt,
+            unpause_fn=self._hotseat_unpause_queue,
         )
         return self._json(status, body)
 
@@ -3110,9 +3142,15 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # A Codex switch through Hotseat rewrites auth.json; the Codex backend
         # restarts its idle app-servers from on_credential_change(), exactly
         # as after `codex login`.
+        # The desk's switch and the switcher's switch share one lock per provider,
+        # and the switcher's scheduled reads keep the stored desk fresh.
+        desk = getattr(ctx, "hotseat_desk", None)
         return started(AutonomyJanitors(
             adapters.decided_heartbeat, apns.send_user_notification,
-            recover=adapters.recover_janitor_quota))
+            recover=adapters.recover_janitor_quota,
+            hotseat_switch_lock=desk.switch_lock if desk is not None else None,
+            hotseat_observe=desk.absorb_switcher_read if desk is not None else None,
+            hotseat_switched=desk.mark_switched if desk is not None else None))
 
     def start_janitor_runner():
         from lib.janitor_http import runtime_available
@@ -3286,6 +3324,9 @@ def build_server(ctx: ServerContext, port: int,
     from lib import oracle_handoffs
     oracle_handoffs.bind(ctx)
     oracle_handoffs.recover()
+    if ctx.hotseat_desk is None:
+        from lib.hotseat_desk import HotseatDesk
+        ctx.replace_service("hotseat_desk", HotseatDesk())
     listener_addr = bind_addr or BIND_ADDR
     if listener_addr not in {"127.0.0.1", "::1", "localhost"} and not ctx.auth_token:
         raise ValueError("a non-loopback listener requires authentication")

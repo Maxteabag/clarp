@@ -56,6 +56,7 @@ Methods, each with a real body in the subclass or the shared base:
 | `spawn_turn(**spec) -> TurnHandle` | the runner |
 | `interrupt(agent_id) -> int`, `active_handles(agent_id)` | process registry |
 | `resume_target(session_id, cwd, home)` | transcript path for Claude, the id for the rest, `None` when a bound session has nothing to resume |
+| `native_resume_command(session_id)` | the command a person types to resume a native session of this CLI (`claude --resume <id>`, `codex resume <id>`), `None` for a CLI with none the Host knows; the Hotseat desk shows it and never offers one CLI's command for another's session |
 | `bind_new_session(agent_id, session) -> str` | Claude pre-mints a UUID; others return "" |
 | `find_transcript(session_id, home, cwd=)`, `parse_transcript(path)`, `list_sessions(cwd, limit, all_projects)` | transcript access; the `cwd` hint lets a CLI whose layout encodes it prefer that directory |
 | `transcript_cwd(transcript)` | the cwd a transcript's location encodes (Claude's project dirs), "" for the rest |

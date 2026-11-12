@@ -48,6 +48,11 @@ CONFIG_PATH = pathlib.Path(os.environ.get(
 DEFAULT_AUDIO_CENTRAL_URL = "https://clarp-audio-central.peter-w-adams96.workers.dev"
 APNS_MODES = ("auto", "relay", "direct", "off")
 
+# Paid Contact portrait generation defaults (single place to flip default policy).
+DEFAULT_CONTACT_AVATAR_GENERATION = True
+DEFAULT_CONTACT_AVATAR_DAILY_LIMIT = 20
+DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS = 3
+
 
 DEFAULT_ROSTER: dict[str, str] = {
     "Mike":   "nPczCjzI2devNBz1zQrb",
@@ -390,6 +395,10 @@ class Config:
     # URL prefixes a controller `http_post` action may call besides loopback
     # ([controller_actions] allowed_urls; see lib.controller_actions).
     controller_action_urls: tuple[str, ...] = ()
+    # The Hotseat desk ([hotseat] desk): its features are advertised and
+    # /hotseat/desk, /hotseat/switch and /hotseat/resume are served. False
+    # takes all of it away; clients fall back to the read-only /hotseat/status.
+    hotseat_desk_enabled: bool = True
     eleven_api_key: str = ""             # if set, used for direct HTTP; else env var ELEVEN_API_KEY
     eleven_model: str = "eleven_flash_v2_5"
     eleven_speed: float = 1.2
@@ -527,6 +536,11 @@ class Config:
     job_heartbeat_grace_minutes: float = 15.0
     helper_idle_after_minutes: float = 30.0
     custom_status_ttl_hours: float = 2.0
+    # Paid Contact portrait generation ([contacts] or [openai]). Controlled by
+    # DEFAULT_CONTACT_AVATAR_* above so changing the default is a one-line edit.
+    contact_avatar_generation: bool = DEFAULT_CONTACT_AVATAR_GENERATION
+    contact_avatar_daily_limit: int = DEFAULT_CONTACT_AVATAR_DAILY_LIMIT
+    contact_avatar_max_attempts: int = DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS
     codex_model: str = ""
     codex_reasoning_effort: str = ""     # "" | "low" | "medium" | "high"
     agy_model: str = ""
@@ -571,6 +585,12 @@ class Config:
     # (and managed voice), reached with this Computer's cav1.… credential.
     audio_central_url: str = DEFAULT_AUDIO_CENTRAL_URL
     audio_central_credential: str = field(default="", repr=False)
+    # [fcm] service_account: path to a Google service account JSON key for
+    # the Firebase project of the Android app. When set (and readable), this
+    # Host pushes to Android phones directly through FCM HTTP v1 and
+    # advertises feature `push_fcm` (docs/push-android.md). The project id
+    # comes from the file.
+    fcm_service_account: str = ""
     # [transcript_shadow]: the incremental-import shadow comparison (kill
     # switch and resource budget; read by lib.transcript_incremental). Off
     # unless `enabled = true`; see docs/transcript-incremental-import.md.
@@ -645,6 +665,22 @@ class Config:
         deterministic code, which is the default state.
         """
         return self.auth_token_or_env(self.typesafe_api_key, "TYPESAFE_API_KEY")
+
+    def fcm_service_account_file(self) -> str:
+        """The configured service account path ("" when unset), expanded."""
+        raw = (self.fcm_service_account or os.environ.get("FCM_SERVICE_ACCOUNT", "")).strip()
+        return str(pathlib.Path(raw).expanduser()) if raw else ""
+
+    def fcm_enabled(self) -> bool:
+        """True when Android pushes can go out through FCM (a usable service
+        account file; whether Google accepts it shows at the first send)."""
+        from . import fcm
+        return fcm.configured(self)
+
+    def push_enabled(self) -> bool:
+        """True when any push path is configured: APNs for iPhones or FCM
+        for Android phones."""
+        return self.apns_enabled() or self.fcm_enabled()
 
     def apns_enabled(self) -> bool:
         """True when pushes have a delivery path (relay or direct)."""
@@ -817,6 +853,46 @@ def _non_negative_float(raw: Any, default: float) -> float:
     return value if value >= 0 else default
 
 
+def _non_negative_int(raw: Any, default: int) -> int:
+    if isinstance(raw, bool):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _parse_contact_avatar_switch(raw: Any) -> bool:
+    """Parse a spend-stopping switch; only explicit true values enable it."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int):
+        return raw == 1
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+def _resolve_contact_avatar_generation(data: dict[str, Any]) -> bool:
+    env_raw = os.environ.get("CLARP_CONTACT_AVATAR_GENERATION")
+    if env_raw is not None and env_raw.strip() != "":
+        return _parse_contact_avatar_switch(env_raw)
+    if "contacts" in data:
+        raw_contacts = data.get("contacts")
+        if not isinstance(raw_contacts, dict):
+            return False
+        if "avatar_generation" in raw_contacts:
+            return _parse_contact_avatar_switch(raw_contacts.get("avatar_generation"))
+    if "openai" in data:
+        raw_openai = data.get("openai")
+        if not isinstance(raw_openai, dict):
+            return False
+        if "contact_avatar_generation" in raw_openai:
+            return _parse_contact_avatar_switch(raw_openai.get("contact_avatar_generation"))
+    return DEFAULT_CONTACT_AVATAR_GENERATION
+
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -899,7 +975,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     google_stt = data.get("google_stt", {}) or {}
     google_tts = data.get("google_tts")
     google_tts_values = google_tts if isinstance(google_tts, dict) else {}
-    openai  = data.get("openai", {}) or {}
+    openai  = data.get("openai") if isinstance(data.get("openai"), dict) else {}
     typesafe = data.get("typesafe", {}) or {}
     tts     = data.get("tts", {}) or {}
     whisper = data.get("whisper", {}) or {}
@@ -907,11 +983,14 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     catalog = data.get("voice_catalog") or []
     audio   = data.get("audio", {}) or {}
     agents  = data.get("agents", {}) or {}
+    contacts = data.get("contacts") if isinstance(data.get("contacts"), dict) else {}
     mcp     = data.get("mcp", {}) or {}
     network = data.get("network", {}) or {}
     apns    = data.get("apns", {}) or {}
     audio_central = data.get("audio_central", {}) or {}
+    fcm_section = data.get("fcm") if isinstance(data.get("fcm"), dict) else {}
     controller_actions = data.get("controller_actions", {}) or {}
+    hotseat = data.get("hotseat", {}) or {}
     if (str(network.get("mode", "off")).strip().lower() != "off"
             or network.get("relay_enabled", False) or network.get("local_enabled", False)) and not str(server.get("auth_token", "")).strip():
         raise ConfigError("remote networking requires configured authentication")
@@ -956,6 +1035,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         controller_action_urls = tuple(
             str(url).strip() for url in controller_actions.get("allowed_urls", []) or []
             if str(url).strip()),
+        # Only a literal `false` turns the desk off: a typo must not remove it.
+        hotseat_desk_enabled = hotseat.get("desk", True) is not False,
         default_session = str(server.get("default_session", "claude")),
         eleven_api_key  = str(eleven.get("api_key", "")),
         eleven_model    = str(eleven.get("model", "eleven_flash_v2_5")),
@@ -1047,6 +1128,27 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             agents.get("helper_idle_after_minutes"), 30.0),
         custom_status_ttl_hours=_non_negative_float(
             agents.get("custom_status_ttl_hours"), 2.0),
+        contact_avatar_generation=_resolve_contact_avatar_generation(data),
+        contact_avatar_daily_limit=_non_negative_int(
+            os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT")
+            if os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT") is not None
+            and os.environ.get("CLARP_CONTACT_AVATAR_DAILY_LIMIT", "").strip() != ""
+            else contacts.get(
+                "avatar_daily_limit",
+                openai.get("contact_avatar_daily_limit"),
+            ),
+            DEFAULT_CONTACT_AVATAR_DAILY_LIMIT,
+        ),
+        contact_avatar_max_attempts=_non_negative_int(
+            os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS")
+            if os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS") is not None
+            and os.environ.get("CLARP_CONTACT_AVATAR_MAX_ATTEMPTS", "").strip() != ""
+            else contacts.get(
+                "avatar_max_attempts",
+                openai.get("contact_avatar_max_attempts"),
+            ),
+            DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS,
+        ),
         codex_model     = str(agents.get("codex_model", "")),
         codex_reasoning_effort = str(agents.get("codex_reasoning_effort", "")),
         agy_model       = str(agents.get("agy_model", "")),
@@ -1078,6 +1180,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         audio_central_url = (str(audio_central.get("url", "")).strip().rstrip("/")
                              or DEFAULT_AUDIO_CENTRAL_URL),
         audio_central_credential = str(audio_central.get("credential", "")).strip(),
+        fcm_service_account = str(fcm_section.get("service_account", "")).strip(),
         transcript_shadow = dict(data.get("transcript_shadow") or {})
             if isinstance(data.get("transcript_shadow"), dict) else {},
         runtime_release_drain = str(

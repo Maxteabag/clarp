@@ -119,11 +119,23 @@ def _push_grant(raw: str) -> str:
     return value if _PUSH_GRANT.match(value) else ""
 
 
-OWNED_PLATFORMS = frozenset({"ios"})   # platforms whose device registration binds an APNs token
+OWNED_PLATFORMS = frozenset({"ios", "android"})   # platforms whose device registration binds its token
+PROVIDERS = frozenset({"apns", "fcm"})   # device_tokens.provider: the push service that delivers a row
+_DEFAULT_PROVIDER = {"android": "fcm"}   # every other platform: "apns"
+
+
+def provider_for(platform: str, provider: str = "") -> str:
+    """The push provider of a registration: the explicit one, else the platform's default.
+    "" when the explicit one is unknown (POST /devices answers 400)."""
+    value = (provider or "").strip().lower()
+    if not value:
+        return _DEFAULT_PROVIDER.get((platform or "ios").strip().lower(), "apns")
+    return value if value in PROVIDERS else ""
 
 
 class InvalidDeviceToken(ValueError):
-    """POST /devices: a device-bound alert token must be an APNs hex token (64-200 hex digits)."""
+    """POST /devices: a device-bound APNs token must be 64-200 hex digits; an FCM token must look like
+    one (20-4096 characters of A-Z a-z 0-9 _ - :); the provider must be known."""
 
 
 class TokenOwnedElsewhere(Exception):
@@ -133,7 +145,7 @@ class TokenOwnedElsewhere(Exception):
 def register_token(token: str, session: str | None = None,
                     environment: str | None = None,
                     platform: str = "ios", base_url: str = "",
-                    push_grant: str = "", owner: str = "") -> None:
+                    push_grant: str = "", owner: str = "", provider: str = "") -> None:
     """Upsert a device token. Re-registering clears any prior disabled flag.
 
     ``owner`` (column ``device_tokens.principal``) is the AUTHENTICATED paired, full-scope, non-revoked device that registers the token
@@ -147,6 +159,10 @@ def register_token(token: str, session: str | None = None,
       environment; another phone's rows are never touched, even under the same client-supplied session.
     - A non-device registration keeps the legacy retirement (same session+platform, same push grant),
       limited to unbound rows: legacy rows are preserved, never guessed into an owner or mass-disabled.
+
+    ``provider`` (column ``device_tokens.provider``) names the push service: ``apns`` (default for every
+    platform but Android) or ``fcm`` (default for ``android``). An FCM token is validated on every
+    registration (there is no legacy FCM row to stay compatible with) and kept exactly as sent.
     """
     from . import db
     token = canonical_token(token)
@@ -158,11 +174,19 @@ def register_token(token: str, session: str | None = None,
     base_url_key = _device_base_url(base_url)
     grant_key = _push_grant(push_grant)
     owner_key = (owner or "").strip()
+    provider_key = provider_for(platform_key, provider)
+    if not provider_key:
+        raise InvalidDeviceToken(f"unknown push provider {provider!r}")
+    if provider_key == "fcm":
+        from . import fcm
+        if not fcm.valid_token(token):
+            raise InvalidDeviceToken("not an FCM registration token")
     if platform_key not in OWNED_PLATFORMS:
-        # Only an APNs registration from the iOS app binds a token to its device; any other platform
-        # (desktop, web) keeps the legacy, unbound registration and is never refused for its token format.
+        # Only a registration from the iOS (APNs) or Android (FCM) app binds a token to its device; any other
+        # platform (desktop, web) keeps the legacy, unbound registration and is never refused for its token format.
         owner_key = ""
-    if owner_key and not (64 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)):
+    if owner_key and provider_key == "apns" and not (
+            64 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)):
         # Only a device binds ownership, and only to a real APNs token; other registrants keep the legacy
         # acceptance of any non-empty token (it binds nothing).
         raise InvalidDeviceToken("device token must be 64-200 hex digits")
@@ -182,23 +206,26 @@ def register_token(token: str, session: str | None = None,
             (token,)).fetchall()
         if any((v["principal"] or "") and v["principal"] != owner_key for v in variants):
             raise TokenOwnedElsewhere(next(v["principal"] for v in variants if v["principal"]))
-        if owner_key and hex_token:
-            # The same owner's own other-case rows of this token: retire them (same phone, same token).
-            # Unbound legacy case variants stay as they are: ambiguous, never merged or claimed.
-            database.execute(
-                """UPDATE device_tokens SET disabled_at = ?
-                    WHERE lower(token) = ? AND token != ? AND principal = ? AND disabled_at IS NULL""",
-                (now, token, token, owner_key),
-            )
+        if owner_key:
+            if hex_token:
+                # The same owner's own other-case rows of this token: retire them (same phone, same token).
+                # Unbound legacy case variants stay as they are: ambiguous, never merged or claimed.
+                database.execute(
+                    """UPDATE device_tokens SET disabled_at = ?
+                        WHERE lower(token) = ? AND token != ? AND principal = ? AND disabled_at IS NULL""",
+                    (now, token, token, owner_key),
+                )
+            # A rotated token replaces the device's older one for the same service.
             database.execute(
                 """UPDATE device_tokens
                       SET disabled_at = ?
                     WHERE principal = ?
                       AND platform = ?
                       AND environment = ?
+                      AND provider = ?
                       AND token != ?
                       AND disabled_at IS NULL""",
-                (now, owner_key, platform_key, env, token),
+                (now, owner_key, platform_key, env, provider_key, token),
             )
         else:
             if session_key:
@@ -229,11 +256,12 @@ def register_token(token: str, session: str | None = None,
         database.execute(
             """INSERT INTO device_tokens
                     (token, session, platform, environment, base_url, push_grant,
-                     created_at, updated_at, principal)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, updated_at, principal, provider)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(token) DO UPDATE SET
                     session     = excluded.session,
                     platform    = excluded.platform,
+                    provider    = excluded.provider,
                     environment = excluded.environment,
                     base_url    = CASE WHEN excluded.base_url != ''
                                        THEN excluded.base_url
@@ -246,7 +274,8 @@ def register_token(token: str, session: str | None = None,
                                        ELSE excluded.principal END,
                     updated_at  = excluded.updated_at,
                     disabled_at = NULL""",
-            (token, session_key, platform_key, env, base_url_key, grant_key, now, now, owner_key),
+            (token, session_key, platform_key, env, base_url_key, grant_key, now, now, owner_key,
+             provider_key),
         )
         database.execute("RELEASE register_token" if nested else "COMMIT")
     except BaseException:
@@ -273,7 +302,7 @@ def active_tokens() -> list[dict]:
     """Every live (non-disabled) device token."""
     from . import db
     rows = db.conn().execute(
-        "SELECT token, session, environment, base_url, push_grant FROM device_tokens "
+        "SELECT token, session, environment, base_url, push_grant, provider FROM device_tokens "
         "WHERE disabled_at IS NULL"
     ).fetchall()
     return [dict(r) for r in rows]
@@ -896,10 +925,19 @@ class _Router:
         self._base = _base_transport(cfg)
         self._grant = _GrantTransport(cfg) if cfg.apns_relay_url_ok() else None
         self._direct_fallback = None
+        self._fcm = None
         self.name = self._base.name if self._base else "grant"
 
     def send(self, token: str, environment: str, payload: dict, *,
-             grant: str = "", **kwargs) -> tuple[int, str, str]:
+             grant: str = "", provider: str = "apns", context: dict | None = None,
+             **kwargs) -> tuple[int, str, str]:
+        if provider == "fcm":
+            # An Android row: same decision, FCM transport (docs/push-android.md).
+            if self._fcm is None:
+                from . import fcm
+                self._fcm = fcm.Transport(self._cfg)
+            self.name = "fcm"
+            return self._fcm.send(token, payload, context=context, **kwargs)
         grant = _push_grant(grant)
         if grant and self._grant and self._cfg.apns_mode in ("auto", "relay"):
             self.name = "grant"
@@ -932,13 +970,45 @@ class _Router:
             self._base.reset()
         if self._direct_fallback:
             self._direct_fallback.reset()
+        if self._fcm:
+            self._fcm.reset()
 
 
 def _transport(cfg):
-    """The transport for one batch of pushes, per `cfg.apns_transport()`."""
-    if not cfg.apns_enabled():
+    """The transport for one batch of pushes, per `cfg.apns_transport()`
+    for iPhones and the FCM service account for Android phones."""
+    if not cfg.push_enabled():
         raise RuntimeError("push is not configured")
     return _Router(cfg)
+
+
+def _deliverable(cfg, rows: list[dict]) -> list[dict]:
+    """The rows this Host can push to now: APNs rows while APNs is enabled,
+    FCM rows while a service account is configured. An Android phone that
+    registered with a Host that lost its service account is reported once."""
+    apns_on = cfg.apns_enabled()
+    fcm_rows = [r for r in rows if r.get("provider") == "fcm"]
+    fcm_on = bool(fcm_rows) and cfg.fcm_enabled()
+    if fcm_rows and not fcm_on:
+        from . import fcm
+        try:
+            fcm.load_service_account(cfg.fcm_service_account_file())
+        except fcm.ServiceAccountError as e:
+            fcm.report_auth_problem(f"{len(fcm_rows)} Android device(s) registered, but {e}")
+    live = [r for r in rows if (fcm_on if r.get("provider") == "fcm" else apns_on)]
+    # iPhones first. The batch loops send one row after another, and an
+    # Android send that Google is slow to answer can take its retries and
+    # timeouts (tens of seconds at worst). It must never sit in front of an
+    # iPhone's push. The sort is stable, so each group keeps its order.
+    return sorted(live, key=lambda r: r.get("provider") == "fcm")
+
+
+def _route(row: dict, context: dict | None = None) -> dict:
+    """Extra `send` arguments for one device row: none for APNs (so the call
+    stays what it always was), the provider and app context for FCM."""
+    if row.get("provider") == "fcm":
+        return {"provider": "fcm", "context": dict(context or {})}
+    return {}
 
 
 def send_user_notification(notification: dict) -> dict:
@@ -949,10 +1019,10 @@ def send_user_notification(notification: dict) -> dict:
     """
     from . import config
     cfg = config.load()
-    if not cfg.apns_enabled():
+    if not cfg.push_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
 
-    tokens = active_tokens()
+    tokens = _deliverable(cfg, active_tokens())
     if not tokens:
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
 
@@ -1017,7 +1087,12 @@ def send_user_notification(notification: dict) -> dict:
                 )
                 try:
                     status, reason, apns_id = transport.send(
-                        tok, env, payload, grant=row.get("push_grant") or "")
+                        tok, env, payload, grant=row.get("push_grant") or "",
+                        **_route(row, {
+                            "agent_id": notification.get("agent_id") or "",
+                            "badge": bool(notification.get("badge")),
+                            "unread": bool(notification.get("unread")),
+                        }))
                 except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
                     log_exception("apnsSendFail", e,
                                   detail=f"notification={notification_id} token={tok[:12]}…")
@@ -1090,9 +1165,9 @@ def send_background_sync(session: str, agent_id: str = "") -> dict:
     """Wake a suspended app to sync its cursors (no alert). Never raises."""
     from . import config
     cfg = config.load()
-    if not (cfg.apns_enabled() and getattr(cfg, "apns_background_sync", False)):
+    if not (cfg.push_enabled() and getattr(cfg, "apns_background_sync", False)):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
-    tokens = active_tokens()
+    tokens = _deliverable(cfg, active_tokens())
     if not tokens:
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
     if not _background_budget_allows(session):
@@ -1110,7 +1185,7 @@ def send_background_sync(session: str, agent_id: str = "") -> dict:
                 status, reason, _apns_id = transport.send(
                     tok, env, payload, grant=row.get("push_grant") or "",
                     push_type="background", priority="5",
-                    collapse_id=f"sync-{session}"[:64])
+                    collapse_id=f"sync-{session}"[:64], **_route(row))
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsBackgroundSendFail", e, detail=tok[:12])
                 transport.reset()
@@ -1139,10 +1214,10 @@ def send_turn_done(session: str | None, persona: str,
     """
     from . import config, user_notifications
     cfg = config.load()
-    if not cfg.apns_enabled():
+    if not cfg.push_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
 
-    tokens = active_tokens()
+    tokens = _deliverable(cfg, active_tokens())
     if not tokens:
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
 
@@ -1163,10 +1238,10 @@ def on_turn_done(session: str | None, persona: str,
                  agent_id: str | None = None, done_ts: int = 0) -> None:
     """Fire-and-forget "your turn" push. Spawns a daemon thread so the state
     watcher's poll loop is never blocked on a network round-trip. No-op (cheap)
-    when APNs isn't configured."""
+    when no push path is configured."""
     from . import config
     try:
-        if not config.load().apns_enabled():
+        if not config.load().push_enabled():
             return
     except Exception:  # noqa: BLE001
         return
@@ -1176,10 +1251,10 @@ def on_turn_done(session: str | None, persona: str,
 
 
 def on_user_notification(notification: dict) -> None:
-    """Fire-and-forget APNs transport for a persisted User notification."""
+    """Fire-and-forget push transport (APNs and FCM) for a persisted User notification."""
     from . import config
     try:
-        if not notification.get("push") or not config.load().apns_enabled():
+        if not notification.get("push") or not config.load().push_enabled():
             return
     except Exception:  # noqa: BLE001
         return
@@ -1250,9 +1325,9 @@ def send_decision_created(artifact: dict) -> dict:
     """
     from . import agents as agents_db, config, desktop_presence, quiet_agents
     cfg = config.load()
-    if not cfg.apns_enabled():
+    if not cfg.push_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
-    tokens = active_tokens()
+    tokens = _deliverable(cfg, active_tokens())
     if not tokens:
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
 
@@ -1303,7 +1378,8 @@ def send_decision_created(artifact: dict) -> dict:
                     server_instance_id=_server_instance_id())
                 try:
                     status, reason, apns_id = transport.send(
-                        tok, env, payload, grant=row.get("push_grant") or "")
+                        tok, env, payload, grant=row.get("push_grant") or "",
+                        **_route(row, {"agent_id": agent_id}))
                 except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
                     log_exception("apnsSendFail", e,
                                   detail=f"notification={notification_id} token={tok[:12]}…")
@@ -1334,10 +1410,10 @@ def send_decision_created(artifact: dict) -> dict:
 
 def on_decision_created(artifact: dict) -> None:
     """Fire-and-forget push for a newly created decision. Cheap no-op when
-    APNs isn't configured; never blocks or fails the creating request."""
+    no push path is configured; never blocks or fails the creating request."""
     from . import config
     try:
-        if not config.load().apns_enabled():
+        if not config.load().push_enabled():
             return
     except Exception:  # noqa: BLE001
         return
@@ -1737,7 +1813,7 @@ def owned_active_tokens() -> list[dict]:
     from . import db
     database = db.conn()
     rows = database.execute(
-        "SELECT token, session, environment, base_url, push_grant, principal AS owner FROM device_tokens "
+        "SELECT token, session, environment, base_url, push_grant, provider, principal AS owner FROM device_tokens "
         "WHERE disabled_at IS NULL"
     ).fetchall()
     return [dict(r) for r in rows]
@@ -1753,7 +1829,8 @@ def ring_alert_tokens(exclude_owners=None) -> list[dict]:
         owner = row.get("owner") or ""
         if owner and (owner in (exclude_owners or ()) or not agent_ring_live.device_ok(owner)):
             continue
-        tokens.append({key: row[key] for key in ("token", "session", "environment", "base_url", "push_grant")})
+        tokens.append({key: row[key] for key in ("token", "session", "environment", "base_url", "push_grant",
+                                                 "provider")})
     return tokens
 
 
@@ -1766,10 +1843,10 @@ def send_agent_ring(ring: dict, kind: str, exclude_owners=None) -> dict:
     """
     from . import config
     cfg = config.load()
-    if not cfg.apns_enabled():
+    if not cfg.push_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     from . import agent_rings
-    tokens = ring_alert_tokens(exclude_owners)
+    tokens = _deliverable(cfg, ring_alert_tokens(exclude_owners))
     show_reason = agent_rings.settings()["show_reason"]
     sent = failed = disabled = 0
     collapse = agent_ring_collapse_id(ring)
@@ -1785,7 +1862,8 @@ def send_agent_ring(ring: dict, kind: str, exclude_owners=None) -> dict:
             try:
                 status, reason, apns_id = transport.send(
                     tok, row.get("environment") or cfg.apns_environment, payload,
-                    grant=row.get("push_grant") or "", collapse_id=collapse)
+                    grant=row.get("push_grant") or "", collapse_id=collapse,
+                    **_route(row, {"agent_id": str(ring.get("agent_id") or "")}))
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsRingSendFail", e, detail=f"ring={ring.get('ring_id')} token={tok[:12]}…")
                 transport.reset()
