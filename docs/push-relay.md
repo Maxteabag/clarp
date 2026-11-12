@@ -1,5 +1,8 @@
 # Push relay
 
+This page is about iPhones (APNs). Android phones are pushed to through
+Firebase Cloud Messaging; see [push-android.md](push-android.md).
+
 The server is open source; the Apple Push Notification service (APNs) key for
 the Clarp app is not. A self-hosted Computer therefore does not sign pushes
 itself. It hands them to **Clarp Audio Central**, the developer-run Cloudflare

@@ -66,6 +66,7 @@ def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
         ALTER TABLE device_tokens DROP COLUMN principal;
+        ALTER TABLE device_tokens DROP COLUMN provider;
         DROP INDEX idx_task_plans_recovery;
         DROP TABLE task_goal_documents;
         ALTER TABLE task_plans DROP COLUMN history_json;
@@ -459,6 +460,26 @@ def test_v118_migrates_device_token_provenance_from_117_and_a_rerun_is_a_no_op(t
     assert con.execute("SELECT principal FROM device_tokens WHERE token='ab'").fetchone()[0] == ""
     db_migrations._migrate_to_v118(con)
     assert [r[1] for r in con.execute("PRAGMA table_info(device_tokens)")].count("principal") == 1
+
+def test_v123_adds_the_push_provider_with_apns_for_every_existing_row(tmp_path):
+    """v123: device_tokens.provider, 'apns' for every row from before it (all iPhones); guarded."""
+    from lib import db_migrations, db_schema
+    path = tmp_path / "v122.sqlite"
+    db.reset_for_tests(path)
+    con = db.conn()
+    con.execute("ALTER TABLE device_tokens DROP COLUMN provider")
+    con.execute("INSERT INTO device_tokens(token, session, created_at, updated_at, principal) "
+                "VALUES ('ab', 's', 1, 1, 'device_x')")
+    con.execute("PRAGMA user_version = 122")
+    con.commit()
+    db.reset_for_tests(path)
+    con = db.conn()
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    row = con.execute("SELECT provider, principal FROM device_tokens WHERE token='ab'").fetchone()
+    assert tuple(row) == ("apns", "device_x")
+    db_migrations._migrate_to_v123(con)
+    assert [r[1] for r in con.execute("PRAGMA table_info(device_tokens)")].count("provider") == 1
+
 
 def test_v119_adds_the_per_agent_state_generation_index(tmp_path):
     path = tmp_path / "v117.sqlite"
