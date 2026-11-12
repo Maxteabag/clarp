@@ -204,17 +204,22 @@ def test_legacy_unbound_tokens_are_preserved_never_guessed_or_mass_disabled(sand
     assert rows[T_LEGACY]["disabled_at"] is None and rows[T_LEGACY]["owner"] == ""
 
 
-def test_a_revoked_phone_keeps_provenance_gets_no_ring_alert_and_a_repaired_id_cannot_take_its_token(sander,
-                                                                                                    monkeypatch):
+def test_a_revoked_phone_keeps_provenance_gets_no_ring_alert_and_its_token_passes_only_after_revocation(sander,
+                                                                                                        monkeypatch):
     apns.register_token(T_PHONE, owner=PHONE)
     apns.register_token(T_OTHER, owner=OTHER_PHONE)
     real_ok = live.device_ok
+    with pytest.raises(apns.TokenOwnedElsewhere):               # while PHONE is valid: no transfer
+        apns.register_token(T_PHONE, owner=OTHER_PHONE)
     monkeypatch.setattr(live, "device_ok", lambda principal: principal != PHONE and real_ok(principal))
     assert [t["token"] for t in apns.ring_alert_tokens()] == [T_OTHER]
-    assert _rows()[T_PHONE]["owner"] == PHONE                   # provenance kept, never cleared
-    with pytest.raises(apns.TokenOwnedElsewhere):               # re-paired under a new id: no transfer
-        apns.register_token(T_PHONE, owner="device_repaired")
-    assert _rows()[T_PHONE]["owner"] == PHONE
+    assert _rows()[T_PHONE]["owner"] == PHONE                   # provenance kept until someone registers it
+    with pytest.raises(apns.TokenOwnedElsewhere):               # an unbound registrant never takes it
+        apns.register_token(T_PHONE)
+    # FCM review finding 9 (12 Nov): revoking disables a phone's rows, so the same phone paired again
+    # (a new device id) must be able to register its token, or it would never get a push again.
+    apns.register_token(T_PHONE, owner="device_repaired")
+    assert _rows()[T_PHONE]["owner"] == "device_repaired"
 
 
 # ---- Live admission and the answered ring --------------------------------------------------
