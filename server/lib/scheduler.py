@@ -329,7 +329,9 @@ class AgentScheduleRunner:
         dispatch_goal: Callable | None = None,
         goal_wake_retired: Callable | None = None,
     ):
+        from .stranded_parks import StrandedParks
         self._goal_cursor = [""]
+        self._stranded_parks = StrandedParks()
         self._dispatch_goal = dispatch_goal
         self._goal_wake_retired = goal_wake_retired
         self._dispatch_turn = dispatch_turn
@@ -369,6 +371,11 @@ class AgentScheduleRunner:
             except Exception as exc:  # noqa: BLE001 - goals never stop the cron schedules (AUT-09)
                 task_goal_recovery.log_failure_throttled(
                     "agentScheduleGoalTickFail", ("goal-tick",), exc, now)
+        try:
+            self._stranded_parks.tick(now)
+        except Exception as exc:  # noqa: BLE001 - a broken check stops no schedule
+            task_goal_recovery.log_failure_throttled(
+                "strandedParkCheckFail", ("stranded-parks",), exc, now)
         for item in due:
             sid = item["schedule_id"]
             session = item["session"]

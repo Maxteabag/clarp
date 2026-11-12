@@ -87,7 +87,10 @@ validates stdin without switching accounts or making provider requests.
   2026-11-12 a turn read as replaced that way was dropped by the coordinator
   and waited four hours for a recovery that no longer knew it. A Stop, a
   deletion or a replacement releases the slot, and that ends a parked turn.
-  When a parked turn starts it takes the marker back.
+  When a parked turn starts it takes the marker back. A running turn follows
+  the same rule: it is superseded when another turn holds its slot, not when
+  the marker moved (a voice message queued behind it, or the speech worker,
+  moves it), so it still binds its session and records its own outcome.
 - Turns parked for a model that are handed over to the next runtime outside
   a recovery (the minute after the last working turn finished) are carried
   like a recovery's, from their own park, so the next runtime asks the
@@ -168,6 +171,15 @@ credentials. The same coordinator and the same rules serve the Codex pool
 (`codex_account_switch_command`); its events carry the same names.
 The runtime status includes `claude_account_recovery` with `recovering` and waiting
 agent IDs. Waiting agents keep a THINKING state with `account_recovery=waiting`.
+The Host compares the two once a minute (`stranded_parks`, on the agent
+scheduler's tick): an agent that shows the wait while no coordinator lists it,
+at every check that could tell for five minutes of them, is logged as
+`strandedPark` and gets one failed document in its own session, which Updates
+shows as blocking. Nothing resumes such a turn; Stop it and send the message
+again. The alert is withdrawn when the turn ends or is listed again. A status
+that cannot be read, or that has no account recovery entry, raises no alarm
+and counts for nothing: the minutes found so far stand, and the count goes on
+at the next status that can be read.
 The separate runtime service preserves this coordination across HTTP restarts.
 Existing runtime startup recovery remains responsible for a runtime/Host crash.
 

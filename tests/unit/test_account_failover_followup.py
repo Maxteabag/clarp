@@ -22,7 +22,8 @@ from lib import agents as agents_db
 from lib.account_failover import MAX_PARK_SECONDS, RECHECK_SECONDS, AccountFailover
 from lib.protocol import AgentState
 from tests.unit.test_account_plan_hostage import (  # noqa: F401
-    Fleet, USAGE_LIMIT, _dispatch, _local_dispatch_runtime, _parked_beside_a_working_turn)
+    Fleet, NOT_OFFERED, USAGE_LIMIT, _dispatch, _local_dispatch_runtime,
+    _parked_beside_a_working_turn, _visible_failure)
 
 WEEKLY = "You've hit your weekly limit for Fable · resets 3pm"
 MINUTE = 60.0
@@ -68,6 +69,31 @@ def test_when_the_model_is_back_only_the_first_turn_waits_its_half_hour(tmp_path
     # The turn that waited behind the trial is told once that it was recovered.
     first = [call for _, call in fleet.backends.spawned if call["trace_id"] == "trace-fable-1"]
     assert len(first) == 1 and "Clarp recovered from" not in first[0]["text"]   # it had never run
+
+
+def test_a_turn_resumed_because_its_model_is_back_does_not_start_a_recovery_for_its_plan(
+        tmp_path, monkeypatch):
+    """A turn started because a trial showed its model is served again was
+    resumed, like one a recovery resumed. When the provider then says the
+    account does not offer its model, it ends there with that sentence: the
+    answer it was resumed on was wrong, and asking again is the loop of
+    2026-11-11. (Not counted as resumed, it parked and began a recovery.)"""
+    fleet, start = _fable_parked_beside_sonnet(tmp_path, monkeypatch)
+    fleet.run_until(start + 25 * MINUTE)
+    waiting, _spawned = _dispatch(fleet, "fable-1", "fable")
+    back = start + MAX_PARK_SECONDS + RECHECK_SECONDS
+    fleet.run_until(back + 10)
+    assert _started(fleet, "fable-1") == [back]
+    # The others are done, so nothing else would hold a plan failure back.
+    fleet.spawns(1)[-1]["on_result"]({"duration_ms": 5})
+    fleet.spawns(0)[-1]["on_result"]({"duration_ms": 5})
+
+    resumed = [call for _, call in fleet.backends.spawned if call["trace_id"] == "trace-fable-1"]
+    resumed[-1]["on_error"](NOT_OFFERED)
+
+    _visible_failure(agents_db.latest_state(waiting), category="account_plan",
+                     says="'gpt-6' model is not supported")
+    assert not fleet.coordinator.recovering and len(fleet.selector_calls()) == 1
 
 
 def test_a_trial_that_meets_the_limit_again_leaves_the_others_parked(tmp_path, monkeypatch):

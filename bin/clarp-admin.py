@@ -2635,13 +2635,14 @@ def activate_release(release: Path, *, allow_older_schema: bool = False) -> None
             if fallback.is_symlink(): fallback.unlink()
             fallback.symlink_to(previous, target_is_directory=True)
             fallback.replace(current)
-            # The release that failed may have upgraded the database before it
-            # failed. The one put back has to start on it: record that, for
-            # exactly its schema and the database's (a Host that met a newer
-            # database unasked stays down, exit 78).
+            # The release that failed may have upgraded the database, or may
+            # yet: its Host runs until the services are restored below. The
+            # one put back has to start on that database: record that, for
+            # its schema and the failed release's, whatever the file says now
+            # (a Host that met a newer database unasked stays down, exit 78).
             try:
-                _refuse_older_schema(
-                    previous, allow=True, what=f"Release {previous.name}", how="")
+                schema_guard.allow_restored(
+                    previous, release, SHARE / "state.sqlite", share=SHARE)
             except BaseException as recording:  # noqa: BLE001 - the restore goes on
                 print(f"warning: could not record the rollback for {previous.name}: "
                       f"{recording}", file=sys.stderr)

@@ -3364,7 +3364,7 @@ if __name__ == "__main__":
     try:
         _schema_guard.check_host_start(
             _state_db.DB_PATH, _layout.share, code=_db_schema._SCHEMA_VERSION,
-            release=_code_root.name)
+            release=_code_root.name, code_root=_code_root)
         if not _state_db.run_as_service("host", code_root=_code_root, share=_layout.share):
             _schema_guard.check_foreign_start(
                 _code_root, _state_db.DB_PATH, _layout.share, code=_db_schema._SCHEMA_VERSION)
