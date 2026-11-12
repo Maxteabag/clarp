@@ -123,6 +123,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/db.py", "DB_PATH"): PATHS,
     ("lib/db.py", "_LAST_LOCK_REPORT_AT"): THROTTLE,
     ("lib/db.py", "_MIGRATED"): PATHS,
+    ("lib/db.py", "_UPGRADE_WAITED"): "whether this process has spent its one wait for a service to upgrade an older database (db._leave_an_older_database_alone)",
+    ("lib/db.py", "_SERVICE"): "which service this process is, set once by its entry point (db.run_as_service); only a service upgrades a database",
     ("lib/db.py", "_STAMP_CONN"): "the one connection change_stamp() reads PRAGMA data_version from, under _STAMP_LOCK",
     ("lib/db.py", "_WRITE_GENERATION"): "local half of change_stamp(), bumped under its lock",
     ("lib/deepgram_voices.py", "_cache"): CACHE,

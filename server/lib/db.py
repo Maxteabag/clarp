@@ -60,6 +60,66 @@ DB_PATH = pathlib.Path(os.environ.get(
 _LOCAL = threading.local()  # per-thread connection store
 _CONN_LOCK = threading.Lock()
 _MIGRATED = False
+# The service this process is: "host", "runtime", or "tests" for the throwaway
+# databases of the fixtures. Only such a process upgrades a database that is
+# older than its code; see ``run_as_service``. Empty for everything else.
+_SERVICE = ""
+_SERVICES = frozenset({"host", "runtime", "tests"})
+# How long a process that is not a service waits for one to upgrade a database
+# that is older than its code before it refuses. An install switches the
+# `current` release first and restarts the Host after, so for a few seconds
+# the new release's hooks and tools can meet the old schema.
+_UPGRADE_WAIT_SEC = 10.0
+# Whether this process has spent that wait. It is spent once: a hook or a
+# tool that opens the database again after a refusal is refused at once.
+_UPGRADE_WAITED = False
+
+
+class DatabaseOlderThanCode(RuntimeError):
+    """A process that is not a service met a database below its own schema
+    and left it as it was."""
+
+
+def run_as_service(role: str, *, code_root=None, share=None) -> bool:
+    """Make this process one that upgrades the database it opens.
+
+    Called by a service's own entry point as it starts, and by nothing else:
+    ``server.py`` (the Host), ``runtime.py`` (the runtime), and the test
+    fixtures for the databases they create under ``tmp_path``. It is a call
+    in a ``main``, not a setting: no environment variable, file or import
+    grants it, so a shell that inherits the live database's path, a child
+    process, a script or a ``python -c`` that imports Host code cannot have
+    it by accident. They all still open the database; they just never change
+    its schema (2026-11-11: a debug script run from a checkout one schema
+    step ahead upgraded a live database through its first log line).
+
+    The two services pass where their code is and where the installation
+    is. Code that is not one of that installation's releases is not its
+    service, even when it is ``server.py``: a Host started from a checkout
+    in such a shell is told so and gets no grant (returns False).
+    """
+    global _SERVICE
+    if role not in _SERVICES:
+        raise ValueError(f"not a Clarp service: {role!r}")
+    if code_root is not None and share is not None:
+        from . import schema_guard
+        if schema_guard.foreign_to_installation(code_root, DB_PATH, share):
+            print(f"clarp: {code_root} is not an installed release of {share}; this "
+                  f"{role} will not upgrade that installation's database ({DB_PATH}).",
+                  file=sys.stderr, flush=True)
+            return False
+    _SERVICE = role
+    return True
+
+
+def is_service() -> bool:
+    return bool(_SERVICE)
+
+
+def opened() -> bool:
+    """Whether this process has opened its state database. Logging asks, so
+    that it is never what opens it (``diagnostics_settings.get``)."""
+    return _MIGRATED
 
 
 _LOCK_REPORT_INTERVAL_SEC = 30.0
@@ -548,6 +608,34 @@ def _open_connection() -> sqlite3.Connection:
 
 
 
+def _leave_an_older_database_alone() -> None:
+    """Before a process that is not a service opens the file: wait a moment
+    for a service to upgrade a database that is below this code's schema,
+    then refuse. The file and its ``-wal`` are not written (see
+    ``schema_guard.stored_version`` for the ``-shm``). The wait is spent
+    once in a process. A missing or empty file is not older than anything;
+    creating a new database loses nobody's data and stays allowed."""
+    global _UPGRADE_WAITED
+    from . import schema_guard
+
+    code = db_schema._SCHEMA_VERSION
+    deadline = time.monotonic() + (0.0 if _UPGRADE_WAITED else _UPGRADE_WAIT_SEC)
+    while True:
+        stored = schema_guard.stored_version(DB_PATH)
+        if stored == 0 or stored >= code:
+            return
+        _UPGRADE_WAITED = True
+        if time.monotonic() >= deadline:
+            raise DatabaseOlderThanCode(
+                f"state database {DB_PATH} is at schema {stored}; this code "
+                f"({pathlib.Path(__file__).resolve().parents[1]}) is at schema {code}. "
+                "Only the Clarp Host and runtime services upgrade a database, when "
+                "they start; this process is neither, so the file is left as it is. "
+                "To work on this code, point CLAUDE_PWA_DB at a scratch database; "
+                "to use this database, install this release so the Host upgrades it.")
+        time.sleep(0.2)
+
+
 def conn() -> sqlite3.Connection:
     """Return this thread's sqlite connection.
 
@@ -577,9 +665,17 @@ def conn() -> sqlite3.Connection:
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
+        if not _MIGRATED and not _SERVICE:
+            _leave_an_older_database_alone()
         c = _open_connection()
         if not _MIGRATED:
-            db_migrations._migrate(c)
+            try:
+                # A service brings the file up to this code's schema. Anything
+                # else may create a database that does not exist yet, no more.
+                db_migrations._migrate(c, upgrade=bool(_SERVICE))
+            except BaseException:
+                c.close()
+                raise
             _MIGRATED = True
     _LOCAL.conn = c
     return c
@@ -729,7 +825,8 @@ from . import db_migrations, db_schema  # noqa: E402
 
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
     """Test helper: close cached connection so a new path takes effect."""
-    global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT
+    global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT, _UPGRADE_WAITED
+    _UPGRADE_WAITED = False
     # Opening and migrating a connection form one operation. A worker that
     # opens the previous test's file must not mark the next file migrated.
     with _CONN_LOCK:

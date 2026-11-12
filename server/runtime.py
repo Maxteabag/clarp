@@ -27,6 +27,16 @@ from lib.turn_dispatch import TurnDispatchService  # noqa: E402
 
 
 def main() -> int:
+    # This process is the runtime service: it may upgrade the database it opens.
+    from lib import db, db_schema, schema_guard
+    from lib.deployment import LAYOUT
+    if not db.run_as_service("runtime", code_root=ROOT, share=LAYOUT.share):
+        try:
+            schema_guard.check_foreign_start(
+                ROOT, db.DB_PATH, LAYOUT.share, code=db_schema._SCHEMA_VERSION)
+        except schema_guard.NotThisInstallation as refused:
+            print(f"clarp: {refused}", file=sys.stderr, flush=True)
+            return schema_guard.EXIT_REFUSED            # restarting changes nothing
     # Keep holding the entrypoint's data-root locks but never pass them to children (agent
     # terminals): a no-op unless fds 8/9 are exactly the lock files.
     from lib.data_root_locks import seal_inherited_lock_fds

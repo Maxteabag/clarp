@@ -557,6 +557,10 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
         try:
             mod = __import__(mod_name, fromlist=["reset_for_tests"])
             mod.reset_for_tests(db_path)
+            # The fixture is what makes a test the keeper of its throwaway
+            # database, as a service is of the live one. A test's subprocess,
+            # or a script that imports test code, is not.
+            mod.run_as_service("tests")
         except (ImportError, AttributeError):
             pass
     # Every RevisionedCache (pair-conversation list, dashboard previews, ...)

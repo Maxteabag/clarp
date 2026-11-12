@@ -18,6 +18,9 @@ UMask=0077
 LimitNOFILE=65536
 ExecStart=@@RUNTIME_LAUNCHER@@
 Restart=always
+# 78: a runtime that is not this installation's refused its database
+# (runtime.py). Starting it again changes nothing.
+RestartPreventExitStatus=78
 RestartSec=2
 StandardOutput=journal
 StandardError=journal

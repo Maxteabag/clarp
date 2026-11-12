@@ -49,6 +49,7 @@ PERSISTENCE = frozenset({
     'lib.lifecycle',
     'lib.paths',
     'lib.revisioned_cache',
+    'lib.schema_guard',
     'lib.timing',
     'lib.xdg',
 })
