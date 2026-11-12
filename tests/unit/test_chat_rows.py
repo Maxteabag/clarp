@@ -469,3 +469,33 @@ def test_a_steered_copy_is_linked_to_a_row_sent_after_the_turn_began(tmp_path):
     assert pick(database, rows, "trace-1", sent_at - 1) == 1
     assert pick(database, rows, "", None) == 0                        # no turn running
     assert pick(database, rows[:1], "trace-1", began) == 0
+
+
+def _ended_turn(agent_id, trace_id, started_seconds_ago, ended_seconds_ago):
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace_id)
+    now = now_ms()
+    agents_db.conn().execute(
+        "UPDATE turns SET started_at=?, ended_at=?, settled_at=? WHERE trace_id=?",
+        (now - started_seconds_ago * 1000, now - ended_seconds_ago * 1000,
+         now - ended_seconds_ago * 1000, trace_id))
+
+
+def test_a_copy_stamped_just_before_its_own_turn_began_keeps_that_turns_trace(tmp_path):
+    """The provider stamps the prompt three seconds before its turn row
+    begins, inside the reach of the turn before it. The linked row has a turn
+    of its own, so the reply is that turn's: the turn that happened to be
+    "running" at the stamp overrides only a row that has none."""
+    agent_id = _agent(tmp_path)
+    _sent(agent_id, "m1", "trace-1", "first question", seconds_ago=600)
+    _ended_turn(agent_id, "trace-1", 600, 400)
+    _sent(agent_id, "m2", "trace-2", "second question", seconds_ago=399)
+    _ended_turn(agent_id, "trace-2", 395, 300)
+    turns = [{"role": "user", "text": "first question", "timestamp": iso_from_ms(now_ms() - 599_000)},
+             {"role": "assistant", "text": "first answer", "timestamp": iso_from_ms(now_ms() - 405_000)},
+             {"role": "user", "text": "second question", "timestamp": iso_from_ms(now_ms() - 398_000)},
+             {"role": "assistant", "text": "second answer", "timestamp": iso_from_ms(now_ms() - 305_000)}]
+
+    for _again in range(2):
+        _import(agent_id, turns)
+        replies = {m["text"]: m["trace_id"] for m in _visible(agent_id) if m["role"] == "assistant"}
+        assert replies == {"first answer": "trace-1", "second answer": "trace-2"}
