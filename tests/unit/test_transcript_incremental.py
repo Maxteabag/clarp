@@ -744,11 +744,14 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
     ([_turn("user", "hi"), _turn("assistant", "DREAMING_OK")], "open"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
       _turn("user", "Deep Dreaming contract: night"), _turn("assistant", "DREAMING_OK")], "open"),
-    # Can still change: child transcripts found outside the parent, whether or
-    # not one was found yet, and team capture against the agent's current teams.
-    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD])], "open"),
+    # A Claude sub-agent cell: the one thing it reads outside the parent's
+    # bytes, the child directory's answer, is recorded with the checkpoint
+    # (found or not), so it needs no replay while that answer stands.
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD])], "closed"),
     ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, transcript_path="")])],
-     "open"),
+     "closed"),
+    # Can still change: any other sub-agent cell, an Agent/Task tool, and
+    # team capture against the agent's current teams.
     ([_turn("user", "hi"), _turn("assistant", "x", cells=[dict(_FOUND_CHILD, ephemeral=False)])],
      "open"),
     ([_turn("user", "hi"), _turn("assistant", "x", tools=[{"name": "Task"}])], "open"),
@@ -756,7 +759,9 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
       _turn("assistant", "<team>go</team>")], "open"),
     ([_turn("user", HEARTBEAT_PROMPT), _turn("assistant", "HEARTBEAT_OK"),
-      _turn("assistant", "x", cells=[_FOUND_CHILD])], "open"),
+      _turn("assistant", "x", cells=[_FOUND_CHILD])], "closed"),
+    ([_turn("user", "hi"), _turn("assistant", "x", cells=[_FOUND_CHILD]),
+      _turn("assistant", "<team>go</team>")], "open"),
 ])
 def test_prefix_effects_keep_only_open_effects_on_the_full_path(prefix, expected):
     assert inc._prefix_effects(prefix) == expected
@@ -873,28 +878,85 @@ def test_after_a_host_start_the_import_cache_finds_an_unchanged_file_already_imp
 
 
 def test_a_file_the_import_did_not_read_to_its_end_is_not_taken_for_unchanged(tmp_path, monkeypatch):
-    """The checkpoint's size is the file's as it was seen; its imported bytes
-    can end before that when the file grew during the parse. Same size and
-    mtime then do not mean everything was imported."""
+    """The checkpoint's size and mtime are the file's as it was last seen;
+    its imported bytes end before that when the file grew during the parse.
+    The same size and mtime after a Host start then do not mean everything
+    was imported: the rest is a tail."""
     from dataclasses import replace
-    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
-    stored = inc._stored_frontier
+    lines = claude_lines(5)
+    transcript, cp = _checkpointed(tmp_path, "claude", lines, 6, {"ms": 0})
+    _append(transcript, lines[6:])
+    now = inc.identity(transcript)
+    seen_growing = replace(cp, size=now.size, mtime_ns=now.mtime_ns)
+    assert seen_growing.complete_size < seen_growing.size
+    database = db.conn()
+    inc.write_checkpoint(database, seen_growing)
+    assert database.execute("UPDATE transcript_import_frontiers SET checkpoint_digest=?",
+                            (inc.checkpoint_digest(seen_growing),)).rowcount == 1
+    database.commit()
+    assert inc.load_frontier(database, seen_growing) is not None
     seen = []
     log = inc._tail_log
     monkeypatch.setattr(inc, "_tail_log", lambda code, **kw: (
         kw.get("retention") or seen.append(code), log(code, **kw))[1])
-
-    def short(*args, **kwargs):
-        checkpoint, state = stored(*args, **kwargs)
-        assert state is not None
-        behind = replace(checkpoint, complete_size=checkpoint.complete_size - 1)
-        return behind, replace(state, checkpoint=behind)
-
-    monkeypatch.setattr(inc, "_stored_frontier", short)
     inc._TAIL_STATES.reset()
+    inc._READ_PREFIXES.reset()
     result = inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
                                    backend_session_id=SESSION)
-    assert "unchanged_file" not in seen and result["apply_mode"] == "full"
+    assert seen == ["tail_applied"] and result["apply_mode"] == "tail"
+    assert result["rows"] > cp.turn_count
+
+
+@pytest.mark.parametrize("field", ["device", "inode", "size", "mtime_ns"])
+def test_the_checkpoint_digest_names_the_file_the_checkpoint_describes(tmp_path, field):
+    """A frontier belongs to one checkpoint of one file: the same turns and
+    hashes over another device, inode, size or mtime are not that checkpoint."""
+    from dataclasses import replace
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    other = replace(cp, **{field: getattr(cp, field) + 1})
+    assert inc.checkpoint_digest(other) != inc.checkpoint_digest(cp)
+    assert inc.load_frontier(db.conn(), cp) is not None
+    assert inc.load_frontier(db.conn(), other) is None
+
+
+def test_a_full_import_compares_its_bytes_with_the_digest_of_the_checkpoint_it_started_from(
+        tmp_path, monkeypatch):
+    """The audit (any full import that follows a frontier) compares the bytes
+    it reads with the stored digest of the imported bytes. That digest is the
+    one of the checkpoint this process started from. When another import has
+    moved the checkpoint on meanwhile, the store's frontier covers more of
+    the file: comparing with it would report a rewrite that never happened."""
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(6), 6, {"ms": 0})
+    key = inc._tail_key(transcript, AGENT, SESSION)
+    revision = inc.parser_version("claude")
+    found, held = inc._TAIL_STATES.get(key, revision)
+    assert found and held.checkpoint == cp
+    first = inc.load_frontier(db.conn(), cp)
+    assert inc._imported_before(cp, inc.identity(transcript), AGENT, SESSION, transcript) == (
+        cp.complete_size, first["file_hash"])
+
+    def import_now():
+        return inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
+                                     backend_session_id=SESSION)
+
+    # Another import (another process) takes the checkpoint further.
+    _append(transcript, claude_lines(6)[6:8])
+    assert import_now()["apply_mode"] == "tail"
+    moved = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
+    assert moved != cp and moved.complete_size > cp.complete_size
+    assert inc.load_frontier(db.conn(), moved)["file_hash"] != first["file_hash"]
+    assert inc._imported_before(cp, inc.identity(transcript), AGENT, SESSION, transcript) is None
+
+    # This process still holds the frontier of the earlier checkpoint.
+    inc._TAIL_STATES.put(key, revision, held)
+    said, codes = [], []
+    changed, log = inc._prefix_changed, inc._tail_log
+    monkeypatch.setattr(inc, "_prefix_changed", lambda *a, **kw: (said.append(a[1]), changed(*a, **kw))[1])
+    monkeypatch.setattr(inc, "_tail_log", lambda code, **kw: (
+        kw.get("retention") or codes.append(code), log(code, **kw))[1])
+    _append(transcript, claude_lines(6)[8:])
+    assert import_now()["apply_mode"] == "full"
+    assert codes == ["full_checkpoint_changed"] and said == []
 
 
 def test_the_running_hash_of_another_checkpoint_is_not_taken_up(tmp_path):
@@ -928,3 +990,54 @@ def test_a_frontier_is_not_replaced_by_an_import_whose_checkpoint_lost(tmp_path)
     assert inc.load_checkpoint(database, AGENT, SESSION, str(transcript)) == cp
     inc.write_frontier(database, behind, "the-losers-digest", raw_inputs)
     assert inc.load_frontier(database, cp) == kept
+
+
+# ---- the child directory's answer, recorded with the checkpoint ----------------
+
+def _agent_cell(call="c0", agent="", path=""):
+    return {"kind": "subagents", "id": call, "agent_id": agent, "ephemeral": True,
+            "status": "ok", "transcript_path": path}
+
+
+def test_the_claude_carry_records_what_the_child_directory_answered(tmp_path):
+    parent = tmp_path / "parent.jsonl"
+    parent.write_text("")
+    children = tmp_path / "parent" / "subagents"
+    children.mkdir(parents=True)
+    (children / "agent-a0.jsonl").write_text("{}\n")
+    (children / "agent-a0.meta.json").write_text('{"toolUseId": "c0"}')
+    found = str(children / "agent-a0.jsonl")
+    prefix = [_turn("user", "hi"),
+              _turn("assistant", "x", cells=[_agent_cell("c0", "a0", found), _agent_cell("c1")])]
+
+    carry = inc.parser_carry("claude", prefix, {}, parent)
+    # Every key a cell is looked up by, and what it finds now: nothing for c1.
+    assert carry["subagent_children"] == [["a0", found], ["c0", found], ["c1", None]]
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == ""
+
+    # A child appears for the call that had none; one goes; one is rebound.
+    (children / "agent-a1.jsonl").write_text("{}\n")
+    (children / "agent-a1.meta.json").write_text('{"toolUseId": "c1"}')
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"
+    (children / "agent-a1.jsonl").unlink()
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == ""
+    (children / "agent-a0.meta.json").write_text('{"toolUseId": "c1"}')
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"
+
+    # No cell among the old turns: nothing recorded, nothing asked.
+    plain = inc.parser_carry("claude", [_turn("user", "hi"), _turn("assistant", "x")], {}, parent)
+    assert "subagent_children" not in plain
+    assert inc.parser_carry("claude", prefix, {})["subagent_ids"] == ["c0", "c1"]
+
+
+def test_a_directory_that_already_answers_differently_is_never_certified(tmp_path):
+    """The parse read the directory before the checkpoint is chosen. If a
+    cell's stored path is not what the directory says now, there is nothing
+    to certify: every tail is refused until a full import records afresh."""
+    parent = tmp_path / "parent.jsonl"
+    parent.write_text("")
+    prefix = [_turn("user", "hi"),
+              _turn("assistant", "x", cells=[_agent_cell("c0", "a0", "/gone/agent-a0.jsonl")])]
+    carry = inc.parser_carry("claude", prefix, {}, parent)
+    assert carry["subagent_children"] is None
+    assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"

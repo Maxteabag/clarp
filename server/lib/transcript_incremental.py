@@ -263,8 +263,20 @@ _TOOL_USE_ID_RE = re.compile(r"<tool-use-id>(.*?)</tool-use-id>", re.DOTALL)
 _AGY_TASK_END_RE = re.compile(r"\b(finished|was canceled) with result:|background tasks have been stopped", re.I)
 
 
-def _claude_carry(prefix: list[dict], boundary_record: dict) -> dict[str, Any]:
-    pending, subagents = [], []
+def _claude_children(path: pathlib.Path, keys) -> list[list]:
+    """The child transcript each sub-agent lookup key finds now, or None.
+
+    A Claude sub-agent cell reads one thing outside the parent's bytes: the
+    ``<parent>/subagents`` directory, looked up by the Agent call's tool_use
+    id and then by agent id (claude_transcript._finish_subagent_cell)."""
+    from .claude_transcript import _subagent_transcripts
+    found = _subagent_transcripts(pathlib.Path(path))
+    return [[key, str(found[key]) if key in found else None] for key in sorted(keys)]
+
+
+def _claude_carry(prefix: list[dict], boundary_record: dict,
+                  path: pathlib.Path | None = None) -> dict[str, Any]:
+    pending, subagents, cells = [], [], []
     for turn in prefix:
         for tool in turn.get("tools") or []:
             if tool.get("status") not in ("ok", "error"):
@@ -272,10 +284,25 @@ def _claude_carry(prefix: list[dict], boundary_record: dict) -> dict[str, Any]:
         for cell in turn.get("display_cells") or []:
             if cell.get("kind") == "subagents":
                 subagents.append(str(cell.get("id") or ""))
-    return {"pending_tool_ids": pending, "subagent_ids": subagents}
+                cells.append(cell)
+    carry = {"pending_tool_ids": pending, "subagent_ids": subagents}
+    if cells and path is not None:
+        # What the directory answered for each old cell, so that a tail is
+        # refused once a child appears, goes or is bound to another call
+        # (the parent's bytes do not change when that happens). None when
+        # the directory already answers differently from what the parse saw.
+        children = _claude_children(path, {str(key) for cell in cells
+                                           for key in (cell.get("id"), cell.get("agent_id")) if key})
+        found = dict(children)
+        if any((found.get(str(cell.get("id") or "")) or found.get(str(cell.get("agent_id") or ""))
+                or "") != (cell.get("transcript_path") or "") for cell in cells):
+            children = None
+        carry["subagent_children"] = children
+    return carry
 
 
-def _agy_carry(prefix: list[dict], boundary_record: dict) -> dict[str, Any]:
+def _agy_carry(prefix: list[dict], boundary_record: dict,
+               path: pathlib.Path | None = None) -> dict[str, Any]:
     step = boundary_record.get("step_index")
     return {"boundary_step": step if isinstance(step, int) else 0,
             "running_tools": sum(1 for turn in prefix for tool in turn.get("tools") or []
@@ -285,9 +312,10 @@ def _agy_carry(prefix: list[dict], boundary_record: dict) -> dict[str, Any]:
 _PARSER_CARRIES = {"claude": _claude_carry, "agy": _agy_carry}
 
 
-def parser_carry(backend: str, prefix: list[dict], boundary_record: dict) -> dict[str, Any]:
+def parser_carry(backend: str, prefix: list[dict], boundary_record: dict,
+                 path: pathlib.Path | None = None) -> dict[str, Any]:
     carry = _PARSER_CARRIES.get(backend)
-    return carry(prefix, boundary_record) if carry else {}
+    return carry(prefix, boundary_record, path) if carry else {}
 
 
 def _claude_reference(records, carry: dict) -> str:
@@ -379,8 +407,14 @@ _REFERENCE_SCANS = {"claude": _claude_reference, "codex": _codex_reference,
 
 def reference_outside_tail(backend: str, path: pathlib.Path, start: int, end: int,
                            carry: dict) -> str:
-    """Why a record in [start, end) reaches before the boundary, or ''."""
-    return _REFERENCE_SCANS[backend](_records(path, start, end), carry)
+    """Why a record in [start, end) reaches before the boundary, or ''. Also
+    why an old Claude sub-agent cell would come out differently now."""
+    why = _REFERENCE_SCANS[backend](_records(path, start, end), carry)
+    if not why and "subagent_children" in carry:      # only a Claude carry has it
+        children = carry["subagent_children"]
+        if children is None or _claude_children(path, [key for key, _ in children]) != children:
+            why = "claude_subagent_children_changed"
+    return why
 
 
 _BOUNDARY_MARKERS = {
@@ -511,8 +545,7 @@ def write_frontier(database, checkpoint: Checkpoint, file_hash: str, raw_inputs)
     key = (checkpoint.agent_id, checkpoint.backend_session_id, checkpoint.source_file)
     if load_checkpoint(database, *key) != checkpoint:
         return
-    if raw_inputs[4] or any(row["origin"] not in ("user", "agent", None, "")
-                            for row in raw_inputs[1]):
+    if raw_inputs[4]:
         database.execute(
             """DELETE FROM transcript_import_frontiers
                 WHERE agent_id=? AND backend_session_id=? AND source_file=?""", key)
@@ -569,7 +602,7 @@ def choose_boundary(backend: str, path: pathlib.Path, turns: list[dict],
         if seq < 0 or not tail or tail[0].get("role") != "user" or tail != turns[seq:]:
             reasons.append("tail_differs")
             continue
-        carry = parser_carry(backend, turns[:seq], record)
+        carry = parser_carry(backend, turns[:seq], record, path)
         why = reference_outside_tail(backend, path, offset, complete, carry)
         if why:
             reasons.append(why)
@@ -1087,14 +1120,19 @@ def _prefix_effects(turns) -> str:
       bytes and every message row unchanged, so a replay would account
       nothing. LEADER_NOOP only logs.
 
+    - a Claude sub-agent cell changes only through parent records after the
+      boundary (tool result, task-notification), which
+      ``reference_outside_tail`` refuses on every tail, or through its child
+      and meta files, whose answer the checkpoint records
+      (``subagent_children`` in the parser carry): a child that appears,
+      goes or is bound to another call refuses the tail.
+
     Still open, so still full. Their effects may need retry, or differ on
     replay, even when their message row is unchanged; they cannot be skipped
     merely because bytes or rows were checkpointed:
 
-    - a sub-agent cell or Agent/Task tool. Discovery is external to the
-      parent bytes: a missing child/meta directory at bootstrap does not make
-      this prefix immutable, and nothing records which children a stored
-      cell was built from;
+    - any other sub-agent cell or an Agent/Task tool (Codex attaches collab
+      events to the latest assistant turn, wherever it is);
     - a <team> block: team capture depends on the agent's current teams, which
       can change after the turn is old;
     - a dream prompt or dream output: a replayed DREAMING_OK marks whichever
@@ -1103,8 +1141,15 @@ def _prefix_effects(turns) -> str:
     from . import dreaming, heartbeat, team_leader, team_store
     found = ""
     for turn in turns:
-        if (any(cell.get("kind") == "subagents" for cell in turn.get("display_cells") or [])
-                or any(tool.get("name") in ("Agent", "Task") for tool in turn.get("tools") or [])):
+        for cell in turn.get("display_cells") or []:
+            if cell.get("kind") == "subagents":
+                # Claude's cell (``ephemeral``) depends on nothing outside the
+                # parent's bytes but the child directory, whose answer the
+                # checkpoint records; any other sub-agent cell stays open.
+                if cell.get("ephemeral") is not True:
+                    return "open"
+                found = "closed"
+        if any(tool.get("name") in ("Agent", "Task") for tool in turn.get("tools") or []):
             return "open"
         text = str(turn.get("text") or "")
         if turn.get("role") == "user":
@@ -1244,10 +1289,6 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, r
         _TAIL_STATES.note_refusal(key, revision, reason_token, "oracle_history")
         _tail_log("oracle_history", retention=True)
         return
-    if any(row["origin"] not in ("user", "agent", None, "") for row in raw_inputs[1]):
-        _TAIL_STATES.note_refusal(key, revision, reason_token, "automation_provenance")
-        _tail_log("automation_provenance", retention=True)
-        return
     state = _TailState(checkpoint, raw_inputs, file_hash, hasher)
     if hasher is not None:
         _READ_PREFIXES.put(key, revision, (checkpoint_digest(checkpoint), hasher.copy()))
@@ -1272,29 +1313,15 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     reason_token = _TAIL_STATES.consume(key, revision)
     if diagnostic is not None:
         diagnostic["token"] = reason_token
+    restored = False
     if (not found or state is None) and reason in _RESTORABLE:
         # The frontier this process does not hold, as the last import that
         # published it left it in the store.
         stored, state = _stored_frontier(db.conn(), key, revision, agent_id,
                                          backend_session_id, path)
-        if stored is not None:
-            if diagnostic is not None:
-                diagnostic["imported"] = stored
-            before = identity(path)
-            if (state is not None
-                    and before == Identity(stored.device, stored.inode, stored.size, stored.mtime_ns)
-                    and stored.complete_size == before.size):
-                # The file is the one that import read, to its last byte, and
-                # the database rows it read are as they were: there is nothing
-                # to import. What the process's own record of an unchanged
-                # file says, which a Host start empties. (With other rows a
-                # full import may rewrite some, so it runs, as it always did.)
-                _TAIL_STATES.put(key, revision, state)
-                _tail_log("unchanged_file", backend=backend, size=size)
-                return {"rows": stored.turn_count, "parse_s": 0.0,
-                        "store_s": time.perf_counter() - started, "shadow": "not_sampled_tail",
-                        "apply_mode": "unchanged", "parsed_bytes": 0,
-                        "_clarp_transcript_completion_v1": "completed-unchanged"}
+        restored = state is not None
+        if stored is not None and diagnostic is not None:
+            diagnostic["imported"] = stored
     elif found and state is not None and diagnostic is not None:
         diagnostic["imported"] = state.checkpoint
     if state is None:
@@ -1314,6 +1341,28 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             if diagnostic is not None:
                 diagnostic.pop("imported", None)
         return refuse(reason)
+    if (restored and (before.size, before.mtime_ns) == (cp.size, cp.mtime_ns)
+            and cp.complete_size == before.size):
+        # The file is the one that import read, to its last byte (a
+        # checkpoint's size can be ahead of its imported bytes: the file grew
+        # during that parse), and the database rows it read are as they were:
+        # there is nothing to import. What the process's own record of an
+        # unchanged file says, which a Host start empties. (With other rows a
+        # full import may rewrite some, so it runs, as it always did.)
+        #
+        # It stands after the checks above on purpose: a file is left alone
+        # only where a tail from its checkpoint would be allowed. They have
+        # compared the device and inode; an audit that is due is a full
+        # import here too, so a file rewritten in place and then idle is read
+        # at the latest by the first import after ``audit_seconds``; and a
+        # sub-agent child that appeared or went while the parent was idle is
+        # noticed.
+        _TAIL_STATES.put(key, revision, state)
+        _tail_log("unchanged_file", backend=backend, size=size)
+        return {"rows": cp.turn_count, "parse_s": 0.0,
+                "store_s": time.perf_counter() - started, "shadow": "not_sampled_tail",
+                "apply_mode": "unchanged", "parsed_bytes": 0,
+                "_clarp_transcript_completion_v1": "completed-unchanged"}
     # Every imported byte is read again when the setting says so, when this
     # process has not read them yet (the first tail after a Host start), and
     # when the file was touched without growing. Otherwise the new bytes are

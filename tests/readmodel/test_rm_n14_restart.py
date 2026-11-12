@@ -86,6 +86,51 @@ def test_after_a_host_start_an_unchanged_file_is_not_imported_and_a_grown_one_is
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_an_unchanged_file_is_left_alone_only_until_its_audit_is_due(tmp_path, backend):
+    """A lane's clock is its tick, in seconds. One second short of
+    ``audit_seconds`` after the last full import the unchanged file is left
+    alone; at the hour it is imported in full, as a grown file would be, and
+    that import is the audit: the clock starts again."""
+    reference, candidate, transcript = _world(tmp_path, backend)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
+            full.tick(0)
+            before.tick(0)
+        for tick, expected in ((3599, "unchanged_file"), (3600, "full_audit"),
+                               (7199, "unchanged_file"), (7200, "full_audit")):
+            full.tick(tick)
+            with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
+                report = after.tick(tick)
+            assert _decision(report) == expected
+            assert report["prefix_changed"] == []
+            harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_an_unchanged_file_that_has_had_its_number_of_imports_is_audited_after_a_host_start(
+        tmp_path, backend):
+    """The other audit rule, ``audit_every`` imports since the last one."""
+    reference, candidate, transcript = _world(tmp_path, backend)
+    two = {"settings": {"audit_every": 2}}
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
+            full.tick(0)
+            before.tick(0, faults=two)
+            for tick in (1, 2):
+                _append(transcript, backend, 2 + tick)
+                full.tick(tick)
+                assert _decision(before.tick(tick, faults=two)) == "tail_applied"
+        full.tick(3)
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
+            assert _decision(after.tick(3, faults=two)) == "full_audit"
+            harness.assert_product_equal(reference, candidate)
+        full.tick(4)
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as again:
+            assert _decision(again.tick(4, faults=two)) == "unchanged_file"
+            harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
 def test_reading_every_byte_at_every_tail_can_be_switched_back_on(tmp_path, backend):
     reference, candidate, transcript = _world(tmp_path, backend)
     every_tail = {"settings": {"digest_every_tail": True}}
@@ -210,34 +255,22 @@ def test_a_stored_frontier_that_does_not_match_is_not_used(tmp_path, what):
         harness.assert_product_equal(reference, candidate)
 
 
-@pytest.mark.parametrize("row", ["a heartbeat's /send row", "an Oracle delegation"])
-def test_no_frontier_is_stored_for_a_session_none_is_kept_for(tmp_path, row):
-    """Exactly the sessions the process keeps no frontier for (automation
-    provenance, Oracle history): after a Host start they are imported in
-    full, as before."""
+def test_no_frontier_is_stored_for_a_session_with_oracle_history(tmp_path):
+    """The one kind of session the process keeps no frontier for: after a
+    Host start it is imported in full, as before."""
     backend = "claude"
     reference, candidate, transcript = _world(tmp_path, backend)
     for database in (reference, candidate):
         with sqlite3.connect(database) as other:
-            if row == "an Oracle delegation":
-                # Whatever the table requires, with the agent as its own.
-                columns = other.execute("PRAGMA table_info(oracle_delegations)").fetchall()
-                values = {name: (corpus.AGENT if name == "agent_id" else
-                                 0 if "INT" in kind.upper() else "synthetic")
-                          for _cid, name, kind, notnull, default, _pk in columns
-                          if notnull and default is None or name == "agent_id"}
-                other.execute(
-                    f"INSERT INTO oracle_delegations({','.join(values)}) "
-                    f"VALUES ({','.join('?' * len(values))})", list(values.values()))
-            else:
-                revision = other.execute(
-                    "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
-                ).fetchone()[0]
-                other.execute(
-                    "INSERT INTO messages(message_id,agent_id,backend_session_id,source_file,seq,role,"
-                    "timestamp,text,updated_at,revision,origin) VALUES ('u-hb',?,?,'client:hb',-2000,"
-                    "'user','2026-10-11T00:00:00Z','a heartbeat',?,?,'heartbeat')",
-                    (corpus.AGENT, corpus.SESSION, harness.BASE_MS - 5000, revision))
+            # Whatever the table requires, with the agent as its own.
+            columns = other.execute("PRAGMA table_info(oracle_delegations)").fetchall()
+            values = {name: (corpus.AGENT if name == "agent_id" else
+                             0 if "INT" in kind.upper() else "synthetic")
+                      for _cid, name, kind, notnull, default, _pk in columns
+                      if notnull and default is None or name == "agent_id"}
+            other.execute(
+                f"INSERT INTO oracle_delegations({','.join(values)}) "
+                f"VALUES ({','.join('?' * len(values))})", list(values.values()))
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
             full.tick(0)
@@ -277,6 +310,33 @@ def test_a_file_that_is_not_the_imported_one_is_imported_in_full_and_named(tmp_p
         assert _decision(report) == f"full_{what}"
         [line] = report["prefix_changed"]
         assert f"file={transcript} what={what} " in line
+        harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_another_file_of_the_same_size_and_time_is_not_taken_for_the_imported_one(tmp_path, backend):
+    """An unchanged file is pinned to its device and inode. Here the name
+    holds a copy: the same bytes, the same size, the same mtime, another
+    inode. It is imported in full and the line says why."""
+    reference, candidate, transcript = _world(tmp_path, backend)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
+            full.tick(0)
+            before.tick(0)
+        stat = transcript.stat()
+        copy = transcript.with_suffix(".copy")
+        copy.write_bytes(transcript.read_bytes())
+        os.utime(copy, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        copy.replace(transcript)
+        now = transcript.stat()
+        assert (now.st_size, now.st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)
+        assert now.st_ino != stat.st_ino
+        full.tick(1)
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
+            report = after.tick(1)
+        assert _decision(report) == "full_inode"
+        [line] = report["prefix_changed"]
+        assert f"file={transcript} what=inode " in line
         harness.assert_product_equal(reference, candidate)
 
 
