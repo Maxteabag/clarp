@@ -10,13 +10,22 @@ day's WORKLOAD instead, on a scratch store and synthetic transcripts:
   heartbeat was sent to it), with a sub-agent call among its old turns, plain;
 * one import per journal line, for a session of the line's bucket and of the
   kind the line's reason implies; the transcript grows before the import, and
-  a line the journal marks ``carry_inputs_changed`` has a turn row written
-  first, as a running turn does between two ticks;
+  a line the journal marks ``carry_inputs_changed`` has a database row
+  written first. The journal does not say WHICH row had changed, so
+  ``--inputs`` chooses one model for all of them: ``turn`` (a turn row; the
+  default, and what this tool always did), ``send`` (a new message: its
+  /send row and its turn's row) or ``live`` (a turn row and the row of the
+  reply that turn is streaming);
 * a Host start at each given time: the imports after it run in a new process.
 
 It runs the real import, through the import cache, and reads the process's
 own read counter (``/proc/self/io`` ``rchar``) around each one. The first
 import of every session (a cold store) is not counted: a day starts warm.
+
+Since the rules of lib.message_carry a tail may find some rows changed, so
+the three models differ: ``turn`` and ``send`` are changes a tail now allows,
+``live`` is one it does not. A day on a live Host is a mix of them (and of a
+turn settling, which is not modelled); run all three for the range.
 
 What it does not model: imports that fail to publish because another writer
 committed meanwhile or the file grew during the parse, transcripts with no
@@ -251,8 +260,21 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
             out.write(turn_bytes(session["ordinal"], event["at"], size=2048)
                       if session["ticks"] % 4 == 0 else step_bytes(session["ordinal"], event["at"]))
         if event["inputs_changed"]:
-            agents_db.open_turn(agent_id=session["agent"], source="pwa",
-                                trace_id=f"turn-{name}-{session['ordinal']}")
+            trace = f"turn-{name}-{session['ordinal']}"
+            # Every model has the turn row: a live row is only written for
+            # the agent's running turn.
+            agents_db.open_turn(agent_id=session["agent"], source="pwa", trace_id=trace)
+            if the_plan.get("inputs") == "send":
+                message_store.record_user_message(
+                    agent_id=session["agent"], backend_session_id=name,
+                    client_msg_id=f"m-{name}-{session['ordinal']}",
+                    text=f"synthetic message {name} {session['ordinal']}", trace_id=trace)
+            if the_plan.get("inputs") == "live":
+                if message_store.upsert_live_assistant_message(
+                        agent_id=session["agent"], backend_session_id=name, trace_id=trace,
+                        text=f"synthetic streamed reply {session['ordinal']}",
+                        item_key="replay") is None:
+                    raise SystemExit("the live row was refused: the model would measure nothing")
         decisions.clear()
         before = _rchar()
         run_import(name)
@@ -284,6 +306,8 @@ def main(argv: list[str]) -> int:
                         help="the day's Host starts, HH:MM, comma separated")
     parser.add_argument("--sample", type=int, default=10)
     parser.add_argument("--session-scale", type=float, default=0.3)
+    parser.add_argument("--inputs", choices=("turn", "send", "live"), default="turn",
+                        help="which row a line marked carry_inputs_changed finds changed")
     parser.add_argument("--segment", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     work = args.work.resolve()
@@ -297,6 +321,7 @@ def main(argv: list[str]) -> int:
     work.mkdir(parents=True, exist_ok=True)
     the_plan = plan(read_journal(args.journal), [_clock(s) for s in args.starts.split(",") if s],
                     max(1, args.sample), args.session_scale)
+    the_plan["inputs"] = args.inputs
     (work / "plan.json").write_text(json.dumps(the_plan))
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("CLAUDE_PWA_", "CLARP_", "XDG_"))}
@@ -326,6 +351,7 @@ def main(argv: list[str]) -> int:
     report = {
         "journal_imports": the_plan["journal_events"], "replayed_imports": totals["imports"],
         "sample": scale, "host_starts_replayed": len(the_plan["starts"]),
+        "changed_inputs_model": the_plan["inputs"],
         "sessions": len(the_plan["sessions"]),
         "full": totals["full"], "tail": totals["tail"], "other": totals["other"],
         "bytes_read_replayed": totals["bytes"],
