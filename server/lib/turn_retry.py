@@ -59,12 +59,18 @@ class RetryMixin:
                 switch_pending = bool(backend.credential_switch_pending(message))
             except Exception as exc:  # noqa: BLE001 - unknown: failover decides as before
                 log_exception("credentialSwitchCheckFail", exc, detail=spec.trace_id)
+        if category == error_classify.ACCOUNT_PLAN:
+            # What the provider said, for a turn that ends later out of its park.
+            state["plan_failure"] = message
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH,
                          error_classify.ACCOUNT_PLAN)
                 and backend.account_pool()
                 and not switch_pending   # switched already; no loop (BACKENDS-06 (c))
                 and account_failover(spec.backend).request(
-                    spec.agent_id, spec.trace_id, account_selector(spec.backend))):
+                    spec.agent_id, spec.trace_id, account_selector(spec.backend),
+                    # A plan failure is about this turn's model: it must not
+                    # stop the turns that run fine on other models.
+                    plan=category == error_classify.ACCOUNT_PLAN)):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
                           detail={"reason": category})
             return
