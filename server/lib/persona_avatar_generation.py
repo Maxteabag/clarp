@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
+from . import agents as agents_db
 from . import background_jobs, config, db, personas, roster, server_identity
 from .log import log, log_exception
 
@@ -24,81 +25,15 @@ MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_GENERATED_BYTES = 20 * 1024 * 1024
 AVATAR_MAX_BYTES = 512_000
 HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000
+DAILY_WINDOW_MS = 24 * 60 * 60 * 1000
+DEFAULT_DAILY_LIMIT = config.DEFAULT_CONTACT_AVATAR_DAILY_LIMIT
+DEFAULT_MAX_ATTEMPTS = config.DEFAULT_CONTACT_AVATAR_MAX_ATTEMPTS
+RETRY_BACKOFF_MS = (5 * 60 * 1000, 30 * 60 * 1000)
 WORKER_ENV_NAMES = (
-    "OPENAI_API_KEY", "CLAUDE_PWA_DB", "CLAUDE_PWA_CONFIG",
+    "CLAUDE_PWA_DB", "CLAUDE_PWA_CONFIG",
     "CLARP_MEDIA_DIR", "CLARP_CACHE_DIR", "CLARP_DATA_DIR",
     "CLARP_CONFIG_DIR", "CLARP_SHARE_DIR",
 )
-
-_HUMAN_VARIETY = (
-    "a woman in her late twenties with warm dark eyes and wavy chestnut hair, wearing a soft oatmeal knit crew-neck",
-    "a man in his early thirties with short curls, light stubble, and a relaxed smile, wearing an olive linen overshirt",
-    "a South Asian woman in her thirties with expressive dark eyes and shoulder-length black hair, wearing a clean slate studio jacket",
-    "an East Asian man in his late twenties with neat tousled hair and wire-rimmed glasses, wearing a charcoal merino sweater",
-    "a woman in her mid-thirties with freckles, copper-auburn hair tied loosely back, wearing a warm navy cotton shirt",
-    "a Black man in his thirties with a close-cropped fade and warm confident expression, wearing a minimalist sand overshirt",
-    "a Mediterranean man in his late twenties with dark wavy hair and warm hazel eyes, wearing a stone-grey henley",
-    "a Nordic woman in her early thirties with windswept blonde bob hair and bright blue-grey eyes, wearing a forest-green wool top",
-)
-
-_ANDROID_VARIETY = (
-    "brushed warm titanium cranial plates, soft amber ring-lit optical irises, and a matte charcoal composite collar",
-    "porcelain-white ceramic faceplates with delicate gold micro-seams, calm cyan optical irises, and a slate acoustic collar",
-    "anodized slate-blue alloy cheek seams, warm silver-blue synthetic optics, and sculpted carbon-weave shoulder armour",
-    "satin bronze-and-obsidian facial geometry, luminous seafoam optical sensors, and precision telemetry ear vanes",
-)
-
-_GROK_VARIETY = (
-    "messy hair with electric magenta highlights, leather moto jacket, neon rain reflections behind",
-    "undercut silver-streaked hair, vintage denim vest with patches, amber alley neon bokeh behind",
-    "tousled jet-black hair with cyan tips, scarred brow and wry grin, dark synthwave rooftop lights behind",
-    "cropped crimson-tinted hair, aviator collar jacket and confident smirk, industrial neon glow behind",
-)
-
-_GEMINI_VARIETY = (
-    "luminous indigo stardust skin, warm golden eyes, and a floating crystalline Gemini spark star",
-    "soft celestial violet-and-amber aura, joyful eyes, and swirling twilight nebula light",
-    "warm sunlit cloud-and-gold genie aesthetic, friendly grin, and shimmering astral particles",
-    "turquoise-and-starlight cosmic sage aesthetic, gentle expression, and radiant constellation bokeh",
-)
-
-_DEEPSEEK_VARIETY = (
-    "matte charcoal technical dive collar, cold electric-blue bioluminescence on damp hair, drifting abyssal plankton",
-    "brushed brass-and-slate submersible suit collar, cyan deep-sea glow across cheek, distant whale silhouette in dark water",
-    "navy expedition drysuit collar with silver whale pin, soft aquamarine underwater light, tranquil deep-ocean bokeh",
-    "darktitanium oceanographer collar, bioluminescent teal rim light and tiny suspended water droplets",
-)
-
-TIER_TEMPLATES: dict[str, str] = {
-    "claude": (
-        "A photorealistic candid 35mm portrait photograph of {name}, {detail}. "
-        "Captured at a natural three-quarter angle in a sunlit architectural studio with soft natural bokeh. "
-        "Authentic human skin texture, warm editorial window lighting, centered 1:1 head-and-shoulders framing, "
-        "one person only, no CGI plastic sheen, no text, no logos, no borders, no watermarks."
-    ),
-    "codex": (
-        "A photorealistic candid 35mm portrait photograph of {name}, a sleek humanoid android engineer featuring {detail}. "
-        "Captured at a three-quarter angle in a calm modern workshop with soft ambient bokeh. "
-        "Subtle cybernetic micro-seams and expressive synthetic optics, natural cinematic lighting, centered 1:1 head-and-shoulders framing, "
-        "one character only, no green matrix rain, no text, no logos, no borders, no watermarks."
-    ),
-    "grok": (
-        "Bold graphic-novel character portrait illustration of {name}, an edgy cyberpunk rebel engineer with {detail}. "
-        "Expressive ink linework and painterly neon rim lighting, centered 1:1 head-and-shoulders framing, "
-        "one character only, no text, no speech bubbles, no logos, no borders, no watermarks."
-    ),
-    "gemini": (
-        "Stylized high-craft digital character portrait of {name}, a warm whimsical cosmic genie spirit with {detail}. "
-        "Majestic celestial lighting, expressive friendly face, centered 1:1 head-and-shoulders framing, "
-        "one character only, no text, no logos, no borders, no watermarks."
-    ),
-    "deepseek": (
-        "Cinematic underwater portrait photograph of {name}, a calm deep-sea explorer with {detail}. "
-        "Realistic skin texture, shallow depth of field, centered 1:1 head-and-shoulders framing, no goggles covering the eyes, "
-        "one person only, no text, no logos, no borders, no watermarks."
-    ),
-}
-
 
 class PersonaAvatarError(RuntimeError):
     pass
@@ -113,26 +48,23 @@ def job_id_for(persona_id: str) -> str:
 
 
 def prompt_for_persona(name: str, *, tier: str = "", backend: str = "") -> str:
-    resolved_tier = (
+    spec = roster.contact_tier_spec(
         (tier or "").strip().casefold()
         or roster.tier_for_contact(name)
         or roster.backend_to_tier(backend)
     )
-    if resolved_tier not in TIER_TEMPLATES:
-        resolved_tier = "claude"
     seed = int.from_bytes(hashlib.sha256(name.strip().casefold().encode()).digest()[:4], "big")
-    varieties = {
-        "claude": _HUMAN_VARIETY,
-        "codex": _ANDROID_VARIETY,
-        "grok": _GROK_VARIETY,
-        "gemini": _GEMINI_VARIETY,
-        "deepseek": _DEEPSEEK_VARIETY,
-    }[resolved_tier]
-    detail = varieties[seed % len(varieties)]
-    return TIER_TEMPLATES[resolved_tier].format(name=name.strip(), detail=detail)
+    detail = spec.portrait_varieties[seed % len(spec.portrait_varieties)]
+    return spec.portrait_template.format(name=name.strip(), detail=detail)
 
 
-def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -> dict | None:
+def start_best_effort(
+    persona_name: str,
+    *,
+    tier: str = "",
+    backend: str = "",
+    now_ms: int | None = None,
+) -> dict | None:
     """Queue a detached background avatar generation job if OpenAI is configured.
 
     Never blocks session startup and never raises into the caller.
@@ -143,8 +75,20 @@ def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -
             return None
         if row.get("avatar_path") or row.get("avatar_symbol"):
             return None
-        if not config.load().openai_key():
+        cfg = config.load()
+        if not getattr(
+            cfg,
+            "contact_avatar_generation",
+            config.DEFAULT_CONTACT_AVATAR_GENERATION,
+        ):
             return None
+        daily_limit = int(getattr(cfg, "contact_avatar_daily_limit", DEFAULT_DAILY_LIMIT))
+        max_attempts = int(getattr(cfg, "contact_avatar_max_attempts", DEFAULT_MAX_ATTEMPTS))
+        if daily_limit <= 0 or max_attempts <= 0:
+            return None
+        if not cfg.openai_key():
+            return None
+        now = int(now_ms if now_ms is not None else db.now_ms())
         persona_id = str(row["persona_id"])
         resolved_tier = (
             (tier or "").strip().casefold()
@@ -152,25 +96,28 @@ def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -
             or roster.backend_to_tier(backend)
         )
         job_id = job_id_for(persona_id)
-        existing = background_jobs.get(job_id)
-        if existing and existing["status"] in background_jobs.ACTIVE_STATUSES:
-            return existing
-        if existing and existing["status"] in background_jobs.TERMINAL_STATUSES:
+        background_jobs.reconcile_stale(job_id=job_id, now_ms=now)
+        existing = background_jobs.get(job_id, reconcile=False, observed_at=now)
+        if existing and existing["status"] in {"failed", "cancelled"}:
             pid = int(existing.get("worker_pid") or 0)
             token = str(existing.get("worker_start_token") or "")
             if pid and token and background_jobs.worker_is_alive(pid, token):
                 if not background_jobs.terminate_worker(pid, token):
                     return None
         computer_id = str(server_identity.get_server_info()["server_id"])
-        job = background_jobs.upsert_computer(
+        job, claimed = background_jobs.enqueue_computer_capped(
             computer_id=computer_id,
             job_id=job_id,
             kind="persona-avatar",
             title=f"Generate avatar for {row['name']}",
             detail=f"Generating {resolved_tier} Contact portrait",
-            status="queued",
             heartbeat_timeout_ms=HEARTBEAT_TIMEOUT_MS,
             restart_cancelled=True,
+            max_launches=daily_limit,
+            window_ms=DAILY_WINDOW_MS,
+            max_attempts=max_attempts,
+            retry_backoffs_ms=RETRY_BACKOFF_MS,
+            now_ms=now,
             metadata={
                 "persona_id": persona_id,
                 "persona_name": row["name"],
@@ -180,10 +127,8 @@ def start_best_effort(persona_name: str, *, tier: str = "", backend: str = "") -
                 "expire_queued": True,
             },
         )
-        if not background_jobs.claim_queued_launch(
-            job_id, generation=int(job["generation"])
-        ):
-            return background_jobs.get(job_id, reconcile=False)
+        if not job or not claimed:
+            return job
         command = [
             sys.executable, str(_worker_script()),
             "--handle", background_jobs.job_handle(job),
@@ -232,9 +177,16 @@ def generate_for_persona(
     row = personas.get_by_id(persona_id)
     if not row:
         raise PersonaAvatarError("Contact no longer exists")
-    if row.get("avatar_path") or row.get("avatar_symbol"):
+    if row.get("builtin") or row.get("avatar_path") or row.get("avatar_symbol"):
         return row
-    api_key = config.load().openai_key()
+    cfg = config.load()
+    if not getattr(
+        cfg,
+        "contact_avatar_generation",
+        config.DEFAULT_CONTACT_AVATAR_GENERATION,
+    ):
+        raise PersonaAvatarCancelled("Contact avatar generation is disabled")
+    api_key = cfg.openai_key()
     if not api_key:
         raise PersonaAvatarError("OpenAI API key is not configured")
     prompt = prompt_for_persona(row["name"], tier=tier)
@@ -252,7 +204,7 @@ def generate_for_persona(
     latest = personas.get_by_id(persona_id)
     if not latest:
         raise PersonaAvatarError("Contact was removed before avatar save")
-    if latest.get("avatar_path") or latest.get("avatar_symbol"):
+    if latest.get("builtin") or latest.get("avatar_path") or latest.get("avatar_symbol"):
         return latest
     encoded = base64.b64encode(jpeg_bytes).decode("ascii")
     updated = personas.update_avatar(
@@ -262,21 +214,7 @@ def generate_for_persona(
     )
     avatar_path = str(updated.get("avatar_path") or "")
     if avatar_path:
-        con = db.conn()
-        con.execute("BEGIN IMMEDIATE")
-        try:
-            con.execute(
-                """UPDATE agents
-                      SET avatar_path = ?
-                    WHERE persona = ? COLLATE NOCASE
-                      AND COALESCE(avatar_path, '') = ''
-                      AND COALESCE(avatar_symbol, '') = ''""",
-                (avatar_path, updated["name"]),
-            )
-            con.commit()
-        except Exception:
-            con.rollback()
-            raise
+        agents_db.sync_contact_avatar(updated["name"], avatar_path)
     return updated
 
 

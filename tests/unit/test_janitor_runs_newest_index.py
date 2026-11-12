@@ -385,12 +385,13 @@ def test_code_that_stops_at_version_121_leaves_the_index_alone_and_keeps_working
     _mixed_history(janitor)
     expected = _answers(janitor)
     con = db.conn()
+    newest = db_schema._SCHEMA_VERSION                     # 122 when this was written; later steps add to it
     monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 121)
     monkeypatch.delattr(db_migrations, "_migrate_to_v122")
 
     db_migrations._migrate(con)                            # the database is newer: nothing to do
 
-    assert con.execute("PRAGMA user_version").fetchone()[0] == 122
+    assert con.execute("PRAGMA user_version").fetchone()[0] == newest
     assert len(_index_rows(con)) == 1
     assert _answers(janitor) == expected
     # It writes runs as before; the index it does not know about follows along.

@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 86  # 85 plus what a goal says about a wake that did not complete.
+HOST_CONTRACT = 91  # 90 plus what a goal says about a wake that did not complete.
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -51,6 +51,7 @@ FEATURES: tuple[str, ...] = (
     "decision_on_behalf",
     "accounts_hotseat",
     "hotseat_desk",
+    "hotseat_desk_actions",
     "auto_contact_minting",
     SEND_DELIVERY_STATE,
     "harness_model_providers",
@@ -145,6 +146,8 @@ FEATURES: tuple[str, ...] = (
     "server_home_terminal",
     # GET /agents/snapshot?include_archived=0 and GET /agents/archived.
     "snapshot_without_archived",
+    # Android push through FCM; advertised only with a service account.
+    "push_fcm",
 )
 
 
@@ -201,6 +204,8 @@ FEATURE_CONTRACTS["push_grants"] = 39
 FEATURE_CONTRACTS["agent_fork"] = 41
 FEATURE_CONTRACTS["hotseat_desk"] = 84
 FEATURE_CONTRACTS["auto_contact_minting"] = 85
+FEATURE_CONTRACTS["hotseat_desk_actions"] = 86  # PROVISIONAL: next free above main's 85; PR 260 also wants a number
+FEATURE_CONTRACTS["push_fcm"] = 88  # PROVISIONAL: next free above main's 87
 
 
 # Features that exist only while live events actually flow: the hub runs in
@@ -225,10 +230,43 @@ def live_serving() -> bool:
         return False
 
 
+# The Hotseat desk can be turned off in the config ([hotseat] desk = false):
+# its features are then not advertised and its three routes answer 404.
+HOTSEAT_DESK_FEATURES = frozenset({"hotseat_desk", "hotseat_desk_actions"})
+
+
+def hotseat_desk_enabled() -> bool:
+    """Whether this Host serves the Hotseat desk. On unless the config says no."""
+    try:
+        from . import config
+        return config.load().hotseat_desk_enabled is not False
+    except Exception:  # noqa: BLE001 - an unreadable config is not an owner's "off"
+        return True
+
+
+# Android push is offered only by a Host that can deliver it: one with a
+# usable FCM service account ([fcm] service_account, docs/push-android.md).
+FCM_FEATURES = frozenset({"push_fcm"})
+
+
+def fcm_push_enabled() -> bool:
+    try:
+        from . import config
+        return bool(config.load().fcm_enabled())
+    except Exception as e:  # noqa: BLE001 - unknown means not advertised
+        from .log import log
+        log("fcmFeatureProbeFail", f"{type(e).__name__}: {e}")
+        return False
+
+
 def _features() -> list[str]:
     serving = live_serving()
+    desk = hotseat_desk_enabled()
+    fcm = fcm_push_enabled()
     return [f for f in FEATURES
             if (serving or f not in LIVE_FEATURES)
+            and (desk or f not in HOTSEAT_DESK_FEATURES)
+            and (fcm or f not in FCM_FEATURES)
             and (os.name == "posix" or f != "server_home_terminal")]
 
 

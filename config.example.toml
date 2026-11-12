@@ -74,12 +74,26 @@ api_key = ""
 model = "flux-haley-en"
 
 [openai]
-# Used by the optional Oracle Mode Realtime proxy. The permanent key remains
-# on this Computer and is never returned to the iPhone.
-# If empty, falls back to OPENAI_API_KEY.
+# Used by the optional Oracle Mode Realtime proxy and paid Contact portrait
+# generation. The permanent key remains on this Computer and is never returned
+# to the iPhone. If empty, in-process features fall back to OPENAI_API_KEY;
+# detached Contact avatar workers read this file directly (see [contacts]).
 api_key = ""
 realtime_model = "gpt-realtime-2.1"
 realtime_voice = "cedar"
+
+[contacts]
+# Paid Contact portraits (OpenAI gpt-image-2) for custom and auto-minted
+# Contacts created without an avatar. Set avatar_generation to false, 0,
+# "false", "off", "no" or "0" (or CLARP_CONTACT_AVATAR_GENERATION=0) to turn
+# it off; any unreadable value also fails closed to off. Detached systemd
+# worker units never receive OPENAI_API_KEY on their command line: if the key
+# lives only in the Host service's environment and not in [openai] api_key
+# above, the worker never gets it and fails unpaid 3 times per Contact, each
+# try counting toward the daily 20.
+# avatar_generation = true
+# avatar_daily_limit = 20
+# avatar_max_attempts = 3
 
 [oracle]
 # Languages you speak, as BCP-47 codes (docs/oracle-gemini-live.md). Gemini
@@ -92,6 +106,16 @@ realtime_voice = "cedar"
 # An http_post action may call loopback services on this machine; list any
 # other URL prefix it may call here.
 # allowed_urls = ["https://example.com/hooks/"]
+
+[hotseat]
+# The Hotseat desk in the apps: every saved Claude and Codex account with its
+# quota, "Use" to switch the default account, "Continue" for work a usage limit
+# stopped, and live reads of the providers. Set this to false to turn all of
+# it off: the Host stops advertising the desk and answers 404 on /hotseat/desk,
+# /hotseat/switch and /hotseat/resume, so the apps fall back to the read-only
+# account view (/hotseat/status), which stays. The Hotseat switcher Janitor is
+# not affected. The file is re-read while the Host runs; no restart is needed.
+# desk = true
 
 [network]
 # Phone connectivity is explicit. "tailscale" uses HTTPS Serve, "lan" uses
@@ -211,6 +235,17 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # environment = "production"          # fallback for tokens registered without one:
 #                                     # production (TestFlight/App Store) | sandbox
 # # The .p8 path may also be supplied via the APNS_KEY_PATH env var.
+
+# [fcm]
+# Android push: the same alerts iPhones get, delivered to the Clarp Android
+# app through Firebase Cloud Messaging (HTTP v1), signed here with a Google
+# service account of the app's Firebase project (Firebase console > Project
+# settings > Service accounts > Generate new private key). The JSON key is a
+# secret — keep it out of git. The project id is read from the file. Without
+# it, Android phones are not offered push (feature `push_fcm` is not
+# advertised). See docs/push-android.md.
+# service_account = "~/.config/clarp/fcm-service-account.json"
+# # The path may also be supplied via the FCM_SERVICE_ACCOUNT env var.
 
 # [audio_central]
 # Clarp Audio Central: managed Clarp Voice and the APNs push relay. The

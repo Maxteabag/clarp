@@ -77,6 +77,8 @@ def test_server_identity_advertises_product_features(monkeypatch, tmp_path):
     block = info["capabilities"]
     assert block["version"] == server_identity.CAPABILITIES_VERSION
     assert {"teams", "oracle", "dreaming", "orchestrator"} <= set(block["features"])
-    # Live features are advertised only while live events flow.
+    # Live features are advertised only while live events flow, and Android
+    # push only with an FCM service account (none in the test config).
     assert block["features"] == [f for f in server_identity.FEATURES
-                                 if f not in server_identity.LIVE_FEATURES]
+                                 if f not in server_identity.LIVE_FEATURES
+                                 and f not in server_identity.FCM_FEATURES]

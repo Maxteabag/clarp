@@ -26,7 +26,9 @@ def configure(value, expected_revision):
             if not isinstance(model,dict) or set(model)!={'provider','model'} or any(not isinstance(v,str) or not v.strip() or len(v)>200 for v in model.values()):raise ValueError('Each model needs provider and model identifiers')
         for model in chain:
             if model['provider'] != 'openai' and not backends.get(model['provider']):raise ValueError('Unsupported model provider')
-            if model['provider'] != 'openai' and not backends.is_valid_model(model['provider'],model['model']):raise ValueError('Invalid provider model identifier')
+            if model['provider'] != 'openai' and not backends.is_valid_model(model['provider'],model['model']):
+                detail=backends.unknown_model_detail(model['provider'],model['model'])
+                raise ValueError('Invalid provider model identifier'+(f': {detail}' if detail else ''))
         if len({json.dumps(v,sort_keys=True) for v in chain})!=len(chain):raise ValueError('Duplicate model')
     with janitors._write():
         current=configuration()
