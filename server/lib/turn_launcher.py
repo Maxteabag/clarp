@@ -15,6 +15,15 @@ from .turn_dispatch_state import _TURN_LOCK, _SLOTS, _INFLIGHT, _launching
 from .turn_command import _TurnSpec, DispatchError, JanitorDispatchError, _janitor_spawn_lock, OPENING_WITHDRAWN, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked
 from .turn_stop import _result_error_text, _result_detail, _result_assistant_text, _record_dreaming_result
 
+# What a turn is resumed with when it met the limit again soon after a recovery
+# had resumed it. A resume needs a prompt; this is all of it. The recovery
+# message and the request are in the conversation already and are not sent
+# again (laptopstudio, 2026-11-11: one more copy of both in each round).
+RELAPSE_RESUME_TEXT = (
+    "The account ran out again and Clarp has resumed this turn once more. Carry on from "
+    "where the conversation stands; check the results of interrupted operations before "
+    "retrying them. Nothing new is asked.")
+
 
 class LauncherMixin:
     @staticmethod
@@ -98,17 +107,24 @@ class LauncherMixin:
             bsid, str(spec.cwd), self.home)
         interrupted = (state.get("spawn_started") or attempt > 1
                        or bool(spec.recovery_text))
+        # One recovery message for each run of relapses. A turn that met the
+        # limit again soon after a recovery resumed it has the message in its
+        # conversation: the process that carried it started its session, or
+        # the turn was already past that and carrying the one line.
+        told = bool(state.get("relapsed") and (
+            spec.recovery_text == RELAPSE_RESUME_TEXT
+            or (spec.recovery_text and state.get("saw_init"))))
         resume_spec = replace(
             spec, backend_session_id=bsid,
             is_new_session=spec.is_new_session and transcript is None,
-            recovery_text=(
+            recovery_text=(RELAPSE_RESUME_TEXT if told else (
                 f"Clarp recovered from a {spec.backend} account usage limit. Continue "
                 "the unfinished request from the existing conversation. Check "
                 "the results of interrupted operations before retrying them; "
                 "do not repeat work or external actions already completed. "
                 "If the request is already complete, report that and stop.\n\n"
                 f"Original request:\n{spec.text}"
-            ) if interrupted and transcript is not None else "",
+            )) if interrupted and transcript is not None else "",
         )
         try:
             spawned = self._spawn_attempt(resume_spec, attempt=attempt)
@@ -123,6 +139,21 @@ class LauncherMixin:
             else:
                 self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
                                        str(exc), attempts=attempt)
+
+    def _end_parked_for_its_plan(self, spec: _TurnSpec, attempt: int, state: dict) -> None:
+        """The provider said the account does not offer this turn's model, and
+        the selector has since answered PLAN_CHECKS times without it. The turn
+        ends here as it would have at that failure: with the provider's own
+        sentence. Resumed, it would fail again and start the next recovery
+        (2026-11-11)."""
+        if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
+                or self._superseded(spec)):
+            return
+        message = state.get("plan_failure")
+        if _is_call_opening(spec):
+            self._end_launched_opening(spec, error_classify.ACCOUNT_PLAN, message, attempt)
+            return
+        self._mark_interrupted(spec, error_classify.ACCOUNT_PLAN, message, attempts=attempt)
 
     def _admit_opening_launch(self, spec: _TurnSpec, attempt: int) -> bool:
         """L2: an initiative is admitted again before it runs (agent_rings.authorize_parked_launch):
@@ -158,15 +189,20 @@ class LauncherMixin:
                                    "account switch", attempt)
         return False
 
-    def _pause_for_account(self, spec: _TurnSpec) -> None:
+    def _pause_for_account(self, spec: _TurnSpec, *, unserved: bool = False) -> None:
+        """Show that the turn waits for an account. ``unserved``: the rest of
+        the pool works on; the active account does not serve this turn's
+        model now (its quota for that model is spent, or its probe failed)."""
+        message = (f"Waiting for a {spec.backend} account that serves "
+                   f"{spec.model or 'this model'}; the active one does not right now"
+                   if unserved else f"Waiting for a {spec.backend} account with available usage")
         with _TURN_LOCK:
             if _SLOTS.owns(spec.agent_id, spec.trace_id):
                 _SLOTS.touch_claim(spec.agent_id)
             defer_on(_TURN_LOCK, lambda: turn_lifecycle.try_transition(
                 spec.agent_id, TurnEvent.ACCOUNT_RECOVERY_WAIT,
                 {"dispatch": spec.backend, "trace_id": spec.trace_id,
-                 "account_recovery": "waiting",
-                 "message": f"Waiting for a {spec.backend} account with available usage"}))
+                 "account_recovery": "waiting", "message": message}))
 
     def _sticky_session(self) -> str:
         """Session of the currently-focused agent — the last one addressed by
