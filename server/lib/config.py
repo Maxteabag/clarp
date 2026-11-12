@@ -671,17 +671,6 @@ class Config:
         raw = (self.fcm_service_account or os.environ.get("FCM_SERVICE_ACCOUNT", "")).strip()
         return str(pathlib.Path(raw).expanduser()) if raw else ""
 
-    def fcm_enabled(self) -> bool:
-        """True when Android pushes can go out through FCM (a usable service
-        account file; whether Google accepts it shows at the first send)."""
-        from . import fcm
-        return fcm.configured(self)
-
-    def push_enabled(self) -> bool:
-        """True when any push path is configured: APNs for iPhones or FCM
-        for Android phones."""
-        return self.apns_enabled() or self.fcm_enabled()
-
     def apns_enabled(self) -> bool:
         """True when pushes have a delivery path (relay or direct)."""
         return bool(self.apns_transport())
