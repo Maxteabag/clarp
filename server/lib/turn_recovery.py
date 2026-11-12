@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from . import agents as agents_db
 from . import db, eventlog
 from . import turn_queue
@@ -24,6 +26,17 @@ class RecoveryMixin:
             return 0
         try:
             return self._recover_queued_locked()
+        except sqlite3.OperationalError as exc:
+            if not db.is_locked_error(exc):
+                raise
+            # Another process held the database's writer longer than this
+            # pass may wait (a Host that has just been restarted does). The
+            # pass schedules its own next run at its end, so an exception out
+            # of it was its last run: 2026-11-12, twice, and queued work then
+            # waited until something else started a pass, once for 21 minutes.
+            log("queuedRecoveryLocked", "the database is locked; the pass runs again in 1s")
+            self.retry_scheduler(1.0, self.recover_queued)
+            return 0
         finally:
             _RECOVERY_LOCK.release()
 
@@ -403,6 +416,33 @@ class RecoveryMixin:
         except Exception:
             return bool(spec.janitor_run_id)
         return bool(current) and current != spec.trace_id
+
+    def _holds_slot(self, spec: _TurnSpec, *, locked: bool = True) -> bool:
+        """Whether a turn that waits for an account is still the agent's turn:
+        the agent's slot holds its trace (and, for a janitor run, the run is
+        still the dispatched one).
+
+        Not ``_superseded``. That asks the agent's trace marker, which tells
+        a replaced turn's late callbacks from the live turn's. A parked turn
+        has no process, and the marker moves without the turn being replaced:
+        POST /transcribe writes it for a voice message that is only queued
+        behind the parked turn. 2026-11-12: read as "replaced", such a turn
+        was dropped by the account coordinator while its slot still held it,
+        and waited four hours for a recovery that no longer knew it. A Stop,
+        a deletion or a real replacement releases the slot, and that is what
+        ends a parked turn."""
+        try:
+            with (_TURN_LOCK if locked else _NO_LOCK):
+                if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
+                    return False
+                if spec.janitor_run_id:
+                    from . import janitors
+                    return bool(janitors.validate_dispatch(
+                        spec.session, spec.janitor_run_id, spec.trace_id))
+        except Exception as exc:  # noqa: BLE001 - an unprovable janitor run is not started
+            log_exception("parkedTurnOwnerCheckFail", exc, detail=spec.trace_id)
+            return not spec.janitor_run_id
+        return True
 
     def _preempt(self, *, agent_id: str, backend: str,
                  context: eventlog.EventContext) -> None:
