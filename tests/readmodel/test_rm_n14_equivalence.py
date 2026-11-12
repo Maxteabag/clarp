@@ -611,6 +611,35 @@ def test_rewrite_outside_the_samples_is_found_when_all_bytes_are_next_read(
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_rewrite_outside_the_samples_and_then_idle_is_found_when_the_audit_is_due(tmp_path, backend):
+    """The same rewrite, and then the conversation goes idle. A Host start
+    alone does not find it: an unchanged file is not read. It is left alone
+    only until its audit is due, though; the first import after that (here a
+    Host start an hour on; a lane's clock is its tick, in seconds) is a full
+    one, names the file, and the rows are the full replay's again."""
+    reference, candidate, transcript, rewrite = _rewritten_outside_the_samples(tmp_path, backend)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0)
+            rewrite()
+            full.tick(1)
+            assert actual.tick(1)["apply_mode"] == "tail"
+        for tick in (2, 3599):
+            with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
+                idle = restarted.tick(tick)
+            assert idle["apply_mode"] == "unchanged" and idle["prefix_changed"] == []
+            assert not any("synthetic task 8" in text for _id, text in _texts(candidate))
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as restarted:
+            found = restarted.tick(3600)
+    assert found["apply_mode"] == "full"
+    [line] = found["prefix_changed"]
+    assert f"file={transcript} what=imported_bytes" in line
+    assert _texts(candidate) == _texts(reference)
+    assert any("synthetic task 8" in text for _id, text in _texts(candidate))
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
 @pytest.mark.parametrize("yield_at", [1, 3, 6])
 def test_interleaved_prefix_client_during_yield_cannot_certify_old_carry(tmp_path, backend, yield_at):
     reference, candidate = _clones(tmp_path, backend)
@@ -635,8 +664,13 @@ def test_interleaved_prefix_client_during_yield_cannot_certify_old_carry(tmp_pat
             assert {"event": "transcriptTailRetention", "code": "checkpoint_foreign_commit_yield", "count": 1} in b["tail_events"]
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 21))
-            full.tick(2)
-            recovered = actual.tick(2)
+            # Both lanes replay in full here, after a row was removed. From
+            # then on every batch an import commits takes a revision number,
+            # and a default batch ends after 25 ms of wall clock as well as
+            # after 200 rows: under load one lane committed one batch more and
+            # numbered its rows one higher. One row a batch, in both lanes.
+            full.tick(2, faults={"single_row_batches": True})
+            recovered = actual.tick(2, faults={"single_row_batches": True})
             assert recovered["apply_mode"] == "full"
             harness.assert_product_equal(reference, candidate)
             with transcript.open("ab") as output:
@@ -789,8 +823,11 @@ def test_dirty_window_and_partial_fanout_failure_keep_recovery_full(tmp_path, ba
             b = actual.tick(1, faults=common)
             assert a["failure_code"] == b["failure_code"] == "OperationalError"
             harness.assert_product_equal(reference, candidate)
-            full.tick(2)
-            assert actual.tick(2)["apply_mode"] == "full"
+            # A full replay after a removed row, in both lanes: one row a
+            # batch in both, for the reason given in the test above (with
+            # different batching alone this comparison fails in either lane).
+            full.tick(2, faults={"single_row_batches": True})
+            assert actual.tick(2, faults={"single_row_batches": True})["apply_mode"] == "full"
             harness.assert_product_equal(reference, candidate)
             with sqlite3.connect(candidate) as connection:
                 assert connection.execute("SELECT count(*) FROM team_inbox").fetchone()[0] == 1

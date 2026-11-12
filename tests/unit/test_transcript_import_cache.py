@@ -1292,10 +1292,15 @@ def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, m
 def test_the_registry_prunes_finished_threads_instead_of_keeping_history(tmp_path, monkeypatch):
     """S-2 (c): pruning keeps the registry from growing with completed history:
     after each of several sequential worker lifetimes it holds only the latest
-    (dead) worker, never the earlier ones. This is not a bound on live threads."""
+    (dead) worker, never the earlier ones. This is not a bound on live threads.
+
+    The owner's window is taken out, not merely set to zero seconds: it lasts
+    twice the time the last import took, so on a loaded machine the next
+    request fell inside it, was handed to a timer, and the registry held that
+    timer where this test expects the worker."""
     cache = transcript_import_cache
     assert cache.reset_for_tests()
-    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr(cache, "_background_interval", lambda duration: 0.0)
     seen: list = []
     for n in range(5):
         path = tmp_path / f"seq-{n}.jsonl"
