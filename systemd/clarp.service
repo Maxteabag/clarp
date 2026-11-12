@@ -27,6 +27,10 @@ UMask=0077
 LimitNOFILE=65536
 ExecStart=@@PYTHON@@ @@SERVER@@
 Restart=on-failure
+# 78: the Host refused a database above its own schema (server.py). Starting
+# it again changes nothing; installing a newer release, or asking for the
+# rollback, does.
+RestartPreventExitStatus=78
 RestartSec=2
 StandardOutput=journal
 StandardError=journal

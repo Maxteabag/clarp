@@ -6,7 +6,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import settings_store
+from . import db, settings_store
 
 
 KEY = "diagnostics.capture.v1"
@@ -61,7 +61,15 @@ def _decode(raw: str) -> Settings:
 
 
 def get() -> Settings:
+    """The capture settings, which are opt-in and off unless stored.
+
+    Asked on every log line, so it must never be what opens the database: a
+    process that has not opened it for its own work gets the default (off)
+    and the line goes to stderr only. 2026-11-11: the first log line of a
+    debug script opened a live database this way and upgraded it."""
     global _CACHED, _CACHED_AT
+    if not db.opened():
+        return Settings()
     now = time.monotonic()
     with _LOCK:
         if _CACHED is None or now - _CACHED_AT >= CACHE_TTL_SEC:
