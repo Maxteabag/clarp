@@ -378,3 +378,85 @@ def test_the_stored_version_is_read_without_writing_also_beside_a_write_ahead_lo
         schema_guard.stored_version(tmp_path / "junk.sqlite")
     assert schema_guard.code_version(ROOT) == CODE
     assert schema_guard.code_version(tmp_path) is None
+
+
+# --- a service that is not this installation's -----------------------------------
+
+def test_a_foreign_service_is_refused_only_on_a_database_that_exists_below_it(tmp_path):
+    """A database that is not there yet (version 0) is nobody's to upgrade: the
+    foreign service creates its own. Only one that exists below its schema is
+    refused."""
+    schema_guard.check_foreign_start(tmp_path, tmp_path / "none.sqlite", tmp_path, code=CODE)
+    empty = tmp_path / "empty.sqlite"
+    empty.write_bytes(b"")
+    schema_guard.check_foreign_start(tmp_path, empty, tmp_path, code=CODE)
+
+    below = _database_at(tmp_path / "below.sqlite", CODE - 1)
+    with pytest.raises(schema_guard.NotThisInstallation, match=f"schema {CODE - 1}"):
+        schema_guard.check_foreign_start(tmp_path, below, tmp_path, code=CODE)
+    schema_guard.check_foreign_start(
+        tmp_path, _database_at(tmp_path / "same.sqlite", CODE), tmp_path, code=CODE)
+
+
+# --- an override that is no longer needed ----------------------------------------
+
+def test_a_start_on_a_database_not_above_the_code_removes_a_stale_override(tmp_path, capsys):
+    database = _database_at(tmp_path / "state.sqlite", CODE)
+    marker = tmp_path / schema_guard.ROLLBACK_MARKER
+    schema_guard.allow_rollback(tmp_path, code=CODE - 1, stored=CODE)   # an earlier rollback
+
+    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)
+
+    assert not marker.exists()
+    assert "no longer needed" in capsys.readouterr().err
+    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)   # nothing to remove
+
+
+def test_an_override_in_use_is_kept(tmp_path):
+    database = _database_at(tmp_path / "state.sqlite", CODE + 1)
+    schema_guard.allow_rollback(tmp_path, code=CODE, stored=CODE + 1)
+
+    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)
+    schema_guard.check_host_start(database, tmp_path, code=CODE, code_root=tmp_path)
+
+    assert schema_guard.rollback_allowed(tmp_path, code=CODE, stored=CODE + 1)
+
+
+def test_a_host_that_is_not_the_installations_removes_nothing(tmp_path):
+    """A checkout started in a shell that inherited the installation's paths is
+    not its Host: the installed Host's override is not its to remove."""
+    share = tmp_path / "share"
+    (share / "releases/abc1234-1").mkdir(parents=True)
+    (share / "current").symlink_to(share / "releases/abc1234-1", target_is_directory=True)
+    database = _database_at(share / "state.sqlite", CODE)
+    schema_guard.allow_rollback(share, code=CODE - 1, stored=CODE)
+
+    schema_guard.check_host_start(database, share, code=CODE, code_root=tmp_path / "checkout")
+    assert schema_guard.rollback_allowed(share, code=CODE - 1, stored=CODE)
+
+    schema_guard.check_host_start(database, share, code=CODE,
+                                  code_root=share / "releases/abc1234-1")
+    assert not (share / schema_guard.ROLLBACK_MARKER).exists()
+
+
+def test_the_restore_records_the_failed_releases_schema_whatever_the_file_says(tmp_path, capsys):
+    """The failed Host may still be upgrading when the restore records."""
+    restored, failed = tmp_path / "old", tmp_path / "new"
+    for release, version in ((restored, CODE), (failed, CODE + 2)):
+        (release / "lib").mkdir(parents=True)
+        (release / "lib/db_schema.py").write_text(f"_SCHEMA_VERSION = {version}\n")
+    database = _database_at(tmp_path / "state.sqlite", CODE)            # not upgraded yet
+
+    assert schema_guard.allow_restored(restored, failed, database, share=tmp_path) == (CODE, CODE + 2)
+    assert schema_guard.rollback_allowed(tmp_path, code=CODE, stored=CODE + 2)
+    assert "Older code does not know" in capsys.readouterr().err
+
+    # A failed release at the same schema needs no override, and none is written.
+    (tmp_path / schema_guard.ROLLBACK_MARKER).unlink()
+    assert schema_guard.allow_restored(restored, restored, database, share=tmp_path) == (CODE, CODE)
+    assert not (tmp_path / schema_guard.ROLLBACK_MARKER).exists()
+
+    # A database already above the failed release's schema is recorded as it is.
+    above = _database_at(tmp_path / "above.sqlite", CODE + 3)
+    assert schema_guard.allow_restored(restored, failed, above, share=tmp_path) == (CODE, CODE + 3)
+    assert schema_guard.rollback_allowed(tmp_path, code=CODE, stored=CODE + 3)

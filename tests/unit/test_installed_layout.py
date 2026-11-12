@@ -259,19 +259,32 @@ def _the_restored_host_starts(home, share, database):
     assert schema_guard.stored_version(database) == CODE + 1
 
 
-def test_the_installer_puts_the_previous_release_back_and_it_starts(tmp_path):
+_UPGRADES = """
+    import sqlite3
+    con = sqlite3.connect({database!r})
+    con.execute("PRAGMA user_version = {version}")
+    con.commit()
+    con.close()
+"""
+
+
+def _the_installers_restore(tmp_path, *, upgrade: str):
     """install.sh's own restore, run as the installer runs it: the new
-    release was activated, its Host upgraded the database, the health check
-    failed. The release put back is this code, one schema step below the
-    database now."""
+    release was activated and its health check failed. Its Host upgrades the
+    database ``before`` the restore begins, only ``as-it-is-stopped`` (the
+    restore's last step, the one that touches the services) or ``never``."""
     home, share, old, new, database = _two_releases(tmp_path)
     (share / "current").unlink()
     (share / "current").symlink_to(new, target_is_directory=True)      # activated
-    _the_new_host_upgrades(database)
-    # The only step of the restore that touches the service manager.
+    if upgrade == "before":
+        _the_new_host_upgrades(database)
+    # The only step of the restore that touches the service manager: it stops
+    # the Host that failed and starts the one put back.
     (new / "lib/service_manager.py").write_text(
         "def restore_after_failed_install(**kwargs):\n"
-        f"    open({str(tmp_path / 'units-restored')!r}, 'w').write(repr(sorted(kwargs)))\n")
+        f"    open({str(tmp_path / 'units-restored')!r}, 'w').write(repr(sorted(kwargs)))\n"
+        + (_UPGRADES.format(database=str(database), version=CODE + 1)
+           if upgrade == "as-it-is-stopped" else ""))
     script = (ROOT / "install.sh").read_text()
     restore = script[script.index("rollback_failed_activation() {"):
                      script.index("trap rollback_failed_activation EXIT")]
@@ -299,13 +312,44 @@ rollback_failed_activation
     assert json.loads((share / schema_guard.ROLLBACK_MARKER).read_text()) == {
         "code": CODE, "database": CODE + 1}
     assert "Older code does not know the tables and columns" in ran.stderr
+    return home, share, database
+
+
+@pytest.mark.parametrize("upgrade", ["before", "as-it-is-stopped"])
+def test_the_installer_puts_the_previous_release_back_and_it_starts(tmp_path, upgrade):
+    """The release put back is this code, one schema step below the database
+    the failed release left. The failed Host is still running while the
+    restore records the override, so its upgrade may commit after that: the
+    override is for the failed release's schema, whatever the file says when
+    it is written (recorded for what the file said, a late upgrade left no
+    override and the Host that was put back exited 78)."""
+    home, share, database = _the_installers_restore(tmp_path, upgrade=upgrade)
+    assert schema_guard.stored_version(database) == CODE + 1
     _the_restored_host_starts(home, share, database)
 
 
-def test_a_failed_activation_puts_the_previous_release_back_and_it_starts(tmp_path, monkeypatch):
+def test_a_failed_release_that_never_upgraded_leaves_no_override_behind(tmp_path):
+    """The override written for the failed release's schema is not needed
+    when that release never got to its upgrade. The Host that was put back
+    starts on its own schema and removes it."""
+    home, share, database = _the_installers_restore(tmp_path, upgrade="never")
+
+    def opened():
+        return (share / "state.sqlite-shm").exists()
+
+    code, said, started = _start(share / "server.py", _environment(home, share, database), opened)
+    assert started and code != schema_guard.EXIT_REFUSED, said[-1500:]
+    assert "because a rollback was asked for" not in said
+    assert schema_guard.stored_version(database) == CODE
+    assert not (share / schema_guard.ROLLBACK_MARKER).exists()
+
+
+@pytest.mark.parametrize("upgrade", ["before", "as-it-is-stopped"])
+def test_a_failed_activation_puts_the_previous_release_back_and_it_starts(
+        tmp_path, monkeypatch, upgrade):
     """The same through ``clarp-admin`` (rollback, the setup wizard): the
     activation's own restore records the override for the release it puts
-    back."""
+    back, also when the failed Host's upgrade commits only as it is stopped."""
     home, share, old, new, database = _two_releases(tmp_path)
     for release in (old, new):
         (release / "SERVICE_PYTHON").write_text(sys.executable + "\n")
@@ -317,11 +361,18 @@ def test_a_failed_activation_puts_the_previous_release_back_and_it_starts(tmp_pa
     monkeypatch.setattr(admin.service_manager, "definition_path",
                         lambda _home: tmp_path / "clarp.service")
     restored = []
+
+    def the_services_are_restored(**kwargs):
+        if upgrade == "as-it-is-stopped":
+            _the_new_host_upgrades(database)
+        restored.append(kwargs)
+
     monkeypatch.setattr(admin.service_manager, "restore_after_failed_install",
-                        lambda **kwargs: restored.append(kwargs))
+                        the_services_are_restored)
 
     def the_new_host_upgrades_then_fails_its_health_check():
-        _the_new_host_upgrades(database)
+        if upgrade == "before":
+            _the_new_host_upgrades(database)
         raise RuntimeError("the Host did not answer within 20 s")
 
     monkeypatch.setattr(admin.service_manager, "install_and_restart",

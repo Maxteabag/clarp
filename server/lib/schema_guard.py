@@ -124,6 +124,39 @@ def allow_rollback(share: pathlib.Path | str, *, code: int, stored: int) -> None
         json.dumps({"code": code, "database": stored}) + "\n")
 
 
+def forget_rollback(share: pathlib.Path | str) -> bool:
+    """Remove the override; whether there was one."""
+    try:
+        (pathlib.Path(share) / ROLLBACK_MARKER).unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def allow_restored(restored, failed, database, *, share) -> tuple[int | None, int]:
+    """After a failed install: record that the release put back may run on
+    the database the failed release leaves. Returns (its schema, the schema
+    recorded).
+
+    The override is written for the failed release's schema whatever the
+    file says now. The failed Host is still running when the installer
+    records this (it is stopped by the step that starts the one put back),
+    so its upgrade may commit afterwards; recorded for what the file said,
+    that left no override and the restored Host exited 78. An upgrade ends
+    at the release's schema and nowhere between. If the failed release never
+    upgrades, the override matches nothing and the restored Host removes it
+    when it starts (``check_host_start``)."""
+    code = code_version(restored)
+    target = max(stored_version(database), code_version(failed) or 0)
+    if code is None or target <= code:
+        return code, target
+    allow_rollback(share, code=code, stored=target)
+    print(f"WARNING: the release put back is at schema {code}; the release that failed "
+          f"is at schema {target} and may have upgraded the database ({database}). "
+          f"The older release is allowed to run on it. {RISK}", file=sys.stderr)
+    return code, target
+
+
 def env_override(value: str | None, *, code: int, stored: int) -> bool:
     """``CLARP_ALLOW_OLDER_SCHEMA=<database>:<code>``. It has to name both
     versions, so a value a shell still carries from an earlier rollback does
@@ -187,13 +220,25 @@ def check_foreign_start(code_root, database, share, *, code: int) -> None:
             "this one a database of its own (CLAUDE_PWA_DB).")
 
 
-def check_host_start(database, share, *, code: int, release: str = "") -> None:
+def check_host_start(database, share, *, code: int, release: str = "",
+                     code_root=None) -> None:
     """What the Host asks before it opens the database: refuse (``OlderCode``)
     to serve a database above its own schema, unless a rollback to exactly
     this code on exactly this database was asked for. ``release`` is the
-    name of the release that asks, for the command the refusal names."""
+    name of the release that asks, for the command the refusal names.
+
+    A Host that starts on a database not above its schema needs no override,
+    so one left from an earlier rollback is removed: it would otherwise sit
+    there until the same pair of versions met again. ``code_root`` is where
+    the Host's code is; only the installation's own Host removes it, not a
+    checkout started on the installation's paths."""
     stored = stored_version(database)
     if stored <= code:
+        if (code_root is not None and not foreign_to_installation(code_root, database, share)
+                and forget_rollback(share)):
+            print(f"clarp: removed the schema rollback override in {share}: this Host is at "
+                  f"schema {code} and the database at {stored}, so it is no longer needed.",
+                  file=sys.stderr, flush=True)
         return
     if rollback_allowed(share, code=code, stored=stored):
         print(f"WARNING: this Clarp Host is at schema {code} and serves a database at "
@@ -218,11 +263,20 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--restored", action="store_true",
         help="the source is the release an installer puts back after a failed install: "
-             "record that it may run on a database the failed release already upgraded")
+             "record that it may run on the database the failed release leaves")
+    parser.add_argument(
+        "--failed", help="with --restored: the release that failed (its schema is what "
+                         "the database may still be upgraded to)")
     args = parser.parse_args(argv)
+    if args.restored:
+        if not args.share:
+            parser.error("--restored needs --share")
+        allow_restored(args.source, args.failed or args.source, args.database,
+                       share=args.share)
+        return 0
     code, stored = code_version(args.source), stored_version(args.database)
-    allow = args.restored or (code is not None and env_override(
-        os.environ.get(ROLLBACK_ENV), code=code, stored=stored))
+    allow = code is not None and env_override(
+        os.environ.get(ROLLBACK_ENV), code=code, stored=stored)
     try:
         check_source(
             args.source, args.database, share=args.share, allow=allow,
