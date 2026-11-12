@@ -36,41 +36,58 @@ TIMELINE_LIMIT = 200
 SHARED_LOG_ROOTS = ("/var/tmp",)
 
 
-def active_by_agent() -> dict[str, list[dict[str, Any]]]:
-    """Running or queued jobs per agent, oldest first, for the dashboard.
+def dashboard_active() -> tuple[dict[str, list[dict[str, Any]]], dict[str, str]]:
+    """Active jobs per agent (oldest first) and active persona-avatar statuses by persona_id.
 
     One indexed read per snapshot. Stale jobs are reconciled by the watcher,
     so a crashed worker drops out within a heartbeat timeout.
     """
     from .provider_background_jobs import mirror_lookup
     marks = ",".join("?" for _ in ACTIVE_STATUSES)
-    out: dict[str, list[dict[str, Any]]] = {}
+    by_agent: dict[str, list[dict[str, Any]]] = {}
+    persona_avatars: dict[str, str] = {}
     rows = db.conn().execute(
-            f"SELECT job_id, agent_id, kind, title, detail, metadata_json, heartbeat_source, "
+            f"SELECT job_id, agent_id, kind, status, title, detail, metadata_json, heartbeat_source, "
             f"progress_text, COALESCE(progress_at, started_at) AS active_at, "
             f"COALESCE(heartbeat_at, updated_at) AS heartbeat_at "
             f"FROM background_jobs WHERE status IN ({marks}) "
-            "AND COALESCE(agent_id, '') != '' "
             "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))).fetchall()
     registered_mirror = mirror_lookup(
-        row["agent_id"] for row in rows if row["heartbeat_source"] == "provider_event")
+        row["agent_id"] for row in rows
+        if row["agent_id"] and row["heartbeat_source"] == "provider_event")
     for row in rows:
         try:
             metadata = json.loads(row["metadata_json"] or "{}")
-        except json.JSONDecodeError:
+        except (TypeError, json.JSONDecodeError):
             metadata = {}
-        if row["heartbeat_source"] == "provider_event" and registered_mirror({"agent_id": row["agent_id"], "metadata": metadata}):
+        meta_dict = metadata if isinstance(metadata, dict) else {}
+        kind = str(row["kind"] or "")
+        status = str(row["status"] or "")
+        if kind == "persona-avatar" and status in ACTIVE_STATUSES:
+            persona_id = str(meta_dict.get("persona_id") or "").strip()
+            if persona_id:
+                persona_avatars[persona_id] = status
+        agent_id = str(row["agent_id"] or "")
+        if not agent_id:
             continue
-        out.setdefault(row["agent_id"], []).append({
+        if row["heartbeat_source"] == "provider_event" and registered_mirror(
+                {"agent_id": agent_id, "metadata": meta_dict}):
+            continue
+        by_agent.setdefault(agent_id, []).append({
             "job_id": str(row["job_id"]),
-            "kind": str(row["kind"] or ""), "title": str(row["title"] or ""),
+            "kind": kind, "title": str(row["title"] or ""),
             "detail": str(row["detail"] or ""),
-            "metadata": metadata if isinstance(metadata, dict) else {},
+            "metadata": meta_dict,
             "progress_text": str(row["progress_text"] or ""),
             "active_at": int(row["active_at"] or 0),
             "heartbeat_at": int(row["heartbeat_at"] or 0),
         })
-    return out
+    return by_agent, persona_avatars
+
+
+def active_by_agent() -> dict[str, list[dict[str, Any]]]:
+    """Running or queued jobs per agent, oldest first, for the dashboard."""
+    return dashboard_active()[0]
 
 
 def mirrored_helper_session(job: dict, helper_sessions: set[str] | frozenset[str]) -> str:

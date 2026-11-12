@@ -214,6 +214,71 @@ class OpsRoutes:
             return self._json_error(500, "register failed")
         return self._json_ok({"ok": True})
 
+    def _handle_unregister_device(self):
+        """DELETE /devices: stop pushes to a token through the Host (docs/push-android.md).
+
+        A paired full-scope device sends {"token": "<its token>"} and disables only its own rows. The
+        administrator may send {"token": "<full token>"}, {"token_prefix": "<12+ characters, one token>"}
+        or {"device_id": "device_…"} (every live row of that device). Answers 200 {"ok": true,
+        "disabled": n}; 404 device_token_not_found when nothing it may disable matches. A disabled row
+        comes back only when its owner registers the token again."""
+        from lib import apns
+        from lib.agent_ring_live import device_ok
+        from lib.http_utils import principal_of
+        data = self._read_json() if int(self.headers.get("Content-Length") or 0) else {}
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        who = principal_of(self)
+        if not who.full_scope:
+            return self._json_error(403, "full device access required")
+        token = str(data.get("token") or "").strip()
+        prefix = str(data.get("token_prefix") or "").strip()
+        device = str(data.get("device_id") or "").strip()
+        is_admin = who.principal == "administrator"
+        if who.principal.startswith("device_"):
+            if not device_ok(who.principal):
+                return self._json_error(403, "full device access required")
+            if not token or prefix or device:
+                return self._json(400, {"ok": False, "error": "token_required"})
+            disabled = apns.disable_tokens(token=token, only_owner=who.principal,
+                                           reason="unregistered-by-device")
+        elif is_admin:
+            if sum(bool(v) for v in (token, prefix, device)) != 1:
+                return self._json(400, {"ok": False, "error": "one_of_token_token_prefix_device_id"})
+            if prefix:
+                if len(prefix) < 12:
+                    return self._json(400, {"ok": False, "error": "token_prefix_too_short"})
+                matches = {r["token"] for r in apns.active_tokens() if r["token"].startswith(prefix)}
+                if len(matches) > 1:
+                    return self._json(409, {"ok": False, "error": "token_prefix_ambiguous"})
+                token = next(iter(matches), "")
+                if not token:
+                    return self._json(404, {"ok": False, "error": "device_token_not_found"})
+            disabled = (apns.disable_tokens(token=token, reason="unregistered-by-administrator") if token
+                        else apns.disable_tokens(owner=device, reason="unregistered-by-administrator"))
+        else:
+            return self._json_error(403, "full device access required")
+        if not disabled:
+            return self._json(404, {"ok": False, "error": "device_token_not_found"})
+        log("deviceTokenUnregistered", f"by={who.principal} rows={disabled}")
+        return self._json_ok({"ok": True, "disabled": disabled})
+
+    def _handle_push_tokens(self):
+        """GET /devices/push-tokens: the push rows this Host holds, without full tokens. The
+        administrator sees every row; a paired full-scope device sees its own."""
+        from lib import apns
+        from lib.http_utils import principal_of
+        who = principal_of(self)
+        if not who.full_scope:
+            return self._json_error(403, "full device access required")
+        if who.principal == "administrator":
+            rows = apns.push_token_rows()
+        elif who.principal.startswith("device_"):
+            rows = apns.push_token_rows(owner=who.principal)
+        else:
+            return self._json_error(403, "full device access required")
+        return self._json_ok({"ok": True, "tokens": rows})
+
     def _handle_remote_action(self):
         """Receive a fire-and-forget remote action (typically from an iOS
         Shortcut driving the Action Button). Broadcasts it over SSE so the

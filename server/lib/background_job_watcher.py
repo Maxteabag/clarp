@@ -98,7 +98,8 @@ class BackgroundJobWatcher:
             # persona-avatar jobs whose completion swaps in Contact + Agent
             # portraits live.
             state_key = (int(job.get("generation") or 1), str(job["status"]))
-            if self._statuses.get(job["job_id"]) != state_key:
+            previous_state = self._statuses.get(job["job_id"])
+            if previous_state != state_key:
                 self._statuses[job["job_id"]] = state_key
                 if len(self._statuses) > 1024:
                     for stale_id in list(self._statuses)[:256]:
@@ -106,5 +107,21 @@ class BackgroundJobWatcher:
                             self._statuses.pop(stale_id, None)
                 if job.get("agent_id"):
                     events.broadcast(self.stream, events.agent_roster("background-job"))
-                elif job.get("kind") == "persona-avatar" and job["status"] == "succeeded":
-                    events.broadcast(self.stream, events.agent_roster("persona-updated"))
+                elif job.get("kind") == "persona-avatar" and (
+                    job["status"] in background_jobs.TERMINAL_STATUSES
+                    or (
+                        previous_state is not None
+                        and previous_state[1] in background_jobs.TERMINAL_STATUSES
+                        and job["status"] in background_jobs.ACTIVE_STATUSES
+                    )
+                ):
+                    persona_name = ""
+                    if isinstance(job.get("metadata"), dict):
+                        persona_name = str(job["metadata"].get("persona_name") or "").strip()
+                    events.broadcast(
+                        self.stream,
+                        events.agent_roster(
+                            "persona-updated",
+                            persona=persona_name if persona_name else events.OMIT,
+                        ),
+                    )

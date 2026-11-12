@@ -12,7 +12,7 @@ from typing import Any
 
 from . import (background_jobs, agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
-               config, message_store, model_avatars, team_store,
+               config, message_store, model_avatars, persona_avatar_generation, team_store,
                turn_queue, scheduler, janitors, quiet_agents)
 from . import reconcile, turn_lifecycle
 from .clock import now_ms
@@ -366,7 +366,7 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     team_memberships = team_store.memberships_by_agent()
     queue_states = turn_queue.states()
     goals = agent_goals.by_agent()
-    active_jobs = background_jobs.active_by_agent()
+    active_jobs, active_avatar_statuses = background_jobs.dashboard_active()
     states = agents_db.dashboard_states()
     live_activities = _live_activities()
     runtimes = agents_db.dashboard_runtimes()
@@ -394,6 +394,11 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     except agent_ring_live.CallError:
         call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents()
+    persona_rows = persona_store.list_all()
+    personas_by_key = {
+        str(row["name"]).strip().casefold(): row
+        for row in persona_rows if str(row.get("name") or "").strip()
+    }
     selected = agent_rows if select is None else select(agent_rows)
     if messages is None:
         messages = message_store.dashboard_messages(agent_ids={a["agent_id"] for a in selected})
@@ -494,6 +499,11 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 a["persona"], backend, a.get("model") or "",
                 root=model_avatar_root,
                 default_model=default_models[resolved_backend])
+        resolved_avatar_url = janitor_avatar_url(bool(a.get("is_janitor")),
+            janitor_templates.get(agent_id), static_root=static_root) or versioned_avatar_url(
+            "/avatars", agent_id, str(a.get("avatar_path") or "")) or (
+            "" if a.get("avatar_symbol") else static_persona_avatar_url(
+                a["persona"], backend, static_root=static_root))
         rows.append({
             "call_mode": ("unavailable" if call_profiles is None else
                           "agent_live_v1" if a.get("session") in call_profiles else "classic"),
@@ -501,11 +511,12 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             "persona":        a["persona"],
             "voice_id":       a["voice_id"],
             "avatar_symbol":  a.get("avatar_symbol") or "",
-            "avatar_url": janitor_avatar_url(bool(a.get("is_janitor")),
-                janitor_templates.get(agent_id), static_root=static_root) or versioned_avatar_url(
-                "/avatars", agent_id, str(a.get("avatar_path") or "")) or (
-                "" if a.get("avatar_symbol") else static_persona_avatar_url(
-                    a["persona"], backend, static_root=static_root)),
+            "avatar_url":     resolved_avatar_url,
+            "avatar_generation_status": persona_avatar_generation.avatar_generation_status_for_agent(
+                a,
+                personas_by_key=personas_by_key,
+                active_by_persona_id=active_avatar_statuses,
+            ),
             "model_avatar_url": model_avatar_url,
             "cwd":            a["cwd"],
             "session":        a["session"],
@@ -585,7 +596,6 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # hub has seen this agent since it started.
             "live_activity":  live_activities.get(agent_id),
         })
-    persona_rows = persona_store.list_all()
     roster = []
     roster_keys = set()
     for name in [
@@ -608,7 +618,10 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         "agents": rows,
         "focus": focus,
         "roster": roster,
-        "personas": [persona_store.public(row) for row in persona_rows],
+        "personas": [
+            persona_store.public(row, active_avatar_statuses=active_avatar_statuses)
+            for row in persona_rows
+        ],
         # Whether clients should prefer the model portrait where one exists.
         "model_avatars": avatar_settings.get(stored=projected_settings)["model_avatars"],
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).

@@ -459,11 +459,11 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
 
                 account_attempt = FailoverAttempt(
                     agent_id=spec.agent_id, trace_id=spec.trace_id, model=spec.model,
-                    state=state, owned=lambda: (
-                        # Lock-free: the coordinator calls this under its own lock
-                        # and must never wait for _TURN_LOCK there.
-                        _INFLIGHT.get(spec.agent_id) == spec.trace_id
-                        and not self._superseded(spec, locked=False)), pause=pause,
+                    # Lock-free: the coordinator calls this under its own lock and
+                    # must never wait for _TURN_LOCK there. By the slot, not by the
+                    # trace marker (see _holds_slot).
+                    state=state, owned=lambda: self._holds_slot(spec, locked=False),
+                    pause=pause,
                     resume=lambda: defer_on(
                         coordinator.lock,
                         lambda: self._resume_after_account_switch(spec, attempt, state)),

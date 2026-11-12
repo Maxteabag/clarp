@@ -68,6 +68,33 @@ UNKNOWN = "unknown"
 # USAGE_LIMIT; this message is how a later reader of the stored state tells
 # the two apart (nothing else on the state does, for a runtime of any age).
 QUOTA_UNCONFIRMED_MESSAGE = "Codex could not complete this request. Try again"
+
+# What a turn shows while it waits for an account, in its two forms: no
+# account has usage, or the active one does not serve this turn's model while
+# the rest of the pool works. The runtime writes them (turn_launcher) and the
+# goal pass reads them back as "waited for an account" when a wake is refused
+# at its resume with that state as its error (task_goal_recovery). Both go
+# through here, so a new form cannot be written without being read: the
+# second was added by PR 269 and was not read until this.
+_ACCOUNT_WAIT_USAGE = "with available usage"
+_ACCOUNT_WAIT_MODEL = ("that serves ", "; the active one does not right now")
+_ACCOUNT_WAIT_RE = re.compile(
+    r"Waiting for an? \S+ account (?:" + re.escape(_ACCOUNT_WAIT_USAGE) + "|"
+    + re.escape(_ACCOUNT_WAIT_MODEL[0]) + r".+?" + re.escape(_ACCOUNT_WAIT_MODEL[1]) + ")")
+
+
+def account_wait_message(backend: str, model: str | None = "") -> str:
+    """The sentence for a turn parked for an account. With ``model`` (None
+    for a turn that names none): the active account does not serve it now."""
+    if model == "":
+        return f"Waiting for a {backend} account {_ACCOUNT_WAIT_USAGE}"
+    return (f"Waiting for a {backend} account {_ACCOUNT_WAIT_MODEL[0]}"
+            f"{model or 'this model'}{_ACCOUNT_WAIT_MODEL[1]}")
+
+
+def is_account_wait_message(text: str | None) -> bool:
+    """Whether a failure text is, whole, a turn's wait for an account."""
+    return bool(_ACCOUNT_WAIT_RE.fullmatch(text or ""))
 MUSE_SESSION_LOCKED = "muse_session_locked"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we

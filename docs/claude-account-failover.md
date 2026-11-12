@@ -74,6 +74,24 @@ validates stdin without switching accounts or making provider requests.
   when no turn of the pool is running, a recovery begins for the parked ones
   and the selector is asked. A working turn that meets its own limit starts a
   recovery as usual, and that one asks for the parked turns' models too.
+- A turn released at its cap while others still wait for its model is their
+  trial. If it is still running one recheck later and has met no account
+  failure, the model is served again: the turns parked for it start, and with
+  none parked a new one for it runs at once. Without this every turn for a
+  model that had come back waited its own half hour until the pool went
+  idle. A trial that met the limit, ended inside the minute or was stopped
+  proves nothing; the next release is the next trial.
+- A parked turn is the agent's turn for as long as the agent's slot holds it.
+  The trace marker does not decide that: a voice message queued behind a
+  parked turn moves the marker (POST /transcribe writes it), and on
+  2026-11-12 a turn read as replaced that way was dropped by the coordinator
+  and waited four hours for a recovery that no longer knew it. A Stop, a
+  deletion or a replacement releases the slot, and that ends a parked turn.
+  When a parked turn starts it takes the marker back.
+- Turns parked for a model that are handed over to the next runtime outside
+  a recovery (the minute after the last working turn finished) are carried
+  like a recovery's, from their own park, so the next runtime asks the
+  selector before it starts them.
 - A relapse is an account failure of a turn of the pool less than ten minutes
   (`QUIET_SECONDS`) after the pool's last recovery resumed its turns: the
   selector said an account was available and it was not, or not for long.

@@ -47,6 +47,51 @@ def job_id_for(persona_id: str) -> str:
     return "persona-avatar-" + hashlib.sha256(persona_id.encode()).hexdigest()[:20]
 
 
+def avatar_generation_status_for_persona(
+    row: dict | None,
+    *,
+    active_by_persona_id: dict[str, str] | None = None,
+) -> str | None:
+    """Return 'queued' or 'running' while a Contact portrait is being generated, else None."""
+    if not row or row.get("builtin"):
+        return None
+    if row.get("avatar_path") or row.get("avatar_symbol"):
+        return None
+    persona_id = str(row.get("persona_id") or row.get("id") or "").strip()
+    if not persona_id:
+        return None
+    if active_by_persona_id is not None:
+        return active_by_persona_id.get(persona_id)
+    job = background_jobs.get(job_id_for(persona_id))
+    if job and job.get("status") in background_jobs.ACTIVE_STATUSES:
+        return str(job["status"])
+    return None
+
+
+def avatar_generation_status_for_agent(
+    agent_row: dict | None,
+    *,
+    personas_by_key: dict[str, dict] | None = None,
+    active_by_persona_id: dict[str, str] | None = None,
+) -> str | None:
+    """Return 'queued' or 'running' when an Agent's Contact portrait is generating, else None."""
+    if not agent_row or agent_row.get("is_janitor"):
+        return None
+    if agent_row.get("avatar_path") or agent_row.get("avatar_symbol"):
+        return None
+    persona_name = str(agent_row.get("persona") or "").strip()
+    if not persona_name:
+        return None
+    persona_row = (
+        personas_by_key.get(persona_name.casefold())
+        if personas_by_key is not None
+        else personas.get(persona_name)
+    )
+    return avatar_generation_status_for_persona(
+        persona_row, active_by_persona_id=active_by_persona_id
+    )
+
+
 def prompt_for_persona(name: str, *, tier: str = "", backend: str = "") -> str:
     spec = roster.contact_tier_spec(
         (tier or "").strip().casefold()
