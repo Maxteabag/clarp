@@ -21,6 +21,7 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -69,6 +70,18 @@ def _paths(tmp_path):
         "XDG_DATA_HOME": str(home / "xdg-data"), "XDG_CACHE_HOME": str(home / "xdg-cache"),
         "XDG_CONFIG_HOME": str(home / "xdg-config"), "XDG_STATE_HOME": str(home / "xdg-state"),
     }
+
+
+def _own_port(config: pathlib.Path) -> None:
+    """A service started by a test listens on a port of its own, never the
+    one a Host on this machine uses."""
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f'[server]\nbind_addr = "127.0.0.1"\nport = {port}\n')
 
 
 def _run(tmp_path, code: str, *, cwd=SERVER) -> subprocess.CompletedProcess:
@@ -169,6 +182,7 @@ def test_the_real_service_entry_points_upgrade_the_database_when_they_start(tmp_
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("CLAUDE_PWA_", "CLARP_", "XDG_", "PYTEST"))}
     env.update(paths)
+    _own_port(pathlib.Path(paths["CLAUDE_PWA_CONFIG"]))
     errors = tmp_path / "stderr.txt"
 
     with errors.open("w") as stderr:
@@ -196,10 +210,11 @@ def test_the_two_services_say_what_they_are_in_their_own_entry_points():
     """The grant is a call a service's ``main`` makes, and only those make it."""
     runtime = (SERVER / "runtime.py").read_text()
     assert 'def main() -> int:\n    # This process is the runtime service' in runtime
-    assert 'db.run_as_service("runtime", code_root=ROOT, share=LAYOUT.share)' in runtime
+    assert 'if not db.run_as_service("runtime", code_root=ROOT, share=LAYOUT.share):' in runtime
     host = (SERVER / "server.py").read_text()
     main = host[host.index('\nif __name__ == "__main__":'):]
-    assert '_state_db.run_as_service(\n        "host", code_root=pathlib.Path(__file__)' in main
+    assert '_code_root = pathlib.Path(__file__).resolve().parent' in main
+    assert '_state_db.run_as_service("host", code_root=_code_root, share=_layout.share)' in main
     assert "run_as_service" not in host[:host.index('\nif __name__ == "__main__":')]
     callers = sorted(
         path.relative_to(ROOT).as_posix()
@@ -380,6 +395,61 @@ def test_it_waits_a_moment_for_a_service_to_upgrade_then_opens(tmp_path, monkeyp
 
     assert db.conn().execute("PRAGMA user_version").fetchone()[0] == CODE
     assert len(seen) == 1
+
+
+def test_the_wait_is_spent_once_in_a_process(tmp_path, monkeypatch, not_a_service):
+    """A hook or a tool that opens the database again after it was refused
+    is refused at once: measured by the reviewer, a second open waited
+    another ten seconds."""
+    older = _database_at(tmp_path / "state.sqlite", CODE - 1)
+    _point_at(older)
+    monkeypatch.setattr(db, "_UPGRADE_WAIT_SEC", 1.0)
+    slept, real_sleep = [], time.sleep
+    monkeypatch.setattr(db.time, "sleep", lambda seconds: slept.append(seconds) or real_sleep(0.3))
+
+    with pytest.raises(db.DatabaseOlderThanCode):
+        db.conn()
+    waited = len(slept)
+    assert waited >= 2
+    with pytest.raises(db.DatabaseOlderThanCode):
+        db.conn()
+
+    assert len(slept) == waited                 # no second wait
+    # A database that is upgraded later is opened without ado.
+    con = sqlite3.connect(str(older))
+    con.execute(f"PRAGMA user_version = {CODE}")
+    con.commit()
+    con.close()
+    assert db.conn().execute("PRAGMA user_version").fetchone()[0] == CODE
+
+
+def test_a_tool_started_during_an_install_waits_for_the_host_to_upgrade(tmp_path):
+    """The window the wait exists for, in a real process with the wait as it
+    ships: the release has been switched, the Host upgrades the database two
+    seconds later, and a tool that opened it meanwhile carries on."""
+    database = _database_at(pathlib.Path(_paths(tmp_path)["CLAUDE_PWA_DB"]), CODE - 1)
+
+    ran = _run(tmp_path, f"""
+        import sqlite3, sys, threading, time
+        sys.path.insert(0, ".")
+        from lib import db
+
+        def the_host_upgrades():
+            time.sleep(2.0)
+            con = sqlite3.connect({str(database)!r})
+            con.execute("PRAGMA user_version = {CODE}")
+            con.commit()
+            con.close()
+
+        threading.Thread(target=the_host_upgrades, daemon=True).start()
+        began = time.monotonic()
+        version = db.conn().execute("PRAGMA user_version").fetchone()[0]
+        print(version, round(time.monotonic() - began, 1))
+    """)
+
+    assert ran.returncode == 0, ran.stderr[-1500:]
+    version, took = ran.stdout.split()
+    assert int(version) == CODE and 1.5 <= float(took) < 9.0
 
 
 def test_a_service_upgrades(tmp_path):

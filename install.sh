@@ -343,6 +343,13 @@ rollback_failed_activation() {
             ln -s "$PREVIOUS_CURRENT" "$SHARE/.current.rollback"
             "$PYTHON" -c 'import os,sys; os.replace(sys.argv[1],sys.argv[2])' \
                 "$SHARE/.current.rollback" "$SHARE/current"
+            # The release that failed may have upgraded the database before it
+            # failed. The one put back has to start on it, so that is recorded
+            # for exactly its schema and the database's; unasked, a Host that
+            # meets a newer database stays down.
+            "$PYTHON" "$REPO_DIR/server/lib/schema_guard.py" --restored \
+                --source "$PREVIOUS_CURRENT" --database "$SHARE/state.sqlite" \
+                --share "$SHARE" >&2 || true
         else
             rm -f "$SHARE/current"
             for _name in server.py runtime.py lib static scripts skills plugin systemd \

@@ -2635,6 +2635,16 @@ def activate_release(release: Path, *, allow_older_schema: bool = False) -> None
             if fallback.is_symlink(): fallback.unlink()
             fallback.symlink_to(previous, target_is_directory=True)
             fallback.replace(current)
+            # The release that failed may have upgraded the database before it
+            # failed. The one put back has to start on it: record that, for
+            # exactly its schema and the database's (a Host that met a newer
+            # database unasked stays down, exit 78).
+            try:
+                _refuse_older_schema(
+                    previous, allow=True, what=f"Release {previous.name}", how="")
+            except BaseException as recording:  # noqa: BLE001 - the restore goes on
+                print(f"warning: could not record the rollback for {previous.name}: "
+                      f"{recording}", file=sys.stderr)
             try:
                 previous_toolchain = (previous / "TOOLCHAIN_DIR").read_text().strip()
             except OSError:
@@ -2668,13 +2678,16 @@ def cmd_rollback(args) -> int:
     if not available:
         raise SystemExit("no installed releases")
     current = (SHARE / "current").resolve() if (SHARE / "current").exists() else None
+    allow = getattr(args, "allow_older_schema", False)
     candidates = [item for item in available if item.resolve() != current]
-    target = next((item for item in candidates if item.name == args.version), None) \
+    # With the override, the release that is already current can be named:
+    # that is how a release put back on a newer database is allowed to run.
+    named = available if allow else candidates
+    target = next((item for item in named if item.name == args.version), None) \
         if args.version else (candidates[0] if candidates else None)
     if target is None:
         raise SystemExit("no previous matching release")
-    activate_release(
-        target, allow_older_schema=getattr(args, "allow_older_schema", False))
+    activate_release(target, allow_older_schema=allow)
     print(f"rolled back to {target.name}")
     return 0
 

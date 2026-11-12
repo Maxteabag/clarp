@@ -22,7 +22,7 @@ import pytest
 
 from lib import db_schema, schema_guard
 from tests.unit.test_clarp_admin import admin
-from tests.unit.test_only_services_migrate import _database_at, _paths, _snapshot
+from tests.unit.test_only_services_migrate import _database_at, _own_port, _paths, _snapshot
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CODE = db_schema._SCHEMA_VERSION
@@ -158,6 +158,33 @@ def test_an_installed_commit_the_source_does_not_have_is_compared_by_its_build_t
     install.installed("0123abc" + "0" * 33, built="20260801090000")     # built before the tag
     assert install.update() == 0
     assert install.ran() == [[install.tagged, "none"]]
+
+
+def test_a_tag_on_another_line_of_history_is_judged_by_its_date(install, capsys):
+    """The tag is not an ancestor of what is installed (a release branch):
+    commits on both sides. Made before the installed commit, it is still the
+    older one, and a bare update does not install it."""
+    _git(install.origin, "checkout", "-q", "-b", "release", install.tagged)
+    _commit(install.origin, "a fix on the release branch", date="2026-09-20T12:00:00")
+    _git(install.origin, "tag", "v0.9.1")
+    side = _git(install.origin, "rev-parse", "HEAD")
+    _git(install.origin, "checkout", "-q", "main")
+    install.installed(install.head)
+
+    with pytest.raises(SystemExit) as refused:
+        install.update()
+    assert "not installing v0.9.1" in str(refused.value)
+    assert "2 commits behind what is installed" in str(refused.value)
+    assert install.ran() == []
+
+    # The same shape with the newer date on the tag's side is an update.
+    _git(install.origin, "checkout", "-q", "release")
+    _commit(install.origin, "a later fix on the release branch", date="2026-11-20T12:00:00")
+    _git(install.origin, "tag", "v0.9.2")
+    newer = _git(install.origin, "rev-parse", "HEAD")
+    _git(install.origin, "checkout", "-q", "main")
+    assert install.update() == 0
+    assert install.ran() == [[newer, "none"]] and side != newer
 
 
 def test_a_first_install_with_nothing_recorded_updates_as_before(install):
@@ -299,7 +326,10 @@ def test_the_host_refuses_to_start_on_a_database_above_its_schema(tmp_path):
         schema_guard.check_host_start(database, tmp_path, code=CODE)
     assert (f"This Clarp Host is at schema {CODE}, below the database's schema {CODE + 1}"
             in str(refused.value))
-    assert "clarp-admin rollback --allow-older-schema" in str(refused.value)
+    assert "clarp-admin rollback <this release> --allow-older-schema" in str(refused.value)
+    with pytest.raises(schema_guard.OlderCode) as named:
+        schema_guard.check_host_start(database, tmp_path, code=CODE, release="abc1234-2026")
+    assert "clarp-admin rollback abc1234-2026 --allow-older-schema" in str(named.value)
 
     schema_guard.check_host_start(database, tmp_path, code=CODE + 1)      # its own schema
     schema_guard.check_host_start(tmp_path / "none.sqlite", tmp_path, code=CODE)   # a first start
@@ -315,6 +345,7 @@ def test_the_real_host_exits_before_it_opens_a_database_above_its_schema(tmp_pat
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("CLAUDE_PWA_", "CLARP_", "XDG_", "PYTEST"))}
     env.update(paths)
+    _own_port(pathlib.Path(paths["CLAUDE_PWA_CONFIG"]))
 
     ran = subprocess.run([sys.executable, str(ROOT / "server/server.py")], cwd=ROOT / "server",
                          env=env, capture_output=True, text=True, timeout=180)

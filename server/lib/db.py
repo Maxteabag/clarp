@@ -70,6 +70,9 @@ _SERVICES = frozenset({"host", "runtime", "tests"})
 # `current` release first and restarts the Host after, so for a few seconds
 # the new release's hooks and tools can meet the old schema.
 _UPGRADE_WAIT_SEC = 10.0
+# Whether this process has spent that wait. It is spent once: a hook or a
+# tool that opens the database again after a refusal is refused at once.
+_UPGRADE_WAITED = False
 
 
 class DatabaseOlderThanCode(RuntimeError):
@@ -608,17 +611,20 @@ def _open_connection() -> sqlite3.Connection:
 def _leave_an_older_database_alone() -> None:
     """Before a process that is not a service opens the file: wait a moment
     for a service to upgrade a database that is below this code's schema,
-    then refuse. Nothing is written, not even the write-ahead log's side
-    files. A missing or empty file is not older than anything; creating a
-    new database loses nobody's data and stays allowed."""
+    then refuse. The file and its ``-wal`` are not written (see
+    ``schema_guard.stored_version`` for the ``-shm``). The wait is spent
+    once in a process. A missing or empty file is not older than anything;
+    creating a new database loses nobody's data and stays allowed."""
+    global _UPGRADE_WAITED
     from . import schema_guard
 
     code = db_schema._SCHEMA_VERSION
-    deadline = time.monotonic() + _UPGRADE_WAIT_SEC
+    deadline = time.monotonic() + (0.0 if _UPGRADE_WAITED else _UPGRADE_WAIT_SEC)
     while True:
         stored = schema_guard.stored_version(DB_PATH)
         if stored == 0 or stored >= code:
             return
+        _UPGRADE_WAITED = True
         if time.monotonic() >= deadline:
             raise DatabaseOlderThanCode(
                 f"state database {DB_PATH} is at schema {stored}; this code "
@@ -819,7 +825,8 @@ from . import db_migrations, db_schema  # noqa: E402
 
 def reset_for_tests(path: pathlib.Path | None = None) -> None:
     """Test helper: close cached connection so a new path takes effect."""
-    global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT
+    global DB_PATH, _MIGRATED, _LAST_LOCK_REPORT_AT, _UPGRADE_WAITED
+    _UPGRADE_WAITED = False
     # Opening and migrating a connection form one operation. A worker that
     # opens the previous test's file must not mark the next file migrated.
     with _CONN_LOCK:
