@@ -312,8 +312,9 @@ class AgentRoutes:
             log("agentCreateRejected",
                 f"status={e.status} code={e.code} :: {e.message}")
             return self._json(e.status, e.response())
+        from lib import persona_avatar_generation
         from lib.mcp_selection import decode as decode_mcp
-        from lib.avatar_urls import versioned_avatar_url
+        from lib.avatar_urls import static_persona_avatar_url, versioned_avatar_url
         row = identity.lookup(result.session) or {}
         agent = {key: row.get(key) for key in (
             "agent_id", "session", "persona", "backend", "cwd", "model", "effort",
@@ -322,9 +323,24 @@ class AgentRoutes:
         from lib.session_models import agent_model
         agent["model"] = agent_model(row, identity.backend_session(row))
         state = agents_db.latest_state(row["agent_id"]) or {}
-        agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
-                     mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
-                     avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
+        static_root = getattr(self.ctx, "static", None)
+        resolved_avatar_url = versioned_avatar_url(
+            "/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""
+        ) or (
+            "" if row.get("avatar_symbol") else static_persona_avatar_url(
+                str(row.get("persona") or ""),
+                str(row.get("backend") or "claude"),
+                static_root=static_root,
+            )
+        )
+        agent.update(
+            alive=True,
+            latest_state=state.get("kind") or "idle",
+            last_activity=row.get("created_at", 0),
+            mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
+            avatar_url=resolved_avatar_url,
+            avatar_generation_status=persona_avatar_generation.avatar_generation_status_for_agent(row),
+        )
         return self._json_ok({
             "ok": True, "session": result.session, "name": result.persona, "agent": agent,
         })

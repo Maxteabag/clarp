@@ -51,11 +51,13 @@ class AgentLifecycleService:
 
     def create(self, data: dict) -> AgentLifecycleResult:
         with self._create_lock:
-            result, should_generate_avatar = self._create_locked(data)
+            result, spec, should_generate_avatar = self._create_locked(data)
         if should_generate_avatar:
             from . import persona_avatar_generation
             persona_avatar_generation.start_best_effort(
                 result.persona, backend=result.backend)
+        if spec is not None:
+            self._announce(spec)
         return result
 
     def create_janitor(self, data: dict) -> AgentLifecycleResult:
@@ -69,13 +71,15 @@ class AgentLifecycleService:
         if data.get("replace_sid"):
             raise AgentLifecycleError(400, "Use Janitor configure for an existing agent")
         with self._create_lock:
-            result, _ = self._create_locked(data, janitor=True)
+            result, spec, _ = self._create_locked(data, janitor=True)
+        if spec is not None:
+            self._announce(spec)
         return result
 
     def _create_locked(
         self, data: dict, *, janitor: bool = False
-    ) -> tuple[AgentLifecycleResult, bool]:
-        """Parse the request, check the IO-backed collisions, persist, announce."""
+    ) -> tuple[AgentLifecycleResult, AgentSpec | None, bool]:
+        """Parse the request, check the IO-backed collisions, and persist."""
         agents = load_agents(self.ctx.agents_path)
         parsed = AgentSpec.parse(
             data, backends=backends, roster=self._roster_view(agents),
@@ -90,6 +94,7 @@ class AgentLifecycleService:
                 AgentLifecycleResult(
                     owner["session"], owner["persona"], owner["voice_id"], parsed.backend
                 ),
+                None,
                 False,
             )
         if parsed.recommendation:
@@ -100,12 +105,19 @@ class AgentLifecycleService:
         self._reject_owned_backend_session(
             backend=spec.backend, backend_session_id=resume_session_id,
             session=spec.session)
-        agent = self._persist(spec, agents, resume_session_id)
+        self._persist(spec, agents, resume_session_id)
         should_generate_avatar = (
-            spec.avatar_raw is None
+            not janitor
+            and spec.avatar_raw is None
             and not str(data.get("avatar_symbol") or "").strip()
         )
-        return self._announce(spec, agent), should_generate_avatar
+        result = AgentLifecycleResult(
+            spec.session,
+            spec.persona,
+            "" if spec.janitor else spec.voice_id,
+            spec.backend,
+        )
+        return result, spec, should_generate_avatar
 
     @staticmethod
     def _roster_view(agents: dict) -> RosterView:
@@ -228,7 +240,7 @@ class AgentLifecycleService:
         agents_db.record_path_usage(spec.cwd)
         return agent
 
-    def _announce(self, spec: AgentSpec, agent: dict) -> AgentLifecycleResult:
+    def _announce(self, spec: AgentSpec) -> None:
         announcement = (
             f"{spec.persona} relaunched." if spec.replace_sid
             else f"{spec.persona} forked and ready." if spec.fork_id
@@ -236,10 +248,16 @@ class AgentLifecycleService:
         )
         if spec.synthesize_audio:
             # Pass session so the announcement engine can resolve the agent's
-            # persona -> Cartesia voice (else it falls back to ElevenLabs).
-            self.ctx.speak_announcement(announcement, spec.voice_id, session=spec.session)
+            # persona -> Cartesia/Gemini voice (else it falls back to ElevenLabs).
+            # Run off the HTTP request thread when backed by a real TTS engine so
+            # POST /agents returns immediately instead of waiting on remote TTS.
+            speak_async = getattr(self.ctx, "speak_announcement_async", None)
+            if callable(speak_async):
+                speak_async(announcement, spec.voice_id, session=spec.session)
+            else:
+                self.ctx.speak_announcement(announcement, spec.voice_id, session=spec.session)
         if spec.janitor:
-            return AgentLifecycleResult(spec.session, spec.persona, "", spec.backend)
+            return
         events.broadcast(self.ctx.stream, events.agent_roster(
             "relaunched" if spec.replace_sid else ("forked" if spec.fork_id else "created"),
             session=spec.session,
@@ -247,7 +265,6 @@ class AgentLifecycleService:
             voice_id=spec.voice_id,
             backend=spec.backend,
         ))
-        return AgentLifecycleResult(spec.session, spec.persona, spec.voice_id, spec.backend)
 
     @staticmethod
     def _mint_session(persona: str) -> str:
