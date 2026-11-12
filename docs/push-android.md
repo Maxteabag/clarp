@@ -80,10 +80,9 @@ token (`onNewToken`):
   is never touched.
 - A token another paired device already registered answers
   `409 {"ok": false, "error": "device_token_owned_elsewhere"}`. That
-  includes the same phone paired again (a new device id): its token stays
-  with the earlier pairing, as for iPhones, and keeps receiving pushes
-  through that row. Revoking the earlier pairing does not release or stop
-  it; alert rows do not check revocation.
+  includes the same phone paired again (a new device id) while its earlier
+  pairing is still valid. Once the earlier pairing is revoked, the phone's
+  new pairing takes the token over on its next registration.
 - A token is registered for one push service for good. Registering a token
   the Host already holds as an APNs row (an iPhone's, or an unbound legacy
   row) as Android/FCM, or an FCM token as anything else, answers
@@ -93,6 +92,31 @@ token (`onNewToken`):
   token FCM has dropped is disabled at the next push (below).
 
 iOS registration is unchanged.
+
+## Unregistering and revocation
+
+Pushes to a token stop through the Host, never by editing its database
+(feature `push_unregister`, Host contract 91):
+
+- **The phone itself**: `DELETE /devices` with `{"token": "<its token>"}`,
+  authenticated as the paired device that registered it. Answers
+  `200 {"ok": true, "disabled": 1}`, or `404 device_token_not_found` when
+  that device has no live row for the token. Send it when the user signs out
+  of the Host or turns notifications off. Registering again re-enables it.
+- **The administrator**: `DELETE /devices` with exactly one of `{"token"}`,
+  `{"token_prefix": "<12+ characters of one live token>"}` or
+  `{"device_id": "device_…"}`; `GET /devices/push-tokens` lists every row
+  with a 12-character prefix, never the full token. On the Host:
+  `clarp-admin push list` and `clarp-admin push disable --token-prefix …` or
+  `--device device_…`.
+- **Revoking a pairing** (`clarp-admin pair revoke`, or removing the phone in
+  the app) disables every push row of that device at once, iPhone and
+  Android alike. Pushes also check the owner when they are sent, so a row
+  that outlived a revocation (from an older release) or belongs to a device
+  that is no longer full-scope gets nothing. Unbound rows (registered with
+  the administrator token, or from before device binding) cannot be
+  attributed and keep their pushes; remove them with `clarp-admin push
+  disable`.
 
 ## The message
 

@@ -498,6 +498,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/voice-events/utterances": "_handle_voice_utterances_get",
         "/server-info": "_handle_server_info",
         "/paired-devices": "_handle_paired_devices",
+        "/devices/push-tokens": "_handle_push_tokens",
         "/server-update": "_handle_server_update_status",
         "/turn-queue": "_handle_turn_queue",
         "/agents/snapshot": "_handle_snapshot",
@@ -2161,10 +2162,17 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             row = live_activity.register(
                 token=str(data.get("token") or ""), activity_id=str(data.get("activity_id") or ""),
                 kind=str(data.get("kind") or "agents-working"),
-                environment=str(data.get("environment") or ""))
+                environment=str(data.get("environment") or ""),
+                principal=self._push_owner())
         except ValueError as error:
             return self._json_error(400, str(error))
         return self._json_ok({"ok": True, "activity_id": row["activity_id"]})
+
+    def _push_owner(self) -> str:
+        """The paired device a push registration belongs to ('' for the administrator and others),
+        so its pushes stop when that device is revoked."""
+        who = self.principal()
+        return who.principal if who.full_scope and who.principal.startswith("device_") else ""
 
     def _handle_live_activity_delete(self):
         from lib import live_activity

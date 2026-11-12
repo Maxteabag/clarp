@@ -201,10 +201,24 @@ def register_token(token: str, session: str | None = None,
         # to another principal (or any bound variant, for a non-device registrant) is refused before a write.
         # Hex input matches its stored case variants only; any other token keeps exact, binary identity.
         hex_token = _is_hex(token)
+        match = "lower(token) = ?" if hex_token else "token = ?"
         variants = database.execute(
-            "SELECT token, principal, provider FROM device_tokens WHERE "
-            + ("lower(token) = ?" if hex_token else "token = ?"),
-            (token,)).fetchall()
+            "SELECT token, principal, provider FROM device_tokens WHERE " + match, (token,)).fetchall()
+        if owner_key:
+            # A token whose owner was revoked (or is no longer a full-scope device) passes to the
+            # authenticated device that registers it now: the same phone, paired again. Revoking
+            # disabled its rows (device_pairing.revoke); this registration re-enables them under the new
+            # owner. Only a device takes a token over, never an unbound registrant.
+            stale = {v["principal"] for v in variants
+                     if v["principal"] and v["principal"] != owner_key and not owner_can_receive(v["principal"])}
+            for previous in sorted(stale):
+                database.execute(
+                    "UPDATE device_tokens SET principal = ? WHERE principal = ? AND " + match,
+                    (owner_key, previous, token))
+                log("deviceTokenOwnerTransferred", f"from={previous} to={owner_key} token={token[:12]}…")
+            if stale:
+                variants = database.execute(
+                    "SELECT token, principal, provider FROM device_tokens WHERE " + match, (token,)).fetchall()
         if any((v["principal"] or "") and v["principal"] != owner_key for v in variants):
             raise TokenOwnedElsewhere(next(v["principal"] for v in variants if v["principal"]))
         if any((v["provider"] or "apns") != provider_key for v in variants):
@@ -304,13 +318,69 @@ def canonical_token(token) -> str:
 
 
 def active_tokens() -> list[dict]:
-    """Every live (non-disabled) device token."""
+    """Every live (non-disabled) device token, with its owner ('' = unbound)."""
     from . import db
     rows = db.conn().execute(
-        "SELECT token, session, environment, base_url, push_grant, provider FROM device_tokens "
-        "WHERE disabled_at IS NULL"
+        "SELECT token, session, environment, base_url, push_grant, provider, principal AS owner "
+        "FROM device_tokens WHERE disabled_at IS NULL"
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def owner_can_receive(owner: str) -> bool:
+    """Whether pushes may go to a row owned by ``owner``: an unbound legacy row ('') cannot be
+    attributed and keeps its pushes; a bound row only while its device is paired, full-scope and not
+    revoked. A revoked phone must not keep receiving notification previews."""
+    if not owner:
+        return True
+    from .agent_ring_live import device_ok
+    return device_ok(owner)
+
+
+def disable_tokens(*, token: str = "", owner: str = "", only_owner: str | None = None,
+                   reason: str = "unregistered") -> int:
+    """Disable live rows through the Host (DELETE /devices, device revocation). By ``token`` (every
+    stored case variant of an APNs hex token) and/or by ``owner``; ``only_owner`` limits a token match to
+    that owner's rows (a device unregistering its own token). Returns how many rows were disabled; a
+    disabled row comes back only when its owner registers the token again."""
+    from . import db
+    clauses, params = ["disabled_at IS NULL"], []
+    if token:
+        value = canonical_token(token)
+        clauses.append("lower(token) = ?" if _is_hex(value) else "token = ?")
+        params.append(value)
+    if owner:
+        clauses.append("principal = ?")
+        params.append(owner)
+    if only_owner is not None:
+        clauses.append("principal = ?")
+        params.append(only_owner)
+    if len(clauses) == 1:
+        raise ValueError("a token or an owner is required")
+    result = db.conn().execute(
+        f"UPDATE device_tokens SET disabled_at = ? WHERE {' AND '.join(clauses)}",
+        (db.now_ms(), *params))
+    count = result.rowcount
+    if count:
+        log("apnsTokenDisabled", f"{reason} rows={count} owner={owner or only_owner or '-'} "
+                                 f"token={(token or '-')[:12]}…")
+    return count
+
+
+def push_token_rows(owner: str | None = None) -> list[dict]:
+    """The push rows for GET /devices/push-tokens: every row, or one device's. Never the full token."""
+    from . import db
+    where, params = ("WHERE principal = ?", (owner,)) if owner is not None else ("", ())
+    rows = db.conn().execute(
+        "SELECT token, platform, provider, environment, principal AS owner, created_at, updated_at, "
+        f"last_push_at, disabled_at FROM device_tokens {where} ORDER BY updated_at DESC", params).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["token_prefix"] = item.pop("token")[:12]
+        item["owner_can_receive"] = owner_can_receive(item["owner"] or "")
+        out.append(item)
+    return out
 
 
 def disable_token(token: str, reason: str = "") -> None:
@@ -1005,6 +1075,13 @@ def _deliverable(cfg, rows: list[dict]) -> list[dict]:
     """The rows this Host can push to now: APNs rows while APNs is enabled,
     FCM rows while a service account is configured. An Android phone that
     registered with a Host that lost its service account is reported once."""
+    owners = {r.get("owner") or "" for r in rows}
+    gone = {o for o in owners if not owner_can_receive(o)}
+    if gone:
+        # Revoking a device disables its rows; this catches any row that outlived that (an older
+        # release's revocation, a scope change) so a revoked phone never gets another preview.
+        log("apnsRevokedDeviceSkipped", f"owners={','.join(sorted(gone))}")
+        rows = [r for r in rows if (r.get("owner") or "") not in gone]
     apns_on = cfg.apns_enabled()
     fcm_rows = [r for r in rows if r.get("provider") == "fcm"]
     fcm_on = bool(fcm_rows) and fcm_configured(cfg)
@@ -1724,7 +1801,7 @@ def send_live_activity(payload: dict, priority: str = "5") -> dict:
     effort; never raises."""
     from . import config, live_activity
     cfg = config.load()
-    rows = live_activity.tokens()
+    rows = [r for r in live_activity.tokens() if owner_can_receive(str(r.get("principal") or ""))]
     if not rows or not cfg.apns_enabled():
         return {"enabled": cfg.apns_enabled(), "sent": 0, "failed": 0, "disabled": 0}
     _LA_GATE.offer(rows, payload, priority)
