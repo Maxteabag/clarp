@@ -11,6 +11,7 @@ from .voice_markup import clean_for_display, strip_hidden_blocks
 from .message_text import (
     CALL_OPENING_CLOSE,
     CALL_OPENING_OPEN,
+    CLIENT_ROW_PREFIX,
     FALLBACK_CONTEXT_CLOSE,
     FALLBACK_CONTEXT_OPEN,
     RESTORED_CONTEXT_CLOSE,
@@ -45,11 +46,13 @@ def _automation_kind(*, role: str, origin: str | None,
 
 
 def _display_text_for_message(*, role: str, origin: str | None,
-                              text: str | None) -> str:
+                              text: str | None, message_id: str = "") -> str:
     raw = strip_hidden_blocks(str(text or ""))
-    if role == "user":
-        # A row stored with a barge-in's delivery notice before the import
-        # took it off, whose transcript is gone, so no import puts it right.
+    if role == "user" and not str(message_id or "").startswith(CLIENT_ROW_PREFIX):
+        # A row the import stored with a barge-in's delivery notice before it
+        # took the notice off, whose transcript is gone, so no import puts it
+        # right. Never a row the client stored: what the user typed is what
+        # is shown, also when they began it with the notice.
         raw = strip_delivery_context(raw)
     kind = _automation_kind(role=role, origin=origin, text=raw)
     if not kind:
