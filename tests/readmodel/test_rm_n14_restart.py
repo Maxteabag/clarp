@@ -86,12 +86,47 @@ def test_after_a_host_start_an_unchanged_file_is_not_imported_and_a_grown_one_is
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-def test_an_unchanged_file_is_left_alone_only_until_its_audit_is_due(tmp_path, backend):
+def test_an_unchanged_file_whose_audit_is_due_is_read_and_compared_not_replayed(tmp_path, backend):
     """A lane's clock is its tick, in seconds. One second short of
     ``audit_seconds`` after the last full import the unchanged file is left
-    alone; at the hour it is imported in full, as a grown file would be, and
-    that import is the audit: the clock starts again."""
+    alone. From the hour on its bytes are read once and compared with the
+    stored digest; they are what they were, the rows it was imported with are
+    proven unchanged already, so nothing is replayed. That is not the audit a
+    grown file gets: nothing is written, so every Host start after the hour
+    reads the file again, and when the file grows its import is the full one."""
     reference, candidate, transcript = _world(tmp_path, backend)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
+            full.tick(0)
+            before.tick(0)
+        for tick, expected, read in ((3599, "unchanged_file", []),
+                                     (3600, "unchanged_file_audited", ["all"]),
+                                     (7300, "unchanged_file_audited", ["all"])):
+            full.tick(tick)
+            with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
+                report = after.tick(tick)
+            assert (_decision(report), report["digest_reads"]) == (expected, read)
+            assert report["apply_mode"] == "unchanged" and report["prefix_changed"] == []
+            harness.assert_product_equal(reference, candidate)
+        _append(transcript, backend, 3)
+        full.tick(7301)
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
+            assert _decision(after.tick(7301)) == "full_audit"
+            harness.assert_product_equal(reference, candidate)
+            # That was the audit: the clock starts again.
+            _append(transcript, backend, 4)
+            full.tick(7302)
+            assert _decision(after.tick(7302)) == "tail_applied"
+            harness.assert_product_equal(reference, candidate)
+
+
+@pytest.mark.parametrize("backend", harness.BACKENDS)
+def test_the_audit_of_an_unchanged_file_can_be_switched_back_to_a_full_import(tmp_path, backend):
+    """``audit_unchanged_by_digest = false``: at the hour the unchanged file
+    is imported in full, as a grown file would be, and the clock starts
+    again."""
+    reference, candidate, transcript = _world(tmp_path, backend)
+    replay = {"settings": {"audit_unchanged_by_digest": False}}
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
             full.tick(0)
@@ -100,7 +135,7 @@ def test_an_unchanged_file_is_left_alone_only_until_its_audit_is_due(tmp_path, b
                                (7199, "unchanged_file"), (7200, "full_audit")):
             full.tick(tick)
             with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
-                report = after.tick(tick)
+                report = after.tick(tick, faults=replay)
             assert _decision(report) == expected
             assert report["prefix_changed"] == []
             harness.assert_product_equal(reference, candidate)
@@ -122,11 +157,16 @@ def test_an_unchanged_file_that_has_had_its_number_of_imports_is_audited_after_a
                 assert _decision(before.tick(tick, faults=two)) == "tail_applied"
         full.tick(3)
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
-            assert _decision(after.tick(3, faults=two)) == "full_audit"
+            report = after.tick(3, faults=two)
+            assert (_decision(report), report["digest_reads"]) == ("unchanged_file_audited", ["all"])
             harness.assert_product_equal(reference, candidate)
-        full.tick(4)
+            _append(transcript, backend, 5)
+            full.tick(4)
+            assert _decision(after.tick(4, faults=two)) == "full_audit"
+            harness.assert_product_equal(reference, candidate)
+        full.tick(5)
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as again:
-            assert _decision(again.tick(4, faults=two)) == "unchanged_file"
+            assert _decision(again.tick(5, faults=two)) == "unchanged_file"
             harness.assert_product_equal(reference, candidate)
 
 
