@@ -1,4 +1,4 @@
--- user_version 123
+-- user_version 124
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -658,6 +658,9 @@ CREATE INDEX oracle_threads_owner ON oracle_threads(owner_principal, contact, up
 (implicit);
 
 -- index sqlite_autoindex_transcript_import_checkpoints_1 on transcript_import_checkpoints
+(implicit);
+
+-- index sqlite_autoindex_transcript_import_frontiers_1 on transcript_import_frontiers
 (implicit);
 
 -- index sqlite_autoindex_transcription_results_1 on transcription_results
@@ -2170,6 +2173,19 @@ CREATE TABLE transcript_import_checkpoints (
     store_carry_json TEXT NOT NULL,
     imports_since_audit INTEGER NOT NULL DEFAULT 0,
     audited_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, backend_session_id, source_file)
+);
+
+-- table transcript_import_frontiers on transcript_import_frontiers
+CREATE TABLE transcript_import_frontiers (
+    agent_id TEXT NOT NULL,
+    backend_session_id TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    checkpoint_digest TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    inputs_digest TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (agent_id, backend_session_id, source_file)
 );

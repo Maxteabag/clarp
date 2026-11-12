@@ -760,3 +760,171 @@ _FOUND_CHILD = {"kind": "subagents", "id": "c0", "ephemeral": True,
 ])
 def test_prefix_effects_keep_only_open_effects_on_the_full_path(prefix, expected):
     assert inc._prefix_effects(prefix) == expected
+
+
+# ---- the frontier that survives a Host start (schema 124) ----------------------
+
+def test_a_123_database_gains_the_frontier_table_and_older_code_never_reads_it(tmp_path, monkeypatch):
+    from lib import db_schema, db_migrations
+    newest = db_schema._SCHEMA_VERSION
+    assert newest >= 124
+    # A database as a 123 release left it: no such table.
+    old = tmp_path / "old.sqlite"
+    db.reset_for_tests(old)
+    c = db.conn()
+    c.execute("DROP TABLE transcript_import_frontiers")
+    c.execute("PRAGMA user_version = 123")
+    c.commit()
+    db.reset_for_tests(old)
+    c = db.conn()
+    assert c.execute("PRAGMA user_version").fetchone()[0] == newest
+    assert c.execute("SELECT count(*) FROM transcript_import_frontiers").fetchone()[0] == 0
+    assert db_migrations._migrate_to_v124(c) is None     # a rerun is a no-op
+    # Its columns are the checkpoint's key and the three digests; nothing else
+    # of the schema changed, the checkpoint table least of all (older code
+    # reads that one with SELECT *).
+    assert [row[1] for row in c.execute("PRAGMA table_info(transcript_import_frontiers)")] == [
+        "agent_id", "backend_session_id", "source_file", "parser_version",
+        "checkpoint_digest", "file_hash", "inputs_digest", "updated_at"]
+    assert len(c.execute("PRAGMA table_info(transcript_import_checkpoints)").fetchall()) == 21
+    # A 123 release on a 124 database (a rollback that was asked for) imports
+    # as it always did and leaves the table alone.
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    stored = db.conn().execute("SELECT * FROM transcript_import_frontiers").fetchall()
+    assert len(stored) == 1
+    monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 123)
+    monkeypatch.setattr(inc, "write_frontier", lambda *a, **kw: None)
+    monkeypatch.setattr(inc, "_stored_frontier", lambda *a, **kw: (None, None))
+    inc._TAIL_STATES.reset()
+    _append(transcript, claude_lines(5)[6:])
+    inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
+                          backend_session_id=SESSION)
+    assert [tuple(row) for row in db.conn().execute(
+        "SELECT * FROM transcript_import_frontiers")] == [tuple(row) for row in stored]
+
+
+def test_the_frontier_row_is_written_with_its_checkpoint_and_names_it(tmp_path):
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    [row] = db.conn().execute("SELECT * FROM transcript_import_frontiers").fetchall()
+    assert (row["agent_id"], row["backend_session_id"], row["source_file"]) == (
+        AGENT, SESSION, str(transcript))
+    assert row["parser_version"] == cp.parser_version == inc.parser_version("claude")
+    assert row["checkpoint_digest"] == inc.checkpoint_digest(cp)
+    assert row["file_hash"] == inc._tail_file_hashes(transcript, cp.complete_size, cp.complete_size)[0]
+    assert inc.load_frontier(db.conn(), cp) == {key: row[key] for key in (
+        "parser_version", "checkpoint_digest", "file_hash", "inputs_digest")}
+    # Another checkpoint of the same file is not this frontier's.
+    from dataclasses import replace
+    assert inc.load_frontier(db.conn(), replace(cp, turn_count=cp.turn_count + 1)) is None
+
+
+def test_the_inputs_digest_follows_every_row_and_their_order():
+    rows = (("t1", 1, None, "completed"), ("t2", 2, None, None))
+    base = ([*rows], [("u-1", "hello", "user", "", "x")], ("u-1", "user", ""), [], [])
+    same = ([*rows], [("u-1", "hello", "user", "", "x")], ("u-1", "user", ""), [], [])
+    assert inc.inputs_digest(base) == inc.inputs_digest(same)
+    changed = [
+        ([rows[1], rows[0]], *base[1:]),                                   # order
+        ([*rows, ("t3", 3, None, None)], *base[1:]),                      # one more turn
+        (base[0], [("u-1", "hello!", "user", "", "x")], *base[2:]),      # a text
+        (*base[:2], ("u-2", "user", ""), *base[3:]),                      # the latest user row
+        (*base[:3], [("m-1",)], base[4]),                                 # a message row
+        (*base[:4], [("d-1",)]),                                          # an Oracle row
+        ([rows[0]], [rows[1], *base[1]], *base[2:]),                      # a row in the next group
+    ]
+    digests = {inc.inputs_digest(variant) for variant in changed}
+    assert len(digests) == len(changed) and inc.inputs_digest(base) not in digests
+
+
+def test_after_a_host_start_the_import_cache_finds_an_unchanged_file_already_imported(tmp_path):
+    """Through the cache every import goes through: the importer is asked
+    once after the start, answers 'unchanged' without reading the file, and
+    is not asked again while the file stays as it is."""
+    from lib import transcript_import_cache as cache
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    seen, reads = [], []
+    log = inc._tail_log
+    read = inc._read_digest
+
+    def run():
+        def import_latest():
+            return inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
+                                         backend_session_id=SESSION)
+        importer = inc._completion_import(import_latest, backend="claude", path=transcript,
+                                          agent_id=AGENT, backend_session_id=SESSION)
+        return cache.import_if_changed(transcript, importer, owner=AGENT)
+
+    try:
+        inc._tail_log = lambda code, **kw: (kw.get("retention") or seen.append(code), log(code, **kw))[1]
+        inc._read_digest = lambda *a, **kw: (reads.append(a[1:]), read(*a, **kw))[1]
+        # The Host starts: nothing of the process's own is left.
+        assert cache.reset_for_tests()
+        inc._TAIL_STATES.reset()
+        inc._READ_PREFIXES.reset()
+        assert run() is False                       # nothing changed
+        assert (seen, reads) == (["unchanged_file"], [])
+        assert run() is False
+        assert seen == ["unchanged_file"]           # the cache's own record answers now
+        _append(transcript, claude_lines(5)[6:])
+        assert run() is True
+        assert seen == ["unchanged_file", "tail_applied"] and len(reads) == 1
+    finally:
+        inc._tail_log, inc._read_digest = log, read
+
+
+def test_a_file_the_import_did_not_read_to_its_end_is_not_taken_for_unchanged(tmp_path, monkeypatch):
+    """The checkpoint's size is the file's as it was seen; its imported bytes
+    can end before that when the file grew during the parse. Same size and
+    mtime then do not mean everything was imported."""
+    from dataclasses import replace
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    stored = inc._stored_frontier
+    seen = []
+    log = inc._tail_log
+    monkeypatch.setattr(inc, "_tail_log", lambda code, **kw: (
+        kw.get("retention") or seen.append(code), log(code, **kw))[1])
+
+    def short(*args, **kwargs):
+        checkpoint, state = stored(*args, **kwargs)
+        assert state is not None
+        behind = replace(checkpoint, complete_size=checkpoint.complete_size - 1)
+        return behind, replace(state, checkpoint=behind)
+
+    monkeypatch.setattr(inc, "_stored_frontier", short)
+    inc._TAIL_STATES.reset()
+    result = inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT,
+                                   backend_session_id=SESSION)
+    assert "unchanged_file" not in seen and result["apply_mode"] == "full"
+
+
+def test_the_running_hash_of_another_checkpoint_is_not_taken_up(tmp_path):
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    key = inc._tail_key(transcript, AGENT, SESSION)
+    revision = inc.parser_version("claude")
+    arguments = (db.conn(), key, revision, AGENT, SESSION, transcript)
+    checkpoint, state = inc._stored_frontier(*arguments)
+    assert checkpoint == cp and state.hasher is not None
+    assert state.hasher.hexdigest() == state.file_hash
+    # The process read the bytes of some other checkpoint of this file.
+    held = inc._READ_PREFIXES.peek(key)[1][1]
+    inc._READ_PREFIXES.put(key, revision, ("another-checkpoint", held))
+    assert inc._stored_frontier(*arguments)[1].hasher is None
+    inc._READ_PREFIXES.put(key, "another-parser", (inc.checkpoint_digest(cp), held))
+    assert inc._stored_frontier(*arguments)[1].hasher is None
+
+
+def test_a_frontier_is_not_replaced_by_an_import_whose_checkpoint_lost(tmp_path):
+    """Of two imports racing, the checkpoint that covers more of the file
+    stays (write_checkpoint). The frontier beside it is that import's too:
+    the loser must not put its own digests next to the winner's checkpoint."""
+    from dataclasses import replace
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(4), 6, {"ms": 0})
+    database = db.conn()
+    kept = inc.load_frontier(database, cp)
+    assert kept is not None
+    behind = replace(cp, complete_size=cp.complete_size - 10, turn_count=cp.turn_count - 1)
+    raw_inputs = message_writes._prepare_import_prelude(database, AGENT, SESSION, [], raw_only=True)
+    inc.write_checkpoint(database, behind)                  # refused: it covers less
+    assert inc.load_checkpoint(database, AGENT, SESSION, str(transcript)) == cp
+    inc.write_frontier(database, behind, "the-losers-digest", raw_inputs)
+    assert inc.load_frontier(database, cp) == kept
