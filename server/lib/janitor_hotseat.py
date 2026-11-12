@@ -18,7 +18,7 @@ import re
 import subprocess
 from typing import Callable
 
-from . import hotseat_status
+from . import hotseat_desk_reading, hotseat_status
 from .clock import now_ms
 
 ROLE = "account-hotseat"
@@ -336,14 +336,22 @@ class HotseatProvider:
     confirms_json: bool
     auth_repair: HotseatAuthRepair | None = None
     model_scoped: bool = False
+    # Flags that go after the read's subcommand when only "which account is in
+    # use" is asked (the Hotseat desk, before a switch): they leave out what
+    # that question does not need. Codex's quota probe is the slow part.
+    active_read_flags: tuple[str, ...] = ()
+    # How the Hotseat desk reads this provider's windows and rows.
+    desk: hotseat_desk_reading.DeskReading | None = None
 
 
 PROVIDERS: dict[str, HotseatProvider] = {
     "claude": HotseatProvider("5-hour", ("list", "--json"), 60, parse_claude, "claude_min_remaining",
                               "interval_seconds", lambda alias: ["switch", alias, "--yes", "--json"], True,
-                              auth_repair=HotseatAuthRepair("claude", _repair_model_pin), model_scoped=True),
+                              auth_repair=HotseatAuthRepair("claude", _repair_model_pin), model_scoped=True,
+                              desk=hotseat_desk_reading.CLAUDE_READING),
     "codex": HotseatProvider("weekly", ("codex", "--json"), 150, parse_codex, "codex_min_remaining",
-                             "codex_interval_seconds", lambda alias: ["codex-account", "switch", alias], False),
+                             "codex_interval_seconds", lambda alias: ["codex-account", "switch", alias], False,
+                             active_read_flags=("--no-quota",), desk=hotseat_desk_reading.CODEX_READING),
 }
 WINDOW_LABEL = {provider: spec.window for provider, spec in PROVIDERS.items()}
 
