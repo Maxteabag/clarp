@@ -98,18 +98,7 @@ def start_best_effort(
         job_id = job_id_for(persona_id)
         background_jobs.reconcile_stale(job_id=job_id, now_ms=now)
         existing = background_jobs.get(job_id, reconcile=False, observed_at=now)
-        if existing and existing["status"] in background_jobs.ACTIVE_STATUSES:
-            return existing
-        if existing and existing["status"] == "succeeded":
-            return None
-        if existing and existing["status"] in background_jobs.TERMINAL_STATUSES:
-            attempts = int(existing.get("generation") or 1)
-            if attempts >= max_attempts:
-                return None
-            backoff = RETRY_BACKOFF_MS[min(max(0, attempts - 1), len(RETRY_BACKOFF_MS) - 1)]
-            ended_at = int(existing.get("terminal_at") or existing.get("updated_at") or 0)
-            if ended_at and now - ended_at < backoff:
-                return None
+        if existing and existing["status"] in {"failed", "cancelled"}:
             pid = int(existing.get("worker_pid") or 0)
             token = str(existing.get("worker_start_token") or "")
             if pid and token and background_jobs.worker_is_alive(pid, token):
