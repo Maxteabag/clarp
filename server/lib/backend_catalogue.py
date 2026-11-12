@@ -102,6 +102,7 @@ class BackendDefinition:
     native_tool_explainer: bool = False
     janitor_default_model: str = ''
     model_family: str = ''
+    contact_tier: str = 'claude'
     model_providers: bool = False
     model_id_filter: str = ''
     probe: ModelProbe | None = None
@@ -182,6 +183,7 @@ CODEX = BackendDefinition(
     native_tool_explainer=True,
     janitor_default_model='gpt-6-sol',
     model_family='codex',
+    contact_tier='codex',
     fallback_models=(
         ('gpt-6.1-sol', 'GPT-6.1 Sol'),
         ('gpt-6-astra', 'GPT-6 Astra'),
@@ -235,6 +237,7 @@ AGY = BackendDefinition(
     runner='agy',
     config_model_field='agy_model',
     model_family='gemini',
+    contact_tier='gemini',
     fallback_models=(
         ('gemini-4-carbon-high', 'Gemini 4 Carbon (High)'),
         ('gemini-4-carbon-medium', 'Gemini 4 Carbon (Medium)'),
@@ -277,6 +280,7 @@ GROK = BackendDefinition(
     config_model_field='grok_model',
     config_effort_field='grok_effort',
     model_family='grok',
+    contact_tier='grok',
     login_kind='device_code',
     fallback_models=(
         ('grok-4.6', 'Grok 4.6'),
@@ -299,6 +303,7 @@ OPENCODE = BackendDefinition(
     runner='opencode',
     config_model_field='opencode_model',
     config_effort_field='opencode_effort',
+    contact_tier='codex',
     model_providers=True,
     fallback_models=(
         ('opencode/big-pickle', 'Big Pickle'),
@@ -321,6 +326,7 @@ DEEPSEEK = replace(OPENCODE,
     config_model_field='deepseek_model',
     config_effort_field='deepseek_effort',
     model_family='deepseek',
+    contact_tier='deepseek',
     model_id_filter='deepseek',
     fallback_models=(
         ('fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest', 'DeepSeek Flash (latest, Fireworks)'),

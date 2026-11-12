@@ -236,6 +236,17 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #                                     # production (TestFlight/App Store) | sandbox
 # # The .p8 path may also be supplied via the APNS_KEY_PATH env var.
 
+# [fcm]
+# Android push: the same alerts iPhones get, delivered to the Clarp Android
+# app through Firebase Cloud Messaging (HTTP v1), signed here with a Google
+# service account of the app's Firebase project (Firebase console > Project
+# settings > Service accounts > Generate new private key). The JSON key is a
+# secret — keep it out of git. The project id is read from the file. Without
+# it, Android phones are not offered push (feature `push_fcm` is not
+# advertised). See docs/push-android.md.
+# service_account = "~/.config/clarp/fcm-service-account.json"
+# # The path may also be supplied via the FCM_SERVICE_ACCOUNT env var.
+
 # [audio_central]
 # Clarp Audio Central: managed Clarp Voice and the APNs push relay. The
 # credential is this Computer's cav1.… Computer credential, returned when the

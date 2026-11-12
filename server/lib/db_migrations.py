@@ -193,6 +193,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v121(con)
         if version < 122:
             _migrate_to_v122(con)
+        if version < 123:
+            _migrate_to_v123(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -958,6 +960,17 @@ def _migrate_to_v122(con: sqlite3.Connection) -> None:
     cache and 0.2 s read from a fast SSD."""
     con.execute("CREATE INDEX IF NOT EXISTS idx_janitor_runs_newest"
                 " ON janitor_runs(agent_id, generation, status, finished_at)")
+
+
+def _migrate_to_v123(con: sqlite3.Connection) -> None:
+    """``device_tokens.provider``: which push service delivers to the row, ``apns`` (every row
+    so far: iPhones) or ``fcm`` (Android, docs/push-android.md). Explicit rather than guessed from
+    the platform or the token's shape, so a later path (the relay with Play Integrity grants) can
+    route on it. Additive with the old meaning as default, so older code ignores the column and
+    rolling back needs no down-migration; guarded, so a rerun is a no-op."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
+    if "provider" not in columns:
+        con.execute("ALTER TABLE device_tokens ADD COLUMN provider TEXT NOT NULL DEFAULT 'apns'")
 
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:

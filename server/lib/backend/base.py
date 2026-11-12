@@ -423,6 +423,11 @@ class Backend:
         """
         return True
 
+    def known_models(self) -> list[str]:
+        """The model ids ``is_valid_model`` compares against, sorted, for the
+        refusal to name; empty when this CLI has no list the host can check."""
+        return []
+
     def recorded_model(self, session_id: str) -> str:
         """The model the session actually ran, or "" when the CLI records
         none anywhere the Host can read.
