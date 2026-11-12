@@ -205,6 +205,23 @@ def foreign_to_installation(code_root, database, share) -> bool:
         return True
 
 
+def installations_own_host(code_root, database, share) -> bool:
+    """Whether this code is the installation's own Host: one of ``share``'s
+    releases, serving ``share``'s own database. Both, by their real paths.
+
+    Not the opposite of ``foreign_to_installation``, which asks only whether
+    code would touch an installation's database it does not belong to, and
+    so says "not foreign" of any code on a database of its own. A checkout
+    pointed at a scratch database with the share directory inherited from
+    its shell is that; so is another installation's release."""
+    share, code_root = pathlib.Path(share), pathlib.Path(code_root)
+    try:
+        return (pathlib.Path(database).resolve() == (share / "state.sqlite").resolve()
+                and code_root.resolve().is_relative_to((share / "releases").resolve()))
+    except OSError:
+        return False
+
+
 def check_foreign_start(code_root, database, share, *, code: int) -> None:
     """For a service that ``db.run_as_service`` gave no grant (it is not one
     of this installation's releases): refuse (``NotThisInstallation``) now if
@@ -230,11 +247,14 @@ def check_host_start(database, share, *, code: int, release: str = "",
     A Host that starts on a database not above its schema needs no override,
     so one left from an earlier rollback is removed: it would otherwise sit
     there until the same pair of versions met again. ``code_root`` is where
-    the Host's code is; only the installation's own Host removes it, not a
-    checkout started on the installation's paths."""
+    the Host's code is. Only the installation's own Host on the
+    installation's own database removes it (``installations_own_host``):
+    the override under ``share`` is about that database, and any other code
+    or database that merely has ``share`` in its environment says nothing
+    about it."""
     stored = stored_version(database)
     if stored <= code:
-        if (code_root is not None and not foreign_to_installation(code_root, database, share)
+        if (code_root is not None and installations_own_host(code_root, database, share)
                 and forget_rollback(share)):
             print(f"clarp: removed the schema rollback override in {share}: this Host is at "
                   f"schema {code} and the database at {stored}, so it is no longer needed.",

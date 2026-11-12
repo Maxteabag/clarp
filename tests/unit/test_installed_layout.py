@@ -344,6 +344,28 @@ def test_a_failed_release_that_never_upgraded_leaves_no_override_behind(tmp_path
     assert not (share / schema_guard.ROLLBACK_MARKER).exists()
 
 
+@pytest.mark.parametrize("code", ["a checkout", "another installation's release"])
+def test_a_host_on_a_database_of_its_own_leaves_the_installations_override(tmp_path, code):
+    """The real Host, started from code that is not this installation's, with
+    the installation's share directory inherited and a database of its own
+    (what its refusal advises). It starts, and the installed Host's override
+    is still there."""
+    home, share, _release, _database = _installed(tmp_path, database_version=CODE)
+    schema_guard.allow_rollback(share, code=CODE - 1, stored=CODE)
+    where = {"a checkout": tmp_path / "checkout",
+             "another installation's release": tmp_path / "another-installation/releases"}[code]
+    foreign = _release_of_this_code(where)
+    own = _database_at(tmp_path / "scratch/state.sqlite", CODE)
+
+    exit_code, said, opened = _start(
+        foreign / "server.py", _environment(home, share, own),
+        lambda: (tmp_path / "scratch/state.sqlite-shm").exists())
+
+    assert opened and exit_code != schema_guard.EXIT_REFUSED, said[-1500:]
+    assert schema_guard.rollback_allowed(share, code=CODE - 1, stored=CODE)
+    assert "removed the schema rollback override" not in said
+
+
 @pytest.mark.parametrize("upgrade", ["before", "as-it-is-stopped"])
 def test_a_failed_activation_puts_the_previous_release_back_and_it_starts(
         tmp_path, monkeypatch, upgrade):
