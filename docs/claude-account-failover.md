@@ -115,6 +115,16 @@ validates stdin without switching accounts or making provider requests.
   "no other turn of the pool is running" can be true while one runs, and a
   recovery (a plan recovery included) can switch accounts under it. This was
   so before these rules and is not changed by them.
+- A parked turn is the agent's turn for as long as the agent's slot holds it.
+  The trace marker does not decide that. Two writers move the marker while a
+  turn is parked without replacing it: POST /transcribe writes it for a voice
+  message, also one that is only queued behind the parked turn, and the
+  speech worker writes it to the trace of the reply it is about to speak. On
+  2026-11-12 a turn read as replaced that way was dropped by the coordinator
+  and waited four hours for a recovery that no longer knew it, with every
+  later message queued behind it. A Stop, a deletion or a replacement
+  releases the slot, and that is what ends a parked turn. When a parked turn
+  starts it takes the marker back.
 - One recovery coordinates all Claude turns owned by the runtime. New turns wait
   behind the recovery barrier; queued follow-ups retain their order. Other
   providers, completed agents, and idle agents receive no continuation.

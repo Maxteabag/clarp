@@ -89,9 +89,13 @@ class LauncherMixin:
             log_exception("spawnUnownedInterruptFail", exc, detail=spec.agent_id)
 
     def _resume_after_account_switch(self, spec, attempt, state):
-        if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
-                or self._superseded(spec)):
+        if not self._holds_slot(spec):
             return
+        # It is the agent's live turn again. A message queued behind it while
+        # it waited may have moved the trace marker (a voice message does);
+        # left there, this turn's own callbacks would read as a replaced
+        # turn's. The queued message sets it again when its turn starts.
+        agents_db.set_trace_for_session(spec.session, spec.trace_id)
         if _is_call_opening(spec) and (attempt != 1 or state.get("spawn_started") is not None):
             # Only an attempt-1 initiative parked before its spawn flag was ever set (the flag
             # is set immediately before the backend is invoked, in this same state) is proven
@@ -149,9 +153,9 @@ class LauncherMixin:
         ends here as it would have at that failure: with the provider's own
         sentence. Resumed, it would fail again and start the next recovery
         (2026-11-11)."""
-        if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
-                or self._superseded(spec)):
+        if not self._holds_slot(spec):
             return
+        agents_db.set_trace_for_session(spec.session, spec.trace_id)
         message = state.get("plan_failure")
         if _is_call_opening(spec):
             self._end_launched_opening(spec, error_classify.ACCOUNT_PLAN, message, attempt)
