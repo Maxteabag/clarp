@@ -16,9 +16,18 @@ day's WORKLOAD instead, on a scratch store and synthetic transcripts:
   default, and what this tool always did), ``send`` (a new message: its
   /send row and its turn's row) or ``live`` (a turn row and the row of the
   reply that turn is streaming). Since the ``transcriptCarryInputsChanged``
-  line the journal does say, and ``journal`` goes by it line by line: a live
-  row for ``row_live``, and for a turn word also a turn row that began among
-  the old turns (lines without the words count as ``row_live``);
+  line the journal does say, and ``journal`` goes by it line by line (lines
+  without the words count as ``row_live``). A session has one running turn:
+  ``row_live`` writes that turn's live row, or rewrites it, as the deltas of
+  one streamed reply do. A line that names a turn word is the turn's end (it
+  settles, its reply is no longer live, and the next line opens a new turn)
+  and has a turn row that began among the old turns, which no rule lets
+  through. ``--turn-ends N`` says how many turns settled in the journal's
+  period (the ``turns`` table knows): the journal names fewer, because a
+  rewritten live row is found first and the turn rows are then not asked.
+  The lines that make up the difference are a turn's end as well, chosen by
+  ``--seed``; such an end is refused when a frontier was published while the
+  turn ran, as on a Host;
 * a Host start at each given time: the imports after it run in a new process.
 
 It runs the real import, through the import cache, and reads the process's
@@ -163,6 +172,25 @@ def plan(events: list[dict], starts: list[int], sample: int, session_scale: floa
         segments.append([event for event in kept if begin <= event["at"] < end])
     return {"sessions": sessions, "segments": segments, "starts": kept_starts, "sample": sample,
             "journal_events": len(events), "replayed_events": len(kept)}
+
+
+def mark_turn_ends(the_plan: dict, settled: int, seed: int) -> dict:
+    """Which replayed lines are a turn's end: those whose words name a turn,
+    and as many more of the refused lines as ``settled`` (the turns that
+    settled in the journal's period, scaled to the replayed share) asks."""
+    import random
+    refused = [event for segment in the_plan["segments"] for event in segment
+               if event["inputs_changed"]]
+    for event in refused:
+        event["turn_named"] = any(word.startswith("turn_") for word in event.get("words") or ())
+        event["turn_end"] = event["turn_named"]
+    named = sum(event["turn_end"] for event in refused)
+    share = the_plan["replayed_events"] / max(1, the_plan["journal_events"])
+    rest = [event for event in refused if not event["turn_end"]]
+    more = min(len(rest), max(0, round(settled * share) - named))
+    for event in random.Random(seed).sample(rest, more):
+        event["turn_end"] = True
+    return {"named_by_the_journal": named, "more_from_the_count": more}
 
 
 # ---- synthetic Claude transcripts -------------------------------------------------
@@ -332,15 +360,29 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
         current["bucket"] = the_plan["sessions"][name]["bucket"]
         model = the_plan.get("inputs", "turn")
         if event["inputs_changed"] and model == "journal":
-            trace = f"turn-{name}-{session['ordinal']}"
             named = event.get("words") or ["row_live"]
-            agents_db.open_turn(agent_id=session["agent"], source="pwa", trace_id=trace)
+            trace = session.get("turn")
+            if trace is None:
+                trace = session["turn"] = f"turn-{name}-{session['ordinal']}"
+                agents_db.open_turn(agent_id=session["agent"], source="pwa", trace_id=trace)
+            # The running turn's reply: a new row, or the next delta of the same one.
             if "row_live" in named and message_store.upsert_live_assistant_message(
                     agent_id=session["agent"], backend_session_id=name, trace_id=trace,
                     text=f"synthetic streamed reply {session['ordinal']}",
                     item_key="replay") is None:
                 raise SystemExit("the live row was refused: the model would measure nothing")
-            if any(word.startswith("turn_") for word in named):
+            if event.get("turn_end"):
+                # As turn_lifecycle settles a turn; its reply stops being live in place.
+                db.conn().execute(
+                    "UPDATE turns SET settled_at=?, outcome='completed'"
+                    " WHERE agent_id=? AND trace_id=? AND settled_at IS NULL",
+                    (clock[0], session["agent"], trace))
+                db.conn().commit()
+                message_store.mark_live_message_final(
+                    agent_id=session["agent"], backend_session_id=name, trace_id=trace,
+                    item_key="replay")
+                session["turn"] = None
+            if event.get("turn_named"):
                 # A turn that was running among the old turns: no rule lets it through.
                 db.conn().execute(
                     "INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES (?,'pwa',?,?)",
@@ -398,6 +440,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--live-rows-pass", action="store_true",
                         help="what-if: a tail's guard does not name row_live")
     parser.add_argument("--seed", type=int, default=1, help="for the tails --fence refuses")
+    parser.add_argument("--turn-ends", type=int, default=0,
+                        help="with --inputs journal: the turns that settled in the journal's period")
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                         help="a [transcript_shadow] switch for the replay, as carry_live_rows=true")
     parser.add_argument("--fence", default="",
@@ -417,6 +461,7 @@ def main(argv: list[str]) -> int:
     the_plan = plan(read_journal(args.journal), [_clock(s) for s in args.starts.split(",") if s],
                     max(1, args.sample), args.session_scale)
     the_plan["inputs"] = args.inputs
+    the_plan["turn_ends"] = mark_turn_ends(the_plan, args.turn_ends, args.seed)
     the_plan["live_rows_pass"] = args.live_rows_pass
     the_plan["seed"] = args.seed
     the_plan["settings"] = {key: {"true": True, "false": False}.get(value.lower(), value)
@@ -455,6 +500,7 @@ def main(argv: list[str]) -> int:
         "journal_imports": the_plan["journal_events"], "replayed_imports": totals["imports"],
         "sample": scale, "host_starts_replayed": len(the_plan["starts"]),
         "changed_inputs_model": the_plan["inputs"],
+        "turn_ends": the_plan["turn_ends"],
         "settings": the_plan["settings"],
         "what_if_live_rows_pass": the_plan["live_rows_pass"],
         "what_if_tails_refused_publication": dict(fenced),
