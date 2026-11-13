@@ -136,6 +136,35 @@ value, with the rows read at publication; a full import, or a tail that
 changed a row of the first part, hashes everything and moves the base up to
 the mark.
 
+### When a tail gives the writer away
+
+An import's batch ends after `IMPORT_COMMIT_EVERY` rows or
+`IMPORT_WRITE_BUDGET_SECONDS` (25 ms), counted from `BEGIN IMMEDIATE`, and
+the writer is then given away for 10 ms so that others get their turn. If
+another connection commits in that gap, the rows the import read under the
+lock may no longer be the rows, so its publication is refused (the fence,
+`checkpoint_foreign_commit_yield`) and the next import is a full one.
+
+A tail's transaction begins with reading the session's rows and hashing
+them. On a conversation of a few thousand rows that alone is more than
+25 ms, so the tail ended an empty batch and yielded before it had written a
+row, and whoever was waiting for the writer committed in the gap. On
+13 November a fence refusal was nearly always a tail's (56 of 59), and the
+share grew with the conversation: 2.7 percent of the tails of 1 to 16 MB,
+11.9 percent of 16 to 64 MB, 20.4 percent of 64 to 256 MB.
+
+`tail_yield_after_first_write` (off by default) counts a tail's batch
+budgets from its first write (`message_writes._TailWriter`). A batch that
+has written nothing does not end. It changes only when the writer is given
+away, never what the fence checks: every yield is still sampled before and
+after, and a foreign commit in it still refuses the publication. The price
+is the lock: a tail holds it once for its whole length instead of twice
+with a gap between. Measured on copies of real transcripts: 228 ms instead
+of 93 and 123 on 23,870 rows, 89 ms instead of 40 and 51 on 10,855. With a
+second writer committing every 250 ms no tail lost its publication with the
+switch (0 of 24 on both), against 5 of 19 and 2 of 22 without, and the full
+imports that follow a refusal, which hold the lock longest, went with them.
+
 What a tail still costs: the session's message rows are read from SQLite
 three times (by the probe pass, again under the write lock, and at
 publication) and hashed once. On a conversation of 23,870 rows that is 80 MB
