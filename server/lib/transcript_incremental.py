@@ -682,6 +682,10 @@ _DEFAULTS = {
     "carry_session_rows": True,      # rows of the agent's other sessions
     "carry_later_turns": True,       # turn rows that began after the boundary's turns
     "carry_new_sends": True,         # a new /send row whose words were not said before
+    # Off unless switched on: a live row (the row a reply streams into) that
+    # is new, rewritten or gone, unless a reply before the boundary carries
+    # its trace.
+    "carry_live_rows": False,
 }
 
 

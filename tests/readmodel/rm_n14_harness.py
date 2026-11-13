@@ -316,7 +316,19 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     return original_capture(**kwargs)
 
                 stack.enter_context(patch.object(team_store, "capture_assistant_message", broken_capture))
-            if faults.get("client_on_yield") or faults.get("connection_on_yield"):
+            from lib import message_import_rows
+            metrics["parked"] = 0
+            park = message_import_rows._park_adopted_occupant
+
+            def counted_park(*args, **kwargs):
+                moved = park(*args, **kwargs)
+                metrics["parked"] += bool(moved)
+                return moved
+
+            stack.enter_context(patch.object(message_import_rows, "_park_adopted_occupant", counted_park))
+            stack.enter_context(patch.object(message_writes, "_park_adopted_occupant", counted_park))
+            if faults.get("client_on_yield") or faults.get("connection_on_yield") \
+                    or faults.get("live_on_yield"):
                 original_yield = message_writes._ImportWriter.yield_writer
                 injected = False
                 metrics["yield_windows"] = 0
@@ -331,7 +343,18 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     if injected or not selected:
                         return
                     assert not writer.in_transaction
-                    if faults.get("connection_on_yield"):
+                    if faults.get("live_on_yield"):
+                        # A delta of the streaming reply: its live row is
+                        # rewritten by the runtime while this import yields.
+                        with sqlite3.connect(database) as other:
+                            revision = other.execute(
+                                "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
+                            ).fetchone()[0]
+                            assert other.execute(
+                                "UPDATE messages SET text=text || ' and more', revision=?, updated_at=updated_at+1 "
+                                "WHERE message_id=? AND source_file LIKE 'live:%'",
+                                (revision, faults["live_on_yield"])).rowcount == 1
+                    elif faults.get("connection_on_yield"):
                         replacement = sqlite3.connect(database, isolation_level=None)
                         replacement.row_factory = sqlite3.Row
                         replacement.set_trace_callback(counted)
