@@ -15,7 +15,10 @@ day's WORKLOAD instead, on a scratch store and synthetic transcripts:
   ``--inputs`` chooses one model for all of them: ``turn`` (a turn row; the
   default, and what this tool always did), ``send`` (a new message: its
   /send row and its turn's row) or ``live`` (a turn row and the row of the
-  reply that turn is streaming);
+  reply that turn is streaming). Since the ``transcriptCarryInputsChanged``
+  line the journal does say, and ``journal`` goes by it line by line: a live
+  row for ``row_live``, and for a turn word also a turn row that began among
+  the old turns (lines without the words count as ``row_live``);
 * a Host start at each given time: the imports after it run in a new process.
 
 It runs the real import, through the import cache, and reads the process's
@@ -26,6 +29,15 @@ Since the rules of lib.message_carry a tail may find some rows changed, so
 the three models differ: ``turn`` and ``send`` are changes a tail now allows,
 ``live`` is one it does not. A day on a live Host is a mix of them (and of a
 turn settling, which is not modelled); run all three for the range.
+
+Two what-ifs, for judging a rule before it is built. ``--live-rows-pass``
+takes ``row_live`` out of what a tail's guard names, as if a rule let every
+changed live row through (the upper bound for such a rule: it asks none of
+the rule's conditions). ``--fence lt16m=0.027,lt64m=0.119`` refuses the
+publication of that share of the tails, per size, through the import's own
+refusal path, as a foreign commit during a writer yield does on a live Host
+(the journal gives the shares: a ``checkpoint_foreign_commit_yield`` line
+just before a ``tail_applied`` one); the import after such a tail is full.
 
 What it does not model: imports that fail to publish because another writer
 committed meanwhile or the file grew during the parse, transcripts with no
@@ -66,10 +78,15 @@ BASE_MS = 1_794_441_600_000     # 12 Nov 2026 00:00 UTC, the replay's clock at s
 
 def read_journal(path: pathlib.Path) -> list[dict]:
     events = []
+    words = None
     for line in path.read_text(errors="replace").splitlines():
+        named = re.search(r"transcriptCarryInputsChanged what=(\S+)", line)
+        if named:
+            words = named[1].split(",")      # logged just before its import's decision
+            continue
         if "transcriptTailDecision" not in line:
             continue
-        stamp = re.match(r"\s*(\d\d):(\d\d):(\d\d)\b", line)
+        stamp = re.search(r"(?:^|\s)(\d\d):(\d\d):(\d\d) transcriptTailDecision", line)
         fields = dict(re.findall(r"(\w+)=(\S+)", line))
         code, size = fields.get("code", ""), fields.get("size", "")
         if not stamp or code.startswith("deferred") or size not in BUCKET_MB:
@@ -79,7 +96,11 @@ def read_journal(path: pathlib.Path) -> list[dict]:
         kind = {"automation_provenance": "automation", "bootstrap_effect": "subagent"}.get(
             reason, "plain")
         events.append({"at": second, "bucket": size, "kind": kind, "journal": reason,
-                       "inputs_changed": code == "full_carry_inputs_changed"})
+                       "inputs_changed": code == "full_carry_inputs_changed",
+                       # Which rows the journal says stood in the way (None: a
+                       # journal from before that line existed).
+                       "words": words if code == "full_carry_inputs_changed" else None})
+        words = None
     events.sort(key=lambda event: event["at"])
     return events
 
@@ -216,6 +237,42 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
 
     incremental._tail_log = recorded
     transcripts = work / "transcripts"
+    fence = the_plan.get("fence") or {}
+    fenced = collections.Counter()
+    current = {"bucket": "", "tail": False}
+    if the_plan.get("live_rows_pass"):
+        from lib import message_carry
+        asked = message_carry.changed
+
+        def without_live_rows(*args, **kwargs):
+            return ",".join(word for word in asked(*args, **kwargs).split(",")
+                            if word and word != "row_live")
+
+        message_carry.changed = without_live_rows
+    if fence:
+        import random
+        from lib import message_import_writer, message_writes
+        chance = random.Random(int(the_plan.get("seed") or 0) * 1000 + index)
+        store_tail = message_writes.store_transcript_tail
+        allowed = message_import_writer._ImportWriter.checkpoint_allowed
+
+        def tail(*args, **kwargs):
+            current["tail"] = True
+            try:
+                return store_tail(*args, **kwargs)
+            finally:
+                current["tail"] = False
+
+        def publication(writer, status=None):
+            if current["tail"] and chance.random() < fence.get(current["bucket"], 0.0):
+                current["tail"] = False          # once per tail
+                writer._publication_refusals.add("foreign_commit_yield")
+                fenced[current["bucket"]] += 1
+            return allowed(writer, status)
+
+        message_writes.store_transcript_tail = tail
+        message_store.store_transcript_tail = tail
+        message_import_writer._ImportWriter.checkpoint_allowed = publication
 
     def run_import(name: str) -> None:
         session = state[name]
@@ -259,7 +316,24 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
         with (transcripts / f"{name}.jsonl").open("ab") as out:
             out.write(turn_bytes(session["ordinal"], event["at"], size=2048)
                       if session["ticks"] % 4 == 0 else step_bytes(session["ordinal"], event["at"]))
-        if event["inputs_changed"]:
+        current["bucket"] = the_plan["sessions"][name]["bucket"]
+        model = the_plan.get("inputs", "turn")
+        if event["inputs_changed"] and model == "journal":
+            trace = f"turn-{name}-{session['ordinal']}"
+            named = event.get("words") or ["row_live"]
+            agents_db.open_turn(agent_id=session["agent"], source="pwa", trace_id=trace)
+            if "row_live" in named and message_store.upsert_live_assistant_message(
+                    agent_id=session["agent"], backend_session_id=name, trace_id=trace,
+                    text=f"synthetic streamed reply {session['ordinal']}",
+                    item_key="replay") is None:
+                raise SystemExit("the live row was refused: the model would measure nothing")
+            if any(word.startswith("turn_") for word in named):
+                # A turn that was running among the old turns: no rule lets it through.
+                db.conn().execute(
+                    "INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES (?,'pwa',?,?)",
+                    (session["agent"], f"old-{trace}", BASE_MS - 86_400_000))
+                db.conn().commit()
+        elif event["inputs_changed"]:
             trace = f"turn-{name}-{session['ordinal']}"
             # Every model has the turn row: a live row is only written for
             # the agent's running turn.
@@ -288,7 +362,7 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
     state_path.write_text(json.dumps(state))
     db.close_local()
     return {"segment": index, "seconds": round(time.monotonic() - started, 1), **totals,
-            "by_journal": dict(by_journal), "mix": dict(mix)}
+            "by_journal": dict(by_journal), "mix": dict(mix), "fenced": dict(fenced)}
 
 
 # ---- the parent --------------------------------------------------------------------
@@ -306,8 +380,14 @@ def main(argv: list[str]) -> int:
                         help="the day's Host starts, HH:MM, comma separated")
     parser.add_argument("--sample", type=int, default=10)
     parser.add_argument("--session-scale", type=float, default=0.3)
-    parser.add_argument("--inputs", choices=("turn", "send", "live"), default="turn",
+    parser.add_argument("--inputs", choices=("turn", "send", "live", "journal"), default="turn",
                         help="which row a line marked carry_inputs_changed finds changed")
+    parser.add_argument("--live-rows-pass", action="store_true",
+                        help="what-if: a tail's guard does not name row_live")
+    parser.add_argument("--seed", type=int, default=1, help="for the tails --fence refuses")
+    parser.add_argument("--fence", default="",
+                        help="what-if: the share of tails whose publication is refused, "
+                             "per size, as lt16m=0.027,lt64m=0.119")
     parser.add_argument("--segment", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     work = args.work.resolve()
@@ -322,6 +402,10 @@ def main(argv: list[str]) -> int:
     the_plan = plan(read_journal(args.journal), [_clock(s) for s in args.starts.split(",") if s],
                     max(1, args.sample), args.session_scale)
     the_plan["inputs"] = args.inputs
+    the_plan["live_rows_pass"] = args.live_rows_pass
+    the_plan["seed"] = args.seed
+    the_plan["fence"] = {size: float(share) for size, share in
+                         (item.split("=") for item in args.fence.split(",") if item)}
     (work / "plan.json").write_text(json.dumps(the_plan))
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("CLAUDE_PWA_", "CLARP_", "XDG_"))}
@@ -332,6 +416,7 @@ def main(argv: list[str]) -> int:
                XDG_DATA_HOME=str(work / "xdg-data"), XDG_CACHE_HOME=str(work / "xdg-cache"),
                XDG_CONFIG_HOME=str(work / "xdg-config"), XDG_STATE_HOME=str(work / "xdg-state"))
     totals, by_journal, mix = collections.Counter(), collections.Counter(), collections.Counter()
+    fenced = collections.Counter()
     for index in range(len(the_plan["segments"])):
         ran = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve()),
                               "--work", str(work), "--segment", str(index)],
@@ -344,6 +429,7 @@ def main(argv: list[str]) -> int:
             totals[key] += result.get(key, 0)
         by_journal.update(result["by_journal"])
         mix.update(result["mix"])
+        fenced.update(result.get("fenced") or {})
         print(f"segment {index}: {result.get('imports', 0)} imports in {result['seconds']} s",
               file=sys.stderr, flush=True)
     scale = the_plan["sample"]
@@ -352,6 +438,8 @@ def main(argv: list[str]) -> int:
         "journal_imports": the_plan["journal_events"], "replayed_imports": totals["imports"],
         "sample": scale, "host_starts_replayed": len(the_plan["starts"]),
         "changed_inputs_model": the_plan["inputs"],
+        "what_if_live_rows_pass": the_plan["live_rows_pass"],
+        "what_if_tails_refused_publication": dict(fenced),
         "sessions": len(the_plan["sessions"]),
         "full": totals["full"], "tail": totals["tail"], "other": totals["other"],
         "bytes_read_replayed": totals["bytes"],
