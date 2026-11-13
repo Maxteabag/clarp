@@ -208,6 +208,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v124(con)
         if version < 125:
             _migrate_to_v125(con)
+        if 0 < version < 126:  # Data only: a new database has no paused goals.
+            _migrate_to_v126(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1008,6 +1010,37 @@ def _migrate_to_v125(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
     if "supported_conversation_modes" not in columns:
         con.execute("ALTER TABLE device_tokens ADD COLUMN supported_conversation_modes TEXT NOT NULL DEFAULT ''")
+
+def _migrate_to_v126(con: sqlite3.Connection) -> None:
+    """Data only: stop the clock of steps on durable goals that were paused before pausing froze
+    them (Goal keeper, contract 96). Pausing now sets ``started_at`` NULL and adds the elapsed time
+    to ``active_ms``; a goal paused earlier still has ``started_at`` set, so a resume, an owner's
+    step update or the Goal keeper's write would count the whole paused span as active time.
+    Freezes those steps from the time of the goal's last ``pause`` history entry, else the plan's
+    ``updated_at``, never from now. Guarded by ``started_at IS NOT NULL``, so a rerun changes
+    nothing."""
+    import json
+
+    for plan_id, goal_json, updated_at in con.execute(
+            "SELECT plan_id, goal_json, updated_at FROM task_plans WHERE status='paused'").fetchall():
+        try:
+            goal = json.loads(goal_json or "{}")
+        except ValueError:
+            continue
+        if not isinstance(goal, dict) or not goal:
+            continue
+        pauses = [entry.get("at") for entry in goal.get("history") or []
+                  if isinstance(entry, dict) and entry.get("kind") == "pause"
+                  and isinstance(entry.get("at"), int)]
+        paused_at = max(pauses) if pauses else int(updated_at or 0)
+        for item_id, active_ms, started_at in con.execute(
+                "SELECT item_id, active_ms, started_at FROM task_items "
+                "WHERE plan_id=? AND status='in_progress' AND started_at IS NOT NULL",
+                (plan_id,)).fetchall():
+            frozen = int(active_ms or 0) + max(0, paused_at - int(started_at))
+            con.execute("UPDATE task_items SET active_ms=?, started_at=NULL WHERE item_id=?",
+                        (frozen, item_id))
+
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:
     """The newest state row per agent in one seek, for the call-open end's write-time anchor

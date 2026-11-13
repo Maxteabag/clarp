@@ -443,3 +443,55 @@ def test_replay_of_a_delegated_goal_ends_current(owner, helper):
     assert "[tool Bash: npm run build]" in model.prompts[1]
     assert "Done: 10 rounds" in model.prompts[2] and "(from agent helper designer-1)" in model.prompts[2]
     assert "untrusted" in model.prompts[0]
+
+
+# ---- goals paused before the install (schema step v126) ----------------------
+
+
+def _paused_before_install(owner, hours_running=1, hours_paused=9):
+    """A goal as the code before contract 96 left it: paused, with a step still
+    'running' (started_at set), and a pause entry in its history."""
+    from lib import db_migrations
+    plan = _goal()
+    _step(plan, "harness", "in_progress")
+    _act(plan["plan_id"], "pause", reason="Waiting for Peter")
+    now = db.now_ms()
+    started, paused_at = now - (hours_running + hours_paused) * 3_600_000, now - hours_paused * 3_600_000
+    item_id = _item(plan, "harness")["item_id"]
+    # Undo the new freeze to reproduce the old state, and date the pause.
+    db.conn().execute("UPDATE task_items SET started_at=?, active_ms=0 WHERE item_id=?", (started, item_id))
+    goal = json.loads(db.conn().execute(
+        "SELECT goal_json FROM task_plans WHERE plan_id=?", (plan["plan_id"],)).fetchone()[0])
+    for entry in goal["history"]:
+        if entry["kind"] == "pause":
+            entry["at"] = paused_at
+    db.conn().execute("UPDATE task_plans SET goal_json=? WHERE plan_id=?", (json.dumps(goal), plan["plan_id"]))
+    db_migrations._migrate_to_v126(db.conn())
+    return plan, item_id, hours_running * 3_600_000
+
+
+def _active_ms(item_id):
+    return db.conn().execute("SELECT active_ms FROM task_items WHERE item_id=?", (item_id,)).fetchone()[0]
+
+
+@pytest.mark.parametrize("then", ["resume", "owner_update", "keeper_write"])
+def test_a_goal_paused_before_the_install_never_counts_its_paused_span(owner, then):
+    from lib import db_migrations
+    plan, item_id, ran = _paused_before_install(owner)
+    assert _active_ms(item_id) == ran, "frozen at the last pause, not at the install"
+    row = db.conn().execute("SELECT started_at FROM task_items WHERE item_id=?", (item_id,)).fetchone()
+    assert row[0] is None
+    db_migrations._migrate_to_v126(db.conn())
+    assert _active_ms(item_id) == ran, "a second start changes nothing"
+
+    if then == "resume":
+        _act(plan["plan_id"], "resume", reason="Peter answered")
+        assert _item(plan, "harness")["started_at"] is not None
+    elif then == "owner_update":
+        _step(plan, "harness", "completed")
+    else:
+        current = task_plans.get(plan["plan_id"])
+        task_plans.updater_apply(plan["plan_id"], seen_revision=current["revision"],
+                                 steps={item_id: {"status": "completed", "note": "Evidence: 'harness done'"}},
+                                 progress="Harness done", next_work="n", model="m", source_refs=[])
+    assert ran <= _active_ms(item_id) < ran + MIN, "the nine paused hours are not active time"
