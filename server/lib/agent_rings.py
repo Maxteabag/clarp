@@ -821,6 +821,21 @@ def _announce(ring: dict, kind: str, *, notice: bool = True) -> dict:
         except Exception as exc:  # noqa: BLE001
             log_exception("agentRingEmitFail", exc, f"ring={ring['ring_id']}")
     delivery: dict = {}
+    from .agent_ring_live import MODE_LIVE
+    live = ring.get("conversation_mode") == MODE_LIVE
+    fcm_live = None
+    if live:
+        # H6: the global alert reaches every phone, also those that cannot run Live. A Live ring is
+        # announced by VoIP to capable phones only, for its first ring and for every later state
+        # (answered, declined, missed, cancelled): no global alert, ever. An Android phone that
+        # declared agent_live_v1 on its push row gets every state by FCM instead, as a classic
+        # ring's alert reaches it, naming conversation_mode (docs/push-android.md "Live calls").
+        # Handed over BEFORE the VoIP push: a slow Apple must not let an answer from an Android
+        # phone that was already polling reach Google ahead of the ringing state.
+        try:
+            fcm_live = _push_live_fcm(ring, kind)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentRingLiveFcmFail", exc, f"ring={ring['ring_id']}")
     if kind == "ring":
         # A live ring rings through CallKit when a phone registered a VoIP
         # token; the alert is then a duplicate. Only the live ring is ever
@@ -829,19 +844,9 @@ def _announce(ring: dict, kind: str, *, notice: bool = True) -> dict:
             delivery["voip"] = _push_voip(ring) or {}
         except Exception as exc:  # noqa: BLE001
             log_exception("agentRingVoipFail", exc, f"ring={ring['ring_id']}")
-    from .agent_ring_live import MODE_LIVE
-    if ring.get("conversation_mode") == MODE_LIVE:
-        # H6: the global alert reaches every phone, also those that cannot run Live. A Live ring is
-        # announced by VoIP to capable phones only, for its first ring and for every later state
-        # (answered, declined, missed, cancelled): no global alert, ever. An Android phone that
-        # declared agent_live_v1 on its push row gets every state by FCM instead, as a classic
-        # ring's alert reaches it, naming conversation_mode (docs/push-android.md "Live calls").
-        try:
-            fcm_live = _push_live_fcm(ring, kind)
-            if fcm_live is not None:
-                delivery["fcm_live"] = fcm_live
-        except Exception as exc:  # noqa: BLE001
-            log_exception("agentRingLiveFcmFail", exc, f"ring={ring['ring_id']}")
+    if live:
+        if fcm_live is not None:
+            delivery["fcm_live"] = fcm_live
     elif not (delivery.get("voip") or {}).get("sent"):
         try:
             delivery.update(_push(ring, kind) or {})
@@ -978,21 +983,28 @@ def _eligible_live_principals() -> set[str]:
     return {p for p in principals if p}
 
 
-class _OrderedSender:
-    """One daemon thread that runs jobs in the order they were handed over: a Live ring's states reach
-    the Android phones in order, and Google, which may take tens of seconds, never holds the request
-    that rang, answered or ended the call."""
+class _LiveRingSender:
+    """The Android phones' Live ring states, sent on one daemon thread, oldest first: a ring's states
+    reach Google in the order they happened (ringing, then answered, declined, missed or cancelled),
+    and Google, which may take tens of seconds, never holds the request that rang, answered or ended
+    the call.
+
+    A state still queued when its turn comes is dropped when it can no longer help: when a later state
+    of the same ring is queued behind it, or when the ring has expired; except the last state of a ring
+    a phone was told is ringing, which that phone must hear to stop ringing. ``told`` remembers, per
+    ring, the push rows the ringing state was delivered to, until the ring's last state is handled."""
 
     def __init__(self, name: str):
         self._name = name
         self._cond = threading.Condition()
-        self._jobs: list = []
+        self._jobs: list[tuple[dict, str, list[dict]]] = []
+        self._told: dict[str, set[str]] = {}
         self._busy = False
         self._thread: threading.Thread | None = None
 
-    def submit(self, job) -> None:
+    def submit(self, ring: dict, kind: str, rows: list[dict]) -> None:
         with self._cond:
-            self._jobs.append(job)
+            self._jobs.append((ring, kind, rows))
             if self._thread is None or not self._thread.is_alive():
                 self._thread = threading.Thread(target=self._run, name=self._name, daemon=True)
                 self._thread.start()
@@ -1003,10 +1015,12 @@ class _OrderedSender:
             with self._cond:
                 while not self._jobs:
                     self._cond.wait()
-                job = self._jobs.pop(0)
+                ring, kind, rows = self._jobs.pop(0)
+                later = any(queued[0]["ring_id"] == ring["ring_id"] for queued in self._jobs)
+                told = set(self._told.get(ring["ring_id"], ()))
                 self._busy = True
             try:
-                job()
+                self._send(ring, kind, rows, later=later, told=told)
             except Exception as exc:  # noqa: BLE001 - one failed push never stops the next
                 log_exception("agentRingSenderFail", exc, self._name)
             finally:
@@ -1014,6 +1028,29 @@ class _OrderedSender:
                 with self._cond:
                     self._busy = False
                     self._cond.notify_all()
+
+    def _send(self, ring: dict, kind: str, rows: list[dict], *, later: bool, told: set[str]) -> None:
+        from . import apns
+        ring_id = ring["ring_id"]
+        last = kind != "ring" and not later
+        if later:
+            log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=superseded")
+            return
+        expired = now_ms() >= int(ring.get("expires_at") or 0)
+        if expired and kind == "ring":
+            log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=expired")
+            return
+        targets = [row for row in rows if not expired or row["token"] in told]
+        if expired and len(targets) < len(rows):
+            log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=expired rows={len(rows) - len(targets)}")
+        for row in targets:
+            result = apns.send_agent_ring(ring, kind, tokens=[row])
+            if kind == "ring" and result.get("sent"):
+                with self._cond:
+                    self._told.setdefault(ring_id, set()).add(row["token"])
+        if last:
+            with self._cond:
+                self._told.pop(ring_id, None)
 
     def drain(self, timeout: float = 10.0) -> bool:
         """Wait until every job handed over so far has run (tests)."""
@@ -1027,19 +1064,17 @@ class _OrderedSender:
         return True
 
 
-_LIVE_FCM_SENDER = _OrderedSender("ring-live-fcm")
+_LIVE_FCM_SENDER = _LiveRingSender("ring-live-fcm")
 
 
 def _push_live_fcm(ring: dict, kind: str) -> dict | None:
     """One Live ring state by FCM to the Android phones a Live ring can reach, sent off the calling
-    thread. Answers at once with how many rows the send is pending for; None (nothing reported) when
-    there is none, so a Host without such a phone answers exactly as before."""
-    from . import apns
+    thread (_LiveRingSender). Answers at once with how many rows the send is pending for; None
+    (nothing reported) when there is none, so a Host without such a phone answers exactly as before."""
     rows = _ring_reachable_device_rows()
     if not rows:
         return None
-    ring = dict(ring)
-    _LIVE_FCM_SENDER.submit(lambda: apns.send_agent_ring(ring, kind, tokens=rows))
+    _LIVE_FCM_SENDER.submit(dict(ring), kind, rows)
     return {"pending": len(rows)}
 
 

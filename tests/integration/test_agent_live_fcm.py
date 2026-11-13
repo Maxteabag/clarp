@@ -423,6 +423,9 @@ def test_a_missed_ring_announced_through_a_hanging_google_never_holds_the_iphone
     assert _android(base, android, supported_conversation_modes=LIVE)[0] == 200
     assert _call(base, iphone["token"], "POST", "/devices", {"token": "a1" * 32, "session": "koko"})[0] == 200
     _store_ring("rng_late", live=live_ring, expired=True)
+    if live_ring:
+        # The phone was told this ring is ringing: its end must still reach it, though the ring is over.
+        agent_rings._LIVE_FCM_SENDER._told["rng_late"] = {ANDROID}
     expiry = threading.Thread(target=agent_rings.expire_due, daemon=True)   # what the ring's own timer runs
     expiry.start()
     assert hanging.entered.wait(5)                                       # the missed state is with Google
@@ -506,3 +509,126 @@ def test_the_declaration_counts_only_on_an_android_registration(host):
     db.conn().execute("UPDATE device_tokens SET supported_conversation_modes = ? WHERE token = ?",
                       ('["agent_live_v1"]', token))
     assert not agent_rings.live_capable(phone["device_id"])
+
+
+# ---- Arnold's delta review of b508a96b ------------------------------------------------------------
+
+def _ring_event(base, n):
+    """A Live ring for another event (the same event is a replay, never a second ring)."""
+    context = _context()
+    context["event"] = {**context["event"], "id": f"lw-2026-10-17-{n:04d}"}
+    return _call(base, ADMIN, "POST", "/calls/ring", {
+        "agent": "Sandra", "reason": f"Vann {n}", "opening_line": OPENING,
+        "conversation_mode": "agent_live_v1", "event_context": context})
+
+
+def _states(google):
+    return [(_data(s)["ring_id"], _data(s)["ring_state"]) for s in google.send_calls]
+
+
+@pytest.fixture
+def two_rings(monkeypatch):
+    monkeypatch.setattr(agent_rings, "AGENT_INTERVAL_MS", 0)              # the agent may ring again at once
+
+
+def test_the_android_states_reach_google_in_order_and_superseded_ones_are_dropped(host, hanging, two_rings):
+    """Delta a and c: oldest first; a state with a later one of its ring queued behind it is dropped."""
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    first = _ring_event(base, 1)[1]["ring"]["ring_id"]
+    assert hanging.entered.wait(5)                                         # its ringing is with Google
+    assert _call(base, phone["token"], "POST", "/calls/ring/decline", {"ring_id": first})[0] == 200
+    second = _ring_event(base, 2)[1]["ring"]["ring_id"]
+    status, _answer = _call(base, phone["token"], "POST", "/calls/ring/answer", {
+        "ring_id": second, "conversation_mode": "agent_live_v1", "request_id": "r-2", "client_nonce": "n-2"})
+    assert status == 200
+    hanging.release.set()
+    _drain()
+    # The second ring's ringing had its answer queued behind it: dropped. Everything else in order.
+    assert _states(hanging.google) == [(first, "ringing"), (first, "declined"), (second, "answered")]
+
+
+def test_with_google_slow_ringing_reaches_it_before_answered(host, google, monkeypatch):
+    """Delta a: Google slow, not hung; the answer comes while the ringing is being sent."""
+    import time
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    real_post = google.post
+
+    def slow(url, **kw):
+        if url == SEND:
+            time.sleep(0.3)
+        return real_post(url, **kw)
+    monkeypatch.setattr(google, "post", slow)
+    ring = _live_ring(base)[1]["ring"]["ring_id"]
+    assert _call(base, phone["token"], "POST", "/calls/ring/answer", {
+        "ring_id": ring, "conversation_mode": "agent_live_v1", "request_id": "r-s", "client_nonce": "n-s"})[0] == 200
+    _drain()
+    assert [state for _ring, state in _states(google)] == ["ringing", "answered"]
+
+
+def test_an_expired_ring_drops_its_queued_states_but_a_told_phone_hears_the_end(host, hanging, two_rings,
+                                                                                 monkeypatch):
+    """Delta c: Google hung past the ring's own expiry."""
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    first = _ring_event(base, 1)[1]["ring"]["ring_id"]
+    assert hanging.entered.wait(5)                                         # told: its ringing is in flight
+    assert _call(base, phone["token"], "POST", "/calls/ring/decline", {"ring_id": first})[0] == 200
+    second = _ring_event(base, 2)[1]["ring"]["ring_id"]                    # never told: queued behind
+    real_now = agent_rings.now_ms
+    monkeypatch.setattr(agent_rings, "now_ms", lambda: real_now() + 10 * agent_rings.RING_TIMEOUT_MS)
+    agent_rings.expire_due()                                               # the second rings out: missed
+    hanging.release.set()
+    _drain()
+    # The first ring's end goes to the phone that was told it rang; the second, never shown, sends nothing.
+    assert _states(hanging.google) == [(first, "ringing"), (first, "declined")]
+
+
+def test_the_android_ringing_is_handed_over_before_the_iphones_voip_push(host, google, monkeypatch):
+    """Delta b: Apple slow; an Android phone already polling answers meanwhile."""
+    import threading
+    base = host
+    iphone, android = _pair(), _pair()
+    agent_rings.register_voip_token(iphone["device_id"], "cd" * 32, supported_conversation_modes=LIVE)
+    assert _android(base, android, supported_conversation_modes=LIVE)[0] == 200
+    apple = threading.Event()
+    voip_entered = threading.Event()
+
+    def slow_voip(ring, tokens):
+        voip_entered.set()
+        apple.wait(10)
+        return {"enabled": True, "sent": len(tokens), "failed": 0}
+    monkeypatch.setattr(apns, "send_agent_ring_voip", slow_voip)
+    answer = {}
+    caller = threading.Thread(target=lambda: answer.setdefault("ring", _live_ring(base)), daemon=True)
+    caller.start()
+    assert voip_entered.wait(5)                                            # Apple is still answering
+    ring = _call(base, android["token"], "GET", "/calls/ring")[1]["ring"]["ring_id"]
+    assert _call(base, android["token"], "POST", "/calls/ring/answer", {
+        "ring_id": ring, "conversation_mode": "agent_live_v1", "request_id": "r-b", "client_nonce": "n-b"})[0] == 200
+    apple.set()
+    caller.join(10)
+    _drain()
+    assert [state for _ring, state in _states(google)] == ["ringing", "answered"]
+    assert answer["ring"][1]["delivery"] == {"voip": {"enabled": True, "sent": 1, "failed": 0},
+                                             "fcm_live": {"pending": 1}}
+
+
+def test_the_platform_rule_is_pinned_at_the_route_and_at_the_store(host):
+    """Delta d: the route ignores the field off Android (no validation either), and the store keeps it
+    only on an Android row; the read is pinned above (test_the_declaration_counts_only_on_an_android_registration)."""
+    base = host
+    phone = _pair()
+    assert _call(base, phone["token"], "POST", "/devices", {
+        "token": "c3" * 32, "platform": "ios", "provider": "fcm", "session": "koko",
+        "supported_conversation_modes": "garbage"}) == (200, {"ok": True})    # not even validated off Android
+    apns.register_token("d4" * 32, session="koko", platform="ios", provider="fcm", owner=phone["device_id"],
+                        conversation_modes=LIVE)
+    assert _row("d4" * 32)["supported_conversation_modes"] == ""
+    apns.register_token(ANDROID_2, session="koko", platform="android", owner=phone["device_id"],
+                        conversation_modes=LIVE)
+    assert _row(ANDROID_2)["supported_conversation_modes"] == '["agent_live_v1"]'
