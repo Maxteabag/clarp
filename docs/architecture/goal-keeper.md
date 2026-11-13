@@ -109,9 +109,11 @@ after it read.
 - **Bookkeeping on a paused goal**: the owner and the Goal keeper may record
   steps and progress. An owner checkpoint there cannot carry a continuation,
   so the goal stays paused.
-- **Waivers**: an owner may waive a criterion that will not be met as
-  written, with a reason (`action: waive`). Completion accepts it and the
-  waiver stays visible.
+- **Waivers**: the user may waive a criterion that will not be met as
+  written, with a reason (`action: waive`, the apps' route only). Completion
+  accepts it and the waiver stays visible. The store refuses a waiver or its
+  restoring from anyone else, the owner agent included (review #311,
+  finding 2).
 
 Measured offline before this was built (six real goals, 51 events, hindsight
 labels): step statuses right 238/251 (95%) against 174/251 (69%) for the

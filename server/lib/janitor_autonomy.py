@@ -602,6 +602,10 @@ class AutonomyJanitors:
             return
 
     def _goal_keeper_batch(self,config,run,ready,now,progress_attachment):
+        try:self._goal_keeper_batch_inner(config,run,ready,now,progress_attachment)
+        finally:db.close_local()  # this thread's connection goes back with it (review #311, finding 5)
+
+    def _goal_keeper_batch_inner(self,config,run,ready,now,progress_attachment):
         from . import goal_keeper
         from .log import log_exception
         try:
