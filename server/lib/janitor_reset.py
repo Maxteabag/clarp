@@ -6,6 +6,7 @@ import re
 import subprocess
 
 from . import config
+from .log import log_fault
 
 
 def attempt(command_field: str, models: list[str]) -> dict:
@@ -29,5 +30,6 @@ def attempt(command_field: str, models: list[str]) -> dict:
             status = "unverified"
         return {"status": status,
                 "verified": verified, "account": receipt.get("account") if verified else None}
-    except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        log_fault("claudeBankedResetCommandFailed", exc)
         return {"status": "unverified", "verified": False}
