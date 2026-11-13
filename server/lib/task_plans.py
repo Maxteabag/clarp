@@ -150,7 +150,7 @@ def update_item(
         plan = con.execute(
             "SELECT * FROM task_plans WHERE plan_id=?", (row["plan_id"],)
         ).fetchone()
-        if not plan or plan["status"] != "active":
+        if not plan or not _accepts_step_updates(plan):
             raise ValueError("task plan is no longer active")
         from . import task_goal_state
 
@@ -171,7 +171,8 @@ def update_item(
         started_at = row["started_at"]
         if row["status"] == "in_progress" and started_at:
             active_ms += max(0, now - int(started_at))
-        next_started = now if status == "in_progress" else None
+        # A paused goal's work is not running: its clock stays stopped.
+        next_started = now if status == "in_progress" and plan["status"] == "active" else None
         completed_at = now if status in TERMINAL_ITEM_STATUSES else None
         con.execute(
             "UPDATE task_items SET status=?, detail=COALESCE(?,detail), started_at=?, "
@@ -240,6 +241,38 @@ def finish(
         con.execute("ROLLBACK")
         raise
     return get(plan_id) or {}
+
+
+def _accepts_step_updates(plan) -> bool:
+    """Active plans, and paused durable goals: pausing stops the continuation,
+    not the bookkeeping of what already happened."""
+    if plan["status"] == "active":
+        return True
+    return plan["status"] == "paused" and bool(json.loads(plan["goal_json"] or "{}"))
+
+
+def _freeze_running_items(con, plan_id: str, now: int) -> None:
+    """Pausing keeps a step in progress but stops its clock (``paused`` in
+    reads). Resetting it to pending lost the record that work had started;
+    leaving the clock running showed it as active for days (2026-11-13)."""
+    for row in con.execute(
+        "SELECT item_id,active_ms,started_at FROM task_items "
+        "WHERE plan_id=? AND status='in_progress' AND started_at IS NOT NULL",
+        (plan_id,),
+    ).fetchall():
+        elapsed = int(row["active_ms"] or 0) + max(0, now - int(row["started_at"]))
+        con.execute(
+            "UPDATE task_items SET active_ms=?,started_at=NULL WHERE item_id=?",
+            (elapsed, row["item_id"]),
+        )
+
+
+def _thaw_running_items(con, plan_id: str, now: int) -> None:
+    con.execute(
+        "UPDATE task_items SET started_at=? WHERE plan_id=? AND status='in_progress' "
+        "AND started_at IS NULL",
+        (now, plan_id),
+    )
 
 
 def _close_running_items(con, plan_id: str, plan_status: str, now: int) -> None:
@@ -366,7 +399,10 @@ def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None,
         items.append(item)
     roots = []
     by_parent: dict[str, list] = {}
+    paused = plan["status"] == "paused"
     for item in items:
+        # The record stays in_progress; while the goal is paused it is not running.
+        item["paused"] = paused and item["status"] == "in_progress"
         if item["parent_id"]:
             by_parent.setdefault(item["parent_id"], []).append(item)
         else:
@@ -382,10 +418,11 @@ def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None,
         bound += _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
-        from . import goal_ledger
+        from . import goal_ledger, goal_updater
 
         data["goal"]["documents"] = goal_documents(plan_id)
         data.update(goal_ledger.summary(data))
+        data["updater"] = goal_updater.public_state(plan_id)
     data["legacy"] = data["goal"] is None
     data["completion_verified"] = bool(data["goal"] and data["status"] == "completed")
     counts = {
@@ -629,8 +666,11 @@ def _goal_require_completion(con, plan):
         raise ValueError("required work remains unresolved")
     if any(r["status"] == "in_progress" for r in rows):
         raise ValueError("running work must be resolved or deferred before completion")
-    if goal and any(not c["evidence"].strip() for c in goal["criteria"]):
-        raise ValueError("completion requires evidence for every acceptance criterion")
+    if goal and any(not c["evidence"].strip() and not c.get("waived")
+                    for c in goal["criteria"]):
+        raise ValueError(
+            "completion requires evidence for every acceptance criterion "
+            "(or the owner's waiver of it, with a reason)")
     if not goal and any(r["status"] != "completed" for r in rows):
         raise ValueError("unfinished legacy work cannot be completed")
 
@@ -769,7 +809,11 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 "UPDATE task_plans SET status=?,completed_at=? WHERE plan_id=?",
                 (status, now if action in {"cancel", "supersede"} else None, plan_id),
             )
-            if action != "resume":
+            if action == "pause":
+                task_plans._freeze_running_items(con, plan_id, now)
+            elif action == "resume":
+                task_plans._thaw_running_items(con, plan_id, now)
+            else:
                 task_plans._close_running_items(
                     con, plan_id, "blocked" if action == "block" else "cancelled", now
                 )
@@ -799,8 +843,13 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
         elif action == "document":
             _write_goal_documents(con, plan_id, [data], now)
         elif action == "checkpoint":
-            if plan["status"] != "active":
+            paused = plan["status"] == "paused"
+            if plan["status"] not in {"active", "paused"}:
                 raise ValueError("resume goal before checkpointing")
+            if paused and data.get("continuation"):
+                raise ValueError(
+                    "Nothing was saved: the goal is paused, so a checkpoint records progress "
+                    "and evidence only. Send it again without continuation, or resume the goal first")
             progress = str(data.get("progress") or "").strip()
             next_work = str(data.get("next_work") or "").strip()
             if not progress or not next_work:
@@ -817,7 +866,8 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 next_work=next_work,
                 evidence=data.get("evidence") or {},
             )
-            wake = data.get("continuation") or {}
+            # Paused: the continuation is the pause's (rejected above if sent).
+            wake = {} if paused else (data.get("continuation") or {})
             kind = wake.get("kind", "timer")
             if kind not in {"timer", "dependency", "blocked"}:
                 raise ValueError("invalid continuation kind")
@@ -862,7 +912,9 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 f" (job {awaited['job_handle']})" if awaited["job_handle"] else ""
             )
             replaces = kind == "dependency" or wake.get("replace_dependency") is True
-            if pending and not wake:
+            if paused:
+                pass  # the pause owns the continuation; resume decides the next wake
+            elif pending and not wake:
                 # No continuation: the checkpoint is saved and the wake stands.
                 state.update(
                     generation=state["generation"] + 1,
@@ -1017,6 +1069,23 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                     due_at=now + 120000,
                     reason="Plan revised; reassess current results",
                 )
+        elif action in {"waive", "unwaive"}:
+            # A criterion that will not be met as written (a target the work
+            # fell short of, a requirement that changed) can be set aside by
+            # the owner, with a reason, so the goal can complete honestly
+            # instead of being cancelled. The waiver is shown, never hidden.
+            cid = str(data.get("criterion_id") or "")
+            criterion = next((c for c in goal["criteria"] if c["id"] == cid), None)
+            if criterion is None:
+                raise ValueError("unknown criterion")
+            if action == "waive":
+                if not reason:
+                    raise ValueError("waiving a criterion requires a reason")
+                criterion["waived"] = dict(at=now, reason=reason[:2000])
+            else:
+                if not criterion.get("waived"):
+                    raise ValueError("criterion is not waived")
+                criterion.pop("waived", None)
         elif action == "add_step":
             if not reason:
                 raise ValueError("plan adaptation requires a reason")
@@ -1233,3 +1302,96 @@ def recovery_owns_agent(agent_id):
         .fetchone()
         is not None
     )
+
+
+# ---- the goal updater's write path (lib/goal_updater.py) -------------------
+
+UPDATER_STEP_STATUSES = {"pending", "in_progress", "completed", "blocked"}
+# Steps the owner closed stay closed: the updater records progress, it does not
+# reopen decisions (a completed, skipped, deferred or removed step).
+_UPDATER_FROZEN = {"completed", "skipped", "deferred", "removed"}
+
+
+def updater_apply(
+    plan_id: str,
+    *,
+    seen_revision: int,
+    steps: dict[str, dict],
+    progress: str,
+    next_work: str,
+    model: str,
+    source_refs: list[str],
+    through_ms: int = 0,
+    through_event: int = 0,
+) -> dict:
+    """Record what the goal updater observed, beside the owner's own record.
+
+    ``steps`` maps item_id -> {"status", "note"}. Only step statuses and the
+    updater's own checkpoint (``goal["updater"]``) change: never the plan's
+    status, its continuation, criteria or evidence, and never the owner's
+    checkpoint. The plan revision is not bumped, so the owner's next
+    revision-checked command is never refused because of the updater; instead
+    the write is refused when the owner changed the plan since the updater
+    read it (``seen_revision``), and the updater reads again.
+    Returns {"changed_steps": [...], "stored": bool}.
+    """
+    from . import goal_ledger
+
+    progress = str(progress or "").strip()[:2000]
+    next_work = str(next_work or "").strip()[:1000]
+    if not progress:
+        raise ValueError("updater checkpoint requires progress")
+    con = db.conn()
+    now = db.now_ms()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        plan = con.execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
+        if not plan or plan["status"] not in {"active", "paused"}:
+            raise ValueError("goal is closed")
+        if plan["revision"] != seen_revision:
+            raise ValueError("plan changed; reload before editing")
+        goal = json.loads(plan["goal_json"] or "{}")
+        if not goal:
+            raise ValueError("not a durable goal")
+        running = plan["status"] == "active"
+        rows = {r["item_id"]: r for r in con.execute(
+            "SELECT * FROM task_items WHERE plan_id=?", (plan_id,)).fetchall()}
+        changed = []
+        for item_id, wanted in steps.items():
+            row = rows.get(item_id)
+            status = str((wanted or {}).get("status") or "")
+            if not row or status not in UPDATER_STEP_STATUSES:
+                continue
+            if row["status"] in _UPDATER_FROZEN or row["status"] == status:
+                continue
+            active_ms = int(row["active_ms"] or 0)
+            if row["status"] == "in_progress" and row["started_at"]:
+                active_ms += max(0, now - int(row["started_at"]))
+            con.execute(
+                "UPDATE task_items SET status=?,started_at=?,completed_at=?,active_ms=? "
+                "WHERE item_id=?",
+                (status, now if status == "in_progress" and running else None,
+                 now if status == "completed" else None, active_ms, item_id))
+            changed.append({"item_id": item_id, "from": row["status"], "status": status,
+                            "note": str((wanted or {}).get("note") or "")[:500]})
+        # through_*: where the next update starts reading (lib/goal_updater.py).
+        goal["updater"] = dict(at=now, progress=progress, next_work=next_work, model=model,
+                               source_refs=list(source_refs)[:40],
+                               changed_steps=[c["item_id"] for c in changed],
+                               through_ms=int(through_ms or now),
+                               through_event=int(through_event or 0))
+        goal["history"].append(dict(
+            at=now, kind="updater", revision=plan["revision"],
+            detail={"reason": "Goal updater: " + progress[:200], "by": "goal-updater",
+                    "model": model, "steps": changed, "source_refs": list(source_refs)[:40]}))
+        with goal_ledger.acting_as("system", delegation_id="goal-updater"):
+            _goal_save(con, plan_id, goal)
+        con.execute("UPDATE task_plans SET updated_at=? WHERE plan_id=?", (now, plan_id))
+        from . import artifacts
+
+        artifacts.sync_plan(plan_id)
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    return {"changed_steps": changed, "stored": True}

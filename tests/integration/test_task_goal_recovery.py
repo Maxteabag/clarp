@@ -177,12 +177,19 @@ def test_external_result_and_user_pause_cancel_boundaries(host, outcome):
     p = host.request("/task-plans?session=rachel")["plans"][0]
     assert p["goal"]["continuation"]["dependency_result"]["outcome"] == outcome
     p = action(host, p, "pause", {"reason": "User paused this outcome"})
+    # A paused goal records progress (bookkeeping is not work), but never
+    # resumes silently: it stays paused and no wake is sent (counted below).
+    p = action(host, p, "checkpoint",
+               {"progress": "Must not resume silently", "next_work": "Do work"})
+    assert p["status"] == "paused"
+    assert p["goal"]["continuation"]["state"] == "paused"
     with pytest.raises(urllib.error.HTTPError) as error:
         action(
             host,
             p,
             "checkpoint",
-            {"progress": "Must not resume silently", "next_work": "Do work"},
+            {"progress": "Must not resume silently", "next_work": "Do work",
+             "continuation": {"kind": "timer", "due_at": int(time.time() * 1000) + 60000}},
         )
     assert error.value.code == 409
     p = action(host, p, "cancel", {"reason": "User cancelled this outcome"})

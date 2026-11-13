@@ -51,6 +51,39 @@
         },
         "ledger": {
           "$ref": "#/$defs/ledger_summary"
+        },
+        "updater": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "goal_updater (Host 96): the updater worker for this goal; in-memory, nulls after a Host restart.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "model": {
+              "type": "string"
+            },
+            "pending_since": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_run_at": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
         }
       }
     },
@@ -88,6 +121,25 @@
               },
               "evidence": {
                 "type": "string"
+              },
+              "waived": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "goal_updater (Host 96): the owner set this criterion aside; completion accepts it without evidence.",
+                "required": [
+                  "at",
+                  "reason"
+                ],
+                "properties": {
+                  "at": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -141,6 +193,51 @@
               "type": "integer"
             }
           }
+        },
+        "updater": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "goal_updater (Host 96): the goal updater's own checkpoint, beside the owner's checkpoint; never written by the owner.",
+          "required": [
+            "at",
+            "progress",
+            "next_work",
+            "model"
+          ],
+          "properties": {
+            "at": {
+              "type": "integer"
+            },
+            "progress": {
+              "type": "string"
+            },
+            "next_work": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "source_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "changed_steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "through_ms": {
+              "type": "integer"
+            },
+            "through_event": {
+              "type": "integer"
+            }
+          }
         }
       }
     },
@@ -174,6 +271,10 @@
             "string",
             "null"
           ]
+        },
+        "paused": {
+          "type": "boolean",
+          "description": "goal_updater (Host 96): the step is in_progress but its goal is paused, so it is not running and its clock is stopped."
         }
       }
     },
