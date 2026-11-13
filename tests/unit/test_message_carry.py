@@ -211,6 +211,62 @@ def test_a_tail_keeps_the_digests_of_the_rows_it_left_alone_and_hashes_the_rest(
     assert witnessed([{**old[0], "text": "edited"}, *old[1:]]) == ("row_transcript", None)
 
 
+# ---- the live rows of the session -----------------------------------------------
+
+def _live(name, text, *, trace, revision, kind="live", session=SESSION):
+    return {**_row(f"live-{name}", source=f"live:{trace}", text=text, seq=-900000,
+                   trace=trace, revision=revision, session=session), "kind": kind}
+
+
+def test_a_live_row_is_let_through_unless_a_reply_before_the_boundary_carries_its_trace():
+    """What the lane shows with real imports (test_rm_n14_live_rows.py), in
+    the comparator's own words. The boundary is at seq 5."""
+    old = [{**_row("m-1", seq=1, trace="old-turn", revision=1), "kind": None},
+           {**_row("m-2", seq=2, trace="old-turn", role="user", revision=2), "kind": None},
+           {**_row("m-7", seq=7, trace="running", revision=3), "kind": None},       # after the boundary
+           _live("left", "left by the old turn", trace="old-turn", revision=4, kind=None)]
+    before = _inputs(rows=old)
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+
+    def said(rows, rules=carry.RULES):
+        return _changed(before, _inputs(rows=rows), rules=rules, **stored)
+
+    running = _live("reply", "so far", trace="running", revision=9)
+    assert said([*old, running]) == ""                                   # a new one
+    assert said([*old, running], rules=carry.RULES[:3]) == "row_live"   # the rule not given
+    assert said([*old, {**running, "text": "further", "revision": 10}]) == ""
+    assert said(old[:3]) == ""                                           # the old one gone
+    assert said([*old, _live("stray", "no trace", trace=None, revision=9)]) == ""
+    # Of the old turn, whose reply m-1 lies before the boundary:
+    assert said([*old, _live("more", "other words", trace="old-turn", revision=9)]) == \
+        "live_row_of_old_reply"
+    assert said([*old[:3], {**old[3], "text": "rewritten", "revision": 9}]) == "live_row_of_old_reply"
+    assert said([*old[:3], {**old[3], "text": "rewritten"}]) == "live_row_of_old_reply"   # no new revision
+    # As it was when the frontier was published, it is not asked; and one
+    # harmful row among harmless ones is enough.
+    assert said([*old, running, _live("more", "x", trace="old-turn", revision=11)]) == \
+        "live_row_of_old_reply"
+    # A user row's trace is not a reply's, and a reply from the boundary on
+    # is in a tail's batch as well.
+    only_user = [old[1], old[2], _live("left", "left", trace="old-turn", revision=4, kind=None)]
+    recorded = carry.record(_inputs(rows=only_user), carry=stored, **WHERE)
+    changed = [*only_user[:2], {**only_user[2], "text": "rewritten", "revision": 9}]
+    assert carry.changed(recorded, _inputs(rows=changed), rules=frozenset(carry.RULES),
+                         carry=stored, boundary_seq=5, **WHERE) == ""
+
+
+def test_the_live_rows_rule_is_for_live_rows_of_this_session_only():
+    old = [{**_row("m-1", seq=1, trace="old-turn", revision=1), "kind": None}]
+    before = _inputs(rows=old)
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False)
+    final = {**_row("final-1", source="final:running", trace="running", revision=9), "kind": None}
+    elsewhere = _live("there", "x", trace="old-turn", revision=9, session="bs-2")
+    assert _changed(before, _inputs(rows=[*old, final]), **stored) == "row_final"
+    # Another session's rows are not this record's when it is the session's;
+    # when it is the agent's (carry_session_rows off) they count as before.
+    assert _changed(before, _inputs(rows=[*old, elsewhere]), **stored) == "row_other_session"
+
+
 # ---- the cases no lane reaches -------------------------------------------------
 
 def test_identical_rows_stand_under_any_rules():
@@ -275,12 +331,15 @@ def test_the_latest_user_row_counts_unless_the_checkpoint_says_no_reply_read_it(
     assert _changed(before, after, rules=(), initial_provenance_used=False) == "latest_user_row"
 
 
-def test_every_rule_has_its_switch_and_is_on_by_default():
+def test_every_rule_has_its_switch_and_the_live_rows_rule_is_off_until_switched_on():
     assert set(carry.RULES) == {key for key in inc._DEFAULTS if key.startswith("carry_")}
-    assert all(inc._DEFAULTS[rule] is True for rule in carry.RULES)
-    assert inc.carry_rules(inc._DEFAULTS) == frozenset(carry.RULES)
-    for rule in carry.RULES:
-        assert inc.carry_rules({**inc._DEFAULTS, rule: False}) == frozenset(carry.RULES) - {rule}
+    on = frozenset(carry.RULES) - {carry.LIVE_ROWS}
+    assert {rule for rule in carry.RULES if inc._DEFAULTS[rule] is True} == on
+    assert inc._DEFAULTS[carry.LIVE_ROWS] is False
+    assert inc.carry_rules(inc._DEFAULTS) == on
+    assert inc.carry_rules({**inc._DEFAULTS, carry.LIVE_ROWS: True}) == frozenset(carry.RULES)
+    for rule in on:
+        assert inc.carry_rules({**inc._DEFAULTS, rule: False}) == on - {rule}
     # A module the parser version does not hash would let a change to a rule
     # keep every checkpoint that was certified under the old one.
     assert "message_carry.py" in inc._COMMON_SOURCES
