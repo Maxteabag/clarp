@@ -340,3 +340,14 @@ def test_the_iphone_route_is_unchanged(host, google):
     [(payload, priority)] = fleet.apns
     assert set(payload) == {"aps"} and payload["aps"]["event"] == "update" and priority == "5"
     assert _messages(google) == []
+
+
+def test_the_started_server_feeds_the_android_sender_from_the_pusher(running_server):
+    import time
+    _base, _ctx, srv = running_server
+    for _ in range(100):
+        if getattr(srv, "live_activity_pusher", None) is not None:
+            break
+        time.sleep(0.05)
+    assert srv.live_activity_pusher._send_fcm is not None
+    assert isinstance(srv.live_activity_fcm, live_activity_fcm.FcmActivitySender)
