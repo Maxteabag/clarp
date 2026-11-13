@@ -347,8 +347,16 @@ def _codex_block_from_payload(payload: Any) -> dict[str, Any] | None:
     }
 
 
-def _fresh_codex_block(now_ms: int, *, row: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    if row is None:
+_ROW_NOT_READ: Any = object()
+
+
+def _fresh_codex_block(now_ms: int, *, row: dict[str, Any] | None = _ROW_NOT_READ,
+                       ) -> dict[str, Any] | None:
+    """The block the stored Codex row carries, when it still holds. ``row``
+    is that row as the caller has just read it; None means there is none,
+    which is the caller's answer and is not read again (the agent snapshot
+    asks on every build)."""
+    if row is _ROW_NOT_READ:
         row = _row(CODEX)
     raw = _decode_raw(row)
     block = raw.get("blocked")
