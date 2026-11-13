@@ -614,6 +614,16 @@ class ClaudeBackend(Backend):
                     if (isinstance(info, dict)
                             and info.get("status") in {"rejected", "blocked"}
                             and not saw_usage_limit):
+                        # Keep the provider's actual limiting window. A generic
+                        # usage message alone cannot distinguish model quota,
+                        # the rolling session window, and disabled overage.
+                        detail = {"trace": trace_id, "agent": agent_id}
+                        for key in ("status", "rateLimitType", "utilization", "resetsAt",
+                                    "overageStatus", "overageDisabledReason", "isUsingOverage"):
+                            value = info.get(key)
+                            if isinstance(value, (str, int, float, bool)):
+                                detail[key] = value[:80] if isinstance(value, str) else value
+                        log("claudeRateLimitRejected", json.dumps(detail, sort_keys=True))
                         saw_usage_limit = True
                         if on_error is not None:
                             on_error("Claude usage limit reached")
