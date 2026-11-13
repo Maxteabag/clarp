@@ -211,6 +211,60 @@ Background sync (`kind = sync`, only with `[apns] background_sync = true`):
 `session` and `agent_id`; no alert. Budgeted like iPhones' (three an hour,
 ten minutes apart per session).
 
+## Agents working (feature `live_activity_fcm`, Host contract 95)
+
+The iPhone keeps its "agents working" Live Activity current by ActivityKit
+push (docs/live-items.md §8). An Android phone gets the same content state by
+FCM, on its own FCM push row, at the same moments. The feature is advertised
+only while the Host has a usable service account and live events flow (as
+`live_activity_push`).
+
+```
+POST   /devices/live-activity  {"platform": "fcm", "kind": "agents-working"}
+                               -> 200 {"ok": true, "platform": "fcm", "kind": "agents-working"}
+DELETE /devices/live-activity  {"platform": "fcm"}   (or POST with "ended": true)
+                               -> 200 {"ok": true, "removed": 1 | 0}
+```
+
+- Only a paired, full-scope, unrevoked device asks, for itself (the
+  administrator and a limited device: `403`). It must have registered its FCM
+  token first (`POST /devices`), else `409 fcm_push_token_required`. `kind` is
+  `agents-working` (left out: the same); another `400`. One registration per
+  device; asking again is idempotent.
+- The registration records the device; the messages go to that device's live
+  FCM push rows. So a rotated token is followed without asking again, and
+  `DELETE /devices`, a token taken over by another pairing (the new pairing
+  asks for itself), revocation and a limited scope stop them, by the push
+  row's rules above.
+
+The message is data-only, `android.collapse_key` `agents-working` (FCM keeps
+only the latest for an offline phone):
+
+| Key | Meaning |
+|---|---|
+| `kind` | `agents-working`. |
+| `event` | `update`, or `end` for the quiet state (`working` 0 and `needs_you` 0). |
+| `state` | The APNs push's `content-state` as one JSON string: `working`, `needs_you`, `decisions`, `lead`, `agents`, `updated_at_ms` (docs/live-items.md §8). |
+| `payload_version`, `server_instance_id`, `collapse_id` (`agents-working`), `sent_at` | As on every message. |
+
+- **Pace**: the Live Activity pusher's: routine changes at most every 15 s, a
+  structural change (an agent starting or ending work, a new lead) at least
+  10 s after the last push, a rising `needs_you` at once. The latest state
+  wins while one is held.
+- **Priority**: `HIGH` for a structural change or a rising `needs_you`,
+  `NORMAL` otherwise.
+- **Budget**: per device, counted apart from the iPhone's: a burst of 10
+  refilled evenly to 300 a UTC day, and at most 300 a UTC day per device
+  (a durable count). A 429 from Google (after the transport's own retries)
+  backs that device off from 60 s, doubling to 30 min; a delivered message
+  resets it. A token Google reports gone is disabled.
+- **The end**: when the fleet goes quiet the quiet state goes out once, with
+  `event: "end"` and `HIGH`, even when the device's budget is spent (only a
+  429 back-off delays it), because a suspended Android app cannot end its
+  notification itself.
+- **Start**: there is no start push; the first message of a working stretch
+  is an ordinary `update`, and the app starts its notification from it.
+
 ## Delivery and failures
 
 Sending happens on the same background threads, in the same batch and under

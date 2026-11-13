@@ -309,9 +309,13 @@ class LiveActivityPusher:
                  attention: Callable[[], dict[str, Any]] | None = None,
                  attention_refresh_sec: float = 30.0,
                  roster: Callable[[], list[dict[str, Any]]] | None = None,
-                 background: Callable[[Callable[[], None]], Any] | None = None):
+                 background: Callable[[Callable[[], None]], Any] | None = None,
+                 send_fcm: Callable[[dict[str, Any], bool], Any] | None = None):
         from .live_pacing import _thread_timer
         self._send = send
+        # The Android phones' sink (live_activity_fcm): the same state at the same moments, with
+        # high=True for a structural change or a rising needs_you.
+        self._send_fcm = send_fcm
         self._clock = clock
         self._schedule = schedule or _thread_timer
         self._min_interval = min_interval
@@ -459,7 +463,7 @@ class LiveActivityPusher:
         # budget up); either way the latest state goes out when the timer fires.
         floor = min(STRUCTURAL_FLOOR_SEC, self._min_interval) if structural else self._min_interval
         if urgent or now - self._last_sent >= floor:
-            self._push(state, detail, "10" if urgent else "5")
+            self._push(state, detail, "10" if urgent else "5", high=urgent or structural)
             return
         due = self._last_sent + floor
         if self._timer is not None and due < self._timer_due:
@@ -480,7 +484,7 @@ class LiveActivityPusher:
             self._timer = None
             self._consider()
 
-    def _push(self, state: dict[str, Any], detail: tuple, priority: str) -> None:
+    def _push(self, state: dict[str, Any], detail: tuple, priority: str, *, high: bool = False) -> None:
         if self._timer is not None:
             self._cancel_timer()
         self._sent_key = detail
@@ -491,3 +495,9 @@ class LiveActivityPusher:
         except Exception as exc:  # noqa: BLE001 - best effort, never the stream
             from .log import log_exception
             log_exception("liveActivityPushFail", exc)
+        if self._send_fcm is not None:
+            try:
+                self._send_fcm(state, high)
+            except Exception as exc:  # noqa: BLE001 - best effort, never the stream
+                from .log import log_exception
+                log_exception("liveActivityFcmPushFail", exc)

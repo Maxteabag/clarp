@@ -474,6 +474,11 @@ with a system timer. The Host never sends `end`: when nothing works it sends
 routine changes at most every 15 s at priority 5; a rising `needs_you` at once
 at priority 10; a turn starting or ending or a new lead at once (≥ 2 s apart).
 
+An Android phone gets the same content state by FCM at the same moments
+(feature `live_activity_fcm`, contract 95: `POST /devices/live-activity` with
+`"platform": "fcm"`; docs/push-android.md "Agents working"), with its own
+budget per device and a final `event: "end"` message when the fleet goes quiet.
+
 ## 9. Settled turns in `/log` (feature `log_turn_summary`)
 
 So a client can fold a finished turn (`Worked for 1m 12s · 6 tools`) from
