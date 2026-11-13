@@ -336,6 +336,7 @@ class HotseatProvider:
     confirms_json: bool
     auth_repair: HotseatAuthRepair | None = None
     model_scoped: bool = False
+    reset_command_field: str = ""
     # Flags that go after the read's subcommand when only "which account is in
     # use" is asked (the Hotseat desk, before a switch): they leave out what
     # that question does not need. Codex's quota probe is the slow part.
@@ -348,6 +349,7 @@ PROVIDERS: dict[str, HotseatProvider] = {
     "claude": HotseatProvider("5-hour", ("list", "--json"), 60, parse_claude, "claude_min_remaining",
                               "interval_seconds", lambda alias: ["switch", alias, "--yes", "--json"], True,
                               auth_repair=HotseatAuthRepair("claude", _repair_model_pin), model_scoped=True,
+                              reset_command_field="claude_reset_command",
                               desk=hotseat_desk_reading.CLAUDE_READING),
     "codex": HotseatProvider("weekly", ("codex", "--json"), 150, parse_codex, "codex_min_remaining",
                              "codex_interval_seconds", lambda alias: ["codex-account", "switch", alias], False,
