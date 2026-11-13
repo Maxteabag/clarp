@@ -128,14 +128,17 @@ def test_a_waived_criterion_lets_the_goal_complete_and_stays_visible(owner):
          evidence={pr["id"]: "PR #76 opened"})
     with pytest.raises(ValueError, match="waiver"):
         task_plans.finish(plan["plan_id"], revision=task_plans.get(plan["plan_id"])["revision"])
-    with pytest.raises(ValueError, match="reason"):
-        _act(plan["plan_id"], "waive", criterion_id=judges["id"])
-    _act(plan["plan_id"], "waive", criterion_id=judges["id"],
-         reason="Peter accepted 8/10 after ten rounds")
+    from lib import goal_ledger
+    with goal_ledger.acting_as("user"):  # the apps' route
+        with pytest.raises(ValueError, match="reason"):
+            _act(plan["plan_id"], "waive", criterion_id=judges["id"])
+        _act(plan["plan_id"], "waive", criterion_id=judges["id"],
+             reason="Peter accepted 8/10 after ten rounds")
     done = task_plans.finish(plan["plan_id"], revision=task_plans.get(plan["plan_id"])["revision"])
     assert done["status"] == "completed"
     waived = next(c for c in done["goal"]["criteria"] if c["id"] == judges["id"])
     assert waived["waived"]["reason"] == "Peter accepted 8/10 after ten rounds"
+    assert waived["waived"]["by"] == "user"
     assert waived["evidence"] == ""
 
 
@@ -495,3 +498,125 @@ def test_a_goal_paused_before_the_install_never_counts_its_paused_span(owner, th
                                  steps={item_id: {"status": "completed", "note": "Evidence: 'harness done'"}},
                                  progress="Harness done", next_work="n", model="m", source_refs=[])
     assert ran <= _active_ms(item_id) < ran + MIN, "the nine paused hours are not active time"
+
+
+
+# ---- only the user waives (review #311, finding 2) ----------------------------
+
+
+@pytest.mark.parametrize("paused", [False, True])
+@pytest.mark.parametrize("kind", ["owner", "delegate", "system", "peer", "unattributed"])
+def test_an_agent_cannot_waive_its_own_criteria_and_complete_without_evidence(owner, kind, paused):
+    from lib import goal_ledger
+    plan = _goal()
+    judges, pr = task_plans.get(plan["plan_id"])["goal"]["criteria"]
+    if paused:
+        _act(plan["plan_id"], "pause", reason="The user paused it")
+    for action in ("waive", "unwaive"):
+        with goal_ledger.acting_as(kind, owner if kind == "owner" else ""):
+            with pytest.raises(ValueError, match="only the user"):
+                _act(plan["plan_id"], action, criterion_id=judges["id"], reason="Close enough")
+    stored = task_plans.get(plan["plan_id"])
+    assert all("waived" not in c for c in stored["goal"]["criteria"])
+    assert stored["status"] == ("paused" if paused else "active")
+    if not paused:
+        for stable in ("harness", "climb", "pr"):
+            _step(plan, stable, "completed")
+        stored = task_plans.get(plan["plan_id"])
+        with pytest.raises(ValueError, match="evidence"):
+            task_plans.finish(plan["plan_id"], revision=stored["revision"])
+
+
+def test_the_users_waiver_can_be_restored_by_the_user_only(owner):
+    from lib import goal_ledger
+    plan = _goal()
+    judges = task_plans.get(plan["plan_id"])["goal"]["criteria"][0]
+    with goal_ledger.acting_as("user"):
+        _act(plan["plan_id"], "waive", criterion_id=judges["id"], reason="Accepted as is")
+    with goal_ledger.acting_as("owner", owner), pytest.raises(ValueError, match="only the user"):
+        _act(plan["plan_id"], "unwaive", criterion_id=judges["id"])
+    with goal_ledger.acting_as("user"):
+        _act(plan["plan_id"], "unwaive", criterion_id=judges["id"])
+    assert "waived" not in task_plans.get(plan["plan_id"])["goal"]["criteria"][0]
+
+
+class _Route:
+    """The apps' /task-plan/action handler with a request body and a turn identity."""
+
+    def __init__(self, body, caller=""):
+        from lib.routes.goals import GoalRoutes
+        self._body, self._caller, self.answer = body, caller, None
+        self._handle = GoalRoutes._handle_task_plan_action.__get__(self)
+
+    def _read_json(self):
+        return self._body
+
+    def _turn_caller(self):
+        return self._caller
+
+    def _json_ok(self, payload):
+        self.answer = (200, payload)
+
+    def _json_error(self, code, message):
+        self.answer = (code, message)
+
+
+def test_the_route_acts_for_the_user_only_without_an_agent_turn(owner):
+    plan = _goal()
+    judges = task_plans.get(plan["plan_id"])["goal"]["criteria"][0]
+
+    def waive(caller):
+        current = task_plans.get(plan["plan_id"])
+        route = _Route({"plan_id": plan["plan_id"], "revision": current["revision"], "action": "waive",
+                        "data": {"criterion_id": judges["id"], "reason": "Accepted as is"}}, caller)
+        route._handle()
+        return route.answer
+
+    code, message = waive(owner)          # an agent's turn calling the apps' route
+    assert code == 409 and "only the user" in message
+    code, payload = waive("")             # the apps, no turn identity
+    assert code == 200
+    assert next(c for c in payload["plan"]["goal"]["criteria"] if c["id"] == judges["id"])["waived"]["by"] == "user"
+
+
+# ---- the keeper gives its database connections back (review #311, finding 5) --
+
+
+def _open_db_handles():
+    import os
+    target = os.path.realpath(str(db.DB_PATH))
+    count = 0
+    for fd in os.listdir("/proc/self/fd"):
+        try:
+            if os.path.realpath(os.readlink(f"/proc/self/fd/{fd}")) == target:
+                count += 1
+        except OSError:
+            continue
+    return count
+
+
+def test_update_threads_and_the_batch_thread_give_their_connections_back(owner, helper):
+    keeper = _keeper()
+    keeper = janitors.set_enabled(keeper["session"], keeper["revision"], True)
+    plans = [_goal() for _ in range(3)]
+
+    def ask(run, prompt, plan_id):
+        return ({"steps": {}, "checkpoint": {"progress": "No change", "next_work": "Wait"}}, {}, "m")
+
+    worker = janitor_autonomy.AutonomyJanitors(dispatch=None, notify=None, goal_ask=ask)
+
+    def one_pass():
+        for plan in plans:
+            _message(owner, "assistant", "More work", at=db.now_ms() - 400_000, phase="final")
+            db.conn().execute("UPDATE task_plans SET created_at=created_at-500000 WHERE plan_id=?",
+                              (plan["plan_id"],))
+        worker.goal_keeper_once(wait=True)
+        config = janitors.get(keeper["session"])
+        goal_keeper.run_batch(config, {"run_id": "direct"}, [p["plan_id"] for p in plans],
+                              lambda prompt, plan_id: ask(None, prompt, plan_id), now=db.now_ms())
+
+    one_pass()  # the first pass opens the long-lived connections this thread keeps
+    before = _open_db_handles()
+    for _ in range(12):
+        one_pass()
+    assert _open_db_handles() <= before, "every keeper thread closed its own connection"

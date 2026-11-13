@@ -479,6 +479,10 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
             log_exception("goalKeeperUpdateFail", exc, detail=plan_id)
             conflict = "plan changed" in str(exc)
             return plan_id, "conflict" if conflict else "failed", f"{type(exc).__name__}: {exc}", {}
+        finally:
+            # Each pool thread opened its own connection: give it back (review #311,
+            # finding 5: 3 open handles before twelve passes, 25 after).
+            db.close_local()
 
     changed = 0
     with ThreadPoolExecutor(max_workers=width, thread_name_prefix="goal-keeper") as pool:
