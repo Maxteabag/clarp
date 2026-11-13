@@ -38,6 +38,13 @@ publication of that share of the tails, per size, through the import's own
 refusal path, as a foreign commit during a writer yield does on a live Host
 (the journal gives the shares: a ``checkpoint_foreign_commit_yield`` line
 just before a ``tail_applied`` one); the import after such a tail is full.
+Those shares are for a tail that yields before its first row. A tail under
+``tail_yield_after_first_write`` does not, so with that switch set the
+replay refuses none (measured on two real conversations with a second
+writer every 250 ms: 0 of 24 and 0 of 24, against 5 of 19 and 2 of 22).
+
+``--set key=value`` sets a ``[transcript_shadow]`` switch for the replay,
+for the rules and switches that are off by default.
 
 What it does not model: imports that fail to publish because another writer
 committed meanwhile or the file grew during the parse, transcripts with no
@@ -237,6 +244,10 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
 
     incremental._tail_log = recorded
     transcripts = work / "transcripts"
+    overlay = the_plan.get("settings") or {}
+    if overlay:
+        configured = incremental.settings
+        incremental.settings = lambda: {**configured(), **overlay}
     fence = the_plan.get("fence") or {}
     fenced = collections.Counter()
     current = {"bucket": "", "tail": False}
@@ -264,7 +275,9 @@ def run_segment(work: pathlib.Path, index: int) -> dict:
                 current["tail"] = False
 
         def publication(writer, status=None):
-            if current["tail"] and chance.random() < fence.get(current["bucket"], 0.0):
+            # A tail whose budget starts at its first write has no empty yield.
+            if current["tail"] and not isinstance(writer, message_writes._TailWriter) \
+                    and chance.random() < fence.get(current["bucket"], 0.0):
                 current["tail"] = False          # once per tail
                 writer._publication_refusals.add("foreign_commit_yield")
                 fenced[current["bucket"]] += 1
@@ -385,6 +398,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--live-rows-pass", action="store_true",
                         help="what-if: a tail's guard does not name row_live")
     parser.add_argument("--seed", type=int, default=1, help="for the tails --fence refuses")
+    parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                        help="a [transcript_shadow] switch for the replay, as carry_live_rows=true")
     parser.add_argument("--fence", default="",
                         help="what-if: the share of tails whose publication is refused, "
                              "per size, as lt16m=0.027,lt64m=0.119")
@@ -404,6 +419,8 @@ def main(argv: list[str]) -> int:
     the_plan["inputs"] = args.inputs
     the_plan["live_rows_pass"] = args.live_rows_pass
     the_plan["seed"] = args.seed
+    the_plan["settings"] = {key: {"true": True, "false": False}.get(value.lower(), value)
+                            for key, value in (item.split("=", 1) for item in args.set)}
     the_plan["fence"] = {size: float(share) for size, share in
                          (item.split("=") for item in args.fence.split(",") if item)}
     (work / "plan.json").write_text(json.dumps(the_plan))
@@ -438,6 +455,7 @@ def main(argv: list[str]) -> int:
         "journal_imports": the_plan["journal_events"], "replayed_imports": totals["imports"],
         "sample": scale, "host_starts_replayed": len(the_plan["starts"]),
         "changed_inputs_model": the_plan["inputs"],
+        "settings": the_plan["settings"],
         "what_if_live_rows_pass": the_plan["live_rows_pass"],
         "what_if_tails_refused_publication": dict(fenced),
         "sessions": len(the_plan["sessions"]),
