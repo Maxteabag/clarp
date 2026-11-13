@@ -176,6 +176,24 @@ def switcher(monkeypatch):
     return owner, worker, readings, calls, sent
 
 
+def test_exhausted_switcher_resets_then_rereads_before_switch(switcher, monkeypatch):
+    from lib import janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,"rejected"))
+    monkeypatch.setattr(service,"_provider_model_demand",lambda *a: (("Fable",),("Fable",)))
+    def refill(field,models):
+        assert field=="claude_reset_command" and models==("Fable",)
+        calls.append(("reset",))
+        readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,0))
+        readings["claude"]["accounts"][1]["usage"]["scoped"]=[{"model":"Fable","used":0}]
+        return {"status":"redeemed","account":"ai2","verified":True}
+    monkeypatch.setattr(janitor_reset,"attempt",refill)
+    worker.hotseat_once()
+    reset_index=calls.index(("reset",))
+    assert any(c[0]=="read" and c[2]=="claude" for c in calls[reset_index+1:])
+    assert ("switch","hotseat","claude","b") in calls
+
+
 def test_the_phone_is_pushed_only_when_no_account_can_serve(switcher):
     """Peter, 13 Nov 2026: no push for a switch; a push only when every account is out and work stopped."""
     owner, worker, readings, calls, sent = switcher
