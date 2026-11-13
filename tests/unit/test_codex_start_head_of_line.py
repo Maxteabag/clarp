@@ -87,8 +87,8 @@ def world(tmp_path, monkeypatch):
     release.set()
     # As test_codex_start_guardrails: an idle moment later, and a recycled
     # process that has exited, or the next test's quiescence gate fails.
-    from tests.unit.test_codex_start_guardrails import _leave_no_client_behind
-    _leave_no_client_behind()
+    from tests.codex_pool_lifecycle import retire_left_clients
+    retire_left_clients()
 
 
 def _hold_rachel(world):

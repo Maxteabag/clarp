@@ -80,9 +80,17 @@ _ABSENT = "\x00absent"
 
 
 def _digest(value) -> str:
-    """One digest of plain values (text, numbers, None, tuples, lists). The
-    pickle of equal values is equal bytes and of different values different
-    bytes; protocol 4 is fixed so that another process agrees. SHA-256,
+    """One digest of plain values (text, numbers, None, tuples, lists).
+
+    Different values never pickle to the same bytes, and that is all a
+    record rests on. The other direction does not hold and must not be built
+    on: values that compare equal can pickle differently (5 and 5.0, 1 and
+    True, a str subclass, one string object shared by two cells against two
+    equal strings). Such a difference only makes a digest differ where the
+    rows are the same, and a digest that differs costs a full import; it
+    never lets a changed row pass. The rows SQLite returns for unchanged
+    data pickle the same in every process (protocol 4 is fixed for that;
+    checked across Python 3.12 to 3.14 and two SQLite versions). SHA-256,
     which the processors this runs on compute in hardware; 128 bits kept."""
     return hashlib.sha256(pickle.dumps(value, protocol=4)).hexdigest()[:32]
 
@@ -284,6 +292,10 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         if part == "base" and not differing and witness is not None:
             witness["base"] = (recorded["base"], base, recorded["rows"]["base"])
     rows_stand = not found
+    # The old rows are both parts. No turn before the boundary has a row in
+    # the second part, but the traces the record was published with are the
+    # traces of both: asked of the first part alone, a turn row that changed
+    # would be refused for every conversation that has rows since its base.
     old = base + since if since else base
     said = None
     for row in new:

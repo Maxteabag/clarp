@@ -13,12 +13,11 @@ import subprocess
 import pytest
 
 from lib import agent_goals, agents, codex_app_server as cas
-from tests.unit.test_codex_start_guardrails import synthetic_pools  # noqa: F401 - a fixture
 from tests.unit.test_codex_stuck_and_switch import _client
 
 
 @pytest.fixture
-def pool(monkeypatch, synthetic_pools):  # noqa: F811 - the fixture, by its name
+def pool(monkeypatch):
     client = _client()
     client.process_group = False
     client.detached_agents = {'stopped-agent'}

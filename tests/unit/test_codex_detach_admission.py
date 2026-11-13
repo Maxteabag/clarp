@@ -12,11 +12,10 @@ from tests.codex_request import result_reply
 import threading
 
 from lib import agents, codex_app_server as cas, turn_lifecycle as tl
-from tests.unit.test_codex_start_guardrails import synthetic_pools  # noqa: F401 - a fixture
 from tests.unit.test_codex_stuck_and_switch import _client, _turn
 
 
-def test_quiet_recycle_cannot_kill_a_newly_admitted_turn(tmp_path, monkeypatch, synthetic_pools):  # noqa: F811
+def test_quiet_recycle_cannot_kill_a_newly_admitted_turn(tmp_path, monkeypatch):
     client = _client()
     client.detached_agents = {'stopped-agent'}
     client.process_group = False
@@ -78,7 +77,7 @@ def _stopped_agent(tmp_path, client):
     return stopped, stuck, other
 
 
-def test_late_started_for_a_detached_turn_does_not_readopt_it(tmp_path, monkeypatch, synthetic_pools):  # noqa: F811
+def test_late_started_for_a_detached_turn_does_not_readopt_it(tmp_path, monkeypatch):
     client = _client()
     client.process_group = False
     monkeypatch.setattr(cas, '_CLIENTS', {cas._SHARED_KEY: client})
@@ -93,7 +92,7 @@ def test_late_started_for_a_detached_turn_does_not_readopt_it(tmp_path, monkeypa
     assert stopped not in cas.busy_agents()
 
 
-def test_the_stopped_agent_is_held_until_the_stuck_process_is_recycled(tmp_path, monkeypatch, synthetic_pools):  # noqa: F811
+def test_the_stopped_agent_is_held_until_the_stuck_process_is_recycled(tmp_path, monkeypatch):
     client = _client()
     client.process_group = False
     monkeypatch.setattr(cas, '_CLIENTS', {cas._SHARED_KEY: client})
