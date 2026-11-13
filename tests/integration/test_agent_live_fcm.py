@@ -111,6 +111,11 @@ def _data(send):
     return send["json"]["message"]["data"]
 
 
+def _drain():
+    """Wait for the Android Live ring sends handed to the sender thread."""
+    assert agent_rings._LIVE_FCM_SENDER.drain()
+
+
 # ---- 1. the declaration on POST /devices -------------------------------------------------------
 
 def test_an_android_phone_declares_live_on_its_push_row_and_starts_a_live_call(host):
@@ -156,7 +161,8 @@ def test_a_live_ring_reaches_only_the_declared_android_phone_by_fcm_naming_conve
     assert status == 200, body
     ring = body["ring"]
     assert ring["conversation_mode"] == "agent_live_v1"
-    assert body["delivery"]["fcm_live"] == {"enabled": True, "sent": 1, "failed": 0, "disabled": 0}
+    assert body["delivery"]["fcm_live"] == {"pending": 1}               # sent off the request thread
+    _drain()
     [send] = google.send_calls
     message = send["json"]["message"]
     assert message["token"] == ANDROID and message["android"]["priority"] == "HIGH"
@@ -174,6 +180,7 @@ def test_a_live_ring_reaches_only_the_declared_android_phone_by_fcm_naming_conve
         "ring_id": ring["ring_id"], "conversation_mode": "agent_live_v1", "request_id": "r-1",
         "client_nonce": "n-1"})
     assert status == 200 and answer["conversation_mode"] == "agent_live_v1" and answer["live"]
+    _drain()
     assert [(_data(s)["ring_state"], _data(s)["conversation_mode"], s["json"]["message"]["token"])
             for s in google.send_calls] == [("ringing", "agent_live_v1", ANDROID),
                                             ("answered", "agent_live_v1", ANDROID)]
@@ -185,6 +192,7 @@ def test_every_later_state_of_a_live_ring_reaches_the_android_phone(host, google
     assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
     ring = _live_ring(base)[1]["ring"]
     assert _call(base, phone["token"], "POST", "/calls/ring/decline", {"ring_id": ring["ring_id"]})[0] == 200
+    _drain()
     assert [_data(s)["ring_state"] for s in google.send_calls] == ["ringing", "declined"]
     assert {_data(s)["conversation_mode"] for s in google.send_calls} == {"agent_live_v1"}
 
@@ -354,6 +362,147 @@ def test_an_iphone_and_an_android_phone_each_get_their_own_live_push(host, googl
     agent_rings.register_voip_token(iphone["device_id"], "cd" * 32, supported_conversation_modes=LIVE)
     assert _android(base, android, supported_conversation_modes=LIVE)[0] == 200
     status, body = _live_ring(base)
-    assert status == 200 and body["delivery"]["voip"]["sent"] == 1 and body["delivery"]["fcm_live"]["sent"] == 1
+    assert status == 200 and body["delivery"]["voip"]["sent"] == 1 and body["delivery"]["fcm_live"] == {"pending": 1}
+    _drain()
     assert voip == [[iphone["device_id"]]]
     assert [s["json"]["message"]["token"] for s in google.send_calls] == [ANDROID]
+
+
+# ---- Arnold's review of 4b11d5d3 -------------------------------------------------------------------
+
+class _HangingGoogle:
+    """The fake Google, except that an FCM send hangs until released (or 10 s pass)."""
+
+    def __init__(self, google):
+        import threading
+        self.google, self.entered, self.release = google, threading.Event(), threading.Event()
+
+    def client(self, *a, **k):
+        return self
+
+    def close(self):
+        pass
+
+    def post(self, url, **kw):
+        if url == SEND:
+            self.entered.set()
+            self.release.wait(10)
+        return self.google.post(url, **kw)
+
+
+@pytest.fixture
+def hanging(google, monkeypatch):
+    import httpx
+    fake = _HangingGoogle(google)
+    monkeypatch.setattr(httpx, "Client", fake.client)
+    yield fake
+    fake.release.set()
+    _drain()
+
+
+def _store_ring(ring_id, *, live, expired):
+    record = {"ring_id": ring_id, "session": "rk-sander-0001", "agent_id": "a-sander", "persona": "Sandra",
+              "reason": "r", "opening_line": "o", "opening_audio_url": "", "state": "ringing", "created_at": 1,
+              "expires_at": 1 if expired else agent_rings.now_ms() + 600_000, "ended_at": None,
+              "answered_by": "", "call_id": ""}
+    if live:
+        record["conversation_mode"] = "agent_live_v1"
+    with agent_rings._lock:
+        records = agent_rings._load()
+        records.append(record)
+        agent_rings._save(records)
+
+
+@pytest.mark.parametrize("live_ring", [False, True], ids=["classic", "live"])
+def test_a_missed_ring_announced_through_a_hanging_google_never_holds_the_iphones_poll(host, hanging, live_ring):
+    """Finding 1: the missed rings are collected under the ring lock and announced after it is released."""
+    import threading
+    import time
+    base = host
+    android, iphone = _pair(), _pair()
+    assert _android(base, android, supported_conversation_modes=LIVE)[0] == 200
+    assert _call(base, iphone["token"], "POST", "/devices", {"token": "a1" * 32, "session": "koko"})[0] == 200
+    _store_ring("rng_late", live=live_ring, expired=True)
+    expiry = threading.Thread(target=agent_rings.expire_due, daemon=True)   # what the ring's own timer runs
+    expiry.start()
+    assert hanging.entered.wait(5)                                       # the missed state is with Google
+    started = time.monotonic()
+    status, body = _call(base, iphone["token"], "GET", "/calls/ring")
+    assert status == 200 and body["ring"] is None
+    assert time.monotonic() - started < 1.0
+    assert next(r for r in agent_rings._load() if r["ring_id"] == "rng_late")["state"] == "missed"
+    hanging.release.set()
+    expiry.join(10)
+    _drain()
+    assert [_data(s)["ring_state"] for s in hanging.google.send_calls] == ["missed"]
+
+
+def test_the_callers_live_ring_does_not_wait_for_google(host, hanging):
+    """Finding 2: the Android state goes off the request thread; the answer says it is pending."""
+    import time
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    started = time.monotonic()
+    status, body = _live_ring(base)
+    assert status == 200 and body["delivery"]["fcm_live"] == {"pending": 1}
+    assert time.monotonic() - started < 1.0
+    assert hanging.entered.wait(5) and hanging.google.send_calls == []    # still with Google
+    hanging.release.set()
+    _drain()
+    assert [_data(s)["ring_state"] for s in hanging.google.send_calls] == ["ringing"]
+
+
+def test_without_a_usable_fcm_key_a_live_ring_is_refused_but_the_phones_own_live_call_works(host, tmp_path):
+    """Finding 3: no push can reach the phone, so the ring is 409 and the caller falls back."""
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    _config(tmp_path)                                                      # the service account is gone
+    assert _live_ring(base) == (409, {"ok": False, "error": "live_client_required"})
+    assert agent_rings.live_capable(phone["device_id"])                     # still capable for its own call
+    status, body = _call(base, phone["token"], "POST", "/calls/live",
+                         {"agent": "a-sander", "request_id": "req-k", "client_nonce": "n-k"})
+    assert status == 200 and body["conversation_mode"] == "agent_live_v1"
+
+
+def test_after_google_disables_the_token_the_next_live_ring_is_refused(host, google, monkeypatch):
+    """Finding 3: a row Google has just reported gone makes no ring recipient."""
+    from tests.unit.test_fcm import _fcm_error
+    monkeypatch.setattr(agent_rings, "AGENT_INTERVAL_MS", 0)              # the agent may ring again at once
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    google.sends = [_fcm_error(404, "UNREGISTERED", "NOT_FOUND")]
+    status, body = _live_ring(base)
+    assert status == 200
+    _drain()
+    assert _row(ANDROID)["disabled_at"] is not None
+    with agent_rings._lock:                                                # that ring has run out
+        records = agent_rings._load()
+        records[-1]["expires_at"] = 1
+        agent_rings._save(records)
+    agent_rings.expire_due()
+    context = _context()
+    context["event"] = {**context["event"], "id": "lw-2026-10-17-0002"}   # another event, not a replay
+    assert _call(base, ADMIN, "POST", "/calls/ring", {
+        "agent": "Sandra", "reason": "Vann igjen", "opening_line": OPENING,
+        "conversation_mode": "agent_live_v1", "event_context": context}) == (
+        409, {"ok": False, "error": "live_client_required"})
+
+
+def test_the_declaration_counts_only_on_an_android_registration(host):
+    """Finding 4: a token registered as platform ios with provider fcm keeps no declaration."""
+    base = host
+    phone = _pair()
+    token = "b2" * 32
+    assert _call(base, phone["token"], "POST", "/devices", {
+        "token": token, "platform": "ios", "provider": "fcm", "session": "koko",
+        "supported_conversation_modes": LIVE}) == (200, {"ok": True})
+    assert _row(token) == {"principal": phone["device_id"], "disabled_at": None,
+                           "supported_conversation_modes": ""}
+    assert not agent_rings.live_capable(phone["device_id"])
+    # Even a row that somehow carries one is not read unless it is an Android row.
+    db.conn().execute("UPDATE device_tokens SET supported_conversation_modes = ? WHERE token = ?",
+                      ('["agent_live_v1"]', token))
+    assert not agent_rings.live_capable(phone["device_id"])

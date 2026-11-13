@@ -194,8 +194,8 @@ class OpsRoutes:
         from lib.group_calls import CallError
         from lib.http_utils import principal_of
         platform = (data.get("platform") or "ios").strip() or "ios"
-        modes: list[str] = []
-        if apns.provider_for(platform, str(data.get("provider") or "")) == "fcm":
+        modes: list[str] = []   # an Android phone's declaration; any other registration ignores the field
+        if platform == "android" and apns.provider_for(platform, str(data.get("provider") or "")) == "fcm":
             try:
                 modes = agent_rings.conversation_modes(data.get("supported_conversation_modes"))
             except CallError as exc:

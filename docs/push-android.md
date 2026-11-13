@@ -129,10 +129,16 @@ on the same registration:
   `conversation_mode: "agent_live_v1"`, and gets them by FCM (below,
   "Agent rings"). Without it every Live route answers
   `409 live_client_required`, as before.
-- The field is ignored on an APNs (iPhone) registration, as it always was: an
-  iPhone declares its modes with its VoIP token.
-- The declaration is stored whether or not the Host has an FCM key; Live rings
-  reach the phone by FCM only while `push_fcm` is advertised.
+- The field is honoured only on an Android registration (`"platform":
+  "android"` with provider `fcm`). Any other registration ignores it, as it
+  always has: an iPhone declares its modes with its VoIP token.
+- The declaration is stored whether or not the Host has an FCM key, and the
+  phone's own Live call (`POST /calls/live`) needs none. But an agent's Live
+  **ring** counts the phone as a recipient only while a push can reach it:
+  the Host has a usable FCM key (`push_fcm` is advertised) and the row is live
+  (Google has not reported the token gone). With no such phone, and no
+  Live-capable iPhone, the ring answers `409 live_client_required`, which
+  tells the caller to fall back.
 
 ## Unregistering and revocation
 
@@ -255,7 +261,12 @@ Android rows that declared `agent_live_v1` (above, "Live calls") of a phone
 that receives rings, for every state (`ringing`, then `answered`, `declined`,
 `missed` or `cancelled` under the same `collapse_id`), with the same keys as a
 classic ring plus `conversation_mode`: `"agent_live_v1"`. A phone that cannot
-run Live never hears of one. iPhones get a Live ring by VoIP, as before.
+run Live never hears of one. iPhones get a Live ring by VoIP, as before. These
+FCM sends leave on their own thread, in order: the request that rang, answered
+or ended the call never waits for Google, and its `delivery.fcm_live` says
+`{"pending": <rows>}`. A ring that runs out is announced (`missed`) after the
+Host's ring lock is released, so a slow Google never holds another phone's
+`GET /calls/ring`.
 
 Background sync (`kind = sync`, only with `[apns] background_sync = true`):
 `session` and `agent_id`; no alert. Budgeted like iPhones' (three an hour,
