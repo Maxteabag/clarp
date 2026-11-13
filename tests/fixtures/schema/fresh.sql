@@ -1,4 +1,4 @@
--- user_version 124
+-- user_version 125
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -1062,7 +1062,8 @@ CREATE TABLE device_tokens (
     base_url TEXT NOT NULL DEFAULT '',
     push_grant TEXT NOT NULL DEFAULT '',
     principal TEXT NOT NULL DEFAULT '',
-    provider TEXT NOT NULL DEFAULT 'apns'
+    provider TEXT NOT NULL DEFAULT 'apns',
+    supported_conversation_modes TEXT NOT NULL DEFAULT ''
 );
 
 -- table dream_rounds on dream_rounds

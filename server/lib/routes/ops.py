@@ -178,16 +178,28 @@ class OpsRoutes:
 
         An Android phone registers its FCM registration token the same way,
         with {"platform": "android", "provider": "fcm"} (provider defaults to
-        "fcm" for android, "apns" otherwise); see docs/push-android.md."""
+        "fcm" for android, "apns" otherwise); see docs/push-android.md. An FCM
+        registration may add {"supported_conversation_modes": ["agent_live_v1"]}
+        (feature agent_live_fcm): stored with that push row, replaced by every
+        registration, and read by agent_rings.live_capable. An APNs registration
+        ignores the field, as it always has."""
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
         token = (data.get("token") or "").strip()
         if not token:
             return self._json_error(400, "token required")
-        from lib import apns
+        from lib import agent_rings, apns
         from lib.agent_ring_live import device_ok
+        from lib.group_calls import CallError
         from lib.http_utils import principal_of
+        platform = (data.get("platform") or "ios").strip() or "ios"
+        modes: list[str] = []   # an Android phone's declaration; any other registration ignores the field
+        if platform == "android" and apns.provider_for(platform, str(data.get("provider") or "")) == "fcm":
+            try:
+                modes = agent_rings.conversation_modes(data.get("supported_conversation_modes"))
+            except CallError as exc:
+                return self._json(exc.status, exc.body())
         # Provenance: only the AUTHENTICATED paired, full-scope, non-revoked device owns what it registers
         # (never a body field or the client-supplied session); every other registrant leaves it unbound.
         who = principal_of(self)
@@ -198,11 +210,12 @@ class OpsRoutes:
                 token,
                 session=(data.get("session") or "").strip() or None,
                 environment=(data.get("environment") or "").strip() or None,
-                platform=(data.get("platform") or "ios").strip() or "ios",
+                platform=platform,
                 base_url=(data.get("base_url") or "").strip(),
                 push_grant=str(data.get("push_grant") or ""),
                 owner=owner,
                 provider=str(data.get("provider") or ""),
+                conversation_modes=modes,
             )
         except apns.InvalidDeviceToken:
             return self._json(400, {"ok": False, "error": "device_token_invalid"})

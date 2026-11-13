@@ -84,6 +84,11 @@ def test_batch_skips_junk_items_and_caps_size():
                                      events=too_many)["stored"] == voice_events.MAX_BATCH
 
 
+def test_an_android_source_is_kept():
+    voice_events.record("ring_shown", source="android")
+    assert voice_events.query()[0]["source"] == "android"
+
+
 def test_unknown_source_is_kept_as_other_and_text_is_capped():
     voice_events.record("transcript", source="martian", text="x" * 10_000)
     row = voice_events.query()[0]
