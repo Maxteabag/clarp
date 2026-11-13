@@ -100,13 +100,15 @@ def test_the_matrix_shows_the_known_paths(monkeypatch):
     assert "_migrate_to_v122" in fresh["calls"]         # an additive index: a no-op after _create_schema
     assert "_migrate_to_v123" in fresh["calls"]         # a guarded column: a no-op after _create_schema
     assert "_migrate_to_v124" in fresh["calls"]         # a table created if missing: a no-op too
+    assert "_migrate_to_v125" in fresh["calls"]         # a guarded column: a no-op after _create_schema
     assert from_119["calls"] == ["_migrate_to_v121", "_migrate_to_v122", "_migrate_to_v123",
-                                 "_migrate_to_v124"]
+                                 "_migrate_to_v124", "_migrate_to_v125"]
     assert from_119["final"] == db_schema._SCHEMA_VERSION
     assert run_from(121, monkeypatch)["calls"] == ["_migrate_to_v122", "_migrate_to_v123",
-                                                   "_migrate_to_v124"]
-    assert run_from(122, monkeypatch)["calls"] == ["_migrate_to_v123", "_migrate_to_v124"]
-    assert run_from(123, monkeypatch)["calls"] == ["_migrate_to_v124"]
+                                                   "_migrate_to_v124", "_migrate_to_v125"]
+    assert run_from(122, monkeypatch)["calls"] == ["_migrate_to_v123", "_migrate_to_v124", "_migrate_to_v125"]
+    assert run_from(123, monkeypatch)["calls"] == ["_migrate_to_v124", "_migrate_to_v125"]
+    assert run_from(124, monkeypatch)["calls"] == ["_migrate_to_v125"]
 
 
 def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
@@ -119,4 +121,6 @@ def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
             assert "_migrate_to_v122" in result["calls"], start
         if start < 123:
             assert "_migrate_to_v123" in result["calls"], start
-        assert "_migrate_to_v124" in result["calls"], start
+        if start < 124:
+            assert "_migrate_to_v124" in result["calls"], start
+        assert "_migrate_to_v125" in result["calls"], start

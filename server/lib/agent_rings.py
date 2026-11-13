@@ -153,8 +153,11 @@ def current(principal: str | None = None) -> dict | None:
 # all, and a Live ring never falls back to the global alert push. Classic rings are unchanged.
 
 def live_capable(principal: str | None) -> bool:
-    """The principal's VoIP registration says it can run a Live call.
+    """The principal's VoIP registration, or its Android push row, says it can run a Live call.
 
+    Two declarations count: an iPhone's VoIP registration (POST /calls/ring/voip-token) and an
+    Android phone's FCM push row (POST /devices with supported_conversation_modes,
+    _live_device_rows: live, owned by that device, the device still paired with full scope).
     Read fresh at every use, never cached. An absent registration or one without
     agent_live_v1 is not capable. LIMIT (explicit, not a no-ring guarantee): the
     registration is the device's own last word. A phone that registered
@@ -163,7 +166,8 @@ def live_capable(principal: str | None) -> bool:
     events and VoIP. Only a fresh registration without agent_live_v1, or a
     forgotten token, removes it. The answer itself is still checked separately
     (WIRE-v2 decision 4)."""
-    return bool(principal) and any(row.get("principal") == principal for row in _live_tokens())
+    return bool(principal) and (any(row.get("principal") == principal for row in _live_tokens())
+                                or any(row["owner"] == principal for row in _live_device_rows()))
 
 
 def _visible(ring: dict, capable: bool) -> bool:
@@ -423,7 +427,7 @@ def _ring_live(*, caller_agent_id: str = "", agent: str = "", reason: str = "", 
             if replay is None:
                 _admit(caller, records)
                 if mode == live.MODE_LIVE:
-                    if not _eligible_live_tokens():   # capable AND receiving rings
+                    if not _eligible_live_principals():   # capable AND receiving rings
                         raise CallError(409, live.CLIENT_REQUIRED)
                     snapshot = live.build_snapshot(caller, context)
         except CallError as exc:
@@ -813,8 +817,15 @@ def _announce(ring: dict, kind: str, *, notice: bool = True) -> dict:
     if ring.get("conversation_mode") == MODE_LIVE:
         # H6: the global alert reaches every phone, also those that cannot run Live. A Live ring is
         # announced by VoIP to capable phones only, for its first ring and for every later state
-        # (answered, declined, missed, cancelled): no global alert, ever.
-        pass
+        # (answered, declined, missed, cancelled): no global alert, ever. An Android phone that
+        # declared agent_live_v1 on its push row gets every state by FCM instead, as a classic
+        # ring's alert reaches it, naming conversation_mode (docs/push-android.md "Live calls").
+        try:
+            fcm_live = _push_live_fcm(ring, kind)
+            if fcm_live is not None:
+                delivery["fcm_live"] = fcm_live
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentRingLiveFcmFail", exc, f"ring={ring['ring_id']}")
     elif not (delivery.get("voip") or {}).get("sent"):
         try:
             delivery.update(_push(ring, kind) or {})
@@ -849,6 +860,16 @@ def _hex_token(token: str) -> bool:
     return 32 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)
 
 
+def conversation_modes(value: Any) -> list[str]:
+    """A declared ``supported_conversation_modes``: absent (None) or a list of known modes, each at
+    most once; any other value is refused with 400 live_mode_invalid. The list, duplicates dropped."""
+    from . import agent_ring_live as live
+    if value is not None and (not isinstance(value, list) or len(value) > len(live.MODES)
+                              or any(not isinstance(m, str) or m not in live.MODES for m in value)):
+        raise CallError(400, live.MODE_INVALID)
+    return list(dict.fromkeys(value or ()))
+
+
 def register_voip_token(principal: str, token: str, *, environment: str = "production",
                         supported_conversation_modes: Any = None) -> dict:
     """The phone's PushKit VoIP token, one per principal. "" forgets it.
@@ -856,15 +877,11 @@ def register_voip_token(principal: str, token: str, *, environment: str = "produ
     ``supported_conversation_modes`` (absent: classic only) says which ring
     modes this phone can run; it is a delivery hint, never a credential, and an
     answer is still checked on its own (WIRE-v2 decision 4)."""
-    from . import agent_ring_live as live
     token = str(token or "").strip().lower()
     environment = "sandbox" if str(environment or "").lower() == "sandbox" else "production"
     if token and not _hex_token(token):
         raise CallError(400, "token must be hex")
-    modes = supported_conversation_modes
-    if modes is not None and (not isinstance(modes, list) or len(modes) > len(live.MODES)
-                              or any(not isinstance(m, str) or m not in live.MODES for m in modes)):
-        raise CallError(400, live.MODE_INVALID)
+    modes = conversation_modes(supported_conversation_modes)
     with _lock:
         raw = settings_store.get(VOIP_KEY)
         rows = {r["principal"]: r for r in (json.loads(raw) if raw else [])}
@@ -872,7 +889,7 @@ def register_voip_token(principal: str, token: str, *, environment: str = "produ
             rows[principal] = {"principal": principal, "token": token, "environment": environment,
                                "updated_at": now_ms()}
             if modes:
-                rows[principal]["supported_conversation_modes"] = list(dict.fromkeys(modes))
+                rows[principal]["supported_conversation_modes"] = modes
         else:
             rows.pop(principal, None)
         settings_store.set_text(VOIP_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
@@ -904,8 +921,40 @@ def _receiving(tokens: list[dict]) -> list[dict]:
 
 
 def _eligible_live_tokens() -> list[dict]:
-    """Phones that can run a Live call and still receive rings: the only ones a Live ring may admit for."""
+    """iPhones that can run a Live call and still receive rings: the VoIP pushes of a Live ring."""
     return _receiving(_live_tokens())
+
+
+def _live_device_rows() -> list[dict]:
+    """Android push rows (POST /devices) that declared agent_live_v1, of a device still paired with
+    full scope. A row disabled (DELETE /devices, rotation, revocation), taken over by another pairing
+    (its owner changed) or re-registered without the declaration no longer appears here."""
+    from . import apns
+    from .agent_ring_live import MODE_LIVE, device_ok
+    return [row for row in apns.declared_mode_rows()
+            if MODE_LIVE in row["supported_conversation_modes"] and str(row["owner"]).startswith("device_")
+            and device_ok(row["owner"])]
+
+
+def _eligible_live_principals() -> set[str]:
+    """Phones that can run a Live call and still receive rings, by either declaration: the only ones a
+    Live ring may admit for."""
+    principals = {row.get("principal") for row in _eligible_live_tokens()}
+    off = {row["principal"] for row in device_prefs()}
+    principals |= {row["owner"] for row in _live_device_rows() if row["owner"] not in off}
+    return {p for p in principals if p}
+
+
+def _push_live_fcm(ring: dict, kind: str) -> dict | None:
+    """One Live ring state by FCM to the Android phones that declared agent_live_v1 and receive rings.
+    None (nothing sent, nothing reported) when there is none, so a Host without such a phone answers
+    exactly as before."""
+    from . import apns
+    off = {row["principal"] for row in device_prefs()}
+    rows = [row for row in _live_device_rows() if row["owner"] not in off]
+    if not rows:
+        return None
+    return apns.send_agent_ring(ring, kind, tokens=rows)
 
 
 def _push(ring: dict, kind: str) -> dict:
