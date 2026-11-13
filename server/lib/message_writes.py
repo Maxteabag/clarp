@@ -822,6 +822,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           on_stored=None,
                           expected_prelude=None,
                           carry_rules=frozenset(),
+                          carry_witness: dict | None = None,
                           checkpoint_status: dict | None = None,
                           ) -> list[dict[str, Any]]:
     """Apply a certified tail through the full import's admission protocol.
@@ -831,26 +832,36 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     The optional durable checkpoint shares the final row transaction and
     the full import's savepoint failure handling.
 
-    ``expected_prelude`` are the rows the frontier was published with. The
-    tail is refused (``_TailInvalidated``, its ``what`` naming the rows) when
-    a row the turns before ``start_seq`` could read has changed since;
-    ``carry_rules`` name what they cannot read (lib.message_carry).
+    ``expected_prelude`` is the record of the rows the frontier was
+    published with (lib.message_carry.record; raw rows are recorded here).
+    The tail is refused (``_TailInvalidated``, its ``what`` naming the rows)
+    when a row the turns before ``start_seq`` could read has changed since;
+    ``carry_rules`` name what they cannot read. ``carry_witness`` receives
+    what the next record can build on (lib.message_carry.record).
     """
     visible_replies = _visible_replies(turns)
     phases = _row_phases(turns)
     database = _facade().conn()
     writer = _ImportWriter(database, locked=False)
 
+    judged = None
+
     def guard(prepared) -> None:
+        nonlocal judged
         if expected_prelude is None:
             return
+        rows = prepared.raw_carry_inputs()
+        if judged is not None and rows == judged:
+            return      # the rows the probe read and found standing, to the last value
         what = prepared.carry_change(
             expected_prelude, rules=carry_rules, carry=carry, boundary_seq=start_seq,
-            source_file=source_file, backend_session_id=backend_session_id)
+            source_file=source_file, backend_session_id=backend_session_id,
+            witness=carry_witness)
         if what:
             refusal = _TailInvalidated("tail_carry_inputs_changed")
             refusal.what = what
             raise refusal
+        judged = rows
 
     try:
         prelude = _prepare_import_prelude(
@@ -937,12 +948,20 @@ class _ImportPrelude:
         return (self.turn_index._rows, self.client_rows, self.user_provenance,
                 self.carry_rows, self.oracle_rows)
 
-    def carry_change(self, previous, **context) -> str:
+    def carry_change(self, previous, *, rules=frozenset(), carry=None, boundary_seq=0,
+                     source_file="", backend_session_id="", witness=None) -> str:
         """'' when the rows ``previous`` recorded still stand for the turns
         before the boundary, else what changed (lib.message_carry.changed).
-        Raw rows are compared; revisions/counts alone cannot certify carry."""
-        expected = previous.raw_carry_inputs() if isinstance(previous, _ImportPrelude) else previous
-        return message_carry.changed(expected, self.raw_carry_inputs(), **context)
+        Every column of every row is compared, through the record's digests;
+        revisions/counts alone cannot certify carry."""
+        where = dict(carry=carry, source_file=source_file,
+                     backend_session_id=backend_session_id, session_rows=self.session_rows)
+        if isinstance(previous, _ImportPrelude):
+            previous = previous.raw_carry_inputs()
+        if not isinstance(previous, dict):
+            previous = message_carry.record(previous, **where)
+        return message_carry.changed(previous, self.raw_carry_inputs(), rules=rules,
+                                     boundary_seq=boundary_seq, witness=witness, **where)
 
     def for_pass(self) -> _ImportPrelude:
         return _ImportPrelude(

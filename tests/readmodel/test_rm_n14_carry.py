@@ -19,6 +19,13 @@ candidate, both databases given the same rows:
 
 The comparison comes before any word about the decision, so that a missing
 condition shows as different products, not as a different code.
+
+Every test runs three times, for the three places a frontier can be when the
+import comes: held by the process, taken from the store by a new process (a
+Host start), and pushed out of the process's cache by other conversations
+(taken from the store again). What the frontier keeps of the rows is a
+record of constant size, the same in the process and in the store, so the
+decisions are the same in all three.
 """
 from __future__ import annotations
 
@@ -57,8 +64,21 @@ def _turn(backend: str, ordinal: int, *, request: str | None = None) -> bytes:
     return data.replace(words, _escaped(request))
 
 
+STATES = ("held", "after a Host start", "evicted")
+
+
+@pytest.fixture(autouse=True, params=STATES)
+def frontier_state(request):
+    """Where the frontier is when each import after the first two comes."""
+    World.state = request.param
+    yield request.param
+    World.state = "held"
+
+
 class World:
     """Both lanes over one transcript; every row is written to both stores."""
+
+    state = "held"
 
     def __init__(self, tmp_path, backend, history, *, settings=None):
         self.backend = backend
@@ -73,6 +93,7 @@ class World:
             self.faults["settings"] = settings
         self.tick = 0
         self.rows = 0
+        self.standing = False     # a frontier has been published
 
     def __enter__(self):
         self.full = harness.PersistentLane(self.reference, self.transcript, self.backend, "reference")
@@ -90,15 +111,20 @@ class World:
             with sqlite3.connect(database) as other:
                 assert other.execute(sql, parameters).rowcount == 1
 
+    def next_revision(self, other) -> int:
+        return other.execute(
+            "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
+        ).fetchone()[0]
+
     def message(self, message_id, *, source_file, role, text, at, origin="user", sender=None,
-                trace=None, session=corpus.SESSION):
-        """A message row as its writer leaves it, under the clock's next revision."""
+                trace=None, session=corpus.SESSION, revision=None):
+        """A message row as its writer leaves it, under the clock's next
+        revision (or, for a row that claims to be an old one, ``revision``)."""
         self.rows += 1
+        claimed = revision
         for database in (self.reference, self.candidate):
             with sqlite3.connect(database) as other:
-                revision = other.execute(
-                    "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
-                ).fetchone()[0]
+                revision = self.next_revision(other) if claimed is None else claimed
                 other.execute(
                     "INSERT INTO messages(message_id,agent_id,backend_session_id,source_file,seq,role,"
                     "timestamp,text,updated_at,revision,origin,sender_agent_id,trace_id) "
@@ -127,10 +153,20 @@ class World:
     def imported(self):
         """Run both lanes, compare every product table, THEN say what the
         candidate decided and which rows it named."""
+        faults = self.faults
+        if self.standing and self.state == "after a Host start":
+            self.actual.__exit__(None, None, None)
+            self.actual = harness.PersistentLane(
+                self.candidate, self.transcript, self.backend, "candidate")
+            self.actual.__enter__()
+        elif self.standing and self.state == "evicted":
+            faults = {**faults, "evict": True}
         self.full.tick(self.tick, faults=self.faults)
-        report = self.actual.tick(self.tick, faults=self.faults)
+        report = self.actual.tick(self.tick, faults=faults)
         self.tick += 1
         harness.assert_product_equal(self.reference, self.candidate)
+        if self.standing:
+            assert report["frontier_held"] is (self.state == "held")
         [event] = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
         return event["code"], [word for line in report["carry_changed"]
                                for word in line.removeprefix("what=").split(",")]
@@ -140,6 +176,7 @@ class World:
         assert self.imported()[0] == "full_no_frontier"
         self.grow(_turn(self.backend, turns))
         assert self.imported() == ("tail_applied", [])
+        self.standing = True
         return turns + 1
 
 
@@ -171,31 +208,87 @@ def test_a_row_in_another_session_of_the_agent_does_not_cost_a_full_import(
         assert world.imported() == ("tail_applied", [])
 
 
-@pytest.mark.parametrize("twin", ["a finalized row with an old reply's words",
-                                  "an old row edited", "an old row removed"])
+@pytest.mark.parametrize("twin", [
+    "a finalized row with an old reply's words",
+    "the same row, claiming an old revision",
+    "an old row edited without a new revision",
+    "an old row edited with a new revision",
+    "an old row removed",
+    "a row that a tail wrote, edited",
+    "an old linked /send row reworded",
+])
 @BACKENDS
 def test_a_row_of_this_session_that_an_old_turn_reads_is_a_full_import(tmp_path, backend, twin):
-    """The twins: the same kinds of row, in this session. A full replay
-    removes a finalized row that shows an old reply's words beside that reply,
-    puts an edited row back and writes a removed one again."""
+    """The twins: rows of this session. A full replay removes a finalized row
+    that shows an old reply's words beside that reply, puts an edited row
+    back, writes a removed one again, and no longer links a turn to a /send
+    row whose words were changed.
+
+    They are also the shapes the record's mark has to catch, none of which
+    trusts the revision. A new row lies above the mark and is judged as new.
+    A row that appears with a revision at or below the mark lands among the
+    old rows and breaks their digest. An old row edited without a new
+    revision changes its digest; edited with one, or removed, it is missing
+    from it. The same for a row a tail wrote after the first full import:
+    those are hashed apart from the rows before them."""
     with World(tmp_path, backend, _history(backend)) as world:
+        world.send("linked", "synthetic request 3", at=2900)
         ordinal = world.started(6)
-        if twin.startswith("a finalized"):
+        answer = ("backend_session_id=? AND role='assistant' AND text='synthetic answer 2'",
+                  (corpus.SESSION,))
+        if twin.startswith(("a finalized", "the same row")):
             world.message("final-twin", source_file="final:twin", role="assistant",
-                          text="synthetic answer 2", at=2000, trace="twin")
+                          text="synthetic answer 2", at=2000, trace="twin",
+                          revision=1 if twin.endswith("old revision") else None)
             expected = "row_final"
-        elif twin.endswith("edited"):
-            world.write("UPDATE messages SET text='edited by another writer' "
-                        "WHERE backend_session_id=? AND role='assistant' AND text='synthetic answer 2'",
-                        (corpus.SESSION,))
+        elif twin.endswith("without a new revision"):
+            world.write(f"UPDATE messages SET text='edited by another writer' WHERE {answer[0]}",
+                        answer[1])
+            expected = "row_transcript"
+        elif twin.endswith("with a new revision"):
+            for database in (world.reference, world.candidate):
+                with sqlite3.connect(database) as other:
+                    assert other.execute(
+                        f"UPDATE messages SET text='edited by another writer', revision=? "
+                        f"WHERE {answer[0]}", (world.next_revision(other), *answer[1])).rowcount == 1
+            expected = "row_transcript"
+        elif twin.endswith("removed"):
+            world.write(f"DELETE FROM messages WHERE {answer[0]}", answer[1])
+            expected = "row_transcript"
+        elif twin.startswith("a row that a tail wrote"):
+            world.write("UPDATE messages SET text='edited by another writer' WHERE backend_session_id=? "
+                        "AND role='assistant' AND text='synthetic answer 6'", (corpus.SESSION,))
             expected = "row_transcript"
         else:
-            world.write("DELETE FROM messages WHERE backend_session_id=? AND role='assistant' "
-                        "AND text='synthetic answer 2'", (corpus.SESSION,))
-            expected = "row_transcript"
+            for database in (world.reference, world.candidate):
+                with sqlite3.connect(database) as other:
+                    assert other.execute(
+                        "UPDATE messages SET text='other words now', revision=? WHERE message_id='u-linked'",
+                        (world.next_revision(other),)).rowcount == 1
+            expected = "row_send"
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", [expected])
         world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+@BACKENDS
+def test_a_message_that_came_after_the_full_import_is_an_old_row_once_a_tail_has_published(
+        tmp_path, backend):
+    """The rows a frontier is published with are hashed in two parts: those
+    of the last full import, and those written since. A new message with new
+    words is let through and is then one of the second part. Reworded
+    afterwards to the words of an old turn, with no new revision, it is an
+    old row that changed: a full replay links that old turn to it."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("later", "words nobody said before", at=FAR)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        world.write("UPDATE messages SET text='synthetic request 2' WHERE message_id='u-later'")
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("full_carry_inputs_changed", ["row_send"])
+        world.grow(_turn(backend, ordinal + 2))
         assert world.imported() == ("tail_applied", [])
 
 
@@ -301,17 +394,35 @@ def test_an_ordinary_new_message_is_imported_by_its_tail(tmp_path, backend, rule
                              else ["latest_user_row", "row_send", "turn_rows"])
 
 
+@pytest.mark.parametrize("words", ["synthetic request 2", "  synthetic request 2 \n"],
+                         ids=["the same words", "with other whitespace around them"])
 @BACKENDS
 def test_a_new_message_with_the_words_of_an_old_turn_typed_in_a_terminal_is_a_full_import(
-        tmp_path, backend):
+        tmp_path, backend, words):
     """The twin. The old turn found no /send row when it was imported and is
-    stored as a transcript row. A full replay links it to the new row."""
+    stored as a transcript row. A full replay links it to the new row. The
+    linker compares stripped words, so the new row's words are stripped too:
+    spaces and a newline around them do not make them new."""
     with World(tmp_path, backend, _history(backend)) as world:
         ordinal = world.started(6)
-        world.send("again", "synthetic request 2", at=FAR)
+        world.send("again", words, at=FAR)
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
         world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+@pytest.mark.parametrize("words", ["Synthetic Request 2", "synthetic  request 2"],
+                         ids=["another case", "other whitespace inside"])
+@BACKENDS
+def test_words_the_linker_would_not_link_to_an_old_turn_are_new_words(tmp_path, backend, words):
+    """The other side of the same key: nothing but the strip. Another case
+    or another space between the words is another message to the linker, so
+    it is one here."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("nearly", words, at=FAR)
+        world.grow(_turn(backend, ordinal))
         assert world.imported() == ("tail_applied", [])
 
 
