@@ -45,11 +45,23 @@ copies web cookies. The automatic Hotseat Janitor invokes it only when no local
 account serves demand. The maintained runtime selector invokes the same adapter
 after native candidates fail and then probes the exact refilled local profile.
 
-The command receives `{"models":["claude-fable-5-2"]}` on stdin and has a 150-second
-deadline. Only exit zero plus `verified:true`, `status:redeemed|reconciled` and a
+The Host starts at most one command every ten minutes, recording admission before
+launch so restarts and concurrent service instances cannot bypass that budget.
+It runs off the shared Janitor loop, so a slow reset cannot block Codex or other
+Janitors. It receives `{"models":["claude-fable-5-2"]}` on stdin and has a 150-second
+deadline; timeout, shutdown or owner/Stop changes kill its owned process group,
+including children. Only exit zero plus `verified:true`, `status:redeemed|reconciled` and a
 canonical `account:aiN` permits a fresh account read and ordinary guarded routing.
+A completed command schedules a fresh ordinary account check. That read always
+passes through the same repair ledger, quarantine and in-flight withholding as
+every other check. Authentication withholding alone cannot admit a reset.
 Other outcomes remain visible in the Janitor summary and never prove recovery.
-Neither adapter nor Janitor claims affected turns made progress from a refill.
+Transient reset words do not change the exhaustion notification identity. A
+verified spent/reconciled reset gets one durable chat receipt, including when a
+fresh read fails; the provider remains unreadable rather than turning into a
+successful noop. As with other repair notes, this action receipt does not push:
+the user's push rule is reserved for stopped work. Neither adapter nor Janitor
+claims affected turns made progress from a refill.
 
 The maintained adapter redeems at most one fitting banked grant per attempt,
 only for exhausted weekly/Fable weekly buckets resetting more than 48 hours

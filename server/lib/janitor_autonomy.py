@@ -285,12 +285,15 @@ class AutonomyJanitors:
             own_locks={provider:threading.Lock() for provider in janitor_hotseat.PROVIDERS};hotseat_switch_lock=own_locks.__getitem__
         self.hotseat_switch_lock=hotseat_switch_lock
         self.auth_repair=janitor_hotseat.RepairWorker(self.stop_event)
+        from .janitor_reset import ResetWorker
+        self.reset_worker=ResetWorker(self.stop_event)
         if label_judge is None:
             from .judgment_sites import audit_work_labels as label_judge
         self.label_judge=label_judge
     def start(self):
         setup();self.thread=threading.Thread(target=self.loop,name='janitor-autonomy',daemon=True);self.thread.start()
-    def stop(self):self.stop_event.set()
+    def stop(self):
+        self.stop_event.set();self.reset_worker.stop()
     def loop(self):
         from .log import log_exception
         while not self.stop_event.wait(15):
@@ -403,6 +406,19 @@ class AutonomyJanitors:
         janitor_builtins.complete_run(run['run_id'],result={'summary':summary,'reason':'; '.join(recovery_states)[:500],'item_count':notifications},activity=activity,summary=summary)
         lane_record('quota-keeper',owner,base,activity,summary,now)
 
+    def _reset_notice(self,owner,run,provider,completion,*,read_failed=False):
+        result=completion['result']
+        if not result.get('verified'):return
+        rid=digest(['banked-reset',provider,completion['id']])
+        text=f"Banked reset {result['status']} for {result['account']}; quota refill verified."
+        if read_failed:text+=' Current account status could not be refreshed; recovery is unverified.'
+        payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],
+                 'persona':owner['name'],'preview':text,'push':False,'reason':'account_switch',
+                 'owner_generation':owner['generation']}
+        # A durable phone-chat receipt, once per action. PR305 permits a push
+        # only for stopped work, not for a refill or a successful switch.
+        janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),db.now_ms())
+
     def hotseat_once(self):
         """Hotseat switcher: one bounded run per provider whose check interval elapsed."""
         owner=janitor_builtins.resolve(janitor_hotseat.ROLE)
@@ -413,12 +429,13 @@ class AutonomyJanitors:
             if self.stop_event.is_set():return
             key=f'hotseat-switcher.{provider}.last-check';lane=f'hotseat-switcher.{provider}'
             base=janitor_hotseat.interval_for(options,provider)
-            if not lane_due(lane,owner,base,key,now):continue
+            reset_completion=self.reset_worker.peek(provider,owner)
+            if not lane_due(lane,owner,base,key,now) and reset_completion is None:continue
             settings_store.set_int(key,now);lane_start(lane,owner,base,now)
             run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
             if not run or not janitor_builtins.claim_run(run['run_id']):
                 lane_record(lane,owner,base,'failed','The check could not start',now);continue
-            repair_owner=None;repair_payload=None;repair_started=None;repair_text=''
+            repair_owner=None;repair_payload=None;repair_started=None;repair_text='';reset_text=''
             # The flip-back record as it stands BEFORE Hotseat is read. A switch that lands during the read or
             # the decision changes it, and the stand-down below then sees that this run decided on a default
             # that is gone. Read after the account read, a switch during that read went unnoticed.
@@ -435,10 +452,16 @@ class AutonomyJanitors:
                     janitor_hotseat.observed(self.hotseat_observe,provider,repair_payload,getattr(repair_started,'started_ms',now))
                 else:accounts=self.hotseat_read(options['hotseat_command'],provider)
             except Exception as exc:
+                if reset_completion and janitor_builtins.is_current(run['run_id']):
+                    self._reset_notice(owner,run,provider,reset_completion,read_failed=True)
+                    self.reset_worker.ack(provider,reset_completion)
+                    self.deliver_notifications(owner)
                 _hotseat_receipt('read_failure',lambda:hotseat_status.record_failure(provider,exc,now=now))
                 error=f'{provider}: Hotseat reading unavailable ({type(exc).__name__})'
                 janitor_builtins.complete_run(run['run_id'],'failed',error=error,activity='failed',summary=error)
                 lane_record(lane,owner,base,'failed',error,now);continue
+            import copy
+            raw_accounts=copy.deepcopy(accounts)
             if repair_enabled:
                 try:model=janitor_hotseat.repair_requested_model()
                 except Exception:
@@ -484,25 +507,20 @@ class AutonomyJanitors:
             else:
                 decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
             if not janitor_builtins.is_current(run['run_id']):return
+            if reset_completion:
+                # This run's FIRST read happened after completion and already went
+                # through the ordinary ledger, quarantine and in-flight guards.
+                self._reset_notice(owner,run,provider,reset_completion)
+                self.reset_worker.ack(provider,reset_completion)
+                reset_text='Banked resets: '+reset_completion['result']['status']
             reset_field=janitor_hotseat.PROVIDERS[provider].reset_command_field
-            if decision['action']=='exhausted' and options['mode']=='automatic' and reset_field:
-                from . import janitor_reset
-                reset=janitor_reset.attempt(reset_field,req_models)
-                if reset['status']!='disabled':
-                    repair_text='; '.join(s for s in (repair_text,'Banked resets: '+reset['status']) if s)
-                if not janitor_builtins.is_current(run['run_id']):return
-                if reset['verified']:
-                    # Capacity changed, not the outcome of any affected turn.
-                    # Read it again and use the ordinary guarded switch path.
-                    try:
-                        accounts=self.hotseat_read(options['hotseat_command'],provider)
-                        req_models,act_models=_provider_model_demand(provider,db.now_ms(),base)
-                        decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=db.now_ms(),cooldown_ms=cooldown_ms)
-                    except Exception as exc:
-                        from .log import log_fault
-                        log_fault('claudeBankedResetRoutingReadFailed', exc)
-                        decision={'action':'noop','active':decision.get('active'),'remaining':None}
-                        repair_text+='; fresh account routing read unavailable'
+            if decision['action']=='exhausted' and options['mode']=='automatic' and reset_field and not reset_completion:
+                raw_decision=janitor_hotseat.decide(raw_accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
+                # A withheld healthy account is not quota exhaustion. Never spend
+                # a grant merely because authentication repair hid a candidate.
+                if raw_decision['action']=='exhausted':
+                    status=self.reset_worker.offer(provider,reset_field,req_models,owner)
+                    if status!='disabled':reset_text='Banked resets: '+status
             switched=None;outcome='completed';error=''
             if decision['action']=='switch' and options['mode']=='automatic':
                 superseded=False
@@ -546,7 +564,8 @@ class AutonomyJanitors:
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':decision['action']=='exhausted','reason':'account_switch','owner_generation':owner['generation']}
                 janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
             elif decision['action']=='noop' and not repair_text:settings_store.set_text(marker,'')
-            summary=janitor_hotseat.run_summary(provider,decision,text=text)
+            summary_text='; '.join(part for part in (text,reset_text) if part)
+            summary=janitor_hotseat.run_summary(provider,decision,text=summary_text)
             activity='failed' if outcome=='failed' else 'worked' if worked else 'idle'
             janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error,activity=activity,summary=summary[:300])
             lane_record(lane,owner,base,activity,summary,now)
