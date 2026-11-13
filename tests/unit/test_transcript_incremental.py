@@ -823,22 +823,31 @@ def test_the_frontier_row_is_written_with_its_checkpoint_and_names_it(tmp_path):
     assert inc.load_frontier(db.conn(), replace(cp, turn_count=cp.turn_count + 1)) is None
 
 
-def test_the_inputs_digest_follows_every_row_and_their_order():
-    rows = (("t1", 1, None, "completed"), ("t2", 2, None, None))
-    base = ([*rows], [("u-1", "hello", "user", "", "x")], ("u-1", "user", ""), [], [])
-    same = ([*rows], [("u-1", "hello", "user", "", "x")], ("u-1", "user", ""), [], [])
-    assert inc.inputs_digest(base) == inc.inputs_digest(same)
-    changed = [
-        ([rows[1], rows[0]], *base[1:]),                                   # order
-        ([*rows, ("t3", 3, None, None)], *base[1:]),                      # one more turn
-        (base[0], [("u-1", "hello!", "user", "", "x")], *base[2:]),      # a text
-        (*base[:2], ("u-2", "user", ""), *base[3:]),                      # the latest user row
-        (*base[:3], [("m-1",)], base[4]),                                 # a message row
-        (*base[:4], [("d-1",)]),                                          # an Oracle row
-        ([rows[0]], [rows[1], *base[1]], *base[2:]),                      # a row in the next group
-    ]
-    digests = {inc.inputs_digest(variant) for variant in changed}
-    assert len(digests) == len(changed) and inc.inputs_digest(base) not in digests
+def test_the_frontier_stores_a_record_of_the_rows_not_the_rows(tmp_path):
+    """The inputs_digest column holds the record (lib.message_carry.record):
+    the mark, a digest per kind of row, and the rest; a few hundred bytes for
+    a conversation of any size. What the process holds is the same record."""
+    from lib import message_carry
+    transcript, cp = _checkpointed(tmp_path, "claude", claude_lines(40), 80, {"ms": 0})
+    [stored] = db.conn().execute("SELECT inputs_digest FROM transcript_import_frontiers").fetchall()
+    recorded = message_carry.loads(stored["inputs_digest"])
+    assert recorded is not None and set(recorded["rows"]) == {"base", "since"}
+    rows = db.conn().execute("SELECT count(*), max(revision) FROM messages WHERE agent_id=?",
+                             (AGENT,)).fetchone()
+    assert rows[0] >= 40 and recorded["mark"] == rows[1]
+    assert recorded["scope"] == "session" and recorded["oracle"] == ""
+    assert len(stored["inputs_digest"]) < 1400
+    found, held = inc._TAIL_STATES.get(inc._tail_key(transcript, AGENT, SESSION),
+                                       inc.parser_version("claude"))
+    assert found and held.inputs == recorded
+    assert inc._tail_weight(None, None, held) < 8192
+    # The rows as they are now stand against it, with no rule and with all.
+    now = message_writes._prepare_import_prelude(
+        db.conn(), AGENT, SESSION, [], raw_only=True, session_rows=True)
+    where = dict(carry=cp.store_carry, boundary_seq=cp.boundary_seq, source_file=str(transcript),
+                 backend_session_id=SESSION, session_rows=True)
+    assert message_carry.changed(recorded, now, **where) == ""
+    assert inc.inputs_record(now, cp, True) == recorded
 
 
 def test_after_a_host_start_the_import_cache_finds_an_unchanged_file_already_imported(tmp_path):
@@ -988,7 +997,8 @@ def test_a_frontier_is_not_replaced_by_an_import_whose_checkpoint_lost(tmp_path)
     raw_inputs = message_writes._prepare_import_prelude(database, AGENT, SESSION, [], raw_only=True)
     inc.write_checkpoint(database, behind)                  # refused: it covers less
     assert inc.load_checkpoint(database, AGENT, SESSION, str(transcript)) == cp
-    inc.write_frontier(database, behind, "the-losers-digest", raw_inputs)
+    inc.write_frontier(database, behind, "the-losers-digest",
+                       inc.inputs_record(raw_inputs, behind, False))
     assert inc.load_frontier(database, cp) == kept
 
 

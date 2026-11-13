@@ -357,6 +357,19 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 stack.enter_context(patch.object(message_store, "IMPORT_COMMIT_EVERY", 1))
                 stack.enter_context(patch.object(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9))
                 stack.enter_context(patch.object(message_store, "IMPORT_WRITER_YIELD_SECONDS", 0))
+            if lane in ("candidate", "checkpoint"):
+                key = inc._tail_key(transcript, AGENT, SESSION)
+                if faults.get("evict"):
+                    # Other conversations push this one's frontier out of the
+                    # process's cache: the cache's own eviction, at a bound of one.
+                    bound = inc._TAIL_STATES.max_entries
+                    inc._TAIL_STATES.max_entries = 1
+                    try:
+                        inc._TAIL_STATES.put(("another conversation",), inc.parser_version(backend), None)
+                    finally:
+                        inc._TAIL_STATES.max_entries = bound
+                kept = inc._TAIL_STATES.peek(key)
+                metrics["frontier_held"] = kept is not None and kept[1] is not None
             connection.set_trace_callback(counted)
             started = time.perf_counter()
             if lane == "reference":

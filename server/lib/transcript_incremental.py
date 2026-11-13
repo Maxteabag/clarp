@@ -526,26 +526,36 @@ def checkpoint_digest(checkpoint: Checkpoint) -> str:
                                       separators=(",", ":")).encode(), digest_size=16).hexdigest()
 
 
-def inputs_digest(raw_inputs) -> str:
-    """A digest of the database rows an import read (``_prepare_import_prelude``
-    with ``raw_only``): equal digests stand for equal rows, in order."""
-    digest = hashlib.blake2b(digest_size=16)
-    for component in raw_inputs:
-        digest.update(b"\x1e")
-        for item in component:
-            digest.update(repr(item if isinstance(item, str) else tuple(item)).encode())
-            digest.update(b"\x1f")
-    return digest.hexdigest()
+def inputs_record(raw_inputs, checkpoint: Checkpoint, session_rows: bool,
+                  witness=None) -> dict | None:
+    """What the frontier of ``checkpoint`` keeps of the database rows an
+    import read (``_prepare_import_prelude`` with ``raw_only``): a record of
+    constant size, lib.message_carry.record. None when there are no rows.
+    ``witness`` is what the tail's guard left of the rows it hashed."""
+    from . import message_carry
+    if raw_inputs is None:
+        return None
+    return message_carry.record(
+        raw_inputs, carry=checkpoint.store_carry, source_file=checkpoint.source_file,
+        backend_session_id=checkpoint.backend_session_id, session_rows=session_rows,
+        witness=witness)
 
 
-def write_frontier(database, checkpoint: Checkpoint, file_hash: str, raw_inputs) -> None:
+def write_frontier(database, checkpoint: Checkpoint, file_hash: str, recorded: dict) -> None:
     """Beside its checkpoint, in the same transaction. Not for a session a
     frontier is never kept for (see ``_cache_committed_tail``), and not when
-    the checkpoint row is another import's that covers more of the file."""
+    the checkpoint row is another import's that covers more of the file.
+
+    ``recorded`` (``inputs_record``) goes into the ``inputs_digest`` column
+    as a short JSON text. Until the record existed that column held one
+    digest of all the rows; such a row is never taken for a record, and a
+    release that wrote those never reads this one: both check the parser
+    version first, and it differs."""
+    from . import message_carry
     key = (checkpoint.agent_id, checkpoint.backend_session_id, checkpoint.source_file)
     if load_checkpoint(database, *key) != checkpoint:
         return
-    if raw_inputs[4]:
+    if recorded["oracle"]:
         database.execute(
             """DELETE FROM transcript_import_frontiers
                 WHERE agent_id=? AND backend_session_id=? AND source_file=?""", key)
@@ -561,7 +571,7 @@ def write_frontier(database, checkpoint: Checkpoint, file_hash: str, raw_inputs)
                file_hash=excluded.file_hash, inputs_digest=excluded.inputs_digest,
                updated_at=excluded.updated_at""",
         (*key, checkpoint.parser_version, checkpoint_digest(checkpoint), file_hash,
-         inputs_digest(raw_inputs), checkpoint.updated_at))
+         message_carry.dumps(recorded), checkpoint.updated_at))
 
 
 def load_frontier(database, checkpoint: Checkpoint) -> dict | None:
@@ -926,7 +936,9 @@ def _row_view(row: dict) -> tuple:
 @dataclass
 class _TailState:
     checkpoint: Checkpoint
-    raw_inputs: tuple
+    # The record of the database rows the frontier was published with
+    # (``inputs_record``): the same few hundred bytes for any conversation.
+    inputs: dict
     file_hash: str
     # The digest of the imported bytes as a running hash, when this process
     # read them: new bytes are added to it. None for a frontier taken from the
@@ -937,14 +949,8 @@ class _TailState:
 def _tail_weight(key, revision, state) -> int:
     if state is None:
         return 1
-    # Include payload strings and row/container overhead, not just entry count.
     total = len(json.dumps(state.checkpoint.__dict__, default=str)) + 1024
-    for component in state.raw_inputs:
-        total += sys.getsizeof(component)
-        for row in component:
-            total += sys.getsizeof(row)
-            if not isinstance(row, str):
-                total += sum(sys.getsizeof(value) for value in row)
+    total += len(json.dumps(state.inputs, default=str))
     return total
 
 
@@ -1095,26 +1101,24 @@ _RESTORABLE = frozenset({"missing_unknown", "unknown_reset", "evicted", "evicted
                          "publication_not_written"})
 
 
-def _stored_frontier(database, key, revision, agent_id, backend_session_id, path,
-                     session_rows=False):
-    """(checkpoint, state or None) from the store. The state is None when the
-    database rows the frontier was published with have changed since."""
-    from . import message_writes
+def _stored_frontier(database, key, revision, agent_id, backend_session_id, path):
+    """(checkpoint, state) as the store holds them, or (None, None). Whether
+    the database rows still stand is not asked here: the tail's guard asks it
+    of the record, with the rules, as it does of a frontier this process
+    held."""
+    from . import message_carry
     checkpoint = load_checkpoint(database, agent_id, backend_session_id, str(path))
     if checkpoint is None or checkpoint.parser_version != revision:
         return None, None
     stored = load_frontier(database, checkpoint)
-    if stored is None:
+    recorded = message_carry.loads(stored["inputs_digest"]) if stored is not None else None
+    if recorded is None:
         return None, None
-    raw_inputs = message_writes._prepare_import_prelude(
-        database, agent_id, backend_session_id, [], raw_only=True, session_rows=session_rows)
-    if inputs_digest(raw_inputs) != stored["inputs_digest"]:
-        return checkpoint, None
     hasher = None
     read = _READ_PREFIXES.peek(key)
     if read is not None and read[0] == revision and read[1][0] == stored["checkpoint_digest"]:
         hasher = read[1][1].copy()
-    return checkpoint, _TailState(checkpoint, raw_inputs, stored["file_hash"], hasher)
+    return checkpoint, _TailState(checkpoint, recorded, stored["file_hash"], hasher)
 
 
 def _tail_key(path, agent_id, backend_session_id):
@@ -1279,10 +1283,10 @@ def _checkpoint_reason(status):
     return "publication_refused_unknown"
 
 
-def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, reason_token=None,
+def _cache_committed_tail(key, revision, checkpoint, recorded, file_hash, *, reason_token=None,
                           hasher=None):
     from . import db
-    if raw_inputs is None or file_hash is None:
+    if recorded is None or file_hash is None:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
         _tail_log("checkpoint_not_written", retention=True)
         return
@@ -1301,11 +1305,11 @@ def _cache_committed_tail(key, revision, checkpoint, raw_inputs, file_hash, *, r
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_superseded")
         _tail_log("checkpoint_superseded", retention=True)
         return
-    if raw_inputs[4]:
+    if recorded["oracle"]:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "oracle_history")
         _tail_log("oracle_history", retention=True)
         return
-    state = _TailState(checkpoint, raw_inputs, file_hash, hasher)
+    state = _TailState(checkpoint, recorded, file_hash, hasher)
     if hasher is not None:
         _READ_PREFIXES.put(key, revision, (checkpoint_digest(checkpoint), hasher.copy()))
     _TAIL_STATES.put(key, revision, state)
@@ -1336,7 +1340,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         # The frontier this process does not hold, as the last import that
         # published it left it in the store.
         stored, state = _stored_frontier(db.conn(), key, revision, agent_id,
-                                         backend_session_id, path, session_rows)
+                                         backend_session_id, path)
         restored = state is not None
         if stored is not None and diagnostic is not None:
             diagnostic["imported"] = stored
@@ -1350,14 +1354,41 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     before = identity(path)
     if complete_size(path, before.size) != before.size:
         return refuse("partial_record")
+    rows_now = None
+
+    def recorded_rows_changed(applying=frozenset()) -> str:
+        """What stands in the way of the stored record, the rows read once."""
+        nonlocal rows_now
+        if rows_now is None:
+            rows_now = message_writes._prepare_import_prelude(
+                db.conn(), agent_id, backend_session_id, [], raw_only=True,
+                session_rows=session_rows)
+        return message_carry.changed(
+            state.inputs, rows_now, rules=applying, carry=cp.store_carry,
+            boundary_seq=cp.boundary_seq, source_file=str(path),
+            backend_session_id=backend_session_id, session_rows=session_rows)
+
+    # The file is the one that import read, to its last byte (a checkpoint's
+    # size can be ahead of its imported bytes: the file grew during that
+    # parse), and the database rows it read are as they were: every one of
+    # them, no rule applied. A row a rule lets through can still be for a
+    # turn after the boundary, so with such a row the tail runs.
+    unchanged = (restored and (before.size, before.mtime_ns) == (cp.size, cp.mtime_ns)
+                 and cp.complete_size == before.size
+                 and not recorded_rows_changed())
+    if restored and not unchanged:
+        # A frontier from the store: its rows are asked before anything of
+        # the file is read. The checks below read its samples and the bytes
+        # after the boundary, and the first tail from it every imported
+        # byte: all wasted on a tail the rows refuse.
+        what = recorded_rows_changed(rules)
+        if what:
+            from .log import log
+            log("transcriptCarryInputsChanged", f"what={what}")
+            return refuse("carry_inputs_changed")
     checks = dict(now_ms=db.now_ms(), max_tail_bytes=int(conf["max_tail_bytes"]))
     reason = decide(cp, backend, path, before, audit_every=int(conf["audit_every"]),
                     audit_seconds=float(conf["audit_seconds"]), **checks)
-    # The file is the one that import read, to its last byte (a checkpoint's
-    # size can be ahead of its imported bytes: the file grew during that
-    # parse), and the database rows it read are as they were (``restored``).
-    unchanged = (restored and (before.size, before.mtime_ns) == (cp.size, cp.mtime_ns)
-                 and cp.complete_size == before.size)
     audited = False
     if reason == "audit" and unchanged and bool(conf.get("audit_unchanged_by_digest")):
         # Its audit is due and there is nothing to replay: the rows are proven
@@ -1425,12 +1456,13 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                       complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
                       tail_hash=range_hash(path, cp.boundary_offset, before.size),
                       imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
-    raw_inputs = None
+    recorded = None
     checkpoint_status = {}
     source_invalidated = False
+    witness: dict = {}      # the rows the guard hashed, for the record published below
 
     def publish(database, captured):
-        nonlocal raw_inputs, source_invalidated
+        nonlocal recorded, source_invalidated
         try:
             current = identity(path)
         except OSError:
@@ -1440,15 +1472,17 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             source_invalidated = True
             return
         write_checkpoint(database, next_cp)
-        raw_inputs = message_writes._prepare_import_prelude(
-            database, agent_id, backend_session_id, [], raw_only=True, session_rows=session_rows)
-        write_frontier(database, next_cp, current_hash, raw_inputs)
+        recorded = inputs_record(message_writes._prepare_import_prelude(
+            database, agent_id, backend_session_id, [], raw_only=True,
+            session_rows=session_rows), next_cp, session_rows, witness.get("base"))
+        write_frontier(database, next_cp, current_hash, recorded)
 
     try:
         message_writes.store_transcript_tail(
             agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=str(path), turns=turns, start_seq=cp.boundary_seq,
-            carry=cp.store_carry, expected_prelude=state.raw_inputs, carry_rules=rules,
+            carry=cp.store_carry, expected_prelude=state.inputs, carry_rules=rules,
+            carry_witness=witness,
             on_stored=publish, checkpoint_status=checkpoint_status)
     except message_writes._TailInvalidated as changed:
         # Which rows stood in the way: what a further rule would have to cover.
@@ -1460,7 +1494,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     except OSError:
         source_invalidated = True
     if not _checkpoint_refused(checkpoint_status) and not source_invalidated:
-        _cache_committed_tail(key, revision, next_cp, raw_inputs, current_hash,
+        _cache_committed_tail(key, revision, next_cp, recorded, current_hash,
                               reason_token=reason_token, hasher=hasher)
     else:
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
@@ -1492,7 +1526,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
     session_rows = message_carry.SESSION_ROWS in carry_rules(conf)
     kwargs = {}
     checkpoint = None
-    raw_inputs = None
+    recorded = None
     current_hash = None
     checkpoint_status = {}
     refusal = "file_identity_unavailable"
@@ -1553,7 +1587,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                         captured = {}
 
                         def publish(database, carry):
-                            nonlocal checkpoint, raw_inputs, source_invalidated
+                            nonlocal checkpoint, recorded, source_invalidated
                             if not carry:
                                 return
                             try:
@@ -1574,10 +1608,10 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                                 boundary.prefix_hash, boundary.tail_hash, boundary.prefix_turns_hash,
                                 boundary.parser_carry, dict(carry), 0, now, now)
                             write_checkpoint(database, checkpoint)
-                            raw_inputs = message_writes._prepare_import_prelude(
+                            recorded = inputs_record(message_writes._prepare_import_prelude(
                                 database, agent_id, backend_session_id, [], raw_only=True,
-                                session_rows=session_rows)
-                            write_frontier(database, checkpoint, current_hash, raw_inputs)
+                                session_rows=session_rows), checkpoint, session_rows)
+                            write_frontier(database, checkpoint, current_hash, recorded)
                             return True
 
                         def prepare_publication():
@@ -1642,7 +1676,7 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
         if effects == "closed":
             # Counted apart: before this narrowing it was bootstrap_effect.
             _tail_log("checkpoint_closed_effects", retention=True)
-        _cache_committed_tail(key, revision, checkpoint, raw_inputs, current_hash,
+        _cache_committed_tail(key, revision, checkpoint, recorded, current_hash,
                               reason_token=reason_token, hasher=hasher)
     return source_invalidated
 
