@@ -959,7 +959,7 @@ In every task plan (`GET /task-plans`, `GET /task-plan`, plan artifacts):
   criterion aside. Completion accepts it without evidence; show the reason.
 
 `POST /task-plan/action` takes `action: "waive"` or `"unwaive"` with `data`
-`{criterion_id, reason}` (`reason` required to waive). Only the user may waive or
+`{criterion_id, reason}` (`reason` required to waive); a present `X-Clarp-Turn` that does not verify answers 403. Only the user may waive or
 restore: the store refuses both for any other actor, including a request to this
 route that carries an agent's `X-Clarp-Turn` and the owner's own `clarp-goal act`
 (an agent could otherwise waive its own criteria and complete without evidence).
