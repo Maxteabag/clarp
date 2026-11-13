@@ -154,10 +154,14 @@ lists every field and fixed string.
   opening in a snapshot on the ring. Nothing is trimmed: a ring that cannot be
   built is refused with a fixed `live_*` code. The same event retried with the
   same content gets the same ring back. Nothing is pre-voiced.
-- **Delivery.** The VoIP push goes only to phones that registered
-  `supported_conversation_modes` with `agent_live_v1`; without one the ring is
-  refused (`live_client_required`). GET, SSE and both pushes name
-  `conversation_mode`; a classic ring has no such field.
+- **Delivery.** A Live ring goes only to phones that declared
+  `supported_conversation_modes` with `agent_live_v1`: an iPhone with its VoIP
+  token (`POST /calls/ring/voip-token`; the VoIP push, first ring only), an
+  Android phone on its FCM push row (`POST /devices`, feature `agent_live_fcm`,
+  contract 94, docs/push-android.md "Live calls"; an FCM data message for every
+  state). `agent_rings.live_capable` reads both. With no such phone that still
+  receives rings the ring is refused (`live_client_required`). GET, SSE and
+  every push name `conversation_mode`; a classic ring has no such field.
 - **Answer.** Only `conversation_mode: "agent_live_v1"` answers a Live ring
   (any other answer, every older app included, is 409 `live_client_required`
   and the ring keeps ringing). It hands back the call grant (`alv_` call id,
@@ -371,7 +375,8 @@ never-readable profile grants no opt-in. Clients refuse unknown modes and Live
 without the feature, never silently start Normal. Discovery does not check or
 open the provider.
 
-A paired full-scope Live-capable phone posts exactly
+A paired full-scope Live-capable phone (an iPhone by its VoIP registration, an
+Android phone by its push row's declaration, contract 94) posts exactly
 `{agent: <raw snapshot agent_id>, request_id, client_nonce}`. The Host requires
 one profile bound to the agent session with `user_call_default: "live"`, a
 nonempty `user_call_opening`, and pinned `stories.user_call` file keys. It builds

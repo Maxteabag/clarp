@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 93  # 91 (PR 260) and 92 (PR 271) plus push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 94  # Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -150,6 +150,8 @@ FEATURES: tuple[str, ...] = (
     "push_fcm",
     # DELETE /devices and GET /devices/push-tokens.
     "push_unregister",
+    # POST /devices takes supported_conversation_modes for an FCM row; Live rings by FCM.
+    "agent_live_fcm",
 )
 
 
@@ -209,6 +211,7 @@ FEATURE_CONTRACTS["auto_contact_minting"] = 85
 FEATURE_CONTRACTS["hotseat_desk_actions"] = 86  # PROVISIONAL: next free above main's 85; PR 260 also wants a number
 FEATURE_CONTRACTS["push_fcm"] = 88  # PROVISIONAL: next free above main's 87
 FEATURE_CONTRACTS["push_unregister"] = 93  # booked by Arnold: 91 is PR 260's, 92 PR 271's
+FEATURE_CONTRACTS["agent_live_fcm"] = 94  # booked by Arnold, 13 Nov 2026
 
 
 # Features that exist only while live events actually flow: the hub runs in

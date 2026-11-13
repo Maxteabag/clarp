@@ -151,7 +151,7 @@ class Effects:
         """The caller's own phone is a paired full device that can take a Live ring."""
         from . import agent_rings
         try:
-            return any(row.get("principal") == principal for row in agent_rings._eligible_live_tokens())
+            return principal in agent_rings._eligible_live_principals()
         except Exception as exc:  # noqa: BLE001
             log_exception("agentLiveToolsRecipient", exc, principal)
             return False
