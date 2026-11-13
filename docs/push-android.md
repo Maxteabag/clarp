@@ -262,9 +262,14 @@ that receives rings, for every state (`ringing`, then `answered`, `declined`,
 `missed` or `cancelled` under the same `collapse_id`), with the same keys as a
 classic ring plus `conversation_mode`: `"agent_live_v1"`. A phone that cannot
 run Live never hears of one. iPhones get a Live ring by VoIP, as before. These
-FCM sends leave on their own thread, in order: the request that rang, answered
-or ended the call never waits for Google, and its `delivery.fcm_live` says
-`{"pending": <rows>}`. A ring that runs out is announced (`missed`) after the
+FCM sends leave on their own thread, oldest first: the request that rang,
+answered or ended the call never waits for Google, and its `delivery.fcm_live`
+says `{"pending": <rows>}`. The ringing state is handed over before an
+iPhone's VoIP push, so a slow Apple never lets an answer reach Google first.
+A state still waiting when its turn comes is dropped when it can no longer
+help: a later state of the same ring is waiting behind it, or the ring has
+expired. The exception is the last state of a ring a phone was told is
+ringing, which that phone still gets, so it stops ringing. A ring that runs out is announced (`missed`) after the
 Host's ring lock is released, so a slow Google never holds another phone's
 `GET /calls/ring`.
 
