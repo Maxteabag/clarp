@@ -97,7 +97,23 @@ def _expire(records: list[dict]) -> list[dict]:
     return missed
 
 
-def _settle(records: list[dict]) -> list[dict]:
+@contextlib.contextmanager
+def _settling() -> Iterator[list[dict]]:
+    """``_lock``, and the rings it settled as missed announced once it is released. An announcement
+    may push to Android phones through Google, which can take tens of seconds; nothing else waits on
+    the ring lock meanwhile (an iPhone's GET /calls/ring, an answer, a new ring)."""
+    missed: list[dict] = []
+    try:
+        with _lock:
+            yield missed
+    finally:
+        for ring in missed:
+            _announce(ring, "missed")
+
+
+def _settle(records: list[dict], missed: list[dict]) -> list[dict]:
+    """Expire overdue rings in ``records`` and save them. The rings that became missed are added to
+    ``missed`` for the caller to announce after it releases the lock (_settling); returned too."""
     expired = False
     for ring in records:
         # A user call's or an agent ring's Live answer alike: past its one-use join
@@ -106,28 +122,28 @@ def _settle(records: list[dict]) -> list[dict]:
                 and now_ms() >= ring.get("_live_join_expires_at", 0)):
             ring.update(_live_phase="retired", _live_retired_reason="live_join_expired")
             expired = True
-    missed = _expire(records)
+    now_missed = _expire(records)
     if expired:
         _save(records)
-    if missed:
+    if now_missed:
         _save(records)
-        for ring in missed:
+        for ring in now_missed:
             _audit({"outcome": "missed", "ring_id": ring["ring_id"], "session": ring["session"], "by": "timeout"})
-            _announce(ring, "missed")
-    return missed
+        missed.extend(now_missed)
+    return now_missed
 
 
 def expire_due() -> list[str]:
     """Settle every overdue ring now; returns the ring ids that became missed."""
-    with _lock:
-        return [r["ring_id"] for r in _settle(_load())]
+    with _settling() as missed:
+        return [r["ring_id"] for r in _settle(_load(), missed)]
 
 
 def get(ring_id: str) -> dict | None:
     _recover_one(ring_id)
-    with _lock:
+    with _settling() as missed:
         records = _load()
-        _settle(records)
+        _settle(records, missed)
         ring = next((r for r in records if r["ring_id"] == ring_id), None)
         return public(ring) if ring else None
 
@@ -137,9 +153,9 @@ def current(principal: str | None = None) -> dict | None:
     if principal is not None and not receives_rings(principal):
         return None                     # this phone switched agent rings off for itself
     capable = live_capable(principal) if principal is not None else True
-    with _lock:
+    with _settling() as missed:
         records = _load()
-        _settle(records)
+        _settle(records, missed)
         ring = next((r for r in reversed(records) if r["state"] == "ringing" and not r.get("_user_call")
                      and _visible(r, capable)), None)
         return public(ring) if ring else None
@@ -153,8 +169,11 @@ def current(principal: str | None = None) -> dict | None:
 # all, and a Live ring never falls back to the global alert push. Classic rings are unchanged.
 
 def live_capable(principal: str | None) -> bool:
-    """The principal's VoIP registration says it can run a Live call.
+    """The principal's VoIP registration, or its Android push row, says it can run a Live call.
 
+    Two declarations count: an iPhone's VoIP registration (POST /calls/ring/voip-token) and an
+    Android phone's FCM push row (POST /devices with supported_conversation_modes,
+    _live_device_rows: live, owned by that device, the device still paired with full scope).
     Read fresh at every use, never cached. An absent registration or one without
     agent_live_v1 is not capable. LIMIT (explicit, not a no-ring guarantee): the
     registration is the device's own last word. A phone that registered
@@ -163,7 +182,8 @@ def live_capable(principal: str | None) -> bool:
     events and VoIP. Only a fresh registration without agent_live_v1, or a
     forgotten token, removes it. The answer itself is still checked separately
     (WIRE-v2 decision 4)."""
-    return bool(principal) and any(row.get("principal") == principal for row in _live_tokens())
+    return bool(principal) and (any(row.get("principal") == principal for row in _live_tokens())
+                                or any(row["owner"] == principal for row in _live_device_rows()))
 
 
 def _visible(ring: dict, capable: bool) -> bool:
@@ -261,9 +281,9 @@ def ring(*, caller_agent_id: str = "", agent: str = "", reason: str = "", openin
     host_gen = _gen_pair(read)
     unprovable = False
     try:
-        with _lock:
+        with _settling() as missed:
             records = _load()
-            _settle(records)
+            _settle(records, missed)
             who = {"session": "", "persona": "", "agent_id": caller_agent_id or ""}
             try:
                 live.mode_of(conversation_mode)     # an unknown mode is 400; agent_live_v1 never reaches here
@@ -326,9 +346,9 @@ def _find(records: list[dict], ring_id: str) -> dict:
 
 
 def _end(ring_id: str, state: str, *, by: str, allowed=None) -> dict:
-    with _lock:
+    with _settling() as missed:
         records = _load()
-        _settle(records)
+        _settle(records, missed)
         ring = _find(records, ring_id)
         if ring.get("_user_call") and ring["_user_call"] != by:
             raise CallError(404, "unknown call")
@@ -391,9 +411,9 @@ def _ring_live(*, caller_agent_id: str = "", agent: str = "", reason: str = "", 
     reason = " ".join(str(reason or "").split())[:REASON_CHARS]
     opening = " ".join(str(opening_line or "").split())[:OPENING_CHARS]
     snapshot = replay = None
-    with _lock:
+    with _settling() as missed:
         records = _load()
-        _settle(records)
+        _settle(records, missed)
         who = {"session": "", "persona": "", "agent_id": caller_agent_id or ""}
         try:
             mode = live.MODE_LIVE
@@ -423,7 +443,7 @@ def _ring_live(*, caller_agent_id: str = "", agent: str = "", reason: str = "", 
             if replay is None:
                 _admit(caller, records)
                 if mode == live.MODE_LIVE:
-                    if not _eligible_live_tokens():   # capable AND receiving rings
+                    if not _eligible_live_principals():   # capable AND receiving rings
                         raise CallError(409, live.CLIENT_REQUIRED)
                     snapshot = live.build_snapshot(caller, context)
         except CallError as exc:
@@ -476,9 +496,9 @@ def user_call_live(principal: str, agent: Any, request_id: Any, client_nonce: An
     caller = agents_db.get_by_agent_id(agent)  # exact snapshot raw id; no persona/session resolution
     if caller is None:
         raise CallError(404, "unknown agent")
-    with _lock:
+    with _settling() as missed:
         records = _load()
-        _settle(records)
+        _settle(records, missed)
         replay = next((r for r in reversed(records) if r.get("_user_call") == principal
                        and r.get("_live_request_id") == request_id), None)
         if replay is not None:
@@ -540,9 +560,9 @@ def _answer_live_ring(principal: str, ring_id: str, mode: str | None,
     """The Live branch of answer, unchanged from agent_ring_live."""
     from . import agent_ring_live as live
     from . import group_calls
-    with _lock:
+    with _settling() as missed:
         records = _load()
-        _settle(records)
+        _settle(records, missed)
         ring = _find(records, ring_id)
         fresh = _answer_live(records, ring, principal, mode, request_id, client_nonce)
         if not fresh:
@@ -585,9 +605,9 @@ def _answer_classic(principal: str, ring_id: str, opening_mode: Any = _ABSENT) -
     started_by = ""
     completed = False
     try:
-        with _lock:
+        with _settling() as missed:
             records = _load()
-            _settle(records)
+            _settle(records, missed)
             ring = _find(records, ring_id)
             listen = ring.get("opening_mode") == LISTEN_FIRST
             if ring["state"] == "answered":
@@ -813,8 +833,15 @@ def _announce(ring: dict, kind: str, *, notice: bool = True) -> dict:
     if ring.get("conversation_mode") == MODE_LIVE:
         # H6: the global alert reaches every phone, also those that cannot run Live. A Live ring is
         # announced by VoIP to capable phones only, for its first ring and for every later state
-        # (answered, declined, missed, cancelled): no global alert, ever.
-        pass
+        # (answered, declined, missed, cancelled): no global alert, ever. An Android phone that
+        # declared agent_live_v1 on its push row gets every state by FCM instead, as a classic
+        # ring's alert reaches it, naming conversation_mode (docs/push-android.md "Live calls").
+        try:
+            fcm_live = _push_live_fcm(ring, kind)
+            if fcm_live is not None:
+                delivery["fcm_live"] = fcm_live
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentRingLiveFcmFail", exc, f"ring={ring['ring_id']}")
     elif not (delivery.get("voip") or {}).get("sent"):
         try:
             delivery.update(_push(ring, kind) or {})
@@ -849,6 +876,16 @@ def _hex_token(token: str) -> bool:
     return 32 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)
 
 
+def conversation_modes(value: Any) -> list[str]:
+    """A declared ``supported_conversation_modes``: absent (None) or a list of known modes, each at
+    most once; any other value is refused with 400 live_mode_invalid. The list, duplicates dropped."""
+    from . import agent_ring_live as live
+    if value is not None and (not isinstance(value, list) or len(value) > len(live.MODES)
+                              or any(not isinstance(m, str) or m not in live.MODES for m in value)):
+        raise CallError(400, live.MODE_INVALID)
+    return list(dict.fromkeys(value or ()))
+
+
 def register_voip_token(principal: str, token: str, *, environment: str = "production",
                         supported_conversation_modes: Any = None) -> dict:
     """The phone's PushKit VoIP token, one per principal. "" forgets it.
@@ -856,15 +893,11 @@ def register_voip_token(principal: str, token: str, *, environment: str = "produ
     ``supported_conversation_modes`` (absent: classic only) says which ring
     modes this phone can run; it is a delivery hint, never a credential, and an
     answer is still checked on its own (WIRE-v2 decision 4)."""
-    from . import agent_ring_live as live
     token = str(token or "").strip().lower()
     environment = "sandbox" if str(environment or "").lower() == "sandbox" else "production"
     if token and not _hex_token(token):
         raise CallError(400, "token must be hex")
-    modes = supported_conversation_modes
-    if modes is not None and (not isinstance(modes, list) or len(modes) > len(live.MODES)
-                              or any(not isinstance(m, str) or m not in live.MODES for m in modes)):
-        raise CallError(400, live.MODE_INVALID)
+    modes = conversation_modes(supported_conversation_modes)
     with _lock:
         raw = settings_store.get(VOIP_KEY)
         rows = {r["principal"]: r for r in (json.loads(raw) if raw else [])}
@@ -872,7 +905,7 @@ def register_voip_token(principal: str, token: str, *, environment: str = "produ
             rows[principal] = {"principal": principal, "token": token, "environment": environment,
                                "updated_at": now_ms()}
             if modes:
-                rows[principal]["supported_conversation_modes"] = list(dict.fromkeys(modes))
+                rows[principal]["supported_conversation_modes"] = modes
         else:
             rows.pop(principal, None)
         settings_store.set_text(VOIP_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
@@ -904,8 +937,110 @@ def _receiving(tokens: list[dict]) -> list[dict]:
 
 
 def _eligible_live_tokens() -> list[dict]:
-    """Phones that can run a Live call and still receive rings: the only ones a Live ring may admit for."""
+    """iPhones that can run a Live call and still receive rings: the VoIP pushes of a Live ring."""
     return _receiving(_live_tokens())
+
+
+def _live_device_rows() -> list[dict]:
+    """Android push rows (POST /devices) that declared agent_live_v1, of a device still paired with
+    full scope. A row disabled (DELETE /devices, rotation, revocation), taken over by another pairing
+    (its owner changed) or re-registered without the declaration no longer appears here."""
+    from . import apns
+    from .agent_ring_live import MODE_LIVE, device_ok
+    return [row for row in apns.declared_mode_rows()
+            if MODE_LIVE in row["supported_conversation_modes"] and str(row["owner"]).startswith("device_")
+            and device_ok(row["owner"])]
+
+
+def _ring_reachable_device_rows() -> list[dict]:
+    """The declared Android rows a Live RING can reach now: this Host has a usable FCM key, the row is
+    live (Google has not reported it gone) and its phone receives rings. A phone's own Live call
+    (POST /calls/live) needs no push and counts without a key (live_capable)."""
+    from . import apns, config
+    try:
+        usable = apns.fcm_configured(config.load())
+    except Exception as exc:  # noqa: BLE001 - an unreadable config: no Android ring recipient
+        log_exception("agentRingFcmKeyUnknown", exc)
+        usable = False
+    if not usable:
+        return []
+    off = {row["principal"] for row in device_prefs()}
+    return [row for row in _live_device_rows() if row["owner"] not in off]
+
+
+def _eligible_live_principals() -> set[str]:
+    """Phones a Live ring can ring: an iPhone by its VoIP registration, an Android phone by its
+    declared push row while a push can reach it (_ring_reachable_device_rows); both still receiving
+    rings. The only ones a Live ring may admit for: with none, 409 live_client_required tells the
+    caller to fall back."""
+    principals = {row.get("principal") for row in _eligible_live_tokens()}
+    principals |= {row["owner"] for row in _ring_reachable_device_rows()}
+    return {p for p in principals if p}
+
+
+class _OrderedSender:
+    """One daemon thread that runs jobs in the order they were handed over: a Live ring's states reach
+    the Android phones in order, and Google, which may take tens of seconds, never holds the request
+    that rang, answered or ended the call."""
+
+    def __init__(self, name: str):
+        self._name = name
+        self._cond = threading.Condition()
+        self._jobs: list = []
+        self._busy = False
+        self._thread: threading.Thread | None = None
+
+    def submit(self, job) -> None:
+        with self._cond:
+            self._jobs.append(job)
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name=self._name, daemon=True)
+                self._thread.start()
+            self._cond.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                while not self._jobs:
+                    self._cond.wait()
+                job = self._jobs.pop(0)
+                self._busy = True
+            try:
+                job()
+            except Exception as exc:  # noqa: BLE001 - one failed push never stops the next
+                log_exception("agentRingSenderFail", exc, self._name)
+            finally:
+                db.close_local()        # a job's own connection: rings are rare, an idle thread holds none
+                with self._cond:
+                    self._busy = False
+                    self._cond.notify_all()
+
+    def drain(self, timeout: float = 10.0) -> bool:
+        """Wait until every job handed over so far has run (tests)."""
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while self._jobs or self._busy:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                self._cond.wait(left)
+        return True
+
+
+_LIVE_FCM_SENDER = _OrderedSender("ring-live-fcm")
+
+
+def _push_live_fcm(ring: dict, kind: str) -> dict | None:
+    """One Live ring state by FCM to the Android phones a Live ring can reach, sent off the calling
+    thread. Answers at once with how many rows the send is pending for; None (nothing reported) when
+    there is none, so a Host without such a phone answers exactly as before."""
+    from . import apns
+    rows = _ring_reachable_device_rows()
+    if not rows:
+        return None
+    ring = dict(ring)
+    _LIVE_FCM_SENDER.submit(lambda: apns.send_agent_ring(ring, kind, tokens=rows))
+    return {"pending": len(rows)}
 
 
 def _push(ring: dict, kind: str) -> dict:
