@@ -198,8 +198,12 @@ class GoalRoutes:
             if not isinstance(revision, int):
                 raise ValueError("revision required")
             from lib import goal_ledger
-            # The apps call this on the user's behalf; agents use clarp-goal.
-            with goal_ledger.acting_as("user"):
+            # The apps call this on the user's behalf; agents use clarp-goal. A
+            # request carrying an agent's turn identity is that agent, not the user.
+            caller = self._turn_caller()
+            actor = (goal_ledger.acting_as("owner", caller, verified=True) if caller
+                     else goal_ledger.acting_as("user"))
+            with actor:
                 result = task_goal_state.mutate(plan_id, revision=revision,
                     action=str(body.get("action") or ""), data=body.get("data") or {})
             self._json_ok({"plan": result})

@@ -955,11 +955,15 @@ In every task plan (`GET /task-plans`, `GET /task-plan`, plan artifacts):
   its latest run; `goal_error`/`retry_at` this goal's last failed update.
 - `items[].paused`: true for an `in_progress` step of a paused goal. It is not
   running and `elapsed_ms` does not grow; show it as paused, not active.
-- `goal.criteria[].waived` (or absent): `{at, reason}`, the owner set the
+- `goal.criteria[].waived` (or absent): `{at, reason, by: "user"}`, the user set the
   criterion aside. Completion accepts it without evidence; show the reason.
 
 `POST /task-plan/action` takes `action: "waive"` or `"unwaive"` with `data`
-`{criterion_id, reason}` (`reason` required to waive). A paused goal takes
+`{criterion_id, reason}` (`reason` required to waive). Only the user may waive or
+restore: the store refuses both for any other actor, including a request to this
+route that carries an agent's `X-Clarp-Turn` and the owner's own `clarp-goal act`
+(an agent could otherwise waive its own criteria and complete without evidence).
+A paused goal takes
 step updates and a `checkpoint` without `continuation` (it stays paused); a
 checkpoint with a `continuation` answers 409 and saves nothing. The Janitor
 itself is listed and controlled like any other (`/janitors`), template

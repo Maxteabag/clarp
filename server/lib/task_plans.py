@@ -1074,6 +1074,12 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             # fell short of, a requirement that changed) can be set aside by
             # the owner, with a reason, so the goal can complete honestly
             # instead of being cancelled. The waiver is shown, never hidden.
+            # Only the user may set a criterion aside: an agent that could waive its
+            # own criteria could complete any goal without evidence (review #311,
+            # finding 2), also one the user paused.
+            from . import goal_ledger
+            if goal_ledger.acting_kind() != "user":
+                raise ValueError("only the user can waive or restore a criterion")
             cid = str(data.get("criterion_id") or "")
             criterion = next((c for c in goal["criteria"] if c["id"] == cid), None)
             if criterion is None:
@@ -1081,7 +1087,7 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             if action == "waive":
                 if not reason:
                     raise ValueError("waiving a criterion requires a reason")
-                criterion["waived"] = dict(at=now, reason=reason[:2000])
+                criterion["waived"] = dict(at=now, reason=reason[:2000], by="user")
             else:
                 if not criterion.get("waived"):
                     raise ValueError("criterion is not waived")
