@@ -93,8 +93,59 @@ a file that had not changed.
 
 `transcript_import_frontiers` holds one row beside each checkpoint, written
 in the checkpoint's transaction: the parser version, a digest of that
-checkpoint, the digest of the imported bytes and a digest of those rows. No
+checkpoint, the digest of the imported bytes and a record of those rows. No
 row is written for a session no frontier is kept for (Oracle history).
+
+The record (`lib/message_carry.py`, `record`) is what a frontier keeps of the
+rows, in the process and in the store alike. It is not the rows: a
+conversation of 24,000 message rows weighed 45 MiB as rows, more than the
+32 MiB the process's cache has for all frontiers together, so it kept none
+and every append was a full import; two conversations of 11,000 rows pushed
+each other out. The record is about a kilobyte for a conversation of any
+size:
+
+- the mark: the highest revision among the message rows;
+- digests per kind of message row (`/send`, live, final, transcript, other,
+  another session's), over every column of every row of that kind;
+- three digests of the turn rows: all of them, those that began up to two
+  seconds after the last turn before the boundary, and how the turn of each
+  trace on a recorded row ended;
+- a digest of the latest user row and one of the Oracle rows.
+
+The digests are taken in a fixed order that SQLite has no say in: the
+columns by name, the rows by message id. At a tail the rows are read again
+and split by the mark. Those at or below it must hash to the recorded
+digests, which proves every old row is there and unchanged in every column.
+The revision is not trusted for that: an old row edited without a new
+revision changes its digest; one edited with a new revision, or removed, is
+missing from it; a row that appears with an old revision lands in a digest
+and breaks it. The rows above the mark are then exactly the new ones, and
+the rules below judge them. What the rules need of the old rows (the words
+said before, the traces) is read from the rows at or below the mark, once
+the digests have shown them to be the recorded ones.
+
+The rows at or below the mark are hashed in two parts, split at a second,
+lower revision (the base): the rows up to it, nearly all of a long
+conversation, and the few written since. A tail that leaves the first part
+untouched publishes its record with that part's digests as they are and
+hashes only the second, so a tail hashes the conversation once, not twice.
+Untouched is not assumed: the rows the guard hashed are compared, value for
+value, with the rows read at publication; a full import, or a tail that
+changed a row of the first part, hashes everything and moves the base up to
+the mark.
+
+What a tail still costs: the session's message rows are read from SQLite
+three times (by the probe pass, again under the write lock, and at
+publication) and hashed once. On a conversation of 23,870 rows that is 80 MB
+read and 0.36 s of CPU a tail, about 80 ms of it the hashing; on 10,855 rows
+31 MB and 0.15 s. The record does not lower that floor. Reading only the
+rows above the mark would, by trusting that every change to a row gives it a
+new revision; the record is built so that nothing rests on that today.
+
+The record is stored in the `inputs_digest` column as a short JSON text.
+Until it existed that column held one digest of all the rows. Neither is
+ever taken for the other: the parser version is checked first and differs
+between the releases, and a text that is not a record is no frontier.
 
 A session that holds an automation's `/send` row (a heartbeat, a goal wake or
 schedule, a watcher event, a leader tick, a maintenance run) keeps a frontier
@@ -142,10 +193,10 @@ heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
 way, as fixed words: `transcriptCarryInputsChanged what=row_live,turn_of_old_row`
 (`row_send`, `row_live`, `row_final`, `row_transcript`, `row_other`,
 `row_other_session`, `send_said_before`, `turn_rows`, `turn_before_boundary`,
-`turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply within
-one process, where the rows the frontier was published with are held; a
-frontier taken from the store after a Host start holds only when the digest
-of the rows is unchanged.
+`turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
+frontier the process holds and to one taken from the store alike, so also
+after a Host start and after the cache has dropped the frontier: both are
+the same record.
 
 `tests/readmodel/test_rm_n14_carry.py` runs every rule in pairs: the change
 it lets through is a tail and equals the full replay; its nearest harmful
@@ -158,12 +209,15 @@ import wrote nothing and could not publish (`checkpoint_not_written`: an
 import with nothing to write publishes by upgrading its read snapshot, which
 SQLite refuses once any other writer has committed; the frontier it started
 from is still the last one published). The stored frontier is used only when
-it names the stored checkpoint, the parser version is the current one and
-the rows digest to the stored value. Then:
+it names the stored checkpoint, the parser version is the current one and it
+holds a record. Then:
 
 - the file is exactly the one the checkpoint describes (device, inode, size,
-  mtime, complete to its last byte) and a tail from that checkpoint would be
-  allowed: nothing is imported (`transcriptTailDecision code=unchanged_file`).
+  mtime, complete to its last byte), every recorded row stands with no rule
+  applied, and a tail from that checkpoint would be allowed: nothing is
+  imported (`transcriptTailDecision code=unchanged_file`). (With a row that a
+  rule lets through, the tail runs: such a row can be for a turn after the
+  boundary.)
   The second half matters. Every check a tail passes is made first, so an
   unchanged file is imported in full when a sub-agent child appeared or went
   while the parent was idle (`full_claude_subagent_children_changed`). When
