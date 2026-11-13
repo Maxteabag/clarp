@@ -35,6 +35,32 @@ usage, attempts native OAuth refresh when needed, verifies each requested model,
 and restores the original profile when no candidate works. Its `--dry-run`
 validates stdin without switching accounts or making provider requests.
 
+## Optional banked reset recovery
+
+`agents.claude_reset_command` is a trusted argv list, disabled when empty.
+For the maintained `claude-usage` adapter, configure it on each participating
+Host to call `claude-auto-reset --broker <web-session-host> --peer <other-host>`.
+The broker retains its own authenticated reset sessions; this never logs in or
+copies web cookies. The automatic Hotseat Janitor invokes it only when no local
+account serves demand. The maintained runtime selector invokes the same adapter
+after native candidates fail and then probes the exact refilled local profile.
+
+The command receives `{"models":["claude-fable-5-2"]}` on stdin and has a 150-second
+deadline. Only exit zero plus `verified:true`, `status:redeemed|reconciled` and a
+canonical `account:aiN` permits a fresh account read and ordinary guarded routing.
+Other outcomes remain visible in the Janitor summary and never prove recovery.
+Neither adapter nor Janitor claims affected turns made progress from a refill.
+
+The maintained adapter redeems at most one fitting banked grant per attempt,
+only for exhausted weekly/Fable weekly buckets resetting more than 48 hours
+away. It persists intent before writing, reconciles uncertain writes before any
+other action, locks concurrent calls and budgets checks to ten minutes. Full
+resets remain disabled unless separately configured with complete fresh local
+and peer evidence that no usable alternative exists. Missing, stale or throttled
+quota cannot establish that condition. Never enable Full based on an empty list
+or a failed peer request. Preserve explicit pauses and verify actual affected
+turn progress plus subsequent rejection state after capacity changes.
+
 ## Runtime behavior
 
 - A persisted runtime row identifies a conversation; it does not establish
