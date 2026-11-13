@@ -467,7 +467,7 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
     run (the framework admits one run per Janitor at a time). ``ask(prompt,
     plan_id)`` returns (answer, usage, model id). Returns each goal's
     (outcome, error) and the run's summary numbers."""
-    width = max(1, min(int((config.get("options") or {}).get("max_goals_per_run", 5)), 6))
+    width = max(1, min(int((config.get("options") or {}).get("max_goals_per_run", 2)), 6))
     outcomes: dict[str, tuple[str, str]] = {}
 
     def one(plan_id: str):
@@ -488,6 +488,25 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
     updated = sum(1 for o, _ in outcomes.values() if o == "updated")
     failed = sum(1 for o, _ in outcomes.values() if o == "failed")
     return {"outcomes": outcomes, "updated": updated, "failed": failed, "changed_steps": changed}
+
+
+def public_state(plan_id: str) -> dict:
+    """``plan.updater``: the Goal keeper as this goal sees it. ``enabled`` is the
+    Janitor's own switch; ``last_run_at``/``last_error`` its latest run, and
+    ``goal_error``/``retry_at`` this goal's last failed update, if any."""
+    from . import janitor_store, janitors
+    agent_id = janitor_store.builtin_agent_id(ROLE)
+    row = janitor_store.config_row(agent_id) if agent_id else None
+    if not row:
+        return {"enabled": False, "janitor_agent_id": None, "last_run_at": None,
+                "last_error": None, "goal_error": None, "retry_at": None}
+    goal = {}
+    for attachment in janitor_store.active_attachment_rows(agent_id, trigger_id="agent-work-completed"):
+        goal = (janitors.get_progress(attachment["attachment_id"]).get("goals") or {}).get(plan_id) or {}
+        break
+    return {"enabled": bool(row["enabled"]), "janitor_agent_id": agent_id,
+            "last_run_at": row["last_run_at"], "last_error": row["last_error"] or None,
+            "goal_error": goal.get("last_error") or None, "retry_at": goal.get("retry_at")}
 
 
 def request_id(config: dict, plan_ids: list[str], now: int) -> str:

@@ -51,6 +51,48 @@
         },
         "ledger": {
           "$ref": "#/$defs/ledger_summary"
+        },
+        "updater": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "goal_updater (Host 96): the Goal keeper Janitor as this goal sees it.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "janitor_agent_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_run_at": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "last_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "goal_error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "retry_at": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
         }
       }
     },
