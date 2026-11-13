@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 94  # Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 95  # The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -152,6 +152,8 @@ FEATURES: tuple[str, ...] = (
     "push_unregister",
     # POST /devices takes supported_conversation_modes for an FCM row; Live rings by FCM.
     "agent_live_fcm",
+    # POST/DELETE /devices/live-activity with platform fcm: the agents-working summary by FCM.
+    "live_activity_fcm",
 )
 
 
@@ -212,13 +214,14 @@ FEATURE_CONTRACTS["hotseat_desk_actions"] = 86  # PROVISIONAL: next free above m
 FEATURE_CONTRACTS["push_fcm"] = 88  # PROVISIONAL: next free above main's 87
 FEATURE_CONTRACTS["push_unregister"] = 93  # booked by Arnold: 91 is PR 260's, 92 PR 271's
 FEATURE_CONTRACTS["agent_live_fcm"] = 94  # booked by Arnold, 13 Nov 2026
+FEATURE_CONTRACTS["live_activity_fcm"] = 95  # booked by Arnold, 13 Nov 2026 (94 is agent_live_fcm)
 
 
 # Features that exist only while live events actually flow: the hub runs in
 # the agent runtime, which can be an older release than this HTTP server
 # until it hands over. Advertising them without events makes clients wait
 # for a status line that never comes (working agents look idle).
-LIVE_FEATURES = frozenset({"live_items", "live_activity_push"})
+LIVE_FEATURES = frozenset({"live_items", "live_activity_push", "live_activity_fcm"})
 _live_probe: Callable[[], bool] | None = None
 
 
@@ -255,7 +258,7 @@ def hotseat_desk_enabled() -> bool:
 # Whether it has one is a push-side question (lib.fcm is a feature module and
 # this one is core), so the composition root installs the answer as a probe,
 # the way it installs the live probe above. Without one: not advertised.
-FCM_FEATURES = frozenset({"push_fcm"})
+FCM_FEATURES = frozenset({"push_fcm", "live_activity_fcm"})
 _fcm_probe: Callable[[], bool] | None = None
 
 
