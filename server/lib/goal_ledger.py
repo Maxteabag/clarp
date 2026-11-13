@@ -62,6 +62,12 @@ _actor: contextvars.ContextVar[dict] = contextvars.ContextVar(
     "goal_ledger_actor", default={"kind": "unattributed"})
 
 
+def acting_kind() -> str:
+    """The kind of actor attributed to the goal change being made now
+    ("user" only inside the apps' route, "owner" for an agent's clarp-goal)."""
+    return str(_actor.get().get("kind") or "unattributed")
+
+
 class LedgerError(ValueError):
     """A ledger write that cannot be accepted as asked."""
 
