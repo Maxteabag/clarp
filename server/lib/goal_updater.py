@@ -17,8 +17,8 @@ ended, the goal was paused, resumed or cancelled. Triggers fold per goal for
 picks up goals with activity the triggers did not cover (a long turn with no
 final message). Nothing new since the last update: no model call.
 
-The model is Gemini 4 Hydrogen (low) through the Antigravity CLI in Clarp's
-private one-shot HOME, sandboxed and given no tool permissions: the
+The model is Gemini 4 Hydrogen (low) through the Antigravity CLI in its own
+stripped HOME and an empty cwd, sandboxed and given no tool permissions: the
 transcript is untrusted input. Measured offline on six real goals (51 events):
 95% of step statuses right against 69% for the owners' own records, about 8 s
 and ~4k payload tokens per update (docs/architecture/goal-updater.md).
@@ -46,8 +46,14 @@ DEFAULT_FOLD_SEC = 300
 DEFAULT_SWEEP_SEC = 3600
 FAST_FOLD_SEC = 30          # a pause/resume/cancel should show within the minute
 TICK_SEC = 15.0
-MAX_WORKERS = 2
-CALL_TIMEOUT_SEC = 180
+# One Host-wide queue. agy takes about 220 MB per process; 40 at once failed
+# 3 times in 40, 4-6 did not (upkeep-wide replay, 13 Nov 2026).
+MAX_WORKERS = 5
+PRINT_TIMEOUT = "120s"
+CALL_TIMEOUT_SEC = 150      # backstop above agy's own --print-timeout
+RETRY_AFTER_MS = 60_000     # one retry; after that the hourly sweep decides
+HOME_NAME = "agy-goal-updater-home"
+CONVERSATION_KEEP_SEC = 3600
 # A goal not yet seen by the updater starts from its owner's last checkpoint,
 # but never replays more than this: an old paused goal is not re-read in full.
 FIRST_LOOK_BACK_MS = 24 * 3600 * 1000
@@ -288,17 +294,56 @@ def prompt_for(plan: dict, sheet: dict, text: str) -> str:
     return head + body
 
 
+def _home():
+    """The updater's own stripped agy HOME (login and settings only: no
+    GEMINI.md, no skills, about 9.7k prompt tokens of overhead per call
+    instead of 28.4k) and an empty working directory inside it."""
+    from .backend.agy import isolated_home
+    home = isolated_home(HOME_NAME)
+    work = home / "work"
+    work.mkdir(exist_ok=True)
+    return home, work
+
+
+def _forget(home, conversation_id: str) -> None:
+    """agy keeps every conversation (about 0.5 MB each) and has no flag not to:
+    remove this one, and anything older than an hour a crash left behind."""
+    import shutil
+    store = home / ".gemini" / "antigravity-cli"
+    doomed = []
+    if conversation_id and "/" not in conversation_id:
+        doomed += [*store.glob(f"conversations/{conversation_id}.db*"), store / "brain" / conversation_id]
+    cutoff = time.time() - CONVERSATION_KEEP_SEC
+    for old in (*store.glob("conversations/*.db*"), *store.glob("brain/*"), *store.glob("log/cli-*.log")):
+        try:
+            if old.stat().st_mtime < cutoff:
+                doomed.append(old)
+        except FileNotFoundError:
+            continue
+    for path in doomed:
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            log_exception("goalUpdaterForgetFail", exc, detail=str(path))
+
+
 def call_model(prompt: str, model_id: str) -> tuple[dict, dict]:
     """One sandboxed, tool-less agy request. Raises on any failure."""
     from . import backends
     from .backend_catalogue import AgentBackend
     runner = backends.by_id(AgentBackend.AGY)
+    home, work = _home()
     proc = subprocess.Popen(
-        [runner.required_binary, "--sandbox", "--disable-slash-commands", "--model", model_id,
-         "--output-format", "json", f"--print={prompt}"],
+        [runner.required_binary, "--sandbox", "--disable-slash-commands",
+         "--print-timeout", PRINT_TIMEOUT, "--output-format", "json", "--model", model_id,
+         f"--print={prompt}"],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        cwd=str(runner.routing_env().get("HOME") or "/tmp"), start_new_session=True,
-        env={**os.environ, **runner.routing_env()})
+        cwd=str(work), start_new_session=True, env={**os.environ, "HOME": str(home)})
     try:
         stdout, stderr = proc.communicate(timeout=CALL_TIMEOUT_SEC)
     except subprocess.TimeoutExpired:
@@ -310,8 +355,10 @@ def call_model(prompt: str, model_id: str) -> tuple[dict, dict]:
         raise TimeoutError(f"agy did not answer within {CALL_TIMEOUT_SEC} s")
     start = stdout.find("{")
     if start < 0:
+        _forget(home, "")
         raise RuntimeError(f"agy exited {proc.returncode} without JSON: {(stderr or stdout)[-300:]}")
     envelope = json.loads(stdout[start:])
+    _forget(home, str(envelope.get("conversation_id") or ""))
     if envelope.get("status") not in (None, "SUCCESS"):
         raise RuntimeError(f"agy status {envelope.get('status')}: {str(envelope)[:300]}")
     raw = str(envelope.get("response") or "")
@@ -501,12 +548,17 @@ class GoalUpdater:
             log_exception("goalUpdaterFail", exc, detail=plan_id)
             with _STATE_LOCK:
                 p = _STATE.setdefault(plan_id, _Pending())
-                p.failures += 1
-                conflict = "plan changed" in str(exc)
-                # The owner changed the plan meanwhile: read again soon.
-                p.retry_at = now + (15_000 if conflict else
-                                    min(3600_000, 60_000 * 2 ** min(p.failures, 6)))
                 p.last_error = f"{type(exc).__name__}: {exc}"[:300]
+                if "plan changed" in str(exc):
+                    p.retry_at = now + 15_000   # the owner wrote meanwhile: read again
+                else:
+                    p.failures += 1
+                    if p.failures == 1:
+                        p.retry_at = now + RETRY_AFTER_MS
+                    else:
+                        # One retry only; the hourly sweep tries again.
+                        p.failures, p.first_at, p.fast = 0, 0, False
+                        p.retry_at = now + sweep_ms()
         finally:
             with self._lock:
                 self._running.discard(plan_id)

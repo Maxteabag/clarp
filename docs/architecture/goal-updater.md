@@ -29,9 +29,11 @@ hourly) runs it for a goal whose messages changed with no trigger, such as a
 long turn without a final message. Nothing new since the last update: no
 model call.
 
-At most two updates run at once; one call has 180 s. A failure is logged and
-retried with backoff (1 min doubling to an hour); a refused write because the
-owner changed the plan meanwhile is retried after 15 s.
+One Host-wide queue runs at most five updates at once (agy takes about 220 MB
+per process; at 40 at once 3 in 40 failed). A call has `--print-timeout 120s`.
+A failure is logged and retried once after a minute; after that the hourly
+sweep decides. A write refused because the owner changed the plan meanwhile is
+retried after 15 s.
 
 ## What it reads
 
@@ -52,9 +54,14 @@ to the newest message, job end and goal event each update read.
 
 ## The model
 
-Gemini 4 Hydrogen (low) through the Antigravity CLI, in Clarp's private
-one-shot HOME (`AgyBackend._ONESHOT_*`): `agy --sandbox
---disable-slash-commands --model gemini-4-hydrogen-low --output-format json`.
+Gemini 4 Hydrogen (low) through the Antigravity CLI: `HOME=<cache>/agy-goal-updater-home
+agy --sandbox --disable-slash-commands --print-timeout 120s --output-format json
+--model gemini-4-hydrogen-low`, from an empty directory. That HOME
+(`backend.agy.isolated_home`) holds agy's login and settings and nothing else,
+no GEMINI.md and no skills: about 9.7k prompt tokens of overhead per call
+instead of 28.4k. agy keeps every conversation (about 0.5 MB) with no flag not
+to, so the updater deletes each one after its call and anything older than an
+hour.
 It runs on the Antigravity subscription, not a paid API. The record is
 untrusted: the prompt says so, the CLI gets no tool permissions and the
 answer is a fixed JSON shape that can touch only step statuses and the

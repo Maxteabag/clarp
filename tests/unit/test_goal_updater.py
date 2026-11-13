@@ -326,3 +326,61 @@ def test_replay_of_a_delegated_goal_ends_current(owner, helper):
     assert "[tool Bash: npm run build]" in model.prompts[1]
     assert "Done: 10 rounds" in model.prompts[2] and "(from agent helper designer-1)" in model.prompts[2]
     assert "untrusted" in model.prompts[0]
+
+
+# ---- agy invocation, retries and cleanup ---------------------------------------
+
+
+def test_one_retry_then_the_sweep_decides(owner):
+    plan = _goal()
+
+    def broken(prompt, model_id):
+        raise RuntimeError("agy exited 1")
+
+    _message(owner, "assistant", "done a thing", at=db.now_ms() + 1000, phase="final")
+    worker = goal_updater.GoalUpdater(call=broken)
+    worker._run(plan["plan_id"])
+    first = goal_updater._STATE[plan["plan_id"]]
+    assert first.failures == 1 and first.retry_at - db.now_ms() <= goal_updater.RETRY_AFTER_MS
+    worker._run(plan["plan_id"])
+    second = goal_updater._STATE[plan["plan_id"]]
+    assert second.failures == 0 and second.first_at == 0
+    assert second.retry_at - db.now_ms() > goal_updater.sweep_ms() - 5000
+    assert "agy exited 1" in second.last_error
+    worker.stop()
+
+
+def test_agy_runs_sandboxed_in_its_own_stripped_home_and_forgets_the_conversation(
+        owner, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
+    seen = {}
+
+    class FakeProc:
+        pid = 0
+        returncode = 0
+
+        def __init__(self, argv, **kw):
+            seen["argv"], seen["cwd"], seen["home"] = argv, kw["cwd"], kw["env"]["HOME"]
+            store = tmp_path / "cache" / goal_updater.HOME_NAME / ".gemini" / "antigravity-cli"
+            (store / "conversations").mkdir(parents=True, exist_ok=True)
+            (store / "brain" / "c-1").mkdir(parents=True, exist_ok=True)
+            (store / "conversations" / "c-1.db").write_text("x")
+
+        def communicate(self, timeout=None):
+            answer = json.dumps({"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}})
+            return json.dumps({"conversation_id": "c-1", "status": "SUCCESS", "response": answer,
+                               "usage": {"input_tokens": 12000}}), ""
+
+    monkeypatch.setattr(goal_updater.subprocess, "Popen", FakeProc)
+    answer, usage = goal_updater.call_model("prompt", "gemini-4-hydrogen-low")
+    argv = seen["argv"]
+    assert argv[1:9] == ["--sandbox", "--disable-slash-commands", "--print-timeout", "120s",
+                         "--output-format", "json", "--model", "gemini-4-hydrogen-low"]
+    assert argv[-1] == "--print=prompt"
+    home = tmp_path / "cache" / goal_updater.HOME_NAME
+    assert seen["home"] == str(home) and seen["cwd"] == str(home / "work")
+    assert not any((home / "work").iterdir()), "an empty working directory"
+    store = home / ".gemini" / "antigravity-cli"
+    assert not (store / "conversations" / "c-1.db").exists()
+    assert not (store / "brain" / "c-1").exists()
+    assert answer["checkpoint"]["progress"] == "p" and usage["input_tokens"] == 12000
