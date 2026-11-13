@@ -989,16 +989,24 @@ class _LiveRingSender:
     and Google, which may take tens of seconds, never holds the request that rang, answered or ended
     the call.
 
-    A state still queued when its turn comes is dropped when it can no longer help: when a later state
-    of the same ring is queued behind it, or when the ring has expired; except the last state of a ring
-    a phone was told is ringing, which that phone must hear to stop ringing. ``told`` remembers, per
-    ring, the push rows the ringing state was delivered to, until the ring's last state is handled."""
+    ``_rings`` remembers, per ring whose ringing state this process handled, the push rows the ringing
+    was TRIED on (a phone may ring though Google's answer never came back), until the ring's last state
+    is handled or the ring is long expired (``FORGET_AFTER_MS``).
+
+    - A ringing state is dropped when a later state of its ring is queued behind it, or when the ring
+      has expired. The ring is then known, with nobody told.
+    - An end of a known ring goes only to the rows its ringing was tried on: nothing to stop elsewhere.
+    - An end of a ring this process does not know (it started before a Host restart, or its entry was
+      forgotten) goes to every row: when in doubt the end is sent.
+    - An end with a later state of its ring queued behind it is dropped; the later one is the end."""
+
+    FORGET_AFTER_MS = 10 * 60 * 1000
 
     def __init__(self, name: str):
         self._name = name
         self._cond = threading.Condition()
         self._jobs: list[tuple[dict, str, list[dict]]] = []
-        self._told: dict[str, set[str]] = {}
+        self._rings: dict[str, dict[str, Any]] = {}       # ring_id → {"tried": set of tokens, "expires_at": ms}
         self._busy = False
         self._thread: threading.Thread | None = None
 
@@ -1017,10 +1025,9 @@ class _LiveRingSender:
                     self._cond.wait()
                 ring, kind, rows = self._jobs.pop(0)
                 later = any(queued[0]["ring_id"] == ring["ring_id"] for queued in self._jobs)
-                told = set(self._told.get(ring["ring_id"], ()))
                 self._busy = True
             try:
-                self._send(ring, kind, rows, later=later, told=told)
+                self._send(ring, kind, rows, later=later)
             except Exception as exc:  # noqa: BLE001 - one failed push never stops the next
                 log_exception("agentRingSenderFail", exc, self._name)
             finally:
@@ -1029,28 +1036,40 @@ class _LiveRingSender:
                     self._busy = False
                     self._cond.notify_all()
 
-    def _send(self, ring: dict, kind: str, rows: list[dict], *, later: bool, told: set[str]) -> None:
+    def _forget_expired_locked(self) -> None:
+        cutoff = now_ms() - self.FORGET_AFTER_MS
+        for ring_id in [r for r, entry in self._rings.items() if entry["expires_at"] < cutoff]:
+            del self._rings[ring_id]
+
+    def _send(self, ring: dict, kind: str, rows: list[dict], *, later: bool) -> None:
         from . import apns
         ring_id = ring["ring_id"]
-        last = kind != "ring" and not later
+        expires_at = int(ring.get("expires_at") or 0)
+        with self._cond:
+            self._forget_expired_locked()
+            entry = self._rings.get(ring_id)
+        if kind == "ring":
+            with self._cond:
+                entry = self._rings.setdefault(ring_id, {"tried": set(), "expires_at": expires_at})
+            if later or now_ms() >= expires_at:
+                log("agentRingLiveFcmDropped",
+                    f"ring={ring_id} kind=ring reason={'superseded' if later else 'expired'}")
+                return
+            for row in rows:
+                with self._cond:
+                    entry["tried"].add(row["token"])        # before the send: the phone may ring either way
+                apns.send_agent_ring(ring, kind, tokens=[row])
+            return
         if later:
             log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=superseded")
             return
-        expired = now_ms() >= int(ring.get("expires_at") or 0)
-        if expired and kind == "ring":
-            log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=expired")
-            return
-        targets = [row for row in rows if not expired or row["token"] in told]
-        if expired and len(targets) < len(rows):
-            log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=expired rows={len(rows) - len(targets)}")
+        targets = rows if entry is None else [row for row in rows if row["token"] in entry["tried"]]
+        if len(targets) < len(rows):
+            log("agentRingLiveFcmDropped", f"ring={ring_id} kind={kind} reason=not_rung rows={len(rows) - len(targets)}")
         for row in targets:
-            result = apns.send_agent_ring(ring, kind, tokens=[row])
-            if kind == "ring" and result.get("sent"):
-                with self._cond:
-                    self._told.setdefault(ring_id, set()).add(row["token"])
-        if last:
-            with self._cond:
-                self._told.pop(ring_id, None)
+            apns.send_agent_ring(ring, kind, tokens=[row])
+        with self._cond:
+            self._rings.pop(ring_id, None)
 
     def drain(self, timeout: float = 10.0) -> bool:
         """Wait until every job handed over so far has run (tests)."""

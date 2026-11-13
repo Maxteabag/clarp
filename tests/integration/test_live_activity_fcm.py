@@ -638,3 +638,25 @@ def test_an_end_takes_nothing_from_the_burst(fcm_only):
     sender.offer({**WORK, "updated_at_ms": 100}, True)                   # busy again: the tenth update goes
     assert [m["event"] for m in recorder.sent] == ["update"] * 9 + ["end", "update"]
     assert recorder.sent[-2]["priority"] == "5"
+
+
+
+def test_a_closed_summary_sender_takes_no_state(fcm_only):
+    clock = HeapClock()
+    recorder = Recorder(clock)
+    sender = _sender(clock, recorder)
+    sender.offer(WORK, True)
+    sender.close()
+    assert sender.offer({**WORK, "updated_at_ms": 9}, True) is None
+    clock.run_until(clock.now + 3600)
+    assert [m["state"]["updated_at_ms"] for m in recorder.sent] == [1]
+
+
+def test_without_a_usable_key_the_sender_sends_nothing_even_with_a_transport(fcm_only, tmp_path):
+    """The early return: the transport given here would deliver, so only the key check stops it."""
+    clock = HeapClock()
+    recorder = Recorder(clock)
+    sender = _sender(clock, recorder)
+    _config(tmp_path)                                                    # the service account is gone
+    assert sender.offer(WORK, True) == {"sent": 0, "held": 0, "failed": 0}
+    assert recorder.sent == [] and sender._latest is None
