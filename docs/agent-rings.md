@@ -159,8 +159,10 @@ lists every field and fixed string.
   token (`POST /calls/ring/voip-token`; the VoIP push, first ring only), an
   Android phone on its FCM push row (`POST /devices`, feature `agent_live_fcm`,
   contract 94, docs/push-android.md "Live calls"; an FCM data message for every
-  state). `agent_rings.live_capable` reads both. With no such phone that still
-  receives rings the ring is refused (`live_client_required`). GET, SSE and
+  state, sent off the request thread). `agent_rings.live_capable` reads both.
+  An Android phone counts as a ring recipient only while a push can reach it
+  (a usable FCM key, a live row). With no such phone that still receives rings
+  the ring is refused (`live_client_required`). GET, SSE and
   every push name `conversation_mode`; a classic ring has no such field.
 - **Answer.** Only `conversation_mode: "agent_live_v1"` answers a Live ring
   (any other answer, every older app included, is 409 `live_client_required`

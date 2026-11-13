@@ -166,9 +166,10 @@ def register_token(token: str, session: str | None = None,
     registration (there is no legacy FCM row to stay compatible with) and kept exactly as sent.
 
     ``conversation_modes`` (column ``device_tokens.supported_conversation_modes``) is what an Android
-    phone declared it can run (``["agent_live_v1"]``), already validated by the caller. Kept on an FCM
-    row only, and replaced by every registration: one without it stores none. An APNs row never keeps
-    one: an iPhone declares its modes with its VoIP token (POST /calls/ring/voip-token), as before.
+    phone declared it can run (``["agent_live_v1"]``), already validated by the caller. Kept on an
+    Android FCM row only (platform ``android``, provider ``fcm``), and replaced by every registration:
+    one without it stores none. Any other row never keeps one: an iPhone declares its modes with its
+    VoIP token (POST /calls/ring/voip-token), as before.
     """
     from . import db
     token = canonical_token(token)
@@ -184,7 +185,7 @@ def register_token(token: str, session: str | None = None,
     if not provider_key:
         raise InvalidDeviceToken(f"unknown push provider {provider!r}")
     modes_key = (json.dumps(list(dict.fromkeys(conversation_modes)), separators=(",", ":"))
-                 if provider_key == "fcm" and conversation_modes else "")
+                 if provider_key == "fcm" and platform_key == "android" and conversation_modes else "")
     if provider_key == "fcm":
         from . import fcm
         if not fcm.valid_token(token):
@@ -2068,6 +2069,7 @@ def declared_mode_rows() -> list[dict]:
     rows = db.conn().execute(
         "SELECT token, session, environment, base_url, push_grant, provider, principal AS owner, "
         "supported_conversation_modes FROM device_tokens WHERE disabled_at IS NULL AND provider = 'fcm' "
+        "AND platform = 'android' "
         "AND principal != '' AND supported_conversation_modes != ''").fetchall()
     out = []
     for row in rows:
