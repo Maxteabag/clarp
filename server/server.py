@@ -3088,15 +3088,18 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
 
         # The Android phones' summary has its own sender thread: a slow Google never holds an
         # iPhone's push (docs/push-android.md "Agents working").
+        # offer() only records the newest state and wakes the sender's worker, so a hung Google
+        # leaves one state waiting per device, never a backlog.
         from lib.live_activity_fcm import FcmActivitySender
         fcm_activity = FcmActivitySender()
-        fcm_sender = ThreadPoolExecutor(max_workers=1, thread_name_prefix="live-activity-fcm")
         pusher = live_activity.LiveActivityPusher(
             lambda payload, priority: sender.submit(apns.send_live_activity, payload, priority),
             attention=live_activity.badge_attention, roster=agents_db_list, background=in_background,
-            send_fcm=lambda state, high: fcm_sender.submit(fcm_activity.send, state, high))
+            send_fcm=fcm_activity.offer)
         srv.live_activity_pusher = pusher
         srv.live_activity_fcm = fcm_activity
+        fcm_activity.after_start(pusher.present_state)
+        srv.on_close(fcm_activity.close)
 
         class _Observers:
             resync = staticmethod(explainer.resync)
