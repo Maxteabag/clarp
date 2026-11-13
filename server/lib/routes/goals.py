@@ -201,6 +201,9 @@ class GoalRoutes:
             # The apps call this on the user's behalf; agents use clarp-goal. A
             # request carrying an agent's turn identity is that agent, not the user.
             caller = self._turn_caller()
+            # A turn token that is present must verify: an unknown one is never the user.
+            if (getattr(self, "headers", None) or {}).get("X-Clarp-Turn") is not None and not caller:
+                return self._json_error(403, "verified turn identity required")
             actor = (goal_ledger.acting_as("owner", caller, verified=True) if caller
                      else goal_ledger.acting_as("user"))
             with actor:

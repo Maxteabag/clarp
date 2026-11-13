@@ -543,9 +543,10 @@ def test_the_users_waiver_can_be_restored_by_the_user_only(owner):
 class _Route:
     """The apps' /task-plan/action handler with a request body and a turn identity."""
 
-    def __init__(self, body, caller=""):
+    def __init__(self, body, caller="", headers=None):
         from lib.routes.goals import GoalRoutes
         self._body, self._caller, self.answer = body, caller, None
+        self.headers = headers or {}
         self._handle = GoalRoutes._handle_task_plan_action.__get__(self)
 
     def _read_json(self):
@@ -620,3 +621,55 @@ def test_update_threads_and_the_batch_thread_give_their_connections_back(owner, 
     for _ in range(12):
         one_pass()
     assert _open_db_handles() <= before, "every keeper thread closed its own connection"
+
+
+
+# ---- review #311 leftovers --------------------------------------------------
+
+
+def test_the_route_refuses_a_turn_token_that_does_not_verify(owner):
+    plan = _goal()
+    judges = task_plans.get(plan["plan_id"])["goal"]["criteria"][0]
+    current = task_plans.get(plan["plan_id"])
+    route = _Route({"plan_id": plan["plan_id"], "revision": current["revision"], "action": "waive",
+                    "data": {"criterion_id": judges["id"], "reason": "Accepted"}},
+                   caller="", headers={"X-Clarp-Turn": "not-a-turn-we-know"})
+    route._handle()
+    assert route.answer == (403, "verified turn identity required")
+    assert "waived" not in task_plans.get(plan["plan_id"])["goal"]["criteria"][0]
+
+
+def test_the_batch_thread_closes_its_own_connection(owner, helper, monkeypatch):
+    import threading
+    keeper = _keeper()
+    janitors.set_enabled(keeper["session"], keeper["revision"], True)
+    plan = _goal()
+    _message(owner, "assistant", "Started", at=db.now_ms() - 400_000, phase="final")
+    db.conn().execute("UPDATE task_plans SET created_at=created_at-500000 WHERE plan_id=?", (plan["plan_id"],))
+    closed_by = []
+    real_close = db.close_local
+
+    def recording_close():
+        closed_by.append(threading.current_thread().name)
+        real_close()
+
+    monkeypatch.setattr(db, "close_local", recording_close)
+    worker = janitor_autonomy.AutonomyJanitors(
+        dispatch=None, notify=None,
+        goal_ask=lambda run, prompt, plan_id: ({"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}}, {}, "m"))
+    worker.goal_keeper_once(wait=True)
+    assert "goal-keeper-run" in closed_by, "the batch thread gives its own connection back"
+    assert any(name.startswith("goal-keeper_") for name in closed_by), "and so does each update thread"
+
+
+def test_schema_126_leaves_active_goals_and_their_running_clocks_alone(owner):
+    from lib import db_migrations
+    plan = _goal()
+    _step(plan, "harness", "in_progress")
+    item_id = _item(plan, "harness")["item_id"]
+    started = db.now_ms() - 3_600_000
+    db.conn().execute("UPDATE task_items SET started_at=?, active_ms=5 WHERE item_id=?", (started, item_id))
+    db_migrations._migrate_to_v126(db.conn())
+    row = db.conn().execute("SELECT started_at, active_ms FROM task_items WHERE item_id=?", (item_id,)).fetchone()
+    assert (row[0], row[1]) == (started, 5), "a running step of an active goal keeps its clock"
+    assert task_plans.get(plan["plan_id"])["status"] == "active"
