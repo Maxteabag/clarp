@@ -59,5 +59,5 @@ def test_connection_recovery_real_dispatch(tmp_path, monkeypatch, mode, expected
         clear_for_agent(agent)
         # Until the pools are empty: a client left behind fails the next
         # test's quiescence gate (as in test_codex_start_guardrails).
-        from tests.unit.test_codex_start_guardrails import _leave_no_client_behind
-        _leave_no_client_behind()
+        from tests.codex_pool_lifecycle import retire_left_clients
+        retire_left_clients()
