@@ -949,6 +949,10 @@ In every task plan (`GET /task-plans`, `GET /task-plan`, plan artifacts):
   newer of the two by `at`, labelled as the Goal keeper's. Its step changes are
   in `items[].status` and in `goal.history` as kind `updater`. Its writes do
   not change `revision`.
+- `plan.updater`: the Goal keeper as this goal sees it, `{enabled,
+  janitor_agent_id, last_run_at, last_error, goal_error, retry_at}`. `enabled`
+  is the Janitor's own switch (it ships paused); `last_run_at`/`last_error` are
+  its latest run; `goal_error`/`retry_at` this goal's last failed update.
 - `items[].paused`: true for an `in_progress` step of a paused goal. It is not
   running and `elapsed_ms` does not grow; show it as paused, not active.
 - `goal.criteria[].waived` (or absent): `{at, reason}`, the owner set the

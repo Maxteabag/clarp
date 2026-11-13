@@ -39,6 +39,10 @@ enabling or pausing it is the only switch.
   the sweep. A write refused because the owner changed the plan is read again
   after 15 s. Nothing new since the last update means no model call.
 
+In every task plan, `plan.updater` shows the Janitor as that goal sees it:
+`enabled` (its switch), `last_run_at` and `last_error` (its latest run), and
+`goal_error`/`retry_at` (this goal's last failed update, from the progress).
+
 ## What it reads (`lib/goal_keeper.py`)
 
 One prompt per goal, at most 100 KB:
