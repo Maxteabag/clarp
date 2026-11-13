@@ -498,7 +498,9 @@ class AutonomyJanitors:
                         accounts=self.hotseat_read(options['hotseat_command'],provider)
                         req_models,act_models=_provider_model_demand(provider,db.now_ms(),base)
                         decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=db.now_ms(),cooldown_ms=cooldown_ms)
-                    except Exception:
+                    except Exception as exc:
+                        from .log import log_fault
+                        log_fault('claudeBankedResetRoutingReadFailed', exc)
                         decision={'action':'noop','active':decision.get('active'),'remaining':None}
                         repair_text+='; fresh account routing read unavailable'
             switched=None;outcome='completed';error=''
