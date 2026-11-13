@@ -814,6 +814,54 @@ def _write_checkpoint(writer, database, on_stored, captured) -> None:
     database.execute("RELEASE transcript_checkpoint")
 
 
+class _TailWriter(_ImportWriter):
+    """The locked pass of a tail whose batch budget starts at its first write
+    (``tail_yield_after_first_write``).
+
+    A batch ends after IMPORT_COMMIT_EVERY rows or IMPORT_WRITE_BUDGET_SECONDS,
+    counted from BEGIN IMMEDIATE, and the writer is then given away for a
+    moment. A tail's transaction begins with reading the session's rows and
+    hashing them (the guard); on a conversation of a few thousand rows that
+    alone exceeds the budget. So the tail committed an empty batch and yielded
+    before it had written anything, and whoever was waiting for the writer
+    committed in that gap: a foreign commit during a yield, which refuses the
+    tail's publication, and the import after it is a full one (2.7 percent of
+    the tails of 1 to 16 MB, 11.9 of 16 to 64 MB, 20.4 of 64 to 256 MB on
+    13 November).
+
+    A batch that has written nothing has no reason to end: nobody waits for
+    rows that are not there, and the rows read under the lock stay valid only
+    while it is held. Here both budgets count from the batch's first write.
+    Only WHEN the writer is given away changes. What the fence checks does
+    not: every yield still samples the data version before the release and
+    after the reacquire, and a foreign commit in it still refuses the
+    publication."""
+
+    def __init__(self, database):
+        super().__init__(database, locked=True)
+        self.first_write_at: float | None = None
+        self.first_write_seq = 0
+
+    def execute(self, sql, parameters=()):
+        result = super().execute(sql, parameters)
+        if self.first_write_at is None and \
+                str(sql).lstrip().split(None, 1)[0].upper() in _WRITE_VERBS:
+            self.first_write_at = time.monotonic()
+            self.first_write_seq = self.seq
+        return result
+
+    def due(self) -> bool:
+        if self.began_at is None or self.first_write_at is None:
+            return False
+        every = _facade().IMPORT_COMMIT_EVERY
+        return (every > 0 and self.seq - self.first_write_seq >= every) or \
+            time.monotonic() - self.first_write_at >= _facade().IMPORT_WRITE_BUDGET_SECONDS
+
+    def commit(self) -> None:
+        super().commit()
+        self.first_write_at = None
+
+
 def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           source_file: str, turns: list[dict[str, Any]],
                           start_seq: int, carry: dict[str, Any],
@@ -824,6 +872,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           carry_rules=frozenset(),
                           carry_witness: dict | None = None,
                           checkpoint_status: dict | None = None,
+                          yield_after_first_write: bool = False,
                           ) -> list[dict[str, Any]]:
     """Apply a certified tail through the full import's admission protocol.
 
@@ -837,7 +886,8 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     The tail is refused (``_TailInvalidated``, its ``what`` naming the rows)
     when a row the turns before ``start_seq`` could read has changed since;
     ``carry_rules`` name what they cannot read. ``carry_witness`` receives
-    what the next record can build on (lib.message_carry.record).
+    what the next record can build on (lib.message_carry.record). With
+    ``yield_after_first_write`` the locked pass is a ``_TailWriter``.
     """
     visible_replies = _visible_replies(turns)
     phases = _row_phases(turns)
@@ -887,7 +937,8 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
             database.execute("ROLLBACK")
         raise
     prepared = prelude.for_pass()
-    writer = _ImportWriter(database, locked=True)
+    writer = _TailWriter(database) if yield_after_first_write \
+        else _ImportWriter(database, locked=True)
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
         guard(prepared)

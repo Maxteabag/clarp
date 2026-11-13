@@ -68,14 +68,29 @@ LATER_TURNS = "carry_later_turns"
 # A new /send row does not count when no turn before the boundary can be
 # linked to it: its words were not said before.
 NEW_SENDS = "carry_new_sends"
-RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS)
+# A live row of this session (the row a reply streams into) may be new,
+# rewritten or gone. It is a different kind of rule: such a row is rewritten
+# in place with every delta, so what it lets through is a CHANGED old row,
+# not only a new one. What a turn before the boundary reads of a live row is
+# one thing (message_writes._finish_import): a leftover live row is removed
+# when a reply of ITS OWN trace with related words is in the import's batch,
+# and a full import's batch holds every reply where a tail's holds those
+# from the boundary. (A reply adopts a live row only when its slot is empty,
+# message_import_rows._resolve_reply_id, and the slot of a reply before the
+# boundary is not: its row stands.) So a live row is let through unless a
+# reply before the boundary carries its trace, whatever its words: the
+# running turn then spans the boundary. A live row that is as it was when
+# the frontier was published is not asked: that publication left it there.
+# Off unless switched on.
+LIVE_ROWS = "carry_live_rows"
+RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS, LIVE_ROWS)
 
 # The kinds of message row, by where the row is now: one digest each, and the
 # word a refusal names it by.
 KINDS = ("row_send", "row_live", "row_final", "row_transcript", "row_other", "row_other_session")
 _SOURCE_KINDS = (("client:", "row_send"), ("live:", "row_live"), ("final:", "row_final"))
 _TURN_COLUMNS = ("trace_id", "started_at", "settled_at", "outcome")
-_VERSION = 1
+_VERSION = 2
 _ABSENT = "\x00absent"
 
 
@@ -148,6 +163,14 @@ class _Rows:
     def kind(self, row, source_file, backend_session_id) -> str:
         return _kind_of(row[self.at["source_file"]], row[self.at["backend_session_id"]],
                         source_file, backend_session_id)
+
+    def live(self, backend_session_id) -> list:
+        """The rows of this session a reply streams into, as they are now."""
+        source, session = self.at.get("source_file"), self.at.get("backend_session_id")
+        if source is None:
+            return []
+        return [row for row in self.values
+                if row[session] == backend_session_id and str(row[source] or "").startswith("live:")]
 
     def digests(self, values, source_file, backend_session_id) -> dict[str, str]:
         """One digest per kind, over every column of every row of that kind."""
@@ -225,12 +248,17 @@ def record(raw_inputs, *, carry=None, source_file: str = "", backend_session_id:
                    "since": table.digests((), source_file, backend_session_id)}
     turn_values = _turn_values(turns)
     trace = table.at.get("trace_id")
+    ident = table.at.get("message_id")
     return {
         "version": _VERSION,
         "scope": "session" if session_rows else "agent",
         "mark": mark,
         "base": base,
         "rows": digests,
+        # Each live row of this session by itself (there are few): LIVE_ROWS
+        # asks only those that are not as they were.
+        "live": {str(row[ident]): _digest((table.names, row))
+                 for row in table.live(backend_session_id)},
         "turns": _digest(turn_values),
         "early": _early(turn_values, carry),
         "ends": _ends(turn_values, {row[trace] for row in table.values if row[trace]}
@@ -255,6 +283,7 @@ def loads(text) -> dict | None:
             or not isinstance(recorded.get("mark"), int)
             or not isinstance(recorded.get("base"), int)
             or not isinstance(recorded.get("rows"), dict)
+            or not isinstance(recorded.get("live"), dict)
             or set(recorded["rows"]) != {"base", "since"}
             or any(not isinstance(part, dict) or set(part) != set(KINDS)
                    for part in recorded["rows"].values())):
@@ -285,10 +314,12 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     # Every row the frontier was published with is at or below the mark. They
     # are all there and unchanged exactly when each kind hashes as recorded,
     # in both parts: up to the base, and above it.
+    live_rows = LIVE_ROWS in rules
     for part, values in (("base", base), ("since", since)):
         now = table.digests(values, source_file, backend_session_id)
         differing = [kind for kind in KINDS if now[kind] != recorded["rows"][part][kind]]
-        found.update(differing)
+        # Under LIVE_ROWS the live rows are asked one by one below.
+        found.update(kind for kind in differing if not (live_rows and kind == "row_live"))
         if part == "base" and not differing and witness is not None:
             witness["base"] = (recorded["base"], base, recorded["rows"]["base"])
     rows_stand = not found
@@ -300,6 +331,8 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     said = None
     for row in new:
         kind = table.kind(row, source_file, backend_session_id)
+        if kind == "row_live" and live_rows:
+            continue
         if kind != "row_send" or NEW_SENDS not in rules:
             found.add(kind)
             continue
@@ -310,6 +343,18 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
         # copy of a prompt is stripped of its notice: said before, always.
         if text.lstrip().startswith(DELIVERY_CONTEXT_OPEN) or _norm_text(text) in said:
             found.add("send_said_before")
+    if live_rows:
+        replied = None
+        trace, ident = table.at.get("trace_id"), table.at.get("message_id")
+        for row in table.live(backend_session_id):
+            if recorded["live"].get(str(row[ident])) == _digest((table.names, row)):
+                continue        # as it was when the frontier was published
+            if not row[trace]:
+                continue        # no reply's batch can name it
+            if replied is None:
+                replied = _reply_traces(table, old, boundary_seq, source_file, backend_session_id)
+            if row[trace] in replied:
+                found.add("live_row_of_old_reply")
     turn_values = _turn_values(turns)
     if _digest(turn_values) != recorded["turns"]:
         if LATER_TURNS not in rules or recorded["early"] is None:
@@ -334,6 +379,17 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     if _oracle(oracle) != recorded["oracle"]:
         found.add("oracle_rows")
     return ",".join(sorted(found))
+
+
+def _reply_traces(table, old, boundary_seq, source_file, backend_session_id) -> set[str]:
+    """The traces of the replies stored before the boundary: the turns a full
+    replay's batch names and a tail's does not."""
+    at = table.at
+    session, source, role, seq, trace = (at[name] for name in (
+        "backend_session_id", "source_file", "role", "seq", "trace_id"))
+    return {row[trace] for row in old
+            if row[trace] and row[session] == backend_session_id and row[source] == source_file
+            and row[role] == "assistant" and int(row[seq]) < boundary_seq}
 
 
 def _said_before(table, old, carry, boundary_seq, source_file, backend_session_id) -> set[str]:

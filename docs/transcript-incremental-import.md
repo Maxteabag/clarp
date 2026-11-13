@@ -111,6 +111,8 @@ size:
   seconds after the last turn before the boundary, and how the turn of each
   trace on a recorded row ended;
 - a digest of the latest user row and one of the Oracle rows.
+- a digest of each live row of the session by itself (there are few), for
+  `carry_live_rows`.
 
 The digests are taken in a fixed order that SQLite has no say in: the
 columns by name, the rows by message id. At a tail the rows are read again
@@ -133,6 +135,35 @@ Untouched is not assumed: the rows the guard hashed are compared, value for
 value, with the rows read at publication; a full import, or a tail that
 changed a row of the first part, hashes everything and moves the base up to
 the mark.
+
+### When a tail gives the writer away
+
+An import's batch ends after `IMPORT_COMMIT_EVERY` rows or
+`IMPORT_WRITE_BUDGET_SECONDS` (25 ms), counted from `BEGIN IMMEDIATE`, and
+the writer is then given away for 10 ms so that others get their turn. If
+another connection commits in that gap, the rows the import read under the
+lock may no longer be the rows, so its publication is refused (the fence,
+`checkpoint_foreign_commit_yield`) and the next import is a full one.
+
+A tail's transaction begins with reading the session's rows and hashing
+them. On a conversation of a few thousand rows that alone is more than
+25 ms, so the tail ended an empty batch and yielded before it had written a
+row, and whoever was waiting for the writer committed in the gap. On
+13 November a fence refusal was nearly always a tail's (56 of 59), and the
+share grew with the conversation: 2.7 percent of the tails of 1 to 16 MB,
+11.9 percent of 16 to 64 MB, 20.4 percent of 64 to 256 MB.
+
+`tail_yield_after_first_write` (off by default) counts a tail's batch
+budgets from its first write (`message_writes._TailWriter`). A batch that
+has written nothing does not end. It changes only when the writer is given
+away, never what the fence checks: every yield is still sampled before and
+after, and a foreign commit in it still refuses the publication. The price
+is the lock: a tail holds it once for its whole length instead of twice
+with a gap between. Measured on copies of real transcripts: 228 ms instead
+of 93 and 123 on 23,870 rows, 89 ms instead of 40 and 51 on 10,855. With a
+second writer committing every 250 ms no tail lost its publication with the
+switch (0 of 24 on both), against 5 of 19 and 2 of 22 without, and the full
+imports that follow a refusal, which hold the lock longest, went with them.
 
 What a tail still costs: the session's message rows are read from SQLite
 three times (by the probe pass, again under the write lock, and at
@@ -186,22 +217,58 @@ that kind of change is a full import again.
   transcript that opens with a call opening), which the store carry records
   (`initial_provenance_used`).
 
+A fourth rule is off unless switched on:
+
+- `carry_live_rows`: a live row of this session, the row a reply streams
+  into. It is a different kind of rule: the runtime rewrites that row in
+  place with every delta (four times a second while a reply streams), so
+  what the rule lets through is a CHANGED old row, not only a new one. By
+  day on an active Host this was nearly every refusal left (all 137 in one
+  hour of 13 November named `row_live`). What a turn before the boundary
+  reads of a live row is one thing: a full import removes a leftover live
+  row when a reply of the row's own trace with related words is in its
+  batch, and its batch holds every reply where a tail's holds those from the
+  boundary. So a live row may be new, rewritten or gone unless a reply
+  stored before the boundary carries its trace (the running turn then spans
+  the boundary: a message was steered into it), whatever its words. A live
+  row that is as it was when the frontier was published is not asked; the
+  record keeps a digest of each live row for that. A conversation that has
+  turns whose text the stream owns (`agy_turn_authority`) is left out of the
+  rule: such a turn's replies are stored as no row, a full import still
+  names them in its batch under the authority's trace, and the rule, which
+  asks the stored replies, cannot see that trace. There a changed live row
+  is a full import, as with the switch off. A finalized row
+  (`final:`) is not a live row and counts as before. The rule does not
+  change the publication fence: a delta committed while a tail has given
+  the writer away still refuses that tail's publication.
+
+  What it leaves is the turn's end. Once a frontier was published while a
+  turn ran, the turn's trace is on an old row (its `/send` row, its live
+  row), and the turn row settling is refused by `carry_later_turns`
+  (`turn_of_old_row`). So a streamed turn costs one full import, not one for
+  each delta. Without the rule the journal hides most of these: a rewritten
+  live row is found first (`row_live`) and the turn rows are then not asked.
+  One conservative case: the traces whose turns are asked about are those of
+  the rows at or below the mark, and a rewritten live row is above it. When
+  it was the only old row with its trace, any change among the turn rows is
+  a full import.
+
 What stays a full import on purpose: any other change to a row of this
-session (a streamed reply's live row, a finalized row, a turn's rows
-re-stamped when it settles), a new `/send` row with words said before (every
-heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
+session (a finalized row, a turn's rows re-stamped when it settles, and
+without `carry_live_rows` a streamed reply's live row), a new `/send` row
+with words said before (every heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
 way, as fixed words: `transcriptCarryInputsChanged what=row_live,turn_of_old_row`
 (`row_send`, `row_live`, `row_final`, `row_transcript`, `row_other`,
-`row_other_session`, `send_said_before`, `turn_rows`, `turn_before_boundary`,
-`turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
+`row_other_session`, `send_said_before`, `live_row_of_old_reply`, `turn_rows`,
+`turn_before_boundary`, `turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
 frontier the process holds and to one taken from the store alike, so also
 after a Host start and after the cache has dropped the frontier: both are
 the same record.
 
-`tests/readmodel/test_rm_n14_carry.py` runs every rule in pairs: the change
-it lets through is a tail and equals the full replay; its nearest harmful
-twin is a full import and equals it too, and imported as a tail leaves
-different rows.
+`tests/readmodel/test_rm_n14_carry.py` and `test_rm_n14_live_rows.py` run
+every rule in pairs: the change it lets through is a tail and equals the full
+replay; its nearest harmful twin is a full import and equals it too, and
+imported as a tail leaves different rows.
 
 A process that holds no frontier for a file takes the stored one when it
 never had one (a Host start), lost it to the cache's size limit, or the last

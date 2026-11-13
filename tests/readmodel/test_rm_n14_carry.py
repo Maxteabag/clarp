@@ -54,14 +54,17 @@ def _escaped(text: str) -> bytes:
     return json.dumps(text)[1:-1].encode()
 
 
-def _turn(backend: str, ordinal: int, *, request: str | None = None) -> bytes:
-    """One complete turn at second ``ordinal``; ``request`` replaces its words."""
+def _turn(backend: str, ordinal: int, *, request: str | None = None,
+          answer: str | None = None) -> bytes:
+    """One complete turn at second ``ordinal``; ``request`` replaces its
+    words, ``answer`` those of its last reply."""
     data = harness.append_bytes(backend, ordinal)
-    if request is None:
-        return data
-    words = f"synthetic request {ordinal}".encode()
-    assert data.count(words) == 1
-    return data.replace(words, _escaped(request))
+    for said, instead in ((f"synthetic request {ordinal}", request),
+                          (f"synthetic answer {ordinal}", answer)):
+        if instead is not None:
+            assert data.count(said.encode()) == 1
+            data = data.replace(said.encode(), _escaped(instead))
+    return data
 
 
 STATES = ("held", "after a Host start", "evicted")
@@ -94,6 +97,7 @@ class World:
         self.tick = 0
         self.rows = 0
         self.standing = False     # a frontier has been published
+        self.published = True     # ... and the last import published one too
 
     def __enter__(self):
         self.full = harness.PersistentLane(self.reference, self.transcript, self.backend, "reference")
@@ -139,6 +143,41 @@ class World:
         self.message(f"u-{name}", source_file=f"client:{name}", role="user", text=text, at=at,
                      origin=origin, sender=sender, trace=trace, session=session)
 
+    def _head(self, other, revision, session=corpus.SESSION):
+        other.execute(
+            "INSERT INTO conversation_heads(agent_id,backend_session_id,revision,replace_revision) "
+            "VALUES (?,?,?,0) ON CONFLICT(agent_id,backend_session_id) DO UPDATE SET "
+            "revision=MAX(conversation_heads.revision,excluded.revision)",
+            (corpus.AGENT, session, revision))
+
+    def live(self, name, text, *, at, trace, session=corpus.SESSION, settled=False):
+        """The row a reply streams into, as message_live inserts it."""
+        self.rows += 1
+        for database in (self.reference, self.candidate):
+            with sqlite3.connect(database) as other:
+                revision = self.next_revision(other)
+                other.execute(
+                    "INSERT INTO messages(message_id,agent_id,backend_session_id,source_file,seq,role,"
+                    "timestamp,text,kind,tool_name,tools_json,display_cells_json,updated_at,revision,"
+                    "origin,sender_agent_id,trace_id) VALUES (?,?,?,?,?,'assistant',?,?,?,NULL,'[]','[]',"
+                    "?,?,'user',NULL,?)",
+                    (f"live-{name}", corpus.AGENT, session, f"live:{trace or name}",
+                     -900000 + self.rows, _stamp(harness.BASE_MS + at), text,
+                     None if settled else "live", harness.BASE_MS + at, revision, trace or None))
+                self._head(other, revision, session)
+
+    def live_change(self, name, sql, parameters=()):
+        """One more write to that row under the clock's next revision: a
+        delta (``text=?``), the settling (``kind=NULL``)."""
+        for database in (self.reference, self.candidate):
+            with sqlite3.connect(database) as other:
+                revision = self.next_revision(other)
+                assert other.execute(
+                    f"UPDATE messages SET {sql}, revision=?, updated_at=updated_at+1 "
+                    "WHERE message_id=? AND source_file LIKE 'live:%'",
+                    (*parameters, revision, f"live-{name}")).rowcount == 1
+                self._head(other, revision)
+
     def turn_row(self, trace, *, at, settled=None, outcome=None):
         self.write("INSERT INTO turns(agent_id,source,trace_id,started_at,ended_at,settled_at,outcome) "
                    "VALUES (?,'pwa',?,?,?,?,?)",
@@ -165,8 +204,9 @@ class World:
         report = self.actual.tick(self.tick, faults=faults)
         self.tick += 1
         harness.assert_product_equal(self.reference, self.candidate)
-        if self.standing:
+        if self.standing and self.published:
             assert report["frontier_held"] is (self.state == "held")
+        self.report = report
         [event] = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
         return event["code"], [word for line in report["carry_changed"]
                                for word in line.removeprefix("what=").split(",")]
@@ -181,7 +221,8 @@ class World:
 
 
 def _history(backend, turns=6, **replaced):
-    return [_turn(backend, i, request=replaced.get(f"request{i}")) for i in range(turns)]
+    return [_turn(backend, i, request=replaced.get(f"request{i}"),
+                  answer=replaced.get(f"answer{i}")) for i in range(turns)]
 
 
 ON_OFF = pytest.mark.parametrize("rule_on", [True, False], ids=["rule on", "rule off"])
