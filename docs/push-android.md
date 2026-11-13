@@ -266,10 +266,14 @@ FCM sends leave on their own thread, oldest first: the request that rang,
 answered or ended the call never waits for Google, and its `delivery.fcm_live`
 says `{"pending": <rows>}`. The ringing state is handed over before an
 iPhone's VoIP push, so a slow Apple never lets an answer reach Google first.
-A state still waiting when its turn comes is dropped when it can no longer
-help: a later state of the same ring is waiting behind it, or the ring has
-expired. The exception is the last state of a ring a phone was told is
-ringing, which that phone still gets, so it stops ringing. A ring that runs out is announced (`missed`) after the
+A ringing state still waiting when its turn comes is dropped when a later
+state of the same ring is waiting behind it, or when the ring has expired.
+The end of a ring (answered, declined, missed, cancelled) goes only to the
+phones its ringing was sent to. A phone counts as told once the ringing was
+tried on it, even if Google's answer never came back: it may have rung. A
+phone never told a ring was ringing gets no end, because there is nothing to
+stop. When the Host does not know whether a ring rang (it rang before a Host
+restart), its end goes to every phone, so in doubt the end is sent. A ring that runs out is announced (`missed`) after the
 Host's ring lock is released, so a slow Google never holds another phone's
 `GET /calls/ring`.
 

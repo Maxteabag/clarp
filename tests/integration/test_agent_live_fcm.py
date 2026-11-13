@@ -21,7 +21,7 @@ from tests.integration.test_server_di import fake_ctx, running_server  # noqa: F
 from tests.unit.test_agent_ring_live import FILES, OPENING, PROFILE, _context
 from tests.unit.test_agent_rings import _agent
 from tests.unit.test_fcm import (  # noqa: F401 - fixtures
-    SEND, _config, _fresh_fcm_state, _service_account, google, rsa_key)
+    SEND, _config, _fresh_fcm_state, _service_account, google, rsa_key, sleeps)
 
 ADMIN = "local-administrator"
 ANDROID = "dGVzdC1mY20tdG9rZW4:APA91bH" + "x" * 140
@@ -422,10 +422,8 @@ def test_a_missed_ring_announced_through_a_hanging_google_never_holds_the_iphone
     android, iphone = _pair(), _pair()
     assert _android(base, android, supported_conversation_modes=LIVE)[0] == 200
     assert _call(base, iphone["token"], "POST", "/devices", {"token": "a1" * 32, "session": "koko"})[0] == 200
+    # A ring this process never sent a ringing for (it rang before a Host restart): in doubt its end is sent.
     _store_ring("rng_late", live=live_ring, expired=True)
-    if live_ring:
-        # The phone was told this ring is ringing: its end must still reach it, though the ring is over.
-        agent_rings._LIVE_FCM_SENDER._told["rng_late"] = {ANDROID}
     expiry = threading.Thread(target=agent_rings.expire_due, daemon=True)   # what the ring's own timer runs
     expiry.start()
     assert hanging.entered.wait(5)                                       # the missed state is with Google
@@ -545,8 +543,9 @@ def test_the_android_states_reach_google_in_order_and_superseded_ones_are_droppe
     assert status == 200
     hanging.release.set()
     _drain()
-    # The second ring's ringing had its answer queued behind it: dropped. Everything else in order.
-    assert _states(hanging.google) == [(first, "ringing"), (first, "declined"), (second, "answered")]
+    # The second ring's ringing had its answer queued behind it: dropped, and with it the answer, since the
+    # phone was never told that ring was ringing (there is nothing to stop). Everything else in order.
+    assert _states(hanging.google) == [(first, "ringing"), (first, "declined")]
 
 
 def test_with_google_slow_ringing_reaches_it_before_answered(host, google, monkeypatch):
@@ -632,3 +631,69 @@ def test_the_platform_rule_is_pinned_at_the_route_and_at_the_store(host):
     apns.register_token(ANDROID_2, session="koko", platform="android", owner=phone["device_id"],
                         conversation_modes=LIVE)
     assert _row(ANDROID_2)["supported_conversation_modes"] == '["agent_live_v1"]'
+
+
+
+# ---- Arnold's fix-forward after PR 299 (the reviewer's addendum) -------------------------------------
+
+def test_a_phone_whose_ringing_answer_was_lost_still_hears_missed(host, google, sleeps, monkeypatch):
+    """Google takes the ringing but its answer never reaches the Host (three tries); then the ring runs
+    out. The phone may have rung: it was tried, so it is told the ring is over."""
+    import httpx
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    real_post = google.post
+    taken = []
+
+    def lose_ringing_answers(url, **kw):
+        if url == SEND and kw["json"]["message"]["data"]["ring_state"] == "ringing":
+            taken.append(kw["json"]["message"]["data"]["ring_state"])          # Google has it ...
+            raise httpx.ReadTimeout("the answer never came back")              # ... the Host never hears
+        return real_post(url, **kw)
+    monkeypatch.setattr(google, "post", lose_ringing_answers)
+    ring = _live_ring(base)[1]["ring"]["ring_id"]
+    _drain()
+    assert taken == ["ringing"] * 3 and google.send_calls == []
+    real_now = agent_rings.now_ms
+    monkeypatch.setattr(agent_rings, "now_ms", lambda: real_now() + 2 * agent_rings.RING_TIMEOUT_MS)
+    assert ring in agent_rings.expire_due()
+    _drain()
+    assert _states(google) == [(ring, "missed")]
+
+
+def test_an_end_goes_only_to_the_phones_the_ringing_was_tried_on(host, google, monkeypatch):
+    """A phone that declared Live after the ringing went out was never told: its end would stop nothing."""
+    base = host
+    first, late = _pair(), _pair()
+    assert _android(base, first, supported_conversation_modes=LIVE)[0] == 200
+    ring = _live_ring(base)[1]["ring"]["ring_id"]
+    _drain()
+    assert _android(base, late, token=ANDROID_2, supported_conversation_modes=LIVE)[0] == 200
+    assert _call(base, first["token"], "POST", "/calls/ring/decline", {"ring_id": ring})[0] == 200
+    _drain()
+    assert [(_data(s)["ring_state"], s["json"]["message"]["token"]) for s in google.send_calls] == [
+        ("ringing", ANDROID), ("declined", ANDROID)]
+
+
+def test_the_sender_forgets_a_ring_whose_last_state_never_came(host, google, monkeypatch, two_rings):
+    """The phone stopped receiving between the ringing and the end: nothing is handed over for the end, and
+    the entry goes once the ring is long expired."""
+    base = host
+    phone = _pair()
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    first = _ring_event(base, 1)[1]["ring"]["ring_id"]
+    _drain()
+    assert first in agent_rings._LIVE_FCM_SENDER._rings
+    assert _call(base, phone["token"], "DELETE", "/devices", {"token": ANDROID})[0] == 200
+    real_now = agent_rings.now_ms
+    monkeypatch.setattr(agent_rings, "now_ms", lambda: real_now() + 2 * agent_rings.RING_TIMEOUT_MS)
+    agent_rings.expire_due()                                             # missed: no recipient, nothing handed over
+    _drain()
+    assert first in agent_rings._LIVE_FCM_SENDER._rings
+    later = real_now() + agent_rings.RING_TIMEOUT_MS + agent_rings._LiveRingSender.FORGET_AFTER_MS + 60_000
+    monkeypatch.setattr(agent_rings, "now_ms", lambda: later)
+    assert _android(base, phone, supported_conversation_modes=LIVE)[0] == 200
+    second = _ring_event(base, 2)[1]["ring"]["ring_id"]                  # the next job tidies up
+    _drain()
+    assert first not in agent_rings._LIVE_FCM_SENDER._rings and second in agent_rings._LIVE_FCM_SENDER._rings
