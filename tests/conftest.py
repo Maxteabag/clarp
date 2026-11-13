@@ -657,17 +657,18 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def drop_hand_built_clients(request, _isolated_db):
+def drop_hand_built_clients(_isolated_db):
     """For every test that builds a Codex client by hand (an object, not a
     process): take it out of the pools when the test is over, before the
     quiescence gate of ``_isolated_db`` looks and before the test's patches
     are undone. One such client left behind failed that test's teardown and
     then every later test of the worker: 142 errors in 21 of the 26 Codex
     unit files in one serial run (issue 290). A client that is a process is
-    not touched, so the gate still catches one nobody retired."""
+    not touched, so the gate still catches one nobody retired
+    (tests/unit/test_codex_pool_cleanup.py). That holds for a test with the
+    pool owner as well: its clients are processes, and the owner has closed
+    them by the time this runs."""
     yield
-    if "codex_pool_lifecycle" in request.fixturenames:
-        return      # that fixture owns its clients and closes them itself
     from tests.codex_pool_lifecycle import drop_hand_built_clients as drop
     drop()
 
