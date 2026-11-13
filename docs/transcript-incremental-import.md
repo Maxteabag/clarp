@@ -237,6 +237,17 @@ A fourth rule is off unless switched on:
   change the publication fence: a delta committed while a tail has given
   the writer away still refuses that tail's publication.
 
+  What it leaves is the turn's end. Once a frontier was published while a
+  turn ran, the turn's trace is on an old row (its `/send` row, its live
+  row), and the turn row settling is refused by `carry_later_turns`
+  (`turn_of_old_row`). So a streamed turn costs one full import, not one for
+  each delta. Without the rule the journal hides most of these: a rewritten
+  live row is found first (`row_live`) and the turn rows are then not asked.
+  One conservative case: the traces whose turns are asked about are those of
+  the rows at or below the mark, and a rewritten live row is above it. When
+  it was the only old row with its trace, any change among the turn rows is
+  a full import.
+
 What stays a full import on purpose: any other change to a row of this
 session (a finalized row, a turn's rows re-stamped when it settles, and
 without `carry_live_rows` a streamed reply's live row), a new `/send` row
