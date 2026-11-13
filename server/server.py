@@ -2149,11 +2149,15 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     def _handle_live_activity_register(self):
         """POST /devices/live-activity: register (or with "ended": true,
-        drop) an ActivityKit push token (docs/live-items.md §8)."""
+        drop) an ActivityKit push token (docs/live-items.md §8). With
+        "platform": "fcm", an Android phone asks for the agents-working summary
+        on its FCM push row instead (docs/push-android.md "Agents working")."""
         from lib import live_activity
         data = self._read_json()
         if not isinstance(data, dict):
             return self._json_error(400, "bad json")
+        if data.get("platform") == "fcm":
+            return self._live_activity_fcm(data, ended=data.get("ended") is True)
         if data.get("ended") is True:
             removed = live_activity.unregister(
                 activity_id=str(data.get("activity_id") or ""), token=str(data.get("token") or ""))
@@ -2174,11 +2178,29 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         who = self.principal()
         return who.principal if who.full_scope and who.principal.startswith("device_") else ""
 
+    def _live_activity_fcm(self, data: dict, *, ended: bool):
+        """The agents-working summary for an Android phone (feature live_activity_fcm): only a paired,
+        full-scope, unrevoked device asks for it, for itself."""
+        from lib import live_activity_fcm
+        from lib.agent_ring_live import device_ok
+        who = self.principal()
+        if not (who.full_scope and who.principal.startswith("device_") and device_ok(who.principal)):
+            return self._json_error(403, "full device access required")
+        if ended:
+            return self._json_ok({"ok": True, "removed": live_activity_fcm.unregister(who.principal)})
+        try:
+            live_activity_fcm.register(who.principal, data.get("kind"))
+        except live_activity_fcm.RegistrationError as error:
+            return self._json(error.status, {"ok": False, "error": error.error})
+        return self._json_ok({"ok": True, "platform": "fcm", "kind": live_activity_fcm.KIND})
+
     def _handle_live_activity_delete(self):
         from lib import live_activity
         data = self._read_json() if int(self.headers.get("Content-Length") or 0) else {}
         query = self._query()
         data = data if isinstance(data, dict) else {}
+        if (data.get("platform") or query.get("platform", [""])[0]) == "fcm":
+            return self._live_activity_fcm(data, ended=True)
         removed = live_activity.unregister(
             activity_id=str(data.get("activity_id") or query.get("activity_id", [""])[0] or ""),
             token=str(data.get("token") or query.get("token", [""])[0] or ""))
@@ -3064,10 +3086,20 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         def in_background(job):
             threading.Thread(target=job, daemon=True, name="live-activity-attention").start()
 
+        # The Android phones' summary has its own sender thread: a slow Google never holds an
+        # iPhone's push (docs/push-android.md "Agents working").
+        # offer() only records the newest state and wakes the sender's worker, so a hung Google
+        # leaves one state waiting per device, never a backlog.
+        from lib.live_activity_fcm import FcmActivitySender
+        fcm_activity = FcmActivitySender()
         pusher = live_activity.LiveActivityPusher(
             lambda payload, priority: sender.submit(apns.send_live_activity, payload, priority),
-            attention=live_activity.badge_attention, roster=agents_db_list, background=in_background)
+            attention=live_activity.badge_attention, roster=agents_db_list, background=in_background,
+            send_fcm=fcm_activity.offer)
         srv.live_activity_pusher = pusher
+        srv.live_activity_fcm = fcm_activity
+        fcm_activity.after_start(pusher.present_state)
+        srv.on_close(fcm_activity.close)
 
         class _Observers:
             resync = staticmethod(explainer.resync)

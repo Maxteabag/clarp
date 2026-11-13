@@ -262,15 +262,101 @@ that receives rings, for every state (`ringing`, then `answered`, `declined`,
 `missed` or `cancelled` under the same `collapse_id`), with the same keys as a
 classic ring plus `conversation_mode`: `"agent_live_v1"`. A phone that cannot
 run Live never hears of one. iPhones get a Live ring by VoIP, as before. These
-FCM sends leave on their own thread, in order: the request that rang, answered
-or ended the call never waits for Google, and its `delivery.fcm_live` says
-`{"pending": <rows>}`. A ring that runs out is announced (`missed`) after the
+FCM sends leave on their own thread, oldest first: the request that rang,
+answered or ended the call never waits for Google, and its `delivery.fcm_live`
+says `{"pending": <rows>}`. The ringing state is handed over before an
+iPhone's VoIP push, so a slow Apple never lets an answer reach Google first.
+A state still waiting when its turn comes is dropped when it can no longer
+help: a later state of the same ring is waiting behind it, or the ring has
+expired. The exception is the last state of a ring a phone was told is
+ringing, which that phone still gets, so it stops ringing. A ring that runs out is announced (`missed`) after the
 Host's ring lock is released, so a slow Google never holds another phone's
 `GET /calls/ring`.
 
 Background sync (`kind = sync`, only with `[apns] background_sync = true`):
 `session` and `agent_id`; no alert. Budgeted like iPhones' (three an hour,
 ten minutes apart per session).
+
+## Agents working (feature `live_activity_fcm`, Host contract 95)
+
+The iPhone keeps its "agents working" Live Activity current by ActivityKit
+push (docs/live-items.md §8). An Android phone gets the same content state by
+FCM, on its own FCM push row, at the same moments. The feature is advertised
+only while the Host has a usable service account and live events flow (as
+`live_activity_push`).
+
+```
+POST   /devices/live-activity  {"platform": "fcm", "kind": "agents-working"}
+                               -> 200 {"ok": true, "platform": "fcm", "kind": "agents-working"}
+DELETE /devices/live-activity  {"platform": "fcm"}   (or POST with "ended": true)
+                               -> 200 {"ok": true, "removed": 1 | 0}
+```
+
+- Only a paired, full-scope, unrevoked device asks, for itself (the
+  administrator and a limited device: `403`). It must have registered its FCM
+  token first (`POST /devices`), else `409 fcm_push_token_required`. `kind` is
+  `agents-working` (left out: the same); another `400`. One registration per
+  device; asking again is idempotent.
+- The registration records the device; the messages go to that device's live
+  FCM push rows. So a rotated token is followed without asking again, and
+  `DELETE /devices`, a token taken over by another pairing (the new pairing
+  asks for itself), revocation and a limited scope stop them, by the push
+  row's rules above.
+
+The message is data-only, `android.collapse_key` `agents-working` (FCM keeps
+only the latest for an offline phone):
+
+| Key | Meaning |
+|---|---|
+| `kind` | `agents-working`. |
+| `event` | `update`, or `end` for the quiet state (`working` 0 and `needs_you` 0). |
+| `state` | The APNs push's `content-state` as one JSON string: `working`, `needs_you`, `decisions`, `lead`, `agents`, `updated_at_ms` (docs/live-items.md §8). |
+| `payload_version`, `server_instance_id`, `collapse_id` (`agents-working`), `sent_at` | As on every message. |
+
+- **Pace**: the Live Activity pusher's: routine changes at most every 15 s, a
+  structural change (an agent starting or ending work, a new lead) at least
+  10 s after the last push, a rising `needs_you` at once. Latest wins all the
+  way to Google: the pusher only hands the newest state over, one worker
+  sends, and each device holds at most one state. After a hung Google only
+  the newest goes out, never a backlog of old ones.
+- **Priority**: an update is `HIGH` for a structural change or a rising
+  `needs_you` (it changes what the notification shows), `NORMAL` otherwise. A
+  state that replaced a `HIGH` one before it went out stays `HIGH`. An end is
+  always `NORMAL`. Google's page on message priority
+  (firebase.google.com/docs/cloud-messaging/android-message-priority, read on
+  13 Nov 2026) says: "High priority messages on Android are meant for time
+  sensitive, user visible content", and "If FCM detects a pattern in which
+  messages don't result in user-facing notifications, your messages may be
+  deprioritized to normal priority". It does not say whether a message that
+  removes a notification counts as user-visible, so the end never risks the
+  app's rings and alerts. While the phone is in Doze a `NORMAL` end may arrive
+  late. The notification's own 15-minute timeout still applies.
+- **Budget**: per device, counted apart from the iPhone's, and kept in the
+  database (`live_activity_fcm.budget.v1`), so a Host restart neither refills
+  nor forgets it. Updates use a burst of 10 refilled evenly to 300 a day, and
+  at most 300 a UTC day per device. An end takes nothing from the burst and
+  goes out even when the day's updates are spent. It is counted, and there is
+  at most one end per update, so a day stays within about twice the budget.
+  Over 24 hours one phone gets (updates/ends): 309/0 for 200 agents that are
+  never quiet, 96/96 for a 2-minute turn every 15 minutes, 153/153 for a
+  1-minute turn every 5 minutes, 158/158 for a 40 s turn every 2 minutes, and
+  163/163 for start and stop every 10 s.
+- **Failures**: a send Google does not take (a 5xx, a 429 after the
+  transport's own retries, a network error, no access token) keeps that state
+  owed. It is retried after 60 s, doubling to 30 min, until it is delivered or
+  a newer state replaces it. A delivered message resets the back-off. A token
+  Google reports gone is disabled.
+- **The end**: when the fleet goes quiet the quiet state goes out with
+  `event: "end"`, but only to a device that was sent an update since its last
+  end. A suspended Android app cannot end its notification itself, and a
+  phone that was never shown the work needs no end.
+- **A Host start**: a device whose last message was an update may still show
+  agents at work. If no fleet change is offered within 30 s of the start, it
+  gets the present state: an end when nothing works.
+- **Start of a stretch**: there is no start push. The first message of a
+  working stretch is an ordinary `update`, and the app starts its notification
+  from it.
+- **Revocation** removes the device's request and its budget.
 
 ## Delivery and failures
 
