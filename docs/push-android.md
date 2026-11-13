@@ -93,6 +93,53 @@ token (`onNewToken`):
 
 iOS registration is unchanged.
 
+### Live calls (feature `agent_live_fcm`, Host contract 94)
+
+An Android phone that can run a Live call (the Host's realtime voice model in
+an agent call: `POST /calls/live`, and Live rings, docs/agent-rings.md) says so
+on the same registration:
+
+```json
+{
+  "token": "<FCM registration token>",
+  "platform": "android",
+  "provider": "fcm",
+  "session": "<focused session, optional>",
+  "base_url": "<the Host origin the app uses, optional>",
+  "supported_conversation_modes": ["agent_live_v1"]
+}
+```
+
+- The value is a list of known modes (`"classic"`, `"agent_live_v1"`), each at
+  most once (a repeat is dropped). Anything else (not a list, an unknown mode,
+  more entries than there are modes) answers
+  `400 {"ok": false, "error": "live_mode_invalid"}` and writes nothing. The
+  same rules as the iPhone's `POST /calls/ring/voip-token`.
+- It is stored with that push row (`device_tokens.supported_conversation_modes`,
+  schema 125) and is replaced by every registration: a registration without
+  the field clears it. Send it on every registration, rotation included.
+- The row makes its device Live-capable only while it is live and owned by a
+  paired full-scope device: a row disabled through `DELETE /devices`, by a
+  rotation or because FCM dropped the token, a row taken over by another
+  pairing (only the new pairing's own declaration counts), and a row whose
+  pairing is revoked or limited make nobody Live-capable. A registration with
+  the administrator token is unbound and makes nobody capable.
+- Live-capable, the phone may start `POST /calls/live`, sees Live rings on
+  `GET /calls/ring` and the `agent-ring` event stream, may answer them with
+  `conversation_mode: "agent_live_v1"`, and gets them by FCM (below,
+  "Agent rings"). Without it every Live route answers
+  `409 live_client_required`, as before.
+- The field is honoured only on an Android registration (`"platform":
+  "android"` with provider `fcm`). Any other registration ignores it, as it
+  always has: an iPhone declares its modes with its VoIP token.
+- The declaration is stored whether or not the Host has an FCM key, and the
+  phone's own Live call (`POST /calls/live`) needs none. But an agent's Live
+  **ring** counts the phone as a recipient only while a push can reach it:
+  the Host has a usable FCM key (`push_fcm` is advertised) and the row is live
+  (Google has not reported the token gone). With no such phone, and no
+  Live-capable iPhone, the ring answers `409 live_client_required`, which
+  tells the caller to fall back.
+
 ## Unregistering and revocation
 
 Pushes to a token stop through the Host, never by editing its database
@@ -206,6 +253,20 @@ An agent ring (`kind = agent-ring`):
 | `sound`, `category` | `default` and `agent-call` on an incoming ring. |
 | `thread_id` | `ring-<session>`. |
 | `avatar_url`, `avatar_custom` | As above. |
+
+A classic ring goes to every live row less phones that switched rings off,
+for every state. An **agent-live ring** (`conversation_mode` = `agent_live_v1`,
+feature `agent_live_fcm`) never goes to that global list: it goes only to the
+Android rows that declared `agent_live_v1` (above, "Live calls") of a phone
+that receives rings, for every state (`ringing`, then `answered`, `declined`,
+`missed` or `cancelled` under the same `collapse_id`), with the same keys as a
+classic ring plus `conversation_mode`: `"agent_live_v1"`. A phone that cannot
+run Live never hears of one. iPhones get a Live ring by VoIP, as before. These
+FCM sends leave on their own thread, in order: the request that rang, answered
+or ended the call never waits for Google, and its `delivery.fcm_live` says
+`{"pending": <rows>}`. A ring that runs out is announced (`missed`) after the
+Host's ring lock is released, so a slow Google never holds another phone's
+`GET /calls/ring`.
 
 Background sync (`kind = sync`, only with `[apns] background_sync = true`):
 `session` and `agent_id`; no alert. Budgeted like iPhones' (three an hour,

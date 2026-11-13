@@ -145,7 +145,8 @@ class TokenOwnedElsewhere(Exception):
 def register_token(token: str, session: str | None = None,
                     environment: str | None = None,
                     platform: str = "ios", base_url: str = "",
-                    push_grant: str = "", owner: str = "", provider: str = "") -> None:
+                    push_grant: str = "", owner: str = "", provider: str = "",
+                    conversation_modes: list[str] | None = None) -> None:
     """Upsert a device token. Re-registering clears any prior disabled flag.
 
     ``owner`` (column ``device_tokens.principal``) is the AUTHENTICATED paired, full-scope, non-revoked device that registers the token
@@ -163,6 +164,12 @@ def register_token(token: str, session: str | None = None,
     ``provider`` (column ``device_tokens.provider``) names the push service: ``apns`` (default for every
     platform but Android) or ``fcm`` (default for ``android``). An FCM token is validated on every
     registration (there is no legacy FCM row to stay compatible with) and kept exactly as sent.
+
+    ``conversation_modes`` (column ``device_tokens.supported_conversation_modes``) is what an Android
+    phone declared it can run (``["agent_live_v1"]``), already validated by the caller. Kept on an
+    Android FCM row only (platform ``android``, provider ``fcm``), and replaced by every registration:
+    one without it stores none. Any other row never keeps one: an iPhone declares its modes with its
+    VoIP token (POST /calls/ring/voip-token), as before.
     """
     from . import db
     token = canonical_token(token)
@@ -177,6 +184,8 @@ def register_token(token: str, session: str | None = None,
     provider_key = provider_for(platform_key, provider)
     if not provider_key:
         raise InvalidDeviceToken(f"unknown push provider {provider!r}")
+    modes_key = (json.dumps(list(dict.fromkeys(conversation_modes)), separators=(",", ":"))
+                 if provider_key == "fcm" and platform_key == "android" and conversation_modes else "")
     if provider_key == "fcm":
         from . import fcm
         if not fcm.valid_token(token):
@@ -275,12 +284,13 @@ def register_token(token: str, session: str | None = None,
         database.execute(
             """INSERT INTO device_tokens
                     (token, session, platform, environment, base_url, push_grant,
-                     created_at, updated_at, principal, provider)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, updated_at, principal, provider, supported_conversation_modes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(token) DO UPDATE SET
                     session     = excluded.session,
                     platform    = excluded.platform,
                     provider    = excluded.provider,
+                    supported_conversation_modes = excluded.supported_conversation_modes,
                     environment = excluded.environment,
                     base_url    = CASE WHEN excluded.base_url != ''
                                        THEN excluded.base_url
@@ -294,7 +304,7 @@ def register_token(token: str, session: str | None = None,
                     updated_at  = excluded.updated_at,
                     disabled_at = NULL""",
             (token, session_key, platform_key, env, base_url_key, grant_key, now, now, owner_key,
-             provider_key),
+             provider_key, modes_key),
         )
         database.execute("RELEASE register_token" if nested else "COMMIT")
     except BaseException:
@@ -2050,6 +2060,30 @@ def owned_active_tokens() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def declared_mode_rows() -> list[dict]:
+    """The live FCM rows whose owning device declared conversation modes with POST /devices, each with
+    its ``owner`` and its ``supported_conversation_modes`` as a list. A disabled row (DELETE /devices,
+    rotation, revocation, FCM said unregistered) and an unbound row declare nothing; whether the owner
+    may still receive is the caller's check."""
+    from . import db
+    rows = db.conn().execute(
+        "SELECT token, session, environment, base_url, push_grant, provider, principal AS owner, "
+        "supported_conversation_modes FROM device_tokens WHERE disabled_at IS NULL AND provider = 'fcm' "
+        "AND platform = 'android' "
+        "AND principal != '' AND supported_conversation_modes != ''").fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        try:
+            modes = json.loads(item["supported_conversation_modes"])
+        except ValueError as e:
+            log_exception("deviceModesUnreadable", e, detail=f"owner={item['owner']} token={item['token'][:12]}…")
+            continue
+        item["supported_conversation_modes"] = [m for m in modes if isinstance(m, str)] if isinstance(modes, list) else []
+        out.append(item)
+    return out
+
+
 def ring_alert_tokens(exclude_owners=None) -> list[dict]:
     """The live alert tokens a ring alert goes to: every live token, less those owned by a phone that
     switched agent rings off, and less those owned by a revoked or no longer full-scope device (its
@@ -2065,8 +2099,9 @@ def ring_alert_tokens(exclude_owners=None) -> list[dict]:
     return tokens
 
 
-def send_agent_ring(ring: dict, kind: str, exclude_owners=None) -> dict:
-    """Push one ring state to every live token. Never raises.
+def send_agent_ring(ring: dict, kind: str, exclude_owners=None, tokens: list[dict] | None = None) -> dict:
+    """Push one ring state to every live token, or only to ``tokens`` when given (a Live ring's
+    Android phones, agent_rings._push_live_fcm). Never raises.
 
     Unlike replies and decisions, a ring ignores desktop presence: an agent
     calling is the user's explicit choice of interruption, owner-switchable
@@ -2077,7 +2112,7 @@ def send_agent_ring(ring: dict, kind: str, exclude_owners=None) -> dict:
     if not push_enabled(cfg):
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     from . import agent_rings
-    tokens = _deliverable(cfg, ring_alert_tokens(exclude_owners))
+    tokens = _deliverable(cfg, ring_alert_tokens(exclude_owners) if tokens is None else tokens)
     show_reason = agent_rings.settings()["show_reason"]
     sent = failed = disabled = 0
     collapse = agent_ring_collapse_id(ring)

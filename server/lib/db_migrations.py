@@ -206,6 +206,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v123(con)
         if version < 124:
             _migrate_to_v124(con)
+        if version < 125:
+            _migrate_to_v125(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -994,6 +996,18 @@ def _migrate_to_v124(con: sqlite3.Connection) -> None:
     con.execute(db_schema._SCHEMA_SQL[start:end].replace(
         "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
 
+
+
+def _migrate_to_v125(con: sqlite3.Connection) -> None:
+    """``device_tokens.supported_conversation_modes``: the conversation modes an Android phone
+    declared with its FCM registration (POST /devices, docs/push-android.md "Live calls"), a JSON
+    list such as ``["agent_live_v1"]``, or '' for none. agent_rings.live_capable reads it beside
+    the VoIP registrations. Additive with an empty default, so every existing row declares nothing
+    (as today), older code ignores the column and rolling back needs no down-migration; guarded,
+    so a rerun is a no-op."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
+    if "supported_conversation_modes" not in columns:
+        con.execute("ALTER TABLE device_tokens ADD COLUMN supported_conversation_modes TEXT NOT NULL DEFAULT ''")
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:
     """The newest state row per agent in one seek, for the call-open end's write-time anchor
