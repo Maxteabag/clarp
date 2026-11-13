@@ -341,3 +341,79 @@ def test_a_delta_that_lands_while_the_tail_yields_refuses_its_publication(tmp_pa
         world.published = True
         world.grow(_turn(backend, ordinal + 3))
         assert world.imported() == ("tail_applied", [])
+
+
+# ---- what the rule leaves: the end of the turn ------------------------------------
+
+def _settle(world, trace, at):
+    world.write("UPDATE turns SET ended_at=?, settled_at=?, outcome='completed' WHERE trace_id=?",
+                (harness.BASE_MS + at, harness.BASE_MS + at, trace))
+
+
+@pytest.mark.parametrize("live_row", ["as it was", "rewritten"])
+@BACKENDS
+def test_the_end_of_the_streamed_turn_is_still_a_full_import(tmp_path, backend, live_row):
+    """The rule frees the deltas, not the turn's end. Once a frontier was
+    published with the running turn's live row, the turn's trace is on an
+    old row, and its turn row settling is what the rule for later turns
+    refuses (turn_of_old_row), with the live row as it was or rewritten in
+    the same moment. A streamed turn costs one full import, not one a delta."""
+    with World(tmp_path, backend, _history(backend), settings=ON) as world:
+        ordinal = world.started(6)
+        world.turn_row("running", at=FAR)
+        world.live("reply", "so far", at=FAR + 100, trace="running")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        _settle(world, "running", FAR + 900)
+        if live_row == "rewritten":
+            world.live_change("reply", "text=?", ("so far, and to the end",))
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("full_carry_inputs_changed", ["turn_of_old_row"])
+        world.grow(_turn(backend, ordinal + 2))
+        assert world.imported() == ("tail_applied", [])
+
+
+@BACKENDS
+def test_a_rewritten_live_row_whose_trace_no_other_old_row_carries_and_a_new_turn_row(
+        tmp_path, backend):
+    """Conservative, and pinned so that it is known. The traces whose turns
+    are asked about are those of the rows at or below the mark. A live row
+    that was rewritten is above it, so when it was the only old row with its
+    trace the set of traces differs from the recorded one, and ANY change
+    among the turn rows is then refused, here another turn that only
+    started. With the live row as it was the same turn row is a tail. On a
+    Host the running turn's trace is on its /send row as well, and then the
+    set stands."""
+    with World(tmp_path, backend, _history(backend), settings=ON) as world:
+        ordinal = world.started(6)
+        world.turn_row("running", at=FAR)
+        world.live("reply", "so far", at=FAR + 100, trace="running")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        world.turn_row("another", at=FAR + 2000)
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+        world.turn_row("a-third", at=FAR + 3000)
+        world.live_change("reply", "text=?", ("so far, and further",))
+        world.grow(_turn(backend, ordinal + 2))
+        assert world.imported() == ("full_carry_inputs_changed", ["turn_of_old_row"])
+        world.grow(_turn(backend, ordinal + 3))
+        assert world.imported() == ("tail_applied", [])
+
+
+@BACKENDS
+def test_the_same_with_the_turns_message_among_the_old_rows_is_a_tail(tmp_path, backend):
+    """As on a Host: the running turn's /send row carries its trace, so the
+    trace stays among the old rows' when the live row is rewritten, and a
+    turn row that only started is let through."""
+    with World(tmp_path, backend, _history(backend), settings=ON) as world:
+        ordinal = world.started(6)
+        world.send("now", "a message nothing before it said", at=FAR - 50, trace="running")
+        world.turn_row("running", at=FAR)
+        world.live("reply", "so far", at=FAR + 100, trace="running")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        world.turn_row("another", at=FAR + 3000)
+        world.live_change("reply", "text=?", ("so far, and further",))
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
