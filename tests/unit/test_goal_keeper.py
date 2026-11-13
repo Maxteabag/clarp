@@ -233,7 +233,7 @@ def _config(*, coalesce=300, activity=True, sweep=True, scope=None):
     if sweep:
         attachments.append({"attachment_id": "a-sweep", "trigger_id": "schedule", "trigger_version": 1,
                             "enabled": True, "config": {"cron": "17 * * * *", "timezone": "UTC"}})
-    return {"agent_id": "keeper-1", "generation": 1, "scope": scope or {}, "options": {"max_goals_per_run": 5},
+    return {"agent_id": "keeper-1", "generation": 1, "scope": scope or {}, "options": {"max_goals_per_run": 2},
             "attachments": attachments}
 
 
@@ -317,7 +317,7 @@ def _keeper():
     return janitor_builtins.ensure_builtins()["goal-keeper"]
 
 
-def test_the_goal_keeper_is_a_paused_builtin_janitor_with_three_triggers():
+def test_the_goal_keeper_is_a_paused_builtin_janitor_with_three_triggers(owner):
     keeper = _keeper()
     assert not keeper["enabled"]
     assert keeper["backend"] == "agy" and keeper["model"] == "gemini-4-hydrogen-low"
@@ -327,6 +327,9 @@ def test_the_goal_keeper_is_a_paused_builtin_janitor_with_three_triggers():
     assert watched["agent-work-completed"]["coalesce_seconds"] == 300
     assert "goal-activity-observed" in watched and watched["schedule"]["cron"] == "17 * * * *"
     assert janitor_builtins.eligible("goal-keeper") == [], "paused: nothing runs"
+    plan = _goal()
+    shown = task_plans.get(plan["plan_id"])["updater"]
+    assert shown["enabled"] is False and shown["janitor_agent_id"] == keeper["agent_id"]
 
 
 def test_isolated_execution_is_an_antigravity_option():
@@ -336,6 +339,7 @@ def test_isolated_execution_is_an_antigravity_option():
 
 
 def test_an_enabled_keeper_runs_one_recorded_batch(owner, helper):
+    assert janitors.template("goal-keeper")["options"][0]["default"] == 2, "two goals at once"
     keeper = _keeper()
     keeper = janitors.set_enabled(keeper["session"], keeper["revision"], True)
     plan = _goal()
@@ -356,6 +360,8 @@ def test_an_enabled_keeper_runs_one_recorded_batch(owner, helper):
     assert run["status"] == "completed"
     assert task_plans.get(plan["plan_id"])["goal"]["updater"]["progress"] == "Helper started"
     assert _item(plan, "harness")["status"] == "in_progress"
+    shown = task_plans.get(plan["plan_id"])["updater"]
+    assert shown["enabled"] is True and shown["last_run_at"] and shown["last_error"] is None
 
 
 # ---- agy isolation -------------------------------------------------------------

@@ -114,7 +114,7 @@ def templates() -> list[dict]:
                  {"trigger_id": "goal-activity-observed", "config": {}},
                  {"trigger_id": "schedule", "config": {"cron": "17 * * * *", "timezone": "UTC"}}],
              "options": [
-                 {"key": "max_goals_per_run", "label": "Goals updated at once", "type": "integer", "default": 5,
+                 {"key": "max_goals_per_run", "label": "Goals updated at once", "type": "integer", "default": 2,
                   "min": 1, "max": 6,
                   "description": "One run updates up to this many goals in parallel; each is one model call."}]},
             {"id": "tool-explainer", "name": "Tool explainer",

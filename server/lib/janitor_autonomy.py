@@ -591,7 +591,7 @@ class AutonomyJanitors:
             ready=goal_keeper.due(config,progress,now)
             janitors.save_progress(watch.progress_attachment,config['generation'],progress)
             if not ready:continue
-            width=max(1,min(int(config['options'].get('max_goals_per_run',5)),6));ready=ready[:width]
+            width=max(1,min(int(config['options'].get('max_goals_per_run',2)),6));ready=ready[:width]
             run=janitor_builtins.begin_run(goal_keeper.ROLE,goal_keeper.request_id(config,ready,now),context={'input_hash':digest(ready),'target_count':len(ready)})
             if not run or not janitor_builtins.claim_run(run['run_id']):continue
             self.goal_batch=threading.Thread(target=self._goal_keeper_batch,args=(config,run,ready,now,watch.progress_attachment),name='goal-keeper-run',daemon=True)

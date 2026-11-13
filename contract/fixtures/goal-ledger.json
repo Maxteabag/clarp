@@ -993,6 +993,14 @@
     ],
     "title": "Number Ninja logs events",
     "total_count": 3,
-    "updated_at": 1791160054000
+    "updated_at": 1791160054000,
+    "updater": {
+      "enabled": false,
+      "goal_error": null,
+      "janitor_agent_id": null,
+      "last_error": null,
+      "last_run_at": null,
+      "retry_at": null
+    }
   }
 }

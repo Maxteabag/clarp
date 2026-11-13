@@ -16,7 +16,7 @@ enabling or pausing it is the only switch.
 - **Template** `goal-keeper` (`janitors.templates`): allowed effect
   `goal_update`, recommended backend `agy`, model `gemini-4-hydrogen-low`,
   execution `{"executor": "ephemeral", "provider": "agy", "isolated": true}`,
-  option `max_goals_per_run` (5, 1 to 6). Scope: all eligible agents (not
+  option `max_goals_per_run` (2, 1 to 6). Scope: all eligible agents (not
   Janitors, archived or deleted agents).
 - **Triggers** (its attachments):
   - `agent-work-completed@1`, coalesce 300 s: the owner's turn ended. Its
@@ -38,6 +38,10 @@ enabling or pausing it is the only switch.
   survive a restart. A failed goal is retried once after a minute, then left to
   the sweep. A write refused because the owner changed the plan is read again
   after 15 s. Nothing new since the last update means no model call.
+
+In every task plan, `plan.updater` shows the Janitor as that goal sees it:
+`enabled` (its switch), `last_run_at` and `last_error` (its latest run), and
+`goal_error`/`retry_at` (this goal's last failed update, from the progress).
 
 ## What it reads (`lib/goal_keeper.py`)
 
