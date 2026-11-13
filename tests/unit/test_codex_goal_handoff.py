@@ -4,6 +4,8 @@
 from tests.codex_request import result_reply
 import sqlite3
 
+import threading
+
 import pytest
 
 from lib import agent_goals, agents, backends, codex_app_server as cas, turn_dispatch as td
@@ -78,6 +80,14 @@ def test_a_second_send_to_a_held_stopped_session_queues_instead_of_spawning(tmp_
         assert second.queued, 'a second send took the held-session owner for a stale turn and attempted a spawn'
     finally:
         td.reset_for_tests()
+        # The waiting send left a thread that polls for the held process
+        # (turn_claim._wait_for_process_exit). With the slots reset it ends
+        # within one poll and then finishes its turn; that belongs to this
+        # test, not to whichever one is running a quarter of a second later.
+        for waiter in threading.enumerate():
+            if waiter.name == f'turn-wait-{world.agent}':
+                waiter.join(5)
+                assert not waiter.is_alive()
 
 
 def test_a_goal_update_the_mirror_failed_to_record_keeps_the_process(tmp_path, monkeypatch):
