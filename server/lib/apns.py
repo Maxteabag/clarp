@@ -2050,6 +2050,19 @@ def owned_active_tokens() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def live_fcm_rows(owner: str) -> list[dict]:
+    """One device's live FCM push rows (POST /devices): what its agents-working summary goes to
+    (live_activity_fcm). Rotation, DELETE /devices, a take-over and revocation all act on these rows."""
+    from . import db
+    if not owner:
+        return []
+    rows = db.conn().execute(
+        "SELECT token, session, environment, base_url, push_grant, provider, principal AS owner "
+        "FROM device_tokens WHERE disabled_at IS NULL AND provider = 'fcm' AND principal = ?",
+        (owner,)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def ring_alert_tokens(exclude_owners=None) -> list[dict]:
     """The live alert tokens a ring alert goes to: every live token, less those owned by a phone that
     switched agent rings off, and less those owned by a revoked or no longer full-scope device (its

@@ -552,9 +552,9 @@ class Transport:
             log("fcmPayloadTooLarge",
                 f"kind={payload.get('kind') or '-'} notification={payload.get('notification_id') or '-'}")
             return 0, "PayloadTooLarge", ""
-        # A background sync is a hint: only the newest one per session matters.
+        # A background sync is a hint, an agents-working summary a state: only the newest matters.
         body = message_body(token, data, priority=priority,
-                            collapse_key=collapse if push_type == "background" else "")
+                            collapse_key=collapse if push_type in ("background", "liveactivity") else "")
         url = SEND_URL.format(project=sa.project_id)
         auth_retry = True
         attempt = 0
