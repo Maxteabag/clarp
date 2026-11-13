@@ -176,11 +176,30 @@ def switcher(monkeypatch):
     return owner, worker, readings, calls, sent
 
 
-def test_switches_once_per_interval_and_notifies_the_phone(switcher):
+def test_the_phone_is_pushed_only_when_no_account_can_serve(switcher):
+    """Peter, 13 Nov 2026: no push for a switch; a push only when every account is out and work stopped."""
+    owner, worker, readings, calls, sent = switcher
+    readings["claude"] = claude_payload(a=(True, 1.0), b=(False, 1.0))
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+    assert len(sent) == 1 and sent[0]["reason"] == "account_switch" and sent[0]["push"] is True
+    assert "no saved account has more" in sent[0]["preview"]
+
+
+def test_switch_advice_is_told_without_a_push(switcher):
+    owner, worker, readings, calls, sent = switcher
+    c = janitors.configure(owner["session"], owner["revision"], options={"mode": "notify"})
+    janitors.set_enabled(c["session"], c["revision"], True)
+    worker.hotseat_once()
+    assert not [c for c in calls if c[0] == "switch"]
+    assert len(sent) == 1 and sent[0]["preview"].startswith("Claude: would switch to b") and sent[0]["push"] is False
+
+
+def test_switches_once_per_interval_and_tells_the_chat_without_a_push(switcher):
     owner, worker, readings, calls, sent = switcher
     worker.hotseat_once()
     assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "b")]
-    assert len(sent) == 1 and sent[0]["preview"].startswith("Claude: switched to b") and sent[0]["push"] is True
+    assert len(sent) == 1 and sent[0]["preview"].startswith("Claude: switched to b") and sent[0]["push"] is False
     assert json.loads(settings_store.get_text("hotseat-switcher.claude.last-switch"))["to"] == "b"
     runs = janitors.list_runs(owner["session"])
     assert {r["outcome"] for r in runs} == {"completed"} and len(runs) == 2
