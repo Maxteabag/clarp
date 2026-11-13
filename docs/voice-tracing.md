@@ -48,7 +48,7 @@ window): the correction handles clock skew, not buffering delay.
 ```
 POST /voice-events
 {
-  "source": "ios",                 // ios | pwa
+  "source": "ios",                 // ios | pwa | android (any other: stored as other)
   "client_id": "…",                // stable per install
   "sent_at": 1788400000000,        // client wall clock at send
   "session": "rachel",             // default for events without one
