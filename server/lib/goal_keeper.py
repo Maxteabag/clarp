@@ -1,61 +1,52 @@
-"""Keep durable goals current beside the agents doing the work.
+"""The Goal keeper Janitor's work: keep durable goals current beside agents.
 
 Agents rarely keep their own goal books while they work: a goal sat for a week
 showing "0 of 4 steps done" and a step "Active", while a helper had finished
-everything on day one (2026-11-06/13). This updater watches what Clarp already
-records and, after something happened, asks a small model to restate the goal:
-which steps are pending, in progress, done or blocked, and a short checkpoint.
-The working agent is never prompted, told or interrupted; the result is stored
-as the updater's own, attributed record beside the owner's (see
-``task_plans.updater_apply``). It never completes, pauses or cancels a goal and
-never records criterion evidence.
+everything on day one (2026-11-06/13). The Goal keeper (built-in role
+``goal-keeper``, created paused) reads what Clarp already records and, after
+something happened, asks a small model to restate the goal: which steps are
+pending, in progress, done or blocked, and a short checkpoint. The working
+agent is never prompted, told or interrupted. Its one effect, ``goal_update``,
+is ``task_plans.updater_apply``: step statuses and the attributed updater
+checkpoint beside the owner's, nothing else.
 
-Triggers (all read from the database): the owner's turn ended, a helper sent
-the owner a message, a helper's turn ended, a job of the owner or a helper
-ended, the goal was paused, resumed or cancelled. Triggers fold per goal for
-``fold`` seconds (status changes for ``FAST_FOLD_SEC``), and an hourly sweep
-picks up goals with activity the triggers did not cover (a long turn with no
-final message). Nothing new since the last update: no model call.
+The Janitor framework owns it: the template and its triggers (janitors.py),
+the run lifecycle and history (janitor_builtins.begin_run/claim_run/
+complete_run), the model call with its fallback chain and the agy isolation
+option (janitor_autonomy.model_json, backend.agy.isolated_run), and the loop
+(janitor_autonomy.AutonomyJanitors.goal_keeper_once). Pausing the Janitor is
+the switch. This module builds its context and applies its answer.
 
-The model is Gemini 4 Hydrogen (low) through the Antigravity CLI in its own
-stripped HOME and an empty cwd, sandboxed and given no tool permissions: the
-transcript is untrusted input. Measured offline on six real goals (51 events):
-95% of step statuses right against 69% for the owners' own records, about 8 s
-and ~4k payload tokens per update (docs/architecture/goal-updater.md).
+Triggers, from the Janitor's attachments:
+- agent-work-completed@1: the owner's turn ended; its coalesce_seconds (300)
+  folds a goal's triggers;
+- goal-activity-observed@1: a helper sent the owner a message or ended a turn,
+  a job of the owner or a helper ended, the goal was paused, resumed or
+  cancelled (a status change folds for 30 s);
+- schedule@1: the sweep, for goals with activity no trigger covered.
+Nothing new since the last update: no model call.
+
+Measured offline on six real goals (51 events): 95% of step statuses right
+against 69% for the owners' own records (docs/architecture/goal-keeper.md).
 """
 from __future__ import annotations
 
+import hashlib
 import json
-import os
-import signal
-import subprocess
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from . import db, settings_store
-from .log import log, log_exception
+from . import db
+from .log import log_exception
 
-KEY_ENABLED = "goal_updater.enabled"
-KEY_MODEL = "goal_updater.model"
-KEY_FOLD = "goal_updater.fold_seconds"
-KEY_SWEEP = "goal_updater.sweep_seconds"
-DEFAULT_MODEL = "gemini-4-hydrogen-low"
+ROLE = "goal-keeper"
+EFFECT = "goal_update"
 DEFAULT_FOLD_SEC = 300
-DEFAULT_SWEEP_SEC = 3600
 FAST_FOLD_SEC = 30          # a pause/resume/cancel should show within the minute
-TICK_SEC = 15.0
-# One Host-wide queue. agy takes about 220 MB per process; 40 at once failed
-# 3 times in 40, 4-6 did not (upkeep-wide replay, 13 Nov 2026).
-MAX_WORKERS = 5
-PRINT_TIMEOUT = "120s"
-CALL_TIMEOUT_SEC = 150      # backstop above agy's own --print-timeout
-RETRY_AFTER_MS = 60_000     # one retry; after that the hourly sweep decides
-HOME_NAME = "agy-goal-updater-home"
-CONVERSATION_KEEP_SEC = 3600
-# A goal not yet seen by the updater starts from its owner's last checkpoint,
-# but never replays more than this: an old paused goal is not re-read in full.
+RETRY_AFTER_MS = 60_000     # one retry; after that the sweep decides
+# A goal not yet seen starts from its owner's last checkpoint, but never
+# replays more than this: an old paused goal is not re-read in full.
 FIRST_LOOK_BACK_MS = 24 * 3600 * 1000
 DELTA_CHARS = 40_000
 # The prompt is one argv entry, which Linux caps at 128 KiB.
@@ -87,24 +78,34 @@ SYSTEM = (
 )
 
 
-def enabled() -> bool:
-    if os.environ.get("CLARP_GOAL_UPDATER", "").strip().lower() in {"0", "false", "off", "no"}:
-        return False
-    return settings_store.get_bool(KEY_ENABLED, default=True)
+# ---- the Janitor's triggers --------------------------------------------------
 
 
-def model() -> str:
-    return settings_store.get_text(KEY_MODEL, default=DEFAULT_MODEL).strip() or DEFAULT_MODEL
+@dataclass
+class Triggers:
+    """What the enabled attachments of one Goal keeper watch."""
+    owner_turns: bool = False
+    goal_activity: bool = False
+    fold_ms: int = DEFAULT_FOLD_SEC * 1000
+    sweep: dict | None = None          # {"cron", "timezone"} of the schedule attachment
+    progress_attachment: str = ""      # where per-goal fold and retry state is kept
 
 
-def fold_ms() -> int:
-    return 1000 * settings_store.get_int(KEY_FOLD, default=DEFAULT_FOLD_SEC, minimum=10,
-                                         maximum=6 * 3600)
-
-
-def sweep_ms() -> int:
-    return 1000 * settings_store.get_int(KEY_SWEEP, default=DEFAULT_SWEEP_SEC, minimum=300,
-                                         maximum=24 * 3600)
+def triggers(config: dict) -> Triggers:
+    found = Triggers()
+    for attachment in config.get("attachments") or []:
+        if not attachment.get("enabled") or attachment.get("trigger_version") != 1:
+            continue
+        settings = attachment.get("config") or {}
+        if attachment["trigger_id"] == "agent-work-completed":
+            found.owner_turns = True
+            found.fold_ms = 1000 * int(settings.get("coalesce_seconds", DEFAULT_FOLD_SEC))
+            found.progress_attachment = attachment["attachment_id"]
+        elif attachment["trigger_id"] == "goal-activity-observed":
+            found.goal_activity = True
+        elif attachment["trigger_id"] == "schedule":
+            found.sweep = {"cron": settings.get("cron"), "timezone": settings.get("timezone", "UTC")}
+    return found
 
 
 # ---- what happened ---------------------------------------------------------
@@ -165,7 +166,7 @@ def activity(con, plan_row, agent_ids: list[str], helper_ids: set[str],
         found.newest_ms = max(found.newest_ms, int(r["terminal_at"]))
     for r in con.execute(
             "SELECT event_id, at, kind FROM goal_events WHERE plan_id=? AND event_id > ? "
-            "AND delegation_id != 'goal-updater' ORDER BY event_id",
+            "AND delegation_id != 'goal-keeper' ORDER BY event_id",
             (plan_row["plan_id"], since_event)):
         found.newest_event = max(found.newest_event, int(r["event_id"]))
         if r["kind"] in STATUS_EVENT_KINDS:
@@ -294,78 +295,8 @@ def prompt_for(plan: dict, sheet: dict, text: str) -> str:
     return head + body
 
 
-def _home():
-    """The updater's own stripped agy HOME (login and settings only: no
-    GEMINI.md, no skills, about 9.7k prompt tokens of overhead per call
-    instead of 28.4k) and an empty working directory inside it."""
-    from .backend.agy import isolated_home
-    home = isolated_home(HOME_NAME)
-    work = home / "work"
-    work.mkdir(exist_ok=True)
-    return home, work
 
-
-def _forget(home, conversation_id: str) -> None:
-    """agy keeps every conversation (about 0.5 MB each) and has no flag not to:
-    remove this one, and anything older than an hour a crash left behind."""
-    import shutil
-    store = home / ".gemini" / "antigravity-cli"
-    doomed = []
-    if conversation_id and "/" not in conversation_id:
-        doomed += [*store.glob(f"conversations/{conversation_id}.db*"), store / "brain" / conversation_id]
-    cutoff = time.time() - CONVERSATION_KEEP_SEC
-    for old in (*store.glob("conversations/*.db*"), *store.glob("brain/*"), *store.glob("log/cli-*.log")):
-        try:
-            if old.stat().st_mtime < cutoff:
-                doomed.append(old)
-        except FileNotFoundError:
-            continue
-    for path in doomed:
-        try:
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            log_exception("goalUpdaterForgetFail", exc, detail=str(path))
-
-
-def call_model(prompt: str, model_id: str) -> tuple[dict, dict]:
-    """One sandboxed, tool-less agy request. Raises on any failure."""
-    from . import backends
-    from .backend_catalogue import AgentBackend
-    runner = backends.by_id(AgentBackend.AGY)
-    home, work = _home()
-    proc = subprocess.Popen(
-        [runner.required_binary, "--sandbox", "--disable-slash-commands",
-         "--print-timeout", PRINT_TIMEOUT, "--output-format", "json", "--model", model_id,
-         f"--print={prompt}"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        cwd=str(work), start_new_session=True, env={**os.environ, "HOME": str(home)})
-    try:
-        stdout, stderr = proc.communicate(timeout=CALL_TIMEOUT_SEC)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        proc.communicate()
-        raise TimeoutError(f"agy did not answer within {CALL_TIMEOUT_SEC} s")
-    start = stdout.find("{")
-    if start < 0:
-        _forget(home, "")
-        raise RuntimeError(f"agy exited {proc.returncode} without JSON: {(stderr or stdout)[-300:]}")
-    envelope = json.loads(stdout[start:])
-    _forget(home, str(envelope.get("conversation_id") or ""))
-    if envelope.get("status") not in (None, "SUCCESS"):
-        raise RuntimeError(f"agy status {envelope.get('status')}: {str(envelope)[:300]}")
-    raw = str(envelope.get("response") or "")
-    answer = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
-    if not isinstance(answer, dict):
-        raise ValueError("answer is not a JSON object")
-    return answer, envelope.get("usage") or {}
+# ---- the answer -----------------------------------------------------------
 
 
 def decide(plan: dict, answer: dict) -> tuple[dict, str, str]:
@@ -396,169 +327,169 @@ def decide(plan: dict, answer: dict) -> tuple[dict, str, str]:
     return steps, str(checkpoint.get("progress") or ""), str(checkpoint.get("next_work") or "")
 
 
-def update(plan_id: str, *, now: int | None = None, call=call_model) -> dict:
-    """Read, ask, record one goal. Returns what happened (for logs and tests)."""
+
+
+# ---- when to update ----------------------------------------------------------
+
+
+def open_goals(config: dict) -> list:
+    """Open durable goals of agents in this Goal keeper's scope."""
+    from . import janitors
+    rows = db.conn().execute(
+        "SELECT p.*, a.is_janitor, a.deleted_at, a.archived_at FROM task_plans p "
+        "JOIN agents a ON a.agent_id=p.agent_id WHERE p.status IN ('active','paused') "
+        "AND p.goal_json != '{}' AND a.deleted_at IS NULL AND a.archived_at IS NULL "
+        "AND a.is_janitor=0").fetchall()
+    return [r for r in rows if janitors._in_scope(config.get("scope") or {}, {
+        "agent_id": r["agent_id"], "is_janitor": r["is_janitor"], "deleted_at": r["deleted_at"],
+        "archived_at": r["archived_at"]})]
+
+
+def _seen(con, row, now: int, watch: Triggers) -> "Activity":
+    since_ms, since_event = cursor(row, now)
+    helpers = _helpers(con, row["agent_id"], int(row["created_at"]))
+    ids = [row["agent_id"], *(h["agent_id"] for h in helpers)]
+    seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event)
+    kept = []
+    for at, label in seen.triggers:
+        if label == "owner turn end" and watch.owner_turns:
+            kept.append((at, label))
+        elif label != "owner turn end" and watch.goal_activity:
+            kept.append((at, label))
+    seen.triggers = kept
+    seen.status_change = seen.status_change and watch.goal_activity
+    return seen
+
+
+def due(config: dict, progress: dict, now: int) -> list[str]:
+    """Goals whose folded triggers are ripe, or that a due sweep finds active.
+    ``progress`` (the Janitor's persisted state) is updated in place."""
+    from .janitor_schedule import compute_next_run
+    watch = triggers(config)
+    goals = progress.setdefault("goals", {})
+    sweeping = False
+    if watch.sweep and watch.sweep.get("cron"):
+        next_sweep = progress.get("next_sweep_at")
+        if next_sweep is None:
+            progress["next_sweep_at"] = compute_next_run(watch.sweep["cron"], watch.sweep["timezone"], now)
+        elif now >= next_sweep:
+            sweeping = True
+            progress["next_sweep_at"] = compute_next_run(watch.sweep["cron"], watch.sweep["timezone"], now)
+    con = db.conn()
+    ready, live = [], set()
+    for row in open_goals(config):
+        plan_id = row["plan_id"]
+        live.add(plan_id)
+        state = goals.setdefault(plan_id, {})
+        if state.get("retry_at") and now < state["retry_at"]:
+            continue
+        seen = _seen(con, row, now, watch)
+        if seen.triggers:
+            state.setdefault("first_at", seen.triggers[0][0])
+            state["fast"] = bool(state.get("fast") or seen.status_change)
+        elif sweeping and seen.any_messages:
+            state.setdefault("first_at", now - watch.fold_ms)
+        first = state.get("first_at")
+        if first and now - first >= (FAST_FOLD_SEC * 1000 if state.get("fast") else watch.fold_ms):
+            ready.append(plan_id)
+        if not state:
+            goals.pop(plan_id, None)
+    for gone in set(goals) - live:
+        goals.pop(gone, None)
+    return ready
+
+
+def settle(progress: dict, plan_id: str, outcome: str, now: int, error: str = "") -> None:
+    """Record how one goal's update ended: done clears its window; a failure is
+    retried once after a minute, then left to the sweep; a conflict (the owner
+    wrote meanwhile) is read again after 15 s."""
+    state = progress.setdefault("goals", {}).setdefault(plan_id, {})
+    if outcome in ("updated", "skipped"):
+        progress["goals"].pop(plan_id, None)
+        return
+    state["last_error"] = error[:300]
+    if outcome == "conflict":
+        state["retry_at"] = now + 15_000
+        return
+    state["failures"] = int(state.get("failures") or 0) + 1
+    if state["failures"] == 1:
+        state["retry_at"] = now + RETRY_AFTER_MS
+    else:
+        # One retry only: nothing until a trigger after the next sweep.
+        progress["goals"][plan_id] = {"retry_at": progress.get("next_sweep_at") or now + 3600_000,
+                                      "last_error": error[:300]}
+
+
+# ---- one update and one run ---------------------------------------------------
+
+
+def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=lambda: True) -> dict:
+    """Read, ask, record one goal. ``ask(prompt)`` returns the model's JSON
+    answer and its usage. ``current()`` is the run's authority, checked again
+    just before the write."""
     from . import task_plans
-    now = now or db.now_ms()
     con = db.conn()
     row = con.execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
     if not row or row["status"] not in ("active", "paused") or not _goal(row):
-        return {"skipped": "closed"}
+        return {"outcome": "skipped", "reason": "closed"}
     owner = con.execute("SELECT * FROM agents WHERE agent_id=?", (row["agent_id"],)).fetchone()
     if not owner or owner["deleted_at"] or owner["is_janitor"]:
-        return {"skipped": "owner unavailable"}
+        return {"outcome": "skipped", "reason": "owner unavailable"}
     since_ms, since_event = cursor(row, now)
     helpers = _helpers(con, owner["agent_id"], int(row["created_at"]))
     sheet, names, job_refs = fact_sheet(con, row, owner, helpers, now)
     ids = list(names)
     seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event)
     text, message_refs = delta(con, ids, names, since_ms, max(now, seen.newest_ms))
-    plan = task_plans.get(plan_id)
     if not text and not seen.triggers:
-        return {"skipped": "nothing new"}
-    model_id = model()
-    started = time.monotonic()
-    answer, usage = call(prompt_for(plan, sheet, text), model_id)
-    steps, progress, next_work = decide(plan, answer)
-    if not progress:
+        return {"outcome": "skipped", "reason": "nothing new"}
+    plan = task_plans.get(plan_id)
+    answer, usage, model_id = ask(prompt_for(plan, sheet, text))
+    steps, progress_text, next_work = decide(plan, answer)
+    if not progress_text:
         raise ValueError("model answered without a checkpoint")
+    if not current():
+        return {"outcome": "cancelled", "reason": "configuration changed"}
     refs = message_refs[-20:] + job_refs + ([f"goal_event:{seen.newest_event}"]
                                            if seen.newest_event else [])
     result = task_plans.updater_apply(
-        plan_id, seen_revision=plan["revision"], steps=steps, progress=progress,
+        plan_id, seen_revision=plan["revision"], steps=steps, progress=progress_text,
         next_work=next_work, model=model_id, source_refs=refs,
-        through_ms=max(now, seen.newest_ms), through_event=seen.newest_event)
-    return {"changed_steps": result["changed_steps"], "seconds": round(time.monotonic() - started, 1),
-            "input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")}
+        through_ms=max(now, seen.newest_ms), through_event=seen.newest_event,
+        janitor_agent_id=janitor_agent_id)
+    return {"outcome": "updated", "changed_steps": len(result["changed_steps"]),
+            "input_tokens": usage.get("input_tokens")}
 
 
-# ---- when to update --------------------------------------------------------
+def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
+              current=lambda: True) -> dict:
+    """Update up to ``max_goals_per_run`` goals in parallel within one Janitor
+    run (the framework admits one run per Janitor at a time). ``ask(prompt,
+    plan_id)`` returns (answer, usage, model id). Returns each goal's
+    (outcome, error) and the run's summary numbers."""
+    width = max(1, min(int((config.get("options") or {}).get("max_goals_per_run", 5)), 6))
+    outcomes: dict[str, tuple[str, str]] = {}
 
-
-@dataclass
-class _Pending:
-    first_at: int = 0
-    fast: bool = False
-    failures: int = 0
-    retry_at: int = 0
-    last_run_at: int = 0
-    last_error: str = ""
-    last_result: dict = field(default_factory=dict)
-
-
-_STATE: dict[str, _Pending] = {}
-_STATE_LOCK = threading.Lock()
-
-
-def public_state(plan_id: str) -> dict:
-    """What the apps show about the updater for one goal."""
-    with _STATE_LOCK:
-        p = _STATE.get(plan_id)
-        return {"enabled": enabled(), "model": model(),
-                "pending_since": p.first_at if p and p.first_at else None,
-                "last_run_at": p.last_run_at if p and p.last_run_at else None,
-                "last_error": (p.last_error if p else "") or None}
-
-
-def due(now: int) -> list[str]:
-    """Goals whose folded triggers are ripe, or that the sweep finds stale."""
-    con = db.conn()
-    ready = []
-    rows = con.execute(
-        "SELECT p.* FROM task_plans p JOIN agents a ON a.agent_id=p.agent_id "
-        "WHERE p.status IN ('active','paused') AND p.goal_json != '{}' "
-        "AND a.deleted_at IS NULL AND a.archived_at IS NULL AND a.is_janitor=0").fetchall()
-    fold, sweep = fold_ms(), sweep_ms()
-    for row in rows:
-        plan_id = row["plan_id"]
-        since_ms, since_event = cursor(row, now)
-        helpers = _helpers(con, row["agent_id"], int(row["created_at"]))
-        ids = [row["agent_id"], *(h["agent_id"] for h in helpers)]
-        seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event)
-        with _STATE_LOCK:
-            p = _STATE.setdefault(plan_id, _Pending())
-            if p.retry_at and now < p.retry_at:
-                continue
-            if seen.triggers:
-                if not p.first_at:
-                    p.first_at = seen.triggers[0][0]
-                p.fast = p.fast or seen.status_change
-            elif seen.any_messages and now - max(since_ms, p.last_run_at) >= sweep:
-                p.first_at = p.first_at or now - fold   # the sweep: ripe now
-            if p.first_at and now - p.first_at >= (FAST_FOLD_SEC * 1000 if p.fast else fold):
-                ready.append(plan_id)
-    return ready
-
-
-class GoalUpdater:
-    """The Host worker: a tick every TICK_SEC, at most MAX_WORKERS model calls."""
-
-    def __init__(self, *, call=call_model):
-        self._call = call
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._pool = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="goal-updater")
-        self._running: set[str] = set()
-        self._lock = threading.Lock()
-
-    def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(target=self._loop, name="goal-updater", daemon=True)
-        self._thread.start()
-
-    def stop(self, timeout: float = 1.0) -> None:
-        self._stop.set()
-        self._pool.shutdown(wait=False, cancel_futures=True)
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=timeout)
-
-    def _loop(self) -> None:
-        while not self._stop.wait(TICK_SEC):
-            try:
-                self.tick()
-            except Exception as exc:  # noqa: BLE001 - one bad tick never stops the worker
-                log_exception("goalUpdaterTickFail", exc)
-
-    def tick(self, now: int | None = None) -> list[str]:
-        if not enabled():
-            return []
-        now = now or db.now_ms()
-        started = []
-        for plan_id in due(now):
-            with self._lock:
-                if plan_id in self._running or len(self._running) >= MAX_WORKERS:
-                    continue
-                self._running.add(plan_id)
-            self._pool.submit(self._run, plan_id)
-            started.append(plan_id)
-        return started
-
-    def _run(self, plan_id: str) -> None:
-        now = db.now_ms()
+    def one(plan_id: str):
         try:
-            result = update(plan_id, now=now, call=self._call)
-            with _STATE_LOCK:
-                p = _STATE.setdefault(plan_id, _Pending())
-                p.first_at, p.fast, p.failures, p.retry_at = 0, False, 0, 0
-                p.last_run_at, p.last_error, p.last_result = now, "", result
-            if result.get("changed_steps"):
-                log("goalUpdaterChanged", f"plan={plan_id} {json.dumps(result)[:300]}")
-        except Exception as exc:  # noqa: BLE001 - logged, retried with backoff
-            log_exception("goalUpdaterFail", exc, detail=plan_id)
-            with _STATE_LOCK:
-                p = _STATE.setdefault(plan_id, _Pending())
-                p.last_error = f"{type(exc).__name__}: {exc}"[:300]
-                if "plan changed" in str(exc):
-                    p.retry_at = now + 15_000   # the owner wrote meanwhile: read again
-                else:
-                    p.failures += 1
-                    if p.failures == 1:
-                        p.retry_at = now + RETRY_AFTER_MS
-                    else:
-                        # One retry only; the hourly sweep tries again.
-                        p.failures, p.first_at, p.fast = 0, 0, False
-                        p.retry_at = now + sweep_ms()
-        finally:
-            with self._lock:
-                self._running.discard(plan_id)
+            result = update(plan_id, now=now, ask=lambda prompt: ask(prompt, plan_id),
+                            janitor_agent_id=config["agent_id"], current=current)
+            return plan_id, result["outcome"], "", result
+        except Exception as exc:  # noqa: BLE001 - one goal's failure is its own, logged
+            log_exception("goalKeeperUpdateFail", exc, detail=plan_id)
+            conflict = "plan changed" in str(exc)
+            return plan_id, "conflict" if conflict else "failed", f"{type(exc).__name__}: {exc}", {}
+
+    changed = 0
+    with ThreadPoolExecutor(max_workers=width, thread_name_prefix="goal-keeper") as pool:
+        for plan_id, outcome, error, result in pool.map(one, plan_ids[:width]):
+            outcomes[plan_id] = (outcome, error)
+            changed += int(result.get("changed_steps") or 0)
+    updated = sum(1 for o, _ in outcomes.values() if o == "updated")
+    failed = sum(1 for o, _ in outcomes.values() if o == "failed")
+    return {"outcomes": outcomes, "updated": updated, "failed": failed, "changed_steps": changed}
+
+
+def request_id(config: dict, plan_ids: list[str], now: int) -> str:
+    return hashlib.sha256(json.dumps([config["agent_id"], config["generation"], sorted(plan_ids), now])
+                          .encode()).hexdigest()[:40]

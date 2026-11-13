@@ -19,7 +19,7 @@ from .turn_lifecycle import TurnEvent
 
 
 ROLES = ("message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor",
-         "label-auditor")
+         "label-auditor", "goal-keeper")
 # Optional demand workers are created from the catalog, never installed: the
 # Hotseat switcher needs the local `hotseat` CLI, which not every Host has.
 OPTIONAL_ROLES = ("account-hotseat",)
@@ -69,7 +69,7 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
     if not isinstance(initial, dict) or set(initial) - set(ROLES):
         raise janitors.JanitorError("Invalid built-in seed configuration")
     with janitors._write() as c:
-        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking"), ("account-switch-requested", "When the account in use runs low"), ("label-audit-requested", "When working labels need checking")]:
+        for trigger, name in [("heartbeat-decision-requested", "When continuity needs review"), ("quota-check-requested", "When provider quota needs checking"), ("account-switch-requested", "When the account in use runs low"), ("label-audit-requested", "When working labels need checking"), ("goal-activity-observed", "When a helper reports, a job ends or a goal is paused")]:
             store.ensure_trigger_definition(c, trigger, name)
         for role in ROLES:
             if store.builtin_agent_id(role, c):
@@ -87,8 +87,17 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
                 raise janitors.JanitorError("Unsupported built-in backend")
             model = seed.get("model", defaults["recommended_model"])
             effort = seed.get("effort", defaults["recommended_effort"])
-            execution = janitors._execution(role, {"executor": "ephemeral", "provider": seed.get("provider", backend)}, backend)
-            janitors._model({"backend": backend}, model, effort, provider=execution["provider"])
+            execution = janitors._execution(role, {"executor": "ephemeral", "provider": seed.get("provider", backend),
+                                                   **(defaults.get("seed_execution") or {})}, backend)
+            try:
+                janitors._model({"backend": backend}, model, effort, provider=execution["provider"])
+            except janitors.JanitorError:
+                if "model" in seed:
+                    raise
+                # A recommended model this Host's catalogue does not list yet (a new
+                # Antigravity model): install on the backend's default, still paused.
+                model = None
+                janitors._model({"backend": backend}, model, effort, provider=execution["provider"])
             options = janitors._option_patch(role, seed.get("options", {}))
             agent_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clarp:janitor:builtin:{role}"))
             if store.agent_id_exists(agent_id, c):
@@ -105,8 +114,12 @@ def ensure_builtins(cwd: str | None = None, *, initial: dict | None = None) -> d
                                       {"origin": "janitor", "builtin_role": role})
             store.insert_config(c, agent_id, role, scope={}, execution=execution, options=options,
                                 now=now, enabled=enabled)
-            store.save_attachments(c, agent_id, [{"attachment_id": f"builtin-{role}-v1",
-                "trigger_id": defaults["default_trigger_id"], "trigger_version": 1, "enabled": True, "config": {}}], now)
+            seeds = defaults.get("seed_attachments") or [{"trigger_id": defaults["default_trigger_id"], "config": {}}]
+            store.save_attachments(c, agent_id, [
+                {"attachment_id": f"builtin-{role}-v1" if seed_attachment["trigger_id"] == defaults["default_trigger_id"]
+                 else f"builtin-{role}-{seed_attachment['trigger_id']}-v1",
+                 "trigger_id": seed_attachment["trigger_id"], "trigger_version": 1, "enabled": True,
+                 "config": seed_attachment["config"]} for seed_attachment in seeds], now)
             store.register_builtin(c, role, agent_id, SEED_VERSION, now)
     return {role: get_builtin(role) for role in ROLES}
 
@@ -231,6 +244,7 @@ def _insert_demand_run(c, role, run_id, config, effective, metadata, target_agen
     janitors._active_attachment(c, attachment["attachment_id"], config["generation"])
     now = db.now_ms()
     frozen = {"template_id": role, "executor": "ephemeral", "provider": config["execution"]["provider"],
+        "isolated": bool(config["execution"].get("isolated")),
         "backend": config["backend"], "model": config["model"], "effort": config["effort"],
         "scope": config["scope"], "options": config["options"], "trigger_id": attachment["trigger_id"],
         "trigger_version": attachment["trigger_version"], "config": attachment["config"],
@@ -271,7 +285,9 @@ def is_current(run_id: str, *, connection=None) -> bool:
         execution = janitors._decode(config["execution_json"], {})
         if any(config[key] != frozen[key] for key in ("backend", "model", "effort", "template_id")):
             return False
-        if execution != {"executor": "ephemeral", "provider": frozen["provider"]} or janitors._decode(config["scope_json"], {}) != frozen["scope"]:
+        expected = {"executor": "ephemeral", "provider": frozen["provider"],
+                    **({"isolated": True} if frozen.get("isolated") else {})}
+        if execution != expected or janitors._decode(config["scope_json"], {}) != frozen["scope"]:
             return False
         if janitors.option_values(config["template_id"], janitors._decode(config["options_json"], {})) != frozen.get("options", {}):
             return False

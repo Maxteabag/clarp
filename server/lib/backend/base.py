@@ -281,6 +281,11 @@ class Backend:
         """Extra environment for a ``routing_cmd`` run (none by default)."""
         return {}
 
+    # A Janitor execution option (``execution.isolated``): one request in a
+    # stripped HOME of its own, an empty cwd, a print timeout, its conversation
+    # deleted afterwards. None where the backend cannot do it.
+    isolated_oneshot = None
+
     # --- sessions and transcripts -----------------------------------------
 
     def resume_target(self, session_id: str, cwd: str,
