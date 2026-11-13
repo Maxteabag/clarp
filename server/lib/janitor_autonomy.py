@@ -477,12 +477,30 @@ class AutonomyJanitors:
                     if isinstance(parsed_switch,dict):last_switch=parsed_switch
                 except (ValueError,TypeError):pass
             cooldown_ms=max(3*int(base)*1000,janitor_hotseat.DEFAULT_SWITCH_COOLDOWN_MS)
+            req_models,act_models=[],[]
             if janitor_hotseat.PROVIDERS[provider].model_scoped:
                 req_models,act_models=_provider_model_demand(provider,now,base)
                 decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
             else:
                 decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
             if not janitor_builtins.is_current(run['run_id']):return
+            reset_field=janitor_hotseat.PROVIDERS[provider].reset_command_field
+            if decision['action']=='exhausted' and options['mode']=='automatic' and reset_field:
+                from . import janitor_reset
+                reset=janitor_reset.attempt(reset_field,req_models)
+                if reset['status']!='disabled':
+                    repair_text='; '.join(s for s in (repair_text,'Banked resets: '+reset['status']) if s)
+                if not janitor_builtins.is_current(run['run_id']):return
+                if reset['verified']:
+                    # Capacity changed, not the outcome of any affected turn.
+                    # Read it again and use the ordinary guarded switch path.
+                    try:
+                        accounts=self.hotseat_read(options['hotseat_command'],provider)
+                        req_models,act_models=_provider_model_demand(provider,db.now_ms(),base)
+                        decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=db.now_ms(),cooldown_ms=cooldown_ms)
+                    except Exception:
+                        decision={'action':'noop','active':decision.get('active'),'remaining':None}
+                        repair_text+='; fresh account routing read unavailable'
             switched=None;outcome='completed';error=''
             if decision['action']=='switch' and options['mode']=='automatic':
                 superseded=False
