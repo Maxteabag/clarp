@@ -316,6 +316,26 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     return original_capture(**kwargs)
 
                 stack.enter_context(patch.object(team_store, "capture_assistant_message", broken_capture))
+            # Every time the import gives the writer away, and what it had
+            # written by the first time.
+            metrics["yields"] = 0
+            metrics["changes_at_first_yield"] = None
+            changes_before = connection.total_changes
+            plain_yield = message_writes._ImportWriter.yield_writer
+
+            def counted_yield(writer):
+                if not metrics["yields"]:
+                    metrics["changes_at_first_yield"] = connection.total_changes - changes_before
+                    metrics["first_yield_seq"] = writer.seq
+                metrics["yields"] += 1
+                return plain_yield(writer)
+
+            stack.enter_context(patch.object(message_writes._ImportWriter, "yield_writer", counted_yield))
+            if "write_budget_seconds" in faults:
+                stack.enter_context(patch.object(
+                    message_store, "IMPORT_WRITE_BUDGET_SECONDS", faults["write_budget_seconds"]))
+            if "commit_every" in faults:
+                stack.enter_context(patch.object(message_store, "IMPORT_COMMIT_EVERY", faults["commit_every"]))
             from lib import message_import_rows
             metrics["parked"] = 0
             park = message_import_rows._park_adopted_occupant
@@ -374,6 +394,7 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                                 (AGENT, SESSION, BASE_MS + tick * 1000, revision, SENDER))
                     injected = True
                     metrics["yield_intervention"] = metrics["yield_windows"]
+                    metrics["yield_seq"] = writer.seq
 
                 stack.enter_context(patch.object(message_writes._ImportWriter, "yield_writer", intervene_during_yield))
             if faults.get("single_row_batches"):

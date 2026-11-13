@@ -686,6 +686,11 @@ _DEFAULTS = {
     # is new, rewritten or gone, unless a reply before the boundary carries
     # its trace.
     "carry_live_rows": False,
+    # Off unless switched on: a tail gives the writer away only once it has
+    # written something (message_writes._TailWriter). False: its batch budget
+    # runs from BEGIN IMMEDIATE, so a tail on a long conversation yields
+    # before its first row.
+    "tail_yield_after_first_write": False,
 }
 
 
@@ -1487,6 +1492,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             source_file=str(path), turns=turns, start_seq=cp.boundary_seq,
             carry=cp.store_carry, expected_prelude=state.inputs, carry_rules=rules,
             carry_witness=witness,
+            yield_after_first_write=bool(conf.get("tail_yield_after_first_write")),
             on_stored=publish, checkpoint_status=checkpoint_status)
     except message_writes._TailInvalidated as changed:
         # Which rows stood in the way: what a further rule would have to cover.

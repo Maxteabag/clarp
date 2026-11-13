@@ -292,3 +292,8 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # carry_live_rows = false           # true: a live row (the row a reply streams into) may be
 #                                   # new, rewritten or gone, unless a reply before the
 #                                   # tail's boundary carries its trace. Off by default.
+# tail_yield_after_first_write = false   # true: a tail import gives the writer away only once
+#                                   # it has written something. false: its batch budget runs
+#                                   # from BEGIN IMMEDIATE, so on a long conversation it
+#                                   # yields before its first row, and a commit in that gap
+#                                   # refuses its publication. Off by default.
