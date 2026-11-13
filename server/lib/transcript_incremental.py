@@ -1327,6 +1327,21 @@ def _cache_committed_tail(key, revision, checkpoint, recorded, file_hash, *, rea
         _tail_log("frontier_not_retained", retention=True)
 
 
+def _stream_owns_turns(database, agent_id: str, backend_session_id: str) -> bool:
+    """Whether this conversation has turns whose text the stream owns
+    (``agy_turn_authority``).
+
+    A reply inside such a turn's range is stored as no row, yet a full replay
+    names it in its batch under the authority's trace and so removes a
+    leftover live row of that trace. ``carry_live_rows`` asks the replies
+    STORED before the boundary for their traces and cannot see that one, so
+    for a conversation with any such turn the rule is left out: a changed live
+    row is a full import there, as it is with the switch off."""
+    return database.execute(
+        "SELECT 1 FROM agy_turn_authority WHERE agent_id = ? AND backend_session_id = ? LIMIT 1",
+        (agent_id, backend_session_id)).fetchone() is not None
+
+
 def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, diagnostic=None):
     from . import db, message_carry, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
@@ -1337,6 +1352,9 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         return _refuse_tail(code, reason=reason, backend=backend, size=size)
 
     rules = carry_rules(conf)
+    if message_carry.LIVE_ROWS in rules and _stream_owns_turns(db.conn(), agent_id,
+                                                               backend_session_id):
+        rules = rules - {message_carry.LIVE_ROWS}
     session_rows = message_carry.SESSION_ROWS in rules
     found, state, reason = _TAIL_STATES.observe(key, revision)
     # Invalidate before any attempt, including a failure after a partial batch

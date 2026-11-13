@@ -232,7 +232,12 @@ A fourth rule is off unless switched on:
   stored before the boundary carries its trace (the running turn then spans
   the boundary: a message was steered into it), whatever its words. A live
   row that is as it was when the frontier was published is not asked; the
-  record keeps a digest of each live row for that. A finalized row
+  record keeps a digest of each live row for that. A conversation that has
+  turns whose text the stream owns (`agy_turn_authority`) is left out of the
+  rule: such a turn's replies are stored as no row, a full import still
+  names them in its batch under the authority's trace, and the rule, which
+  asks the stored replies, cannot see that trace. There a changed live row
+  is a full import, as with the switch off. A finalized row
   (`final:`) is not a live row and counts as before. The rule does not
   change the publication fence: a delta committed while a tail has given
   the writer away still refuses that tail's publication.

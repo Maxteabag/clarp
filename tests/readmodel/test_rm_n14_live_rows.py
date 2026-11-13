@@ -99,6 +99,38 @@ def test_a_live_row_of_a_turn_that_has_replies_before_the_boundary_is_a_full_imp
         assert world.imported() == ("tail_applied", [])
 
 
+@pytest.mark.parametrize("words", ["the same words", "words that begin with the old reply's",
+                                   "other words"])
+@pytest.mark.parametrize("ended", ["the range is open", "the range is closed"])
+@BACKENDS
+def test_a_conversation_with_turns_the_stream_owns_keeps_the_full_import(
+        tmp_path, backend, words, ended):
+    """A turn whose text the stream owns (``agy_turn_authority``) has replies
+    before the boundary that are stored as no row. A full replay still names
+    them in its batch, under the authority's trace, and removes a leftover live
+    row of that trace with related words; the rule asks the stored replies and
+    cannot see that trace. So the rule is left out for a conversation that has
+    any such turn: a changed live row is a full import there, as it is with the
+    switch off. (The twin from the review of the rule, where a tail kept the
+    row and the full replay removed it.)"""
+    old = "an old reply that nothing else resembles"
+    text = {"the same words": old, "words that begin with the old reply's": old + ", and more",
+            "other words": "nothing like it"}[words]
+    end, status = (None, "pending") if ended == "the range is open" else (9, "success")
+    with World(tmp_path, backend, _history(backend, answer2=old), settings=ON) as world:
+        world.write(
+            "INSERT INTO agy_turn_authority(agent_id,backend_session_id,trace_id,"
+            "assistant_start_ordinal,assistant_end_ordinal,terminal_status,"
+            "authoritative_message_id,updated_at) VALUES (?,?,?,?,?,?,NULL,?)",
+            (corpus.AGENT, corpus.SESSION, "owned-turn", 2, end, status, harness.BASE_MS))
+        ordinal = world.started(6)
+        world.live("leftover", text, at=FAR, trace="owned-turn")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("full_carry_inputs_changed", ["row_live"])
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
 @BACKENDS
 def test_the_words_of_an_old_reply_in_a_live_row_of_another_turn_are_harmless(tmp_path, backend):
     """The harmless twin. The same words, but the old replies belong to a
