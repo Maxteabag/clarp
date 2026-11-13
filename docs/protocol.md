@@ -936,6 +936,31 @@ every action field are exactly `flat-v1`'s.
   itself, which is as large as its rows, like any list response. A plan that
   reaches the projection without its stored goal text gets `digest_pending`.
 
+### Goal updater, paused steps and waivers (feature `goal_updater`, Host contract 96)
+
+A Host worker keeps durable goals current beside the agent doing the work
+([goal-updater.md](architecture/goal-updater.md)); the agent is never
+prompted. In every task plan (`GET /task-plans`, `GET /task-plan`, plan
+artifacts):
+
+- `goal.updater` (or absent): the updater's own checkpoint, `{at, progress,
+  next_work, model, source_refs, changed_steps, through_ms, through_event}`.
+  Show it beside `goal.checkpoint` (the owner's), as the newer of the two by
+  `at`, labelled as the updater's. Its step changes are in `items[].status`
+  and in `goal.history` as kind `updater`. An updater write does not change
+  `revision`.
+- `plan.updater`: `{enabled, model, pending_since, last_run_at, last_error}`
+  for that goal (in memory; nulls after a Host restart).
+- `items[].paused`: true for an `in_progress` step of a paused goal. It is not
+  running and `elapsed_ms` does not grow; show it as paused, not active.
+- `goal.criteria[].waived` (or absent): `{at, reason}`, the owner set the
+  criterion aside. Completion accepts it without evidence; show the reason.
+
+`POST /task-plan/action` takes `action: "waive"` or `"unwaive"` with `data`
+`{criterion_id, reason}` (`reason` required to waive). A paused goal takes
+step updates and a `checkpoint` without `continuation` (it stays paused); a
+checkpoint with a `continuation` answers 409 and saves nothing.
+
 ### Tool explanation hit rate: `GET /tool-explanations/stats`
 
 How tool calls were explained over a window, for watching the learning cache

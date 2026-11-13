@@ -101,6 +101,7 @@ from lib.voices import voices_with_availability  # noqa: E402
 # Background workers, imported here so tests can monkeypatch them as
 # `server.<Name>`; `_server_workers` looks every one of them up at call time.
 from lib.background_job_watcher import BackgroundJobWatcher  # noqa: E402
+from lib.goal_updater import GoalUpdater  # noqa: E402
 from lib.decision_delivery import DecisionDeliveryWorker  # noqa: E402
 from lib.dispatch_adapters import DispatchAdapters  # noqa: E402
 from lib.dreaming import DreamingScheduler  # noqa: E402
@@ -3264,6 +3265,12 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("cache-warmup", lambda: started(CacheWarmupWorker()), stage=SERVING),
         Worker("bookkeeping-listeners", start_bookkeeping_listeners,
                stop=lambda thread: None, stage=SERVING),
+        # Keeps durable goals current beside the agents doing the work: after
+        # a turn, a helper report, a job or a pause it asks a small model to
+        # restate the goal's steps and checkpoint (lib/goal_updater.py). The
+        # working agent is never prompted. Off: goal_updater.enabled=false or
+        # CLARP_GOAL_UPDATER=0.
+        Worker("goal-updater", lambda: started(GoalUpdater()), stage=SERVING),
         Worker("decision-delivery", lambda: started(
             DecisionDeliveryWorker(lambda: _deliver_decision_rows(ctx)))),
         # Transcript streamer: tails ~/.claude/projects/.../<uuid>.jsonl via

@@ -783,6 +783,7 @@
         "elapsed_ms": 0,
         "item_id": "agent-pip:number-ninja:0000000a:v5",
         "parent_id": null,
+        "paused": false,
         "plan_id": "agent-pip:number-ninja:0000000a",
         "position": 0,
         "required": 1,
@@ -799,6 +800,7 @@
         "elapsed_ms": 0,
         "item_id": "agent-pip:number-ninja:0000000a:v6",
         "parent_id": null,
+        "paused": false,
         "plan_id": "agent-pip:number-ninja:0000000a",
         "position": 0,
         "required": 1,
@@ -815,6 +817,7 @@
         "elapsed_ms": 0,
         "item_id": "agent-pip:number-ninja:0000000a:report",
         "parent_id": null,
+        "paused": false,
         "plan_id": "agent-pip:number-ninja:0000000a",
         "position": 1,
         "required": 1,
@@ -990,6 +993,13 @@
     ],
     "title": "Number Ninja logs events",
     "total_count": 3,
-    "updated_at": 1791160054000
+    "updated_at": 1791160054000,
+    "updater": {
+      "enabled": true,
+      "last_error": null,
+      "last_run_at": null,
+      "model": "gemini-4-hydrogen-low",
+      "pending_since": null
+    }
   }
 }

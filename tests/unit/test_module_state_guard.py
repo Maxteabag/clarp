@@ -43,6 +43,9 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/apns.py", "_RELAY_CLIENT"): CLIENT,
     ("lib/apns.py", "_RELAY_CLIENT_CTOR"): CLIENT,
     ("lib/apns.py", "_RELAY_REGISTERED"): CACHE,
+    # Fold windows and retry backoff per goal: losing them on restart only
+    # restarts a window; the cursor itself lives in the goal (lib/goal_updater.py).
+    ("lib/goal_updater.py", "_STATE"): THROTTLE,
     ("lib/fcm.py", "_client"): CLIENT,
     ("lib/fcm.py", "_client_ctor"): CLIENT,
     ("lib/fcm.py", "_sa_cache"): CACHE,

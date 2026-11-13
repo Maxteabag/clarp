@@ -180,8 +180,12 @@ While that loop owns continuation, the UI reports its ownership or blocked
 state; Host wakes resume only after it no longer owns continuation. Generic
 prompts remain available for independent reminders.
 
-Goal pause/cancel fences future continuation and subsequent plan writes. It does
-not kill arbitrary processes already running for an agent with several goals.
+Goal pause/cancel fences future continuation. Cancel also fences plan writes;
+a paused goal still takes bookkeeping (step statuses, a checkpoint without a
+continuation, a criterion waiver) and keeps a running step in progress with
+its clock stopped, so what happened stays recorded without resuming the work
+(Host contract 96, [goal updater](goal-updater.md)). Neither kills arbitrary
+processes already running for an agent with several goals.
 The native controls explain this distinction; the conversation's explicit Stop
 interrupts the active turn and persists pauses for its durable commitments.
 
