@@ -418,10 +418,11 @@ def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None,
         bound += _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
-        from . import goal_ledger
+        from . import goal_keeper, goal_ledger
 
         data["goal"]["documents"] = goal_documents(plan_id)
         data.update(goal_ledger.summary(data))
+        data["updater"] = goal_keeper.public_state(plan_id)
     data["legacy"] = data["goal"] is None
     data["completion_verified"] = bool(data["goal"] and data["status"] == "completed")
     counts = {
