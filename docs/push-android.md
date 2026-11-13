@@ -249,21 +249,48 @@ only the latest for an offline phone):
 
 - **Pace**: the Live Activity pusher's: routine changes at most every 15 s, a
   structural change (an agent starting or ending work, a new lead) at least
-  10 s after the last push, a rising `needs_you` at once. The latest state
-  wins while one is held.
-- **Priority**: `HIGH` for a structural change or a rising `needs_you`,
-  `NORMAL` otherwise.
-- **Budget**: per device, counted apart from the iPhone's: a burst of 10
-  refilled evenly to 300 a UTC day, and at most 300 a UTC day per device
-  (a durable count). A 429 from Google (after the transport's own retries)
-  backs that device off from 60 s, doubling to 30 min; a delivered message
-  resets it. A token Google reports gone is disabled.
-- **The end**: when the fleet goes quiet the quiet state goes out once, with
-  `event: "end"` and `HIGH`, even when the device's budget is spent (only a
-  429 back-off delays it), because a suspended Android app cannot end its
-  notification itself.
-- **Start**: there is no start push; the first message of a working stretch
-  is an ordinary `update`, and the app starts its notification from it.
+  10 s after the last push, a rising `needs_you` at once. Latest wins all the
+  way to Google: the pusher only hands the newest state over, one worker
+  sends, and each device holds at most one state. After a hung Google only
+  the newest goes out, never a backlog of old ones.
+- **Priority**: an update is `HIGH` for a structural change or a rising
+  `needs_you` (it changes what the notification shows), `NORMAL` otherwise. A
+  state that replaced a `HIGH` one before it went out stays `HIGH`. An end is
+  always `NORMAL`. Google's page on message priority
+  (firebase.google.com/docs/cloud-messaging/android-message-priority, read on
+  13 Nov 2026) says: "High priority messages on Android are meant for time
+  sensitive, user visible content", and "If FCM detects a pattern in which
+  messages don't result in user-facing notifications, your messages may be
+  deprioritized to normal priority". It does not say whether a message that
+  removes a notification counts as user-visible, so the end never risks the
+  app's rings and alerts. While the phone is in Doze a `NORMAL` end may arrive
+  late. The notification's own 15-minute timeout still applies.
+- **Budget**: per device, counted apart from the iPhone's, and kept in the
+  database (`live_activity_fcm.budget.v1`), so a Host restart neither refills
+  nor forgets it. Updates use a burst of 10 refilled evenly to 300 a day, and
+  at most 300 a UTC day per device. An end takes nothing from the burst and
+  goes out even when the day's updates are spent. It is counted, and there is
+  at most one end per update, so a day stays within about twice the budget.
+  Over 24 hours one phone gets (updates/ends): 309/0 for 200 agents that are
+  never quiet, 96/96 for a 2-minute turn every 15 minutes, 153/153 for a
+  1-minute turn every 5 minutes, 158/158 for a 40 s turn every 2 minutes, and
+  163/163 for start and stop every 10 s.
+- **Failures**: a send Google does not take (a 5xx, a 429 after the
+  transport's own retries, a network error, no access token) keeps that state
+  owed. It is retried after 60 s, doubling to 30 min, until it is delivered or
+  a newer state replaces it. A delivered message resets the back-off. A token
+  Google reports gone is disabled.
+- **The end**: when the fleet goes quiet the quiet state goes out with
+  `event: "end"`, but only to a device that was sent an update since its last
+  end. A suspended Android app cannot end its notification itself, and a
+  phone that was never shown the work needs no end.
+- **A Host start**: a device whose last message was an update may still show
+  agents at work. If no fleet change is offered within 30 s of the start, it
+  gets the present state: an end when nothing works.
+- **Start of a stretch**: there is no start push. The first message of a
+  working stretch is an ordinary `update`, and the app starts its notification
+  from it.
+- **Revocation** removes the device's request and its budget.
 
 ## Delivery and failures
 

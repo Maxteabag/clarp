@@ -148,6 +148,13 @@ def revoke(device_id: str) -> bool:
         except Exception as exc:  # noqa: BLE001 - the revoke stands; sends also skip a revoked owner
             from .log import log_exception
             log_exception("devicePairingPushTokensDisableFail", exc, device_id.strip())
+        # Its request for the agents-working summary by FCM goes too (it would never be sent to).
+        try:
+            from . import live_activity_fcm
+            live_activity_fcm.forget(device_id.strip())
+        except Exception as exc:  # noqa: BLE001 - the revoke stands; sends also skip a revoked owner
+            from .log import log_exception
+            log_exception("devicePairingLiveActivityForgetFail", exc, device_id.strip())
         # A listen-first opening answered on this device loses its authority.
         try:
             from . import agent_rings

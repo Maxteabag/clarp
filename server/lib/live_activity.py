@@ -385,6 +385,12 @@ class LiveActivityPusher:
             self._roster = roster
         self.set_attention(fresh)
 
+    def present_state(self) -> dict[str, Any]:
+        """The content state as it is now (live_activity_fcm's start check)."""
+        with self._lock:
+            return content_state(self._agents, int(self._clock() * 1000), self._current_attention(),
+                                 self._roster)
+
     def observe(self, event: dict[str, Any]) -> None:
         if event.get("type") != "live":
             return
