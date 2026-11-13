@@ -48,7 +48,7 @@ from typing import Any
 from . import db
 from .clock import now_ms
 
-SOURCES = ("ios", "pwa", "server", "other")
+SOURCES = ("ios", "pwa", "server", "android", "other")
 MAX_BATCH = 500
 MAX_TEXT = 4000
 MAX_DETAIL = 8000

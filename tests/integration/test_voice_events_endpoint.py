@@ -143,6 +143,18 @@ def test_batch_is_stored_on_the_corrected_clock(running):
     assert events[1]["level_db"] == -19.2
 
 
+
+def test_an_android_phones_trace_rows_are_stored_as_android(running):
+    """An Android phone's ring trace (source "android") keeps its source; it was stored as "other"."""
+    base = running["base"]
+    now = voice_events.now_ms()
+    status, body = _post(base, "/voice-events", {
+        "source": "android", "client_id": "pixel-1", "sent_at": now, "session": "rachel",
+        "events": [{"event": "ring_shown", "ts": now - 500, "utterance_id": "ring-android"}]})
+    assert (status, body["stored"]) == (200, 1), body
+    status, out = _get(base, "/voice-events?utterance_id=ring-android")
+    assert status == 200 and [(e["event"], e["source"]) for e in out["events"]] == [("ring_shown", "android")]
+
 def test_bad_batches_are_rejected(running):
     base = running["base"]
     assert _post(base, "/voice-events", {"events": "nope"})[0] == 400

@@ -481,6 +481,29 @@ def test_v123_adds_the_push_provider_with_apns_for_every_existing_row(tmp_path):
     assert [r[1] for r in con.execute("PRAGMA table_info(device_tokens)")].count("provider") == 1
 
 
+
+def test_v125_adds_the_declared_conversation_modes_empty_for_every_existing_row(tmp_path):
+    """v125: device_tokens.supported_conversation_modes, '' (nothing declared) for every row from
+    before it; guarded, so a rerun is a no-op."""
+    from lib import db_migrations, db_schema
+    path = tmp_path / "v124.sqlite"
+    db.reset_for_tests(path)
+    con = db.conn()
+    con.execute("ALTER TABLE device_tokens DROP COLUMN supported_conversation_modes")
+    con.execute("INSERT INTO device_tokens(token, session, created_at, updated_at, principal, provider) "
+                "VALUES ('ab', 's', 1, 1, 'device_x', 'fcm')")
+    con.execute("PRAGMA user_version = 124")
+    con.commit()
+    db.reset_for_tests(path)
+    con = db.conn()
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    row = con.execute("SELECT provider, principal, supported_conversation_modes FROM device_tokens "
+                      "WHERE token='ab'").fetchone()
+    assert tuple(row) == ("fcm", "device_x", "")
+    db_migrations._migrate_to_v125(con)
+    assert [r[1] for r in con.execute("PRAGMA table_info(device_tokens)")].count(
+        "supported_conversation_modes") == 1
+
 def test_v119_adds_the_per_agent_state_generation_index(tmp_path):
     path = tmp_path / "v117.sqlite"
     con = _fresh(path)
