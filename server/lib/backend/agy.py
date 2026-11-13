@@ -152,14 +152,15 @@ def _handle_result(result: Any, evidence: dict[str, Any], st: _TurnState, *,
 _PRIVATE_HOME_LOGS_PRUNED = [0.0]
 
 
-def _private_home() -> pathlib.Path:
-    """The HOME for agy runs that must not touch the real conversation store
-    (see AgyBackend._ONESHOT_LINKED). Links are swapped in atomically, so
-    concurrent one-shots never see the login missing, and a file agy wrote in
-    place of a link is relinked, so a re-login reaches one-shots too."""
+def isolated_home(name: str) -> pathlib.Path:
+    """A HOME in Clarp's cache holding agy's login (linked) and its settings
+    (copied), and nothing else: no GEMINI.md, no skills, no real
+    conversations. Links are swapped in atomically, so concurrent runs never
+    see the login missing, and a file agy wrote in place of a link is
+    relinked, so a re-login reaches them too."""
     from ..deployment import LAYOUT
     real_home = pathlib.Path.home()
-    home = pathlib.Path(os.environ.get("CLARP_CACHE_DIR") or LAYOUT.cache_dir) / "agy-oneshot-home"
+    home = pathlib.Path(os.environ.get("CLARP_CACHE_DIR") or LAYOUT.cache_dir) / name
     for relative in AgyBackend._ONESHOT_LINKED:
         source, link = real_home / relative, home / relative
         if not source.exists() or (link.is_symlink() and os.readlink(link) == str(source)):
@@ -180,6 +181,14 @@ def _private_home() -> pathlib.Path:
             os.replace(staged, copy)
         except OSError:
             continue
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def _private_home() -> pathlib.Path:
+    """The HOME for agy runs that must not touch the real conversation store
+    (see AgyBackend._ONESHOT_LINKED)."""
+    home = isolated_home("agy-oneshot-home")
     now = time.time()
     if now - _PRIVATE_HOME_LOGS_PRUNED[0] > 600:
         _PRIVATE_HOME_LOGS_PRUNED[0] = now
