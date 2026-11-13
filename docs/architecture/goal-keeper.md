@@ -116,3 +116,7 @@ after it read.
 Measured offline before this was built (six real goals, 51 events, hindsight
 labels): step statuses right 238/251 (95%) against 174/251 (69%) for the
 owners' own records.
+
+## Goals paused before the install
+
+Pausing freezes a running step's clock: `active_ms` takes the elapsed time and `started_at` is set to NULL. A goal paused before this code still has `started_at` set, so a resume, an owner's step update or the Goal keeper's write would count the whole paused span as active time. Schema step v126 (`db_migrations._migrate_to_v126`, data only) freezes those steps once at install. It freezes from the goal's last `pause` history entry, else the plan's `updated_at`, never from now. It is guarded by `started_at IS NOT NULL`, so a rerun changes nothing. Tested by `test_a_goal_paused_before_the_install_never_counts_its_paused_span` for resume, owner update and keeper write.
