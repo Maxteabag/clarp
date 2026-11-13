@@ -184,7 +184,7 @@ Goal pause/cancel fences future continuation. Cancel also fences plan writes;
 a paused goal still takes bookkeeping (step statuses, a checkpoint without a
 continuation, a criterion waiver) and keeps a running step in progress with
 its clock stopped, so what happened stays recorded without resuming the work
-(Host contract 96, [goal updater](goal-updater.md)). Neither kills arbitrary
+(Host contract 96, [goal updater](goal-keeper.md)). Neither kills arbitrary
 processes already running for an agent with several goals.
 The native controls explain this distinction; the conversation's explicit Stop
 interrupts the active turn and persists pauses for its durable commitments.

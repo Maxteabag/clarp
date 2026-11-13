@@ -135,6 +135,39 @@ def decision_model(packet,run):
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
 
+def model_json(run,prompt,request_suffix=''):
+    """One bounded JSON answer for a Host-run Janitor, through its configured model and the
+    fallback chain (model_fallbacks), with no tools. A run whose execution is ``isolated``
+    (an Antigravity option) uses backend.agy.isolated_run: a stripped HOME of its own, an
+    empty cwd, --print-timeout and its conversation deleted after the call.
+    Returns (answer, usage, model id)."""
+    from . import orchestrator,model_fallbacks
+    frozen=run['configuration'];primary={'backend':frozen['provider'],'model':frozen['model'],'effort':frozen['effort']}
+    effective=frozen.get('effective_chain',{})
+    if effective.get('source')=='global' and effective.get('chain'):
+        first=effective['chain'][0];primary={'backend':first['provider'],'model':first['model'],'effort':''}
+    usage={};used={}
+    def invoke(model):
+        if not janitor_builtins.is_current(run['run_id']):raise model_fallbacks.Cancelled('Configuration changed')
+        provider=model['backend'];used['model']=model.get('model') or ''
+        if provider=='openai':return orchestrator._call_openai(prompt,orchestrator.OrchestratorSettings(provider=provider,model=model['model'],effort=model.get('effort',''),timeout_ms=60000))
+        adapter=backends.get(provider)
+        if not adapter or not adapter.supports_routing:raise ValueError('Provider does not support bounded calls')
+        if frozen.get('isolated') and adapter.isolated_oneshot is not None:
+            if not shutil.which(adapter.required_binary):raise model_fallbacks.ProviderFailure('CLI unavailable')
+            try:answer=adapter.isolated_oneshot(prompt,model=model.get('model') or '',home_name=f"{provider}-janitor-{frozen['template_id']}-home")
+            except (TimeoutError,RuntimeError) as exc:raise model_fallbacks.provider_error(str(exc)[:500]) from exc
+            usage.update(answer['usage']);return orchestrator._extract_json(answer['text'])
+        cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
+        if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('CLI unavailable')
+        from .launch_paths import existing_workspace_path
+        p=subprocess.run(cmd,cwd=str(existing_workspace_path(None)),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
+        if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
+        return orchestrator._extract_json(adapter.routing_text(p.stdout))
+    answer=model_fallbacks.execute(run['agent_id'],run['run_id']+':'+(request_suffix or 'call'),primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
+    if not isinstance(answer,dict):raise ValueError('The model did not answer with a JSON object')
+    return answer,usage,used.get('model','')
+
 def validate_decision(value):
     if not isinstance(value,dict) or set(value)-{'action','delay_seconds','message','reason'}:raise ValueError('Invalid decision fields')
     if value.get('action') not in ['wake','defer','noop']:raise ValueError('Invalid action')
@@ -235,8 +268,10 @@ def _provider_model_demand(provider: str, now_ms: int, base_seconds: int) -> tup
 
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,goal_ask=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
+        # goal_ask(run, prompt, plan_id) -> (answer, usage, model): the Goal keeper's model call.
+        self.goal_ask=goal_ask or (lambda run,prompt,plan_id:model_json(run,prompt,plan_id));self.goal_batch=None
         # hotseat_observe(provider, payload, started_at=ms) gets every scheduled read: the server passes
         # the Hotseat desk's, so the stored desk stays as fresh as this cadence with no read of its own.
         # hotseat_switched(provider, alias) hears of a switch this worker made (the desk marks the account).
@@ -262,7 +297,7 @@ class AutonomyJanitors:
             try:self.run_once()
             except Exception as exc:log_exception('janitorAutonomyFail',exc)
     def run_once(self):
-        setup();self.heartbeat_once();self.quota_once();self.hotseat_once();self.label_audit_once()
+        setup();self.heartbeat_once();self.quota_once();self.hotseat_once();self.label_audit_once();self.goal_keeper_once()
     def heartbeat_once(self):
         if not any(c['template_id']=='heartbeat-decider' and c['enabled'] for c in janitors.list_janitors(include_runtime=False)):return
         now=db.now_ms()
@@ -540,6 +575,53 @@ class AutonomyJanitors:
         activity='worked' if artifact else 'idle'
         janitor_builtins.complete_run(run['run_id'],result={'summary':summary,'item_count':len(found),'target_count':len(packets)},activity=activity,summary=summary)
         lane_record(lane,owner,base,activity,summary,now)
+
+    def goal_keeper_once(self,*,wait=False):
+        """Goal keeper: one run at a time per Janitor, a batch of ripe goals updated in
+        parallel on a thread of its own, so model calls never hold up this loop."""
+        from . import goal_keeper
+        if self.goal_batch is not None and self.goal_batch.is_alive():return
+        for config in janitor_builtins.eligible(goal_keeper.ROLE):
+            if self.stop_event.is_set():return
+            watch=goal_keeper.triggers(config)
+            if not watch.progress_attachment:continue
+            now=db.now_ms()
+            progress=janitors.get_progress(watch.progress_attachment) or {}
+            if progress.get('generation')!=config['generation']:progress={'generation':config['generation']}
+            ready=goal_keeper.due(config,progress,now)
+            janitors.save_progress(watch.progress_attachment,config['generation'],progress)
+            if not ready:continue
+            width=max(1,min(int(config['options'].get('max_goals_per_run',5)),6));ready=ready[:width]
+            run=janitor_builtins.begin_run(goal_keeper.ROLE,goal_keeper.request_id(config,ready,now),context={'input_hash':digest(ready),'target_count':len(ready)})
+            if not run or not janitor_builtins.claim_run(run['run_id']):continue
+            self.goal_batch=threading.Thread(target=self._goal_keeper_batch,args=(config,run,ready,now,watch.progress_attachment),name='goal-keeper-run',daemon=True)
+            self.goal_batch.start()
+            if wait:self.goal_batch.join()
+            return
+
+    def _goal_keeper_batch(self,config,run,ready,now,progress_attachment):
+        from . import goal_keeper
+        from .log import log_exception
+        try:
+            result=goal_keeper.run_batch(config,run,ready,lambda prompt,plan_id:self.goal_ask(run,prompt,plan_id),now=now,
+                                         current=lambda:janitor_builtins.is_current(run['run_id']))
+        except Exception as exc:
+            log_exception('goalKeeperRunFail',exc,detail=run['run_id'])
+            result={'outcomes':{p:('failed',type(exc).__name__) for p in ready},'updated':0,'failed':len(ready),'changed_steps':0}
+        try:
+            progress=janitors.get_progress(progress_attachment) or {'generation':config['generation']}
+            settled=db.now_ms()
+            for plan_id,(outcome,error) in result['outcomes'].items():
+                goal_keeper.settle(progress,plan_id,outcome,settled,error)
+            janitors.save_progress(progress_attachment,config['generation'],progress)
+        except Exception as exc:
+            log_exception('goalKeeperProgressFail',exc,detail=run['run_id'])
+        summary=(f"Updated {result['updated']} of {len(ready)} goals; {result['changed_steps']} step changes"
+                 +(f"; {result['failed']} failed" if result['failed'] else ''))
+        activity='failed' if result['failed']==len(ready) else 'worked' if result['changed_steps'] or result['updated'] else 'idle'
+        janitor_builtins.complete_run(run['run_id'],'failed' if activity=='failed' else 'completed',
+            result={'summary':summary[:500],'item_count':result['updated'],'target_count':len(ready)},
+            error=summary[:500] if activity=='failed' else '',activity=activity,summary=summary[:300])
 
     def deliver_notifications(self,owner):
         rows=janitor_store.undelivered_quota_receipts()

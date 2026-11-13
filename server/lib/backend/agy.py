@@ -185,6 +185,78 @@ def isolated_home(name: str) -> pathlib.Path:
     return home
 
 
+# An isolated one-shot (a Janitor execution option, ``execution.isolated``):
+# its own stripped HOME (login and settings only: no GEMINI.md, no skills, about
+# 9.7k prompt tokens of overhead per call instead of 28.4k), an empty cwd,
+# sandboxed, a print timeout, and its conversation deleted afterwards (agy keeps
+# every one, about 0.5 MB, and has no flag not to).
+ISOLATED_PRINT_TIMEOUT = "120s"
+ISOLATED_KILL_SECONDS = 150
+ISOLATED_KEEP_SECONDS = 3600
+
+
+def _forget_conversations(home: pathlib.Path, conversation_id: str) -> None:
+    """Remove this conversation, and anything older than an hour a crash left."""
+    store = home / ".gemini" / "antigravity-cli"
+    doomed: list[pathlib.Path] = []
+    if conversation_id and "/" not in conversation_id:
+        doomed += [*store.glob(f"conversations/{conversation_id}.db*"), store / "brain" / conversation_id]
+    cutoff = time.time() - ISOLATED_KEEP_SECONDS
+    for old in (*store.glob("conversations/*.db*"), *store.glob("brain/*"), *store.glob("log/cli-*.log")):
+        try:
+            if old.stat().st_mtime < cutoff:
+                doomed.append(old)
+        except FileNotFoundError:
+            continue
+    for path in doomed:
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            log_exception("agyIsolatedForgetFail", exc, detail=str(path))
+
+
+def isolated_run(prompt: str, *, model: str, home_name: str, binary: str) -> dict:
+    """One sandboxed, tool-less agy request in a stripped HOME and empty cwd.
+    Returns {"text", "usage", "conversation_id"}; raises on any failure."""
+    import signal
+    home = isolated_home(home_name)
+    work = home / "work"
+    work.mkdir(exist_ok=True)
+    argv = [binary, "--sandbox", "--disable-slash-commands", "--print-timeout", ISOLATED_PRINT_TIMEOUT,
+            "--output-format", "json"]
+    if model:
+        argv += ["--model", model]
+    argv.append(f"--print={prompt}")
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, cwd=str(work),
+                            start_new_session=True, env={**os.environ, "HOME": str(home)})
+    try:
+        stdout, stderr = proc.communicate(timeout=ISOLATED_KILL_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError as exc:
+            log_exception("agyIsolatedKillFail", exc)
+        proc.communicate()
+        _forget_conversations(home, "")
+        raise TimeoutError(f"agy did not answer within {ISOLATED_KILL_SECONDS} s")
+    start = stdout.find("{")
+    if start < 0:
+        _forget_conversations(home, "")
+        raise RuntimeError(f"agy exited {proc.returncode} without JSON: {(stderr or stdout)[-300:]}")
+    envelope = json.loads(stdout[start:])
+    _forget_conversations(home, str(envelope.get("conversation_id") or ""))
+    if envelope.get("status") not in (None, "SUCCESS"):
+        raise RuntimeError(f"agy status {envelope.get('status')}: {str(envelope)[:300]}")
+    return {"text": str(envelope.get("response") or ""), "usage": envelope.get("usage") or {},
+            "conversation_id": str(envelope.get("conversation_id") or "")}
+
+
 def _private_home() -> pathlib.Path:
     """The HOME for agy runs that must not touch the real conversation store
     (see AgyBackend._ONESHOT_LINKED)."""
@@ -1147,6 +1219,10 @@ class AgyBackend(StreamJsonBackend):
 
     def routing_env(self) -> dict[str, str]:
         return {"HOME": str(_private_home())}
+
+    def isolated_oneshot(self, prompt: str, *, model: str, home_name: str) -> dict:
+        """See ``Backend.isolated_oneshot`` and ``isolated_run``."""
+        return isolated_run(prompt, model=model, home_name=home_name, binary=self.required_binary)
 
     def routing_text(self, stdout: str) -> str:
         """The reply text of a ``routing_cmd`` run."""

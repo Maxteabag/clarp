@@ -993,13 +993,6 @@
     ],
     "title": "Number Ninja logs events",
     "total_count": 3,
-    "updated_at": 1791160054000,
-    "updater": {
-      "enabled": true,
-      "last_error": null,
-      "last_run_at": null,
-      "model": "gemini-4-hydrogen-low",
-      "pending_since": null
-    }
+    "updated_at": 1791160054000
   }
 }

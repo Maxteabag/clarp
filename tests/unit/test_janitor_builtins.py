@@ -57,11 +57,14 @@ def test_ensure_installs_real_stable_agents_once_and_preserves_existing_agents()
     for role, config in first.items():
         identity = agents.get_by_agent_id(config["agent_id"])
         assert identity["is_janitor"] == 1
-        assert identity["model"] == ("" if role in {"audio-bookkeeper", "label-auditor"} else "gpt-6-sol")
+        assert identity["model"] == ("" if role in {"audio-bookkeeper", "label-auditor"}
+                                     else "gemini-4-hydrogen-low" if role == "goal-keeper" else "gpt-6-sol")
         assert not identity["heartbeat_enabled"] and not identity["dreaming_enabled"]
         assert config["builtin_role"] == role
-        assert config["execution"] == ({"executor": "deterministic", "provider": "local"} if role == "audio-bookkeeper" else {"executor": "ephemeral", "provider": "codex"})
-        assert len(config["supported_trigger_ids"]) == 1
+        assert config["execution"] == ({"executor": "deterministic", "provider": "local"} if role == "audio-bookkeeper"
+                                       else {"executor": "ephemeral", "provider": "agy", "isolated": True} if role == "goal-keeper"
+                                       else {"executor": "ephemeral", "provider": "codex"})
+        assert len(config["supported_trigger_ids"]) == (3 if role == "goal-keeper" else 1)
         assert not config["capabilities"]["can_release"]
         assert not agents.interaction_capabilities(identity)["can_chat"]
     assert db.conn().execute("SELECT COUNT(*) FROM runtimes").fetchone()[0] == 0

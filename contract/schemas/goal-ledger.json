@@ -51,39 +51,6 @@
         },
         "ledger": {
           "$ref": "#/$defs/ledger_summary"
-        },
-        "updater": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "description": "goal_updater (Host 96): the updater worker for this goal; in-memory, nulls after a Host restart.",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "model": {
-              "type": "string"
-            },
-            "pending_since": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "last_run_at": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "last_error": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
         }
       }
     },
@@ -199,7 +166,7 @@
             "object",
             "null"
           ],
-          "description": "goal_updater (Host 96): the goal updater's own checkpoint, beside the owner's checkpoint; never written by the owner.",
+          "description": "goal_updater (Host 96): the Goal keeper Janitor's own checkpoint, beside the owner's checkpoint; never written by the owner.",
           "required": [
             "at",
             "progress",
@@ -236,6 +203,12 @@
             },
             "through_event": {
               "type": "integer"
+            },
+            "by": {
+              "type": "string"
+            },
+            "janitor_agent_id": {
+              "type": "string"
             }
           }
         }

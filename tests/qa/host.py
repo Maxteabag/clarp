@@ -135,7 +135,9 @@ def main():
             aid = agents.create_agent(persona=session.title(), session=session,
                                       voice_id='', cwd=str(root), backend='codex')
             agents.start_runtime(aid, session)
-    if any(agent['backend'] != 'codex' for agent in agents.list_agents()):
+    # Built-in Janitors are identities, never spawned as turns here (the Goal
+    # keeper is on agy and installed paused); only working agents must be Codex.
+    if any(agent['backend'] != 'codex' and not agent.get('is_janitor') for agent in agents.list_agents()):
         raise SystemExit('QA state contains an unsupported provider')
     audio = root / 'audio'
     audio.mkdir(exist_ok=True)

@@ -1,4 +1,4 @@
-"""The goal updater keeps goals current beside the working agent.
+"""The Goal keeper Janitor keeps goals current beside the working agent.
 
 2026-11-13: a goal sat a week as "0 of 4 steps done", step 1 "Active", while a
 helper had finished all four steps on the first day. The owner had delegated
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from lib import agents as agents_db
-from lib import db, goal_updater, task_goal_state, task_plans
+from lib import db, goal_keeper, janitor_autonomy, janitor_builtins, janitors, task_goal_state, task_plans
 
 MIN = 60_000
 
@@ -151,7 +151,8 @@ def test_updater_writes_steps_and_its_own_checkpoint_only(owner):
         plan["plan_id"], seen_revision=before["revision"],
         steps={harness: {"status": "completed", "note": "Evidence: helper said harness done"}},
         progress="Harness done, round 2 running", next_work="Round 3",
-        model="gemini-4-hydrogen-low", source_refs=["message:m1"], through_ms=123)
+        model="gemini-4-hydrogen-low", source_refs=["message:m1"], through_ms=123,
+        janitor_agent_id="keeper-1")
     after = task_plans.get(plan["plan_id"])
     assert _item(plan, "harness")["status"] == "completed"
     assert after["revision"] == before["revision"], "the owner's next command is not refused"
@@ -163,9 +164,10 @@ def test_updater_writes_steps_and_its_own_checkpoint_only(owner):
     assert (mine["progress"], mine["model"], mine["through_ms"]) == (
         "Harness done, round 2 running", "gemini-4-hydrogen-low", 123)
     event = db.conn().execute(
-        "SELECT actor_kind, delegation_id FROM goal_events WHERE plan_id=? AND kind='updater'",
+        "SELECT actor_kind, actor_agent_id, delegation_id FROM goal_events WHERE plan_id=? AND kind='updater'",
         (plan["plan_id"],)).fetchone()
-    assert tuple(event) == ("system", "goal-updater")
+    assert tuple(event) == ("system", "keeper-1", "goal-keeper")
+    assert mine["by"] == "goal-keeper" and mine["janitor_agent_id"] == "keeper-1"
 
 
 def test_updater_never_reopens_closed_steps_or_writes_over_a_newer_plan(owner):
@@ -197,7 +199,7 @@ def test_updater_records_on_a_paused_goal_without_starting_a_clock(owner):
 
 def test_a_completed_answer_without_evidence_stays_in_progress(owner):
     plan = task_plans.get(_goal()["plan_id"])
-    steps, progress, _ = goal_updater.decide(plan, {
+    steps, progress, _ = goal_keeper.decide(plan, {
         "steps": {"harness": {"status": "completed", "evidence": "Helper: harness built, 3 apps"},
                   "climb": {"status": "completed"},
                   "nope": {"status": "completed", "evidence": "x"}},
@@ -217,56 +219,84 @@ class _Model:
         self.answers = list(answers)
         self.prompts = []
 
-    def __call__(self, prompt, model_id):
+    def __call__(self, prompt):
         self.prompts.append(prompt)
-        return self.answers.pop(0), {"input_tokens": 3000, "output_tokens": 400}
+        return self.answers.pop(0), {"input_tokens": 3000, "output_tokens": 400}, "gemini-4-hydrogen-low"
 
 
-@pytest.fixture(autouse=True)
-def _fresh_state():
-    goal_updater._STATE.clear()
-    yield
-    goal_updater._STATE.clear()
+def _config(*, coalesce=300, activity=True, sweep=True, scope=None):
+    attachments = [{"attachment_id": "a-turns", "trigger_id": "agent-work-completed", "trigger_version": 1,
+                    "enabled": True, "config": {"coalesce_seconds": coalesce}}]
+    if activity:
+        attachments.append({"attachment_id": "a-activity", "trigger_id": "goal-activity-observed",
+                            "trigger_version": 1, "enabled": True, "config": {}})
+    if sweep:
+        attachments.append({"attachment_id": "a-sweep", "trigger_id": "schedule", "trigger_version": 1,
+                            "enabled": True, "config": {"cron": "17 * * * *", "timezone": "UTC"}})
+    return {"agent_id": "keeper-1", "generation": 1, "scope": scope or {}, "options": {"max_goals_per_run": 5},
+            "attachments": attachments}
+
+
+# ---- when it runs -------------------------------------------------------------
 
 
 def test_triggers_fold_and_nothing_new_costs_no_model_call(owner, helper):
     plan = _goal()
     base = db.now_ms()
-    assert goal_updater.due(base) == [], "no activity, no update"
+    config, progress = _config(), {}
+    assert goal_keeper.due(config, progress, base) == [], "no activity, no update"
     _message(helper, "assistant", "Harness built", at=base + 1000, phase="final")
-    assert goal_updater.due(base + 2000) == [], "folding: not before the window"
-    assert goal_updater.due(base + 1000 + goal_updater.fold_ms()) == [plan["plan_id"]]
+    assert goal_keeper.due(config, progress, base + 2000) == [], "folding: not before the window"
+    assert goal_keeper.due(config, progress, base + 1000 + 300_000) == [plan["plan_id"]]
     model = _Model([{"steps": {"harness": {"status": "completed", "evidence": "Harness built"}},
                      "checkpoint": {"progress": "Harness built", "next_work": "Baseline"}}])
-    goal_updater.update(plan["plan_id"], now=base + 1000 + goal_updater.fold_ms(), call=model)
+    goal_keeper.update(plan["plan_id"], now=base + 301_000, ask=model)
+    goal_keeper.settle(progress, plan["plan_id"], "updated", base + 301_000)
     assert len(model.prompts) == 1
-    goal_updater._STATE.clear()
-    later = base + 10 * goal_updater.fold_ms()
-    assert goal_updater.due(later) == [], "the cursor moved past what was read"
-    assert goal_updater.update(plan["plan_id"], now=later, call=model) == {"skipped": "nothing new"}
+    later = base + 3_000_000
+    assert goal_keeper.due(config, progress, later) == [], "the cursor moved past what was read"
+    assert goal_keeper.update(plan["plan_id"], now=later, ask=model)["outcome"] == "skipped"
     assert len(model.prompts) == 1
+
+
+def test_only_the_attached_triggers_count(owner, helper):
+    plan = _goal()
+    base = db.now_ms()
+    _message(helper, "assistant", "Harness built", at=base + 1000, phase="final")
+    turns_only = _config(activity=False, sweep=False)
+    assert goal_keeper.due(turns_only, {}, base + 400_000) == [], "a helper is goal activity"
+    _message(owner, "assistant", "Started the climb", at=base + 2000, phase="final")
+    assert goal_keeper.due(turns_only, {}, base + 400_000) == [plan["plan_id"]]
 
 
 def test_a_pause_is_picked_up_within_the_minute(owner):
     plan = _goal()
     now = db.now_ms()
     _act(plan["plan_id"], "pause", reason="Waiting")
-    assert goal_updater.due(now + 5000) == []
-    assert goal_updater.due(now + goal_updater.FAST_FOLD_SEC * 1000 + 5000) == [plan["plan_id"]]
+    progress = {}
+    assert goal_keeper.due(_config(), progress, now + 5000) == []
+    assert goal_keeper.due(_config(), progress, now + goal_keeper.FAST_FOLD_SEC * 1000 + 5000) == [plan["plan_id"]]
 
 
-def test_the_sweep_catches_a_long_turn_with_no_final_message(owner):
+def test_the_schedule_sweep_catches_a_long_turn_with_no_final_message(owner):
     plan = _goal()
     base = db.now_ms()
     _message(owner, "assistant", "still working", at=base + 1000)
-    assert goal_updater.due(base + 2 * MIN) == []
-    assert goal_updater.due(base + goal_updater.sweep_ms() + 2000) == [plan["plan_id"]]
+    progress = {}
+    assert goal_keeper.due(_config(), progress, base + 2000) == []
+    assert goal_keeper.due(_config(), progress, progress["next_sweep_at"] + 1000) == [plan["plan_id"]]
 
 
-def test_the_kill_switch_stops_every_run(owner, monkeypatch):
-    _goal()
-    monkeypatch.setenv("CLARP_GOAL_UPDATER", "0")
-    assert goal_updater.GoalUpdater(call=_Model([])).tick() == []
+def test_one_retry_then_the_sweep_decides():
+    progress = {"next_sweep_at": 9_000_000}
+    goal_keeper.settle(progress, "p1", "failed", 1000, "agy exited 1")
+    assert progress["goals"]["p1"]["retry_at"] == 1000 + goal_keeper.RETRY_AFTER_MS
+    goal_keeper.settle(progress, "p1", "failed", 70_000, "agy exited 1")
+    assert progress["goals"]["p1"] == {"retry_at": 9_000_000, "last_error": "agy exited 1"}
+    goal_keeper.settle(progress, "p1", "conflict", 80_000, "plan changed")
+    assert progress["goals"]["p1"]["retry_at"] == 95_000
+    goal_keeper.settle(progress, "p1", "updated", 90_000)
+    assert "p1" not in progress["goals"]
 
 
 def test_the_working_agent_is_never_sent_anything(owner, helper):
@@ -274,17 +304,100 @@ def test_the_working_agent_is_never_sent_anything(owner, helper):
     base = db.now_ms()
     _message(owner, "assistant", "Started helper", at=base + 1000, phase="final")
     count = db.conn().execute("SELECT COUNT(*) FROM messages WHERE agent_id=?", (owner,)).fetchone()[0]
-    goal_updater.update(plan["plan_id"], now=base + 2000, call=_Model([
+    goal_keeper.update(plan["plan_id"], now=base + 2000, ask=_Model([
         {"steps": {}, "checkpoint": {"progress": "Helper started", "next_work": "Wait"}}]))
     assert db.conn().execute("SELECT COUNT(*) FROM messages WHERE agent_id=?",
                              (owner,)).fetchone()[0] == count
+
+
+# ---- the Janitor ----------------------------------------------------------------
+
+
+def _keeper():
+    return janitor_builtins.ensure_builtins()["goal-keeper"]
+
+
+def test_the_goal_keeper_is_a_paused_builtin_janitor_with_three_triggers():
+    keeper = _keeper()
+    assert not keeper["enabled"]
+    assert keeper["backend"] == "agy" and keeper["model"] == "gemini-4-hydrogen-low"
+    assert keeper["execution"] == {"executor": "ephemeral", "provider": "agy", "isolated": True}
+    assert janitors.template("goal-keeper")["allowed_effects"] == ["goal_update"]
+    watched = {a["trigger_id"]: a["config"] for a in keeper["attachments"] if a["enabled"]}
+    assert watched["agent-work-completed"]["coalesce_seconds"] == 300
+    assert "goal-activity-observed" in watched and watched["schedule"]["cron"] == "17 * * * *"
+    assert janitor_builtins.eligible("goal-keeper") == [], "paused: nothing runs"
+
+
+def test_isolated_execution_is_an_antigravity_option():
+    assert janitors._execution("goal-keeper", {"provider": "agy", "isolated": True}, "agy")["isolated"] is True
+    with pytest.raises(janitors.JanitorError, match="Antigravity"):
+        janitors._execution("heartbeat-decider", {"provider": "codex", "isolated": True}, "codex")
+
+
+def test_an_enabled_keeper_runs_one_recorded_batch(owner, helper):
+    keeper = _keeper()
+    keeper = janitors.set_enabled(keeper["session"], keeper["revision"], True)
+    plan = _goal()
+    _message(owner, "assistant", "Started the helper", at=db.now_ms() - 400_000, phase="final")
+    # The goal is older than its trigger: move its cursor back so the turn counts.
+    db.conn().execute("UPDATE task_plans SET created_at=created_at-500000 WHERE plan_id=?", (plan["plan_id"],))
+    asked = []
+
+    def ask(run, prompt, plan_id):
+        asked.append((run["run_id"], plan_id))
+        return ({"steps": {"harness": {"status": "in_progress"}},
+                 "checkpoint": {"progress": "Helper started", "next_work": "Wait"}}, {}, "gemini-4-hydrogen-low")
+
+    worker = janitor_autonomy.AutonomyJanitors(dispatch=None, notify=None, goal_ask=ask)
+    worker.goal_keeper_once(wait=True)
+    assert [p for _, p in asked] == [plan["plan_id"]]
+    run = janitors.get_run(asked[0][0])
+    assert run["status"] == "completed"
+    assert task_plans.get(plan["plan_id"])["goal"]["updater"]["progress"] == "Helper started"
+    assert _item(plan, "harness")["status"] == "in_progress"
+
+
+# ---- agy isolation -------------------------------------------------------------
+
+
+def test_agy_runs_sandboxed_in_its_own_stripped_home_and_forgets_the_conversation(tmp_path, monkeypatch):
+    from lib.backend import agy
+    monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
+    seen = {}
+
+    class FakeProc:
+        pid = 0
+        returncode = 0
+
+        def __init__(self, argv, **kw):
+            seen["argv"], seen["cwd"], seen["home"] = argv, kw["cwd"], kw["env"]["HOME"]
+            store = tmp_path / "cache" / "keeper-home" / ".gemini" / "antigravity-cli"
+            (store / "conversations").mkdir(parents=True, exist_ok=True)
+            (store / "brain" / "c-1").mkdir(parents=True, exist_ok=True)
+            (store / "conversations" / "c-1.db").write_text("x")
+
+        def communicate(self, timeout=None):
+            return json.dumps({"conversation_id": "c-1", "status": "SUCCESS", "response": '{"ok": true}',
+                               "usage": {"input_tokens": 9744}}), ""
+
+    monkeypatch.setattr(agy.subprocess, "Popen", FakeProc)
+    answer = agy.isolated_run("prompt", model="gemini-4-hydrogen-low", home_name="keeper-home", binary="agy")
+    assert seen["argv"][1:9] == ["--sandbox", "--disable-slash-commands", "--print-timeout", "120s",
+                                 "--output-format", "json", "--model", "gemini-4-hydrogen-low"]
+    assert seen["argv"][-1] == "--print=prompt"
+    home = tmp_path / "cache" / "keeper-home"
+    assert seen["home"] == str(home) and seen["cwd"] == str(home / "work")
+    assert not any((home / "work").iterdir()), "an empty working directory"
+    store = home / ".gemini" / "antigravity-cli"
+    assert not (store / "conversations" / "c-1.db").exists() and not (store / "brain" / "c-1").exists()
+    assert answer["text"] == '{"ok": true}' and answer["usage"]["input_tokens"] == 9744
 
 
 # ---- replay: the 6 Nov goal, stubbed model -------------------------------------
 
 
 REPLAY = [
-    # (minutes after start, who, role, text, phase, answer)
     (2, "owner", "assistant", "Started helper designer-1 with the brief", "final",
      {"steps": {"harness": {"status": "in_progress"}},
       "checkpoint": {"progress": "Helper designer-1 building the harness", "next_work": "Baseline"}}),
@@ -315,72 +428,12 @@ def test_replay_of_a_delegated_goal_ends_current(owner, helper):
                      tools=[("Bash", "npm run build")] if who == "helper" else ())
         if minutes == 80:
             _act(plan["plan_id"], "pause", reason="Waiting for Peter's decision on PR #76")
-        goal_updater.update(plan["plan_id"], now=at + 1000, call=model)
+        goal_keeper.update(plan["plan_id"], now=at + 1000, ask=model)
     final = task_plans.get(plan["plan_id"])
     assert {i["item_id"].split(":")[-1]: i["status"] for i in final["items"]} == {
         "harness": "completed", "climb": "completed", "pr": "completed"}
     assert final["status"] == "paused" and final["completed_count"] == 3
     assert final["goal"]["updater"]["progress"] == "PR #76 open; ≥9 not reached"
-    assert final["goal"]["checkpoint"] is None or "progress" not in (final["goal"]["checkpoint"] or {}) \
-        or final["goal"]["checkpoint"]["progress"] != final["goal"]["updater"]["progress"]
     assert "[tool Bash: npm run build]" in model.prompts[1]
     assert "Done: 10 rounds" in model.prompts[2] and "(from agent helper designer-1)" in model.prompts[2]
     assert "untrusted" in model.prompts[0]
-
-
-# ---- agy invocation, retries and cleanup ---------------------------------------
-
-
-def test_one_retry_then_the_sweep_decides(owner):
-    plan = _goal()
-
-    def broken(prompt, model_id):
-        raise RuntimeError("agy exited 1")
-
-    _message(owner, "assistant", "done a thing", at=db.now_ms() + 1000, phase="final")
-    worker = goal_updater.GoalUpdater(call=broken)
-    worker._run(plan["plan_id"])
-    first = goal_updater._STATE[plan["plan_id"]]
-    assert first.failures == 1 and first.retry_at - db.now_ms() <= goal_updater.RETRY_AFTER_MS
-    worker._run(plan["plan_id"])
-    second = goal_updater._STATE[plan["plan_id"]]
-    assert second.failures == 0 and second.first_at == 0
-    assert second.retry_at - db.now_ms() > goal_updater.sweep_ms() - 5000
-    assert "agy exited 1" in second.last_error
-    worker.stop()
-
-
-def test_agy_runs_sandboxed_in_its_own_stripped_home_and_forgets_the_conversation(
-        owner, tmp_path, monkeypatch):
-    monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
-    seen = {}
-
-    class FakeProc:
-        pid = 0
-        returncode = 0
-
-        def __init__(self, argv, **kw):
-            seen["argv"], seen["cwd"], seen["home"] = argv, kw["cwd"], kw["env"]["HOME"]
-            store = tmp_path / "cache" / goal_updater.HOME_NAME / ".gemini" / "antigravity-cli"
-            (store / "conversations").mkdir(parents=True, exist_ok=True)
-            (store / "brain" / "c-1").mkdir(parents=True, exist_ok=True)
-            (store / "conversations" / "c-1.db").write_text("x")
-
-        def communicate(self, timeout=None):
-            answer = json.dumps({"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}})
-            return json.dumps({"conversation_id": "c-1", "status": "SUCCESS", "response": answer,
-                               "usage": {"input_tokens": 12000}}), ""
-
-    monkeypatch.setattr(goal_updater.subprocess, "Popen", FakeProc)
-    answer, usage = goal_updater.call_model("prompt", "gemini-4-hydrogen-low")
-    argv = seen["argv"]
-    assert argv[1:9] == ["--sandbox", "--disable-slash-commands", "--print-timeout", "120s",
-                         "--output-format", "json", "--model", "gemini-4-hydrogen-low"]
-    assert argv[-1] == "--print=prompt"
-    home = tmp_path / "cache" / goal_updater.HOME_NAME
-    assert seen["home"] == str(home) and seen["cwd"] == str(home / "work")
-    assert not any((home / "work").iterdir()), "an empty working directory"
-    store = home / ".gemini" / "antigravity-cli"
-    assert not (store / "conversations" / "c-1.db").exists()
-    assert not (store / "brain" / "c-1").exists()
-    assert answer["checkpoint"]["progress"] == "p" and usage["input_tokens"] == 12000

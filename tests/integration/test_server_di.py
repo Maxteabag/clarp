@@ -663,7 +663,7 @@ def test_get_snapshot_returns_seeded_data(running_server):
     assert {a["session"] for a in data["agents"] if not a["is_janitor"]} == {"claude", "rachel"}
     assert {a["session"] for a in data["agents"] if a["is_janitor"]} == {
         "clarp-message-delegator", "clarp-tool-explainer", "clarp-audio-bookkeeper", "clarp-heartbeat-decider", "clarp-quota-monitor",
-        "clarp-label-auditor"}
+        "clarp-label-auditor", "clarp-goal-keeper"}
     assert next(a for a in data["agents"] if a["session"] == "claude")["persona"] == "Mike"
 
 
@@ -4157,7 +4157,7 @@ def test_build_server_starts_the_worker_registry_in_order(fake_ctx, monkeypatch)
             "state-log-watcher", "background-job-watcher", "runtime-event-watcher",
             "live-hub", "live-relay",
             "tts-worker", "maintenance", "usage-refresh", "resource-telemetry",
-            "cache-warmup", "bookkeeping-listeners", "goal-updater", "decision-delivery", "transcript-streamer", "team-leader", "heartbeat",
+            "cache-warmup", "bookkeeping-listeners", "decision-delivery", "transcript-streamer", "team-leader", "heartbeat",
             "autonomy-janitors", "dreaming", "agent-scheduler", "janitor-runner",
             "local-https",
         ]

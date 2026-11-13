@@ -418,11 +418,10 @@ def get_with_goal_text_and_bound(plan_id: str) -> tuple[dict | None, str | None,
         bound += _goal_expand(db.conn(), plan_id, data["goal"])
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
-        from . import goal_ledger, goal_updater
+        from . import goal_ledger
 
         data["goal"]["documents"] = goal_documents(plan_id)
         data.update(goal_ledger.summary(data))
-        data["updater"] = goal_updater.public_state(plan_id)
     data["legacy"] = data["goal"] is None
     data["completion_verified"] = bool(data["goal"] and data["status"] == "completed")
     counts = {
@@ -1304,7 +1303,7 @@ def recovery_owns_agent(agent_id):
     )
 
 
-# ---- the goal updater's write path (lib/goal_updater.py) -------------------
+# ---- the Goal keeper Janitor's effect, goal_update (lib/goal_keeper.py) ----
 
 UPDATER_STEP_STATUSES = {"pending", "in_progress", "completed", "blocked"}
 # Steps the owner closed stay closed: the updater records progress, it does not
@@ -1323,8 +1322,9 @@ def updater_apply(
     source_refs: list[str],
     through_ms: int = 0,
     through_event: int = 0,
+    janitor_agent_id: str = "",
 ) -> dict:
-    """Record what the goal updater observed, beside the owner's own record.
+    """Record what the Goal keeper observed, beside the owner's own record.
 
     ``steps`` maps item_id -> {"status", "note"}. Only step statuses and the
     updater's own checkpoint (``goal["updater"]``) change: never the plan's
@@ -1374,17 +1374,18 @@ def updater_apply(
                  now if status == "completed" else None, active_ms, item_id))
             changed.append({"item_id": item_id, "from": row["status"], "status": status,
                             "note": str((wanted or {}).get("note") or "")[:500]})
-        # through_*: where the next update starts reading (lib/goal_updater.py).
+        # through_*: where the next update starts reading (lib/goal_keeper.py).
         goal["updater"] = dict(at=now, progress=progress, next_work=next_work, model=model,
                                source_refs=list(source_refs)[:40],
                                changed_steps=[c["item_id"] for c in changed],
                                through_ms=int(through_ms or now),
-                               through_event=int(through_event or 0))
+                               through_event=int(through_event or 0),
+                               by="goal-keeper", janitor_agent_id=janitor_agent_id)
         goal["history"].append(dict(
             at=now, kind="updater", revision=plan["revision"],
-            detail={"reason": "Goal updater: " + progress[:200], "by": "goal-updater",
+            detail={"reason": "Goal keeper: " + progress[:200], "by": "goal-keeper",
                     "model": model, "steps": changed, "source_refs": list(source_refs)[:40]}))
-        with goal_ledger.acting_as("system", delegation_id="goal-updater"):
+        with goal_ledger.acting_as("system", janitor_agent_id, delegation_id="goal-keeper"):
             _goal_save(con, plan_id, goal)
         con.execute("UPDATE task_plans SET updated_at=? WHERE plan_id=?", (now, plan_id))
         from . import artifacts

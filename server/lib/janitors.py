@@ -97,6 +97,26 @@ def templates() -> list[dict]:
                  {"key": "autocorrect", "label": "Correct labels automatically", "type": "boolean", "default": False,
                   "description": "Reserved. Mismatches are only reported today; nothing is changed."},
                  _max_interval_option(86400)]},
+            {"id": "goal-keeper", "name": "Goal keeper",
+             "description": "Keep agents' durable goals current beside them: after a turn, a helper's report, a job "
+                            "or a pause, restate the goal's steps and write a short checkpoint. The agents are never "
+                            "prompted; it cannot complete, pause or cancel a goal or record evidence.",
+             "recommended_backend": "agy", "recommended_model": "gemini-4-hydrogen-low", "recommended_effort": None,
+             "allowed_effects": ["goal_update"], "creatable": True,
+             # agent-work-completed@1 is the owner's turn end (coalesce_seconds folds a goal's triggers);
+             # goal-activity-observed@1 adds helpers' reports and turn ends, job ends and pause/resume/cancel;
+             # schedule@1 is the sweep for activity no trigger covered.
+             "supported_trigger_ids": ["agent-work-completed", "goal-activity-observed", "schedule"],
+             "default_trigger_id": "agent-work-completed",
+             "seed_execution": {"isolated": True},
+             "seed_attachments": [
+                 {"trigger_id": "agent-work-completed", "config": {"coalesce_seconds": 300}},
+                 {"trigger_id": "goal-activity-observed", "config": {}},
+                 {"trigger_id": "schedule", "config": {"cron": "17 * * * *", "timezone": "UTC"}}],
+             "options": [
+                 {"key": "max_goals_per_run", "label": "Goals updated at once", "type": "integer", "default": 5,
+                  "min": 1, "max": 6,
+                  "description": "One run updates up to this many goals in parallel; each is one model call."}]},
             {"id": "tool-explainer", "name": "Tool explainer",
              "description": "Explain requested tool activity using bounded read-only input.",
              "recommended_backend": "codex", "recommended_model": "gpt-6-sol",
@@ -344,8 +364,13 @@ def _execution(template_id: str, value, backend: str) -> dict:
         return {}
     if value is None:
         value = {"executor": "ephemeral", "provider": backend}
-    if not isinstance(value, dict) or set(value) - {"executor", "provider"}:
+    if not isinstance(value, dict) or set(value) - {"executor", "provider", "isolated"}:
         raise JanitorError("Invalid demand execution configuration")
+    isolated = value.get("isolated", False)
+    isolating = backends.get(value.get("provider", backend))
+    if not isinstance(isolated, bool) or (isolated and (isolating is None or isolating.isolated_oneshot is None)):
+        # Antigravity today: a stripped HOME, empty cwd, print timeout and conversation cleanup.
+        raise JanitorError("Isolated execution is an Antigravity option")
     provider = value.get("provider", backend)
     if value.get("executor", "ephemeral") != "ephemeral" or not isinstance(provider, str):
         raise JanitorError("Demand jobs require an ephemeral executor")
@@ -355,7 +380,7 @@ def _execution(template_id: str, value, backend: str) -> dict:
         raise JanitorError("Execution provider must match the Janitor backend")
     if template_id == "tool-explainer" and provider != backend:
         raise JanitorError("Tool explanation runs on the Janitor's own backend")
-    return {"executor": "ephemeral", "provider": provider}
+    return {"executor": "ephemeral", "provider": provider, **({"isolated": True} if isolated else {})}
 
 
 def create(session: str, template_id: str = "task-labels", scope=None, attachments=None, options=_UNSET, execution=None) -> dict:
