@@ -517,11 +517,13 @@ class AutonomyJanitors:
             # Advice and exhaustion repeat every interval; notify once per distinct situation.
             marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched]+([decision['model']] if decision.get('model') else [])+([repair_text] if repair_text else []),sort_keys=True)
             # Worked: it switched, or found a situation that needs the owner (switch advice, exhaustion).
+            # The phone is pushed only when work has stopped: no saved account can serve (exhausted).
+            # A switch, switch advice and a repair note are told in the Janitor's chat without a push.
             worked=bool(switched) or decision['action']!='noop'
             if text and (decision['action']=='switch' and switched or settings_store.get_text(marker,default='')!=situation):
                 settings_store.set_text(marker,situation)
                 rid=digest([provider,situation,now,owner['generation']])
-                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':True,'reason':'account_switch','owner_generation':owner['generation']}
+                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':text,'push':decision['action']=='exhausted','reason':'account_switch','owner_generation':owner['generation']}
                 janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
             elif decision['action']=='noop' and not repair_text:settings_store.set_text(marker,'')
             summary=janitor_hotseat.run_summary(provider,decision,text=text)
