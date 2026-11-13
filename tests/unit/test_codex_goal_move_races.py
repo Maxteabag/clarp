@@ -127,7 +127,8 @@ def test_a_drain_backstop_does_not_kill_a_continuation_before_its_notification_i
             assert unblocked.wait(native_goal_gate.remaining()), "notification callback did not finish"
 
 
-def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_path, monkeypatch):
+def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(
+        fake, tmp_path, monkeypatch, codex_pool_lifecycle):
     monkeypatch.setenv('CLARP_QA_GOAL_TURN_HOLD', '3')
     agent, thread, _ = _leftover(fake, tmp_path, monkeypatch, 'drain-admission')
     assert _wait(lambda: not cas.active_handles(agent))
@@ -160,13 +161,18 @@ def test_a_goal_admitted_after_the_last_drain_snapshot_is_not_killed(fake, tmp_p
     monkeypatch.setattr(client, '_goal_may_continue', quiet_snapshot)
     def user_resume():
         try:
-            cas.goal(agent, 'resume') # actual public lookup of the draining owner
+            # The public lookup starts a new current process before it finds
+            # the draining owner (the pool is empty), from this thread: one
+            # of the fixture's own, or it refuses the construction and the
+            # goal call never reaches the client under test.
+            with codex_pool_lifecycle.producing():
+                cas.goal(agent, 'resume') # actual public lookup of the draining owner
         except Exception as exc:
             errors.append(exc)
     worker = threading.Thread(target=user_resume)
     worker.start()
     try:
-        assert looked_up.wait(5)
+        assert looked_up.wait(5), errors
         client._exit_if_drained(backstop=True)
         cut_running = native_running.is_set() and client.proc.poll() is not None
     finally:

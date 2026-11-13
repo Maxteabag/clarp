@@ -656,6 +656,22 @@ def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
             pass
 
 
+@pytest.fixture(autouse=True)
+def drop_hand_built_clients(request, _isolated_db):
+    """For every test that builds a Codex client by hand (an object, not a
+    process): take it out of the pools when the test is over, before the
+    quiescence gate of ``_isolated_db`` looks and before the test's patches
+    are undone. One such client left behind failed that test's teardown and
+    then every later test of the worker: 142 errors in 21 of the 26 Codex
+    unit files in one serial run (issue 290). A client that is a process is
+    not touched, so the gate still catches one nobody retired."""
+    yield
+    if "codex_pool_lifecycle" in request.fixturenames:
+        return      # that fixture owns its clients and closes them itself
+    from tests.codex_pool_lifecycle import drop_hand_built_clients as drop
+    drop()
+
+
 @pytest.fixture
 def codex_pool_lifecycle(_isolated_db, _guard_backend_clis, monkeypatch):
     """Close fake pool actors before either shared sink or CLI guard teardown."""

@@ -6,9 +6,10 @@ finalizers after an error, so both sink resets and MonkeyPatch.undo consult it.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import subprocess
 import sys
 import threading
-from time import monotonic as _real_monotonic
+from time import monotonic as _real_monotonic, sleep as _real_sleep
 
 
 class QuiescenceError(RuntimeError):
@@ -47,6 +48,61 @@ def _stopped(client):
 
 def assert_quiescent():
     GATE.check()
+
+
+def _pools(cas):
+    return (cas._CLIENTS, cas._DRAINING, cas._RETIRING)
+
+
+def _is_process(client) -> bool:
+    return isinstance(getattr(client, "proc", None), subprocess.Popen)
+
+
+def drop_hand_built_clients(cas=None) -> int:
+    """Take out of the pools every client a test built by hand: an object
+    with a stand-in for its process, put into a pool the test patched or
+    moved into another pool by the code under test. It is not a process, so
+    there is nothing to retire; left in a pool it fails the quiescence gate
+    of this test (the gate looks before the test's patches are undone) and,
+    in a pool the test did not patch, of every later test of the worker.
+    A client that IS a process is left where it is: the gate still sees it.
+    Run for every test by the conftest fixture of the same name."""
+    cas = cas if cas is not None else sys.modules.get("lib.codex_app_server")
+    if cas is None:
+        return 0
+    dropped = 0
+    with cas._LOCK:
+        for pool in _pools(cas):
+            for key, client in list(pool.items()):
+                if not _is_process(client):
+                    del pool[key]
+                    dropped += 1
+    return dropped
+
+
+def retire_left_clients(cas=None, limit=15.0) -> None:
+    """Retire the processes a test left, until the pools are empty. For a
+    test that starts clients through the code under test, in its own
+    teardown. An idle client is retired at once; one a held start has just
+    been released on is idle a moment later. A process recycled as stuck has
+    exited but stays listed as retiring until the next send prunes it
+    (``cas._client``), and no send follows a test: pruned here the same way,
+    once its readers are done. Left in a pool, it fails the next test's
+    quiescence gate, and with it every later test of the worker."""
+    cas = cas if cas is not None else sys.modules["lib.codex_app_server"]
+    deadline = _real_monotonic() + limit
+    while True:
+        cas.recycle_clients()
+        with cas._LOCK:
+            for key, retired in list(cas._RETIRING.items()):
+                readers = (getattr(retired, "reader", None), getattr(retired, "stderr_reader", None))
+                if (_is_process(retired) and retired.proc.poll() is not None and not any(
+                        reader is not None and reader.is_alive() for reader in readers)):
+                    del cas._RETIRING[key]
+            left = [client for pool in _pools(cas) for client in pool.values() if _is_process(client)]
+        if not left or _real_monotonic() >= deadline:
+            return
+        _real_sleep(0.05)
 
 
 class PoolOwner:
@@ -176,6 +232,20 @@ class PoolOwner:
             self.monkeypatch.undo = self.undo_attribute
         else:
             del self.monkeypatch.undo
+        # A test may have patched a pool away while it still held one of this
+        # owner's clients (taken from the pool, then the pool replaced). The
+        # close above saw the patched pools; the ones just restored can hold
+        # that client, stopped and proven quiescent, and the next test's gate
+        # would refuse it and every test after it.
+        with self.cas._LOCK:
+            self._forget_owned()
+
+    def _forget_owned(self):
+        """Under cas._LOCK: take this owner's clients out of the pools."""
+        for pool in (self.cas._CLIENTS, self.cas._DRAINING, self.cas._RETIRING):
+            for key, client in list(pool.items()):
+                if self.clients.get(id(client)) is client:
+                    del pool[key]
 
     def close(self):
         deadline = _real_monotonic() + self.timeout
@@ -249,10 +319,7 @@ class PoolOwner:
         if remaining <= 0 or not self.cas._LOCK.acquire(timeout=remaining):
             raise QuiescenceError("Codex pool identity cleanup exceeded total deadline")
         try:
-            for pool in (self.cas._CLIENTS, self.cas._DRAINING, self.cas._RETIRING):
-                for key, client in list(pool.items()):
-                    if self.clients.get(id(client)) is client:
-                        del pool[key]
+            self._forget_owned()
         finally:
             self.cas._LOCK.release()
         with self.lock:
