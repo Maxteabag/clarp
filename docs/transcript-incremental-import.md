@@ -111,6 +111,8 @@ size:
   seconds after the last turn before the boundary, and how the turn of each
   trace on a recorded row ended;
 - a digest of the latest user row and one of the Oracle rows.
+- a digest of each live row of the session by itself (there are few), for
+  `carry_live_rows`.
 
 The digests are taken in a fixed order that SQLite has no say in: the
 columns by name, the rows by message id. At a tail the rows are read again
@@ -186,22 +188,42 @@ that kind of change is a full import again.
   transcript that opens with a call opening), which the store carry records
   (`initial_provenance_used`).
 
+A fourth rule is off unless switched on:
+
+- `carry_live_rows`: a live row of this session, the row a reply streams
+  into. It is a different kind of rule: the runtime rewrites that row in
+  place with every delta (four times a second while a reply streams), so
+  what the rule lets through is a CHANGED old row, not only a new one. By
+  day on an active Host this was nearly every refusal left (all 137 in one
+  hour of 13 November named `row_live`). What a turn before the boundary
+  reads of a live row is one thing: a full import removes a leftover live
+  row when a reply of the row's own trace with related words is in its
+  batch, and its batch holds every reply where a tail's holds those from the
+  boundary. So a live row may be new, rewritten or gone unless a reply
+  stored before the boundary carries its trace (the running turn then spans
+  the boundary: a message was steered into it), whatever its words. A live
+  row that is as it was when the frontier was published is not asked; the
+  record keeps a digest of each live row for that. A finalized row
+  (`final:`) is not a live row and counts as before. The rule does not
+  change the publication fence: a delta committed while a tail has given
+  the writer away still refuses that tail's publication.
+
 What stays a full import on purpose: any other change to a row of this
-session (a streamed reply's live row, a finalized row, a turn's rows
-re-stamped when it settles), a new `/send` row with words said before (every
-heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
+session (a finalized row, a turn's rows re-stamped when it settles, and
+without `carry_live_rows` a streamed reply's live row), a new `/send` row
+with words said before (every heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
 way, as fixed words: `transcriptCarryInputsChanged what=row_live,turn_of_old_row`
 (`row_send`, `row_live`, `row_final`, `row_transcript`, `row_other`,
-`row_other_session`, `send_said_before`, `turn_rows`, `turn_before_boundary`,
-`turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
+`row_other_session`, `send_said_before`, `live_row_of_old_reply`, `turn_rows`,
+`turn_before_boundary`, `turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
 frontier the process holds and to one taken from the store alike, so also
 after a Host start and after the cache has dropped the frontier: both are
 the same record.
 
-`tests/readmodel/test_rm_n14_carry.py` runs every rule in pairs: the change
-it lets through is a tail and equals the full replay; its nearest harmful
-twin is a full import and equals it too, and imported as a tail leaves
-different rows.
+`tests/readmodel/test_rm_n14_carry.py` and `test_rm_n14_live_rows.py` run
+every rule in pairs: the change it lets through is a tail and equals the full
+replay; its nearest harmful twin is a full import and equals it too, and
+imported as a tail leaves different rows.
 
 A process that holds no frontier for a file takes the stored one when it
 never had one (a Host start), lost it to the cache's size limit, or the last
