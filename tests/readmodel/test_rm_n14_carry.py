@@ -427,6 +427,61 @@ def test_words_the_linker_would_not_link_to_an_old_turn_are_new_words(tmp_path, 
 
 
 @BACKENDS
+def test_a_message_that_arrives_after_its_turn_was_imported_is_linked_though_the_file_stands_still(
+        tmp_path, backend):
+    """A turn after the boundary is imported with no /send row (as typed in a
+    terminal), and then its /send row arrives. The words are new to the
+    turns before the boundary, so the rules let the row through. They do not
+    make the file's import a no-op: the turn the row is for is after the
+    boundary, and the tail links it. An unchanged file is left alone only
+    when every recorded row stands with no rule applied; taken for unchanged
+    here (after a Host start or an eviction, where that question is asked),
+    the turn would stay unlinked."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        world.send("late", f"synthetic request {ordinal}", at=ordinal * 1000 - 500,
+                   origin="agent", sender=corpus.SENDER)
+        assert world.imported() == ("tail_applied", [])        # the file has not changed
+        with sqlite3.connect(world.candidate) as linked:
+            assert linked.execute(
+                "SELECT count(*) FROM messages WHERE role='user' AND text=? "
+                "AND source_file NOT LIKE 'client:%'", (f"synthetic request {ordinal}",)
+            ).fetchone()[0] == 0
+        # Nothing has changed now: left alone where that is asked.
+        assert world.imported() == (
+            ("tail_applied" if world.state == "held" else "unchanged_file"), [])
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+@BACKENDS
+def test_a_later_turn_after_a_message_a_tail_let_through_is_still_a_tail(tmp_path, backend):
+    """The rows a tail writes for a new message carry its turn's trace and
+    lie in the second part of the record (written since its base). The
+    traces the record was published with are those of both parts. A turn row
+    that begins later, for another trace, changes nothing an old turn reads;
+    with the traces taken from the first part only it would be refused."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("own", f"synthetic request {ordinal}", at=FAR, trace="own-turn")
+        world.turn_row("own-turn", at=FAR)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        with sqlite3.connect(world.candidate) as stored:
+            recorded = json.loads(stored.execute(
+                "SELECT inputs_digest FROM transcript_import_frontiers").fetchone()[0])
+            traced = stored.execute(
+                "SELECT count(*) FROM messages WHERE trace_id='own-turn' AND revision>?",
+                (recorded["base"],)).fetchone()[0]
+        assert recorded["base"] < recorded["mark"] and traced > 0
+        world.turn_row("another-turn", at=FAR + 60_000)
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("tail_applied", [])
+
+
+@BACKENDS
 def test_a_new_message_with_the_words_of_an_old_linked_message_is_a_full_import(tmp_path, backend):
     """The twin for a turn that WAS linked, so no transcript row holds its
     words; the carry lists the row it took. The old row was sent before the
