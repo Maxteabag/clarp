@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 126  # Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
+_SCHEMA_VERSION = 127  # goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -301,6 +301,32 @@ CREATE TABLE transcript_import_frontiers (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (agent_id, backend_session_id, source_file)
 );
+
+-- One receipt per goal per Goal keeper run (docs/architecture/goal-keeper.md):
+-- what the keeper did with that goal and why, from ids and short notes only,
+-- never the prompt or transcript text. Outcomes: updated, unchanged,
+-- held_by_evidence_rule, refused_owner_changed, failed, skipped, cancelled.
+-- Read by `clarp-admin janitor runs` and a goal's own receipts.
+CREATE TABLE goal_keeper_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    steps_json TEXT NOT NULL DEFAULT '[]',
+    progress TEXT NOT NULL DEFAULT '',
+    next_work TEXT NOT NULL DEFAULT '',
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    model TEXT NOT NULL DEFAULT '',
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    duration_ms INTEGER,
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_goal_keeper_receipts_run ON goal_keeper_receipts(run_id);
+CREATE INDEX idx_goal_keeper_receipts_plan ON goal_keeper_receipts(plan_id, created_at);
 
 CREATE TABLE orchestrator_decisions (
     decision_id INTEGER PRIMARY KEY AUTOINCREMENT,

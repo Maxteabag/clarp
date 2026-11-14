@@ -299,6 +299,9 @@ def prompt_for(plan: dict, sheet: dict, text: str) -> str:
 # ---- the answer -----------------------------------------------------------
 
 
+HELD_NOTE = "Probably done; no concrete evidence yet."
+
+
 def decide(plan: dict, answer: dict) -> tuple[dict, str, str]:
     """Validate the model's answer into item_id -> {status, note}, progress, next work.
     A 'completed' with no quoted evidence stays in progress."""
@@ -319,7 +322,7 @@ def decide(plan: dict, answer: dict) -> tuple[dict, str, str]:
         note = str(value.get("note") or "").strip()
         evidence = str(value.get("evidence") or "").strip()
         if status == "completed" and not evidence:
-            status, note = "in_progress", ("Probably done; no concrete evidence yet. " + note).strip()
+            status, note = "in_progress", (HELD_NOTE + " " + note).strip()
         if status == "completed":
             note = ("Evidence: " + evidence + (". " + note if note else ""))
         steps[known[short]] = {"status": status, "note": note}
@@ -423,13 +426,18 @@ def settle(progress: dict, plan_id: str, outcome: str, now: int, error: str = ""
 # ---- one update and one run ---------------------------------------------------
 
 
-def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=lambda: True) -> dict:
+def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=lambda: True,
+           receipt: dict | None = None) -> dict:
     """Read, ask, record one goal. ``ask(prompt)`` returns the model's JSON
     answer and its usage. ``current()`` is the run's authority, checked again
-    just before the write."""
+    just before the write. ``receipt`` is filled as the update goes, so a
+    failure part-way still leaves what was known (title, sources, model)."""
     from . import task_plans
+    receipt = receipt if receipt is not None else {}
     con = db.conn()
     row = con.execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
+    if row:
+        receipt["title"] = str(row["title"] or "")[:200]
     if not row or row["status"] not in ("active", "paused") or not _goal(row):
         return {"outcome": "skipped", "reason": "closed"}
     owner = con.execute("SELECT * FROM agents WHERE agent_id=?", (row["agent_id"],)).fetchone()
@@ -441,23 +449,45 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
     ids = list(names)
     seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event)
     text, message_refs = delta(con, ids, names, since_ms, max(now, seen.newest_ms))
+    refs = message_refs[-20:] + job_refs + ([f"goal_event:{seen.newest_event}"]
+                                           if seen.newest_event else [])
+    receipt["source_refs"] = refs[:40]
     if not text and not seen.triggers:
         return {"outcome": "skipped", "reason": "nothing new"}
     plan = task_plans.get(plan_id)
     answer, usage, model_id = ask(prompt_for(plan, sheet, text))
+    usage = usage or {}
+    receipt.update(model=str(model_id or ""), input_tokens=usage.get("input_tokens"),
+                   output_tokens=usage.get("output_tokens"))
     steps, progress_text, next_work = decide(plan, answer)
+    receipt.update(progress=progress_text[:500], next_work=next_work[:300])
     if not progress_text:
         raise ValueError("model answered without a checkpoint")
     if not current():
         return {"outcome": "cancelled", "reason": "configuration changed"}
-    refs = message_refs[-20:] + job_refs + ([f"goal_event:{seen.newest_event}"]
-                                           if seen.newest_event else [])
+    previous = ((plan.get("goal") or {}).get("updater") or {}).get("progress") or ""
     result = task_plans.updater_apply(
         plan_id, seen_revision=plan["revision"], steps=steps, progress=progress_text,
         next_work=next_work, model=model_id, source_refs=refs,
         through_ms=max(now, seen.newest_ms), through_event=seen.newest_event,
         janitor_agent_id=janitor_agent_id)
-    return {"outcome": "updated", "changed_steps": len(result["changed_steps"]),
+    changed = result["changed_steps"]
+    held = [item_id for item_id, value in steps.items()
+            if value["note"].startswith(HELD_NOTE) and item_id not in {c["item_id"] for c in changed}]
+    receipt["steps"] = ([{"item_id": c["item_id"], "from": c["from"], "to": c["status"],
+                          "note": c["note"][:300]} for c in changed]
+                        + [{"item_id": item_id, "from": None, "to": "held",
+                            "note": "Completed claimed without evidence; left in progress"}
+                           for item_id in held])
+    if changed:
+        receipt["outcome"] = "updated"
+    elif held:
+        receipt["outcome"] = "held_by_evidence_rule"
+    elif progress_text != previous:
+        receipt["outcome"] = "updated"
+    else:
+        receipt["outcome"] = "unchanged"
+    return {"outcome": "updated", "changed_steps": len(changed),
             "input_tokens": usage.get("input_tokens")}
 
 
@@ -471,15 +501,23 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
     outcomes: dict[str, tuple[str, str]] = {}
 
     def one(plan_id: str):
+        receipt: dict = {"model": str(config.get("model") or "")}
+        started = time.monotonic()
         try:
             result = update(plan_id, now=now, ask=lambda prompt: ask(prompt, plan_id),
-                            janitor_agent_id=config["agent_id"], current=current)
+                            janitor_agent_id=config["agent_id"], current=current, receipt=receipt)
+            if result["outcome"] != "updated":  # skipped or cancelled: say why
+                receipt.update(outcome=result["outcome"], reason=str(result.get("reason") or ""))
             return plan_id, result["outcome"], "", result
         except Exception as exc:  # noqa: BLE001 - one goal's failure is its own, logged
             log_exception("goalKeeperUpdateFail", exc, detail=plan_id)
             conflict = "plan changed" in str(exc)
-            return plan_id, "conflict" if conflict else "failed", f"{type(exc).__name__}: {exc}", {}
+            error = f"{type(exc).__name__}: {exc}"
+            receipt.update(outcome="refused_owner_changed" if conflict else "failed", error=error[:500])
+            return plan_id, "conflict" if conflict else "failed", error, {}
         finally:
+            receipt["duration_ms"] = int((time.monotonic() - started) * 1000)
+            _store_receipt(run, plan_id, receipt)
             # Each pool thread opened its own connection: give it back (review #311,
             # finding 5: 3 open handles before twelve passes, 25 after).
             db.close_local()
@@ -494,23 +532,42 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
     return {"outcomes": outcomes, "updated": updated, "failed": failed, "changed_steps": changed}
 
 
+def _store_receipt(run: dict, plan_id: str, receipt: dict) -> None:
+    """One durable receipt per goal per run, whatever happened (Peter, 14 Nov:
+    "a receipt of every action it does"). Ids and short notes only."""
+    from . import janitor_store, janitors
+    try:
+        with janitors._write() as c:
+            janitor_store.insert_goal_keeper_receipt(c, {
+                **receipt, "receipt_id": f"{run.get('run_id', '')}:{plan_id}",
+                "run_id": str(run.get("run_id") or ""), "plan_id": plan_id,
+                "outcome": receipt.get("outcome") or "failed", "created_at": db.now_ms()})
+    except Exception as exc:  # noqa: BLE001 - a lost receipt is logged, never silent
+        log_exception("goalKeeperReceiptFail", exc, detail=plan_id)
+
+
 def public_state(plan_id: str) -> dict:
     """``plan.updater``: the Goal keeper as this goal sees it. ``enabled`` is the
     Janitor's own switch; ``last_run_at``/``last_error`` its latest run, and
     ``goal_error``/``retry_at`` this goal's last failed update, if any."""
     from . import janitor_store, janitors
+    last = janitor_store.goal_keeper_receipts_for_plan(plan_id, limit=1)
+    last_receipt = ({k: last[0][k] for k in ("run_id", "outcome", "reason", "steps", "model",
+                                              "input_tokens", "output_tokens", "duration_ms",
+                                              "error", "created_at")} if last else None)
     agent_id = janitor_store.builtin_agent_id(ROLE)
     row = janitor_store.config_row(agent_id) if agent_id else None
     if not row:
         return {"enabled": False, "janitor_agent_id": None, "last_run_at": None,
-                "last_error": None, "goal_error": None, "retry_at": None}
+                "last_error": None, "goal_error": None, "retry_at": None, "last_receipt": last_receipt}
     goal = {}
     for attachment in janitor_store.active_attachment_rows(agent_id, trigger_id="agent-work-completed"):
         goal = (janitors.get_progress(attachment["attachment_id"]).get("goals") or {}).get(plan_id) or {}
         break
     return {"enabled": bool(row["enabled"]), "janitor_agent_id": agent_id,
             "last_run_at": row["last_run_at"], "last_error": row["last_error"] or None,
-            "goal_error": goal.get("last_error") or None, "retry_at": goal.get("retry_at")}
+            "goal_error": goal.get("last_error") or None, "retry_at": goal.get("retry_at"),
+            "last_receipt": last_receipt}
 
 
 def request_id(config: dict, plan_ids: list[str], now: int) -> str:

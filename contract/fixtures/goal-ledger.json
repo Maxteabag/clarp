@@ -999,6 +999,7 @@
       "goal_error": null,
       "janitor_agent_id": null,
       "last_error": null,
+      "last_receipt": null,
       "last_run_at": null,
       "retry_at": null
     }
