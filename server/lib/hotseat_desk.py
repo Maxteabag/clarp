@@ -219,6 +219,14 @@ def _rows_by_alias(rows) -> dict[str, dict]:
             if isinstance(row, dict) and isinstance(row.get("alias"), str)}
 
 
+def _roster_changed(provider: str, accounts: list[dict], rows: dict[str, dict]) -> bool:
+    """Compare account groups, not a TUI representative with a different alias."""
+    groups = [{str(acc.get("alias") or ""), *(a for a in (acc.get("aliases") or []) if isinstance(a, str))}
+              for acc in accounts if isinstance(acc, dict) and acc.get("provider") == provider]
+    represented = set().union(*groups) if groups else set()
+    return bool(set(rows) - represented) or any(not group.intersection(rows) for group in groups)
+
+
 def _clarp_block(list_data: dict | None) -> tuple[dict, list[dict]]:
     """(agents summary, stopped items) from the Clarp extension of `hotseat list --json`."""
     summary = _no_clarp_agents()
@@ -733,6 +741,9 @@ class HotseatDesk:
         # that moment knows the account in use less well than the switch does.
         self._switched: dict[str, tuple[int, str]] = {}
         self._last_read_ok = False
+        self._roster_refresh_pending = False
+        self._roster_revision = 0
+        self._roster_expected: dict[str, tuple[str, ...]] = {}
         self._resume_lock = threading.Lock()
         # Orders the read-change-write of the stored snapshot between a live
         # read, a switch marking the new account and the switcher's read.
@@ -799,8 +810,14 @@ class HotseatDesk:
                     return "ok" if self._inflight is None and self._last_read_ok else "failed"
         succeeded = False
         try:
+            with self._store_lock:
+                roster_revision = self._roster_revision
             snapshot = _read_live(cmd, runner, now)
             with self._store_lock:
+                # A scheduled read saw a newer roster while this read ran.
+                # Do not erase that knowledge with an older complete snapshot.
+                if self._roster_revision != roster_revision:
+                    snapshot["roster_stale"] = True
                 _carry_last_good(snapshot["accounts"], (_load_persisted() or {}).get("accounts"))
                 self._keep_switched_accounts(snapshot, now, janitor_hotseat.PROVIDERS)
                 settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
@@ -817,6 +834,27 @@ class HotseatDesk:
             done.set()
         return "ok" if succeeded else "failed"
 
+    def _request_roster_refresh(self) -> None:
+        """Rebuild through the existing admission, without blocking a Janitor lane."""
+        live_read_at = _int_ms((_load_persisted() or {}).get("live_read_at")) or 0
+        with self._lock:
+            if (self._roster_refresh_pending or self._inflight is not None
+                    or now_ms() < self._next_allowed(live_read_at)):
+                return
+            self._roster_refresh_pending = True
+        def rebuild():
+            try:
+                self.refresh()
+            finally:
+                with self._lock:
+                    self._roster_refresh_pending = False
+        try:
+            threading.Thread(target=rebuild, name="hotseat-roster-refresh", daemon=True).start()
+        except Exception:
+            with self._lock:
+                self._roster_refresh_pending = False
+            raise
+
     def absorb_switcher_read(self, provider: str, payload, *, started_at: int | None = None) -> bool:
         """The Hotseat switcher just read `provider` on its own schedule
         (`hotseat list --json` for Claude, `hotseat codex --json` for Codex).
@@ -826,8 +864,10 @@ class HotseatDesk:
         agents' accounts. So a desk nobody refreshes stays as fresh as the
         switcher's cadence, at no extra read of the providers.
 
-        It never adds or removes an account and creates no desk where no live
-        read has stored one: that takes `tui --snapshot`. Only the Claude read,
+        Group membership and action capabilities still come from `tui --snapshot`.
+        A complete scheduled inventory that differs requests one admitted full
+        refresh in the background; it never invents account capabilities and
+        creates no desk where no live read has stored one. Only the Claude read,
         which carries the whole list, moves the desk's `observed_at`; rows the
         read did not cover keep their own `checked_at` and age by it.
         `started_at` is when the read began: a switch that ended since then
@@ -848,12 +888,26 @@ class HotseatDesk:
             return False
         if not server_identity.hotseat_desk_enabled():
             return False
-        rows = _rows_by_alias(payload.get("accounts") if isinstance(payload.get("accounts"), list) else [])
+        inventory = payload.get("accounts")
+        rows = _rows_by_alias(inventory if isinstance(inventory, list) else [])
+        complete_inventory = (isinstance(inventory, list) and not payload.get("error")
+                              and not payload.get("partial") and not payload.get("cached")
+                              and len(rows) == len(inventory)
+                              and all(alias.strip() for alias in rows))
         now = now_ms()
+        needs_roster_refresh = False
         with self._store_lock:
             snapshot = _load_persisted()
             if snapshot is None:
                 return False
+            if complete_inventory:
+                expected = tuple(sorted(rows))
+                if _roster_changed(provider, snapshot.get("accounts") or [], rows):
+                    snapshot["roster_stale"] = True
+                    if self._roster_expected.get(provider) != expected:
+                        self._roster_revision += 1
+                self._roster_expected[provider] = expected
+            needs_roster_refresh = bool(snapshot.get("roster_stale"))
             extensions = payload.get("extensions")
             has_clarp = (reading.whole_list and isinstance(extensions, dict)
                          and isinstance(extensions.get("clarp"), dict))
@@ -886,6 +940,8 @@ class HotseatDesk:
                     snapshot["sources"]["list"] = "ok"  # this read is the one `list` stands for
                 settings_store.set_text(ERROR_KEY, "")
             settings_store.set_text(SNAPSHOT_KEY, json.dumps(snapshot, separators=(",", ":")))
+        if needs_roster_refresh:
+            self._request_roster_refresh()
         return True
 
     def mark_switched(self, provider: str, alias: str) -> None:
@@ -930,7 +986,8 @@ class HotseatDesk:
         partial = sources is None or any(sources.get(key) != "ok" for key in ("tui", "list", "work"))
         if persisted is not None:
             observed_at = _int_ms(persisted.get("observed_at"))
-            stale = observed_at is None or (now - observed_at > STALE_MS) or bool(last_error)
+            stale = (observed_at is None or (now - observed_at > STALE_MS)
+                     or bool(last_error) or bool(persisted.get("roster_stale")))
             accounts = _serve_accounts(persisted.get("accounts") or [], served_at=now, snapshot_stale=stale)
             sessions = int(persisted.get("sessions") or 0)
             errors = list(persisted.get("errors") or [])
