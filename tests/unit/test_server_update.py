@@ -1,6 +1,15 @@
 import threading
 
+import pytest
+
 from lib import agents, background_jobs, server_update, service_manager
+
+
+@pytest.fixture(autouse=True)
+def _installed_host(monkeypatch):
+    """These tests are the installed Host's update. A Host that is not the
+    installed one is refused: tests/unit/test_service_action_guard.py."""
+    monkeypatch.setattr(service_manager, "host_refusal", lambda _action, **_options: None)
 
 
 def _reset_cache():

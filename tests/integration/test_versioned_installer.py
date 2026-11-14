@@ -10,6 +10,12 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
+# service_manager asks which definitions the manager loaded before it acts
+# (issue 322). These fakes are a manager that knows no Clarp unit yet.
+SHOW_NOTHING_LOADED = (
+    '  *" show "*) printf \'Id=clarp.service\\nLoadState=not-found\\nFragmentPath=\\n\\n'
+    'Id=clarp-runtime.service\\nLoadState=not-found\\nFragmentPath=\\n\'; exit 0 ;;\n')
+FAKE_SYSTEMCTL = '#!/bin/sh\ncase " $* " in\n' + SHOW_NOTHING_LOADED + 'esac\nexit 0\n'
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -33,7 +39,7 @@ def test_installer_leaves_pre_clarp_paths_untouched(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     systemctl = fake_bin / "systemctl"
-    systemctl.write_text("#!/bin/sh\nexit 0\n")
+    systemctl.write_text(FAKE_SYSTEMCTL)
     systemctl.chmod(0o755)
 
     legacy_paths = {
@@ -79,7 +85,8 @@ def test_installer_creates_versioned_release_and_compatibility_links(tmp_path):
     systemctl = fake_bin / "systemctl"
     systemctl.write_text(
         '#!/bin/sh\n'
-        'case "$*" in\n'
+        'case " $* " in\n'
+        + SHOW_NOTHING_LOADED +
         '  *"restart clarp.service"*) '
         '[ "${CLARP_TEST_FAIL_RESTART:-0}" = 1 ] && exit 9 ;;\n'
         'esac\n'
@@ -227,7 +234,7 @@ def test_unit_execstart_points_at_the_installed_share_dir(tmp_path):
     fake_bin.mkdir()
     for name in ("systemctl", "jq", "claude", "clarp", "codex"):
         stub = fake_bin / name
-        stub.write_text("#!/bin/sh\nexit 0\n")
+        stub.write_text(FAKE_SYSTEMCTL if name == "systemctl" else "#!/bin/sh\nexit 0\n")
         stub.chmod(0o755)
     env = dict(os.environ)
     env.update({
