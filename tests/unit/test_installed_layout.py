@@ -280,9 +280,16 @@ def _the_installers_restore(tmp_path, *, upgrade: str):
         _the_new_host_upgrades(database)
     # The only step of the restore that touches the service manager: it stops
     # the Host that failed and starts the one put back.
+    # It acts only while a definition says whose services these are (issue
+    # 322): after a failed FIRST installation the new unit is still there when
+    # the services are stopped, and removed afterwards.
+    (tmp_path / "clarp.service").write_text("the unit the failed installation wrote")
     (new / "lib/service_manager.py").write_text(
+        "import os\n"
         "def restore_after_failed_install(**kwargs):\n"
         f"    open({str(tmp_path / 'units-restored')!r}, 'w').write(repr(sorted(kwargs)))\n"
+        f"    open({str(tmp_path / 'unit-at-restore')!r}, 'w').write("
+        f"str(os.path.isfile({str(tmp_path / 'clarp.service')!r})))\n"
         + (_UPGRADES.format(database=str(database), version=CODE + 1)
            if upgrade == "as-it-is-stopped" else ""))
     script = (ROOT / "install.sh").read_text()
@@ -309,6 +316,8 @@ rollback_failed_activation
     assert ran.returncode == 7 and "restoring previous release" in ran.stderr
     assert (share / "current").resolve() == old.resolve()
     assert (tmp_path / "units-restored").exists()                      # the services were restarted
+    assert (tmp_path / "unit-at-restore").read_text() == "True"
+    assert not (tmp_path / "clarp.service").exists()
     assert json.loads((share / schema_guard.ROLLBACK_MARKER).read_text()) == {
         "code": CODE, "database": CODE + 1}
     assert "Older code does not know the tables and columns" in ran.stderr
@@ -438,3 +447,18 @@ def test_the_command_a_refusing_host_names_gets_it_back(tmp_path, monkeypatch, c
     schema_guard.check_source(old, database, share=share, allow=True)
     capsys.readouterr()
     _the_restored_host_starts(home, share, database)
+
+
+def test_the_installers_restore_puts_a_previous_unit_back_before_it_restarts():
+    """The other branch of the same block: an upgrade restores the previous
+    definitions first, so the services restart from them."""
+    script = (ROOT / "install.sh").read_text()
+    block = script[script.index("rollback_failed_activation() {"):
+                   script.index("trap rollback_failed_activation EXIT")]
+    upgrade, first = block[block.index('if [[ $UNIT_HAD_PREVIOUS -eq 1 && -f "$UNIT_BACKUP" ]]; then'):].split(
+        "        else\n", 1)
+    assert upgrade.index('cp "$UNIT_BACKUP" "$SERVICE_FILE"') < upgrade.index(
+        "restore_runtime_definition") < upgrade.index("restore_services")
+    first = first[:first.index("        fi\n")]
+    assert first.index("restore_services") < first.index('rm -f "$SERVICE_FILE"') < first.index(
+        "restore_runtime_definition")

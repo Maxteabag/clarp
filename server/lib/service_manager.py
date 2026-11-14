@@ -21,7 +21,27 @@ from . import xdg
 
 LAUNCHD_LABEL = "com.maxteabag.clarp.server"
 RUNTIME_LAUNCHD_LABEL = "com.maxteabag.clarp.runtime"
+SERVER_UNIT = "clarp.service"
+RUNTIME_UNIT = "clarp-runtime.service"
+_LAUNCHD_LABELS = ((SERVER_UNIT, LAUNCHD_LABEL), (RUNTIME_UNIT, RUNTIME_LAUNCHD_LABEL))
 Runner = Callable[..., subprocess.CompletedProcess]
+# Why a unit action was refused (ServiceActionRefused.reason); a closed set.
+REFUSAL_REASONS = (
+    "not_in_unit",           # a Host that does not run inside the unit it would act on
+    "no_definition",         # no readable service definition where this process looks
+    "foreign_directories",   # the definition names another share directory or database
+    "foreign_definition",    # the service manager loaded the unit from another file
+    "manager_unavailable",   # the service manager could not be asked
+    "disposable_host",       # tests/qa/host.py: a QA Host never acts on a service
+)
+
+
+class ServiceActionRefused(RuntimeError):
+    """This process has no standing to act on the Clarp units; nothing was run."""
+
+    def __init__(self, action: str, reason: str, detail: str):
+        super().__init__(f"refused to {action} the Clarp service: {detail}")
+        self.action, self.reason, self.detail = action, reason, detail
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _RESERVED_ENVIRONMENT = frozenset({
     "HOME", "PATH", "PYTHONUNBUFFERED", "CLARP_SHARE_DIR",
@@ -106,21 +126,29 @@ def _systemd_environment_lines(environment: dict[str, str]) -> str:
         for name, value in sorted(environment.items()))
 
 
-def _previous_ssh_auth_sock(path: Path) -> str:
+def _definition_environment(path: Path) -> dict[str, str] | None:
+    """The environment a service definition gives its process; None when the
+    file is missing or unreadable."""
     try:
         if path.suffix == ".plist":
             payload = plistlib.loads(path.read_bytes())
-            environment = payload.get("EnvironmentVariables") or {}
-            return str(environment.get("SSH_AUTH_SOCK") or "").strip()
+            return {str(name): str(value) for name, value in (
+                payload.get("EnvironmentVariables") or {}).items()}
+        environment: dict[str, str] = {}
         for line in path.read_text().splitlines():
             if not line.startswith("Environment="):
                 continue
             for assignment in shlex.split(line.removeprefix("Environment=")):
-                if assignment.startswith("SSH_AUTH_SOCK="):
-                    return assignment.split("=", 1)[1].replace("%%", "%").strip()
-    except (OSError, ValueError, plistlib.InvalidFileException):
-        pass
-    return ""
+                name, separator, value = assignment.partition("=")
+                if separator:
+                    environment[name] = value.replace("%%", "%")
+        return environment
+    except (OSError, ValueError, AttributeError, plistlib.InvalidFileException):
+        return None
+
+
+def _previous_ssh_auth_sock(path: Path) -> str:
+    return str((_definition_environment(path) or {}).get("SSH_AUTH_SOCK") or "").strip()
 
 
 def render(
@@ -241,6 +269,180 @@ def _run(*args: str, check: bool = True, runner: Runner = subprocess.run):
     return runner(args, check=check, text=True, capture_output=True)
 
 
+# ---- who may act on the units ----------------------------------------------
+#
+# Every action below names its unit by a fixed name (clarp.service,
+# clarp-runtime.service), and the service manager is shared by every process
+# of the user. A disposable Host, a test installation or an admin command run
+# with another environment would therefore stop or restart the LIVE Host
+# (issue 322). Two callers have standing, and each proves it by facts it
+# cannot set by accident:
+#
+#   a Host      runs inside the unit it acts on (its kernel cgroup on Linux,
+#               launchd's XPC_SERVICE_NAME on macOS), and the installed
+#               definition of that unit names its share directory and database.
+#   the admin   (install.sh, clarp-admin) says so in code (admin=True, or one
+#   path        of the install/uninstall functions), a definition exists where
+#               it looks and every one names its share directory, and the
+#               service manager's loaded unit comes from the very file this
+#               process manages, or is not loaded at all (a first installation).
+#
+# A refusal is logged and raised before any service-manager command runs. The
+# directory test comes first and needs no command, so a process whose
+# directories no definition names never reaches systemctl or launchctl, not
+# even to ask. Only the admin path with matching definitions of its own asks
+# the manager one read-only question (show / print).
+
+def refuse(action: str, reason: str, detail: str) -> ServiceActionRefused:
+    """Log one refusal and return it for the caller to raise or to answer with."""
+    refusal = ServiceActionRefused(action, reason, detail)
+    line = f"action={action} reason={reason} {detail}"
+    try:
+        from .log import log
+        log("serviceActionRefused", line)
+    except Exception as exc:  # noqa: BLE001 - the refusal stands without its log sink
+        print(f"serviceActionRefused {line} (log failed: {type(exc).__name__})",
+              file=sys.stderr, flush=True)
+    return refusal
+
+
+def _same_path(left: str | Path, right: str | Path) -> bool:
+    return os.path.realpath(str(left)) == os.path.realpath(str(right))
+
+
+def _own_cgroup() -> str:
+    """This process's systemd cgroup path from the kernel, "" when unknown."""
+    try:
+        text = Path("/proc/self/cgroup").read_text()
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        hierarchy, _, rest = line.partition(":")
+        controllers, _, path = rest.partition(":")
+        if (hierarchy == "0" and not controllers) or controllers == "name=systemd":
+            return path.strip()
+    return ""
+
+
+def runs_in_unit(unit: str) -> bool:
+    """Whether the service manager started this process as part of ``unit``."""
+    if platform_kind() == "macos":
+        return os.environ.get("XPC_SERVICE_NAME", "") == dict(_LAUNCHD_LABELS)[unit]
+    parts = _own_cgroup().split("/")
+    manager = f"user@{os.getuid()}.service"
+    return manager in parts and unit in parts[parts.index(manager) + 1:]
+
+
+def _directories_refusal(
+    action: str, definition: Path, *, host: bool,
+) -> ServiceActionRefused | None:
+    """The installed definition must name the directories this process works on."""
+    environment = _definition_environment(definition)
+    if environment is None:
+        return refuse(action, "no_definition",
+                      f"no readable service definition at {definition}")
+    named_share = environment.get("CLARP_SHARE_DIR", "")
+    share = os.environ.get("CLARP_SHARE_DIR") or str(xdg.data_dir())
+    if not named_share or not _same_path(share, named_share):
+        return refuse(
+            action, "foreign_directories",
+            f"{definition} serves the share directory {named_share or '(none)'}, "
+            f"this process works on {share}")
+    # lib.db's rule for a Host; an admin command opens no database, so only one
+    # it was explicitly given can be foreign.
+    database = os.environ.get("CLAUDE_PWA_DB") or (
+        str(xdg.data_dir() / "state.sqlite") if host else "")
+    named_database = environment.get("CLAUDE_PWA_DB") or str(
+        Path(named_share) / "state.sqlite")
+    if database and not _same_path(database, named_database):
+        return refuse(
+            action, "foreign_directories",
+            f"{definition} serves the database {named_database}, "
+            f"this process works on {database}")
+    return None
+
+
+def host_refusal(action: str, *, unit: str = SERVER_UNIT) -> ServiceActionRefused | None:
+    """Why this Host may not take ``action`` on its own unit, or None when it may.
+
+    Reads this process's own facts and the installed definition only: no
+    service-manager command runs, so a route can ask before it answers."""
+    if not runs_in_unit(unit):
+        return refuse(action, "not_in_unit",
+                      f"this process does not run inside {unit}")
+    definition = runtime_definition_path() if unit == RUNTIME_UNIT else definition_path()
+    return _directories_refusal(action, definition, host=True)
+
+
+def _loaded_definitions(runner: Runner) -> dict[str, str] | None:
+    """Unit -> file the service manager loaded it from ("" when not loaded).
+    None when the manager could not be asked."""
+    loaded: dict[str, str] = {}
+    try:
+        if platform_kind() == "macos":
+            for unit, label in _LAUNCHD_LABELS:
+                result = _run("launchctl", "print", f"{launchd_domain()}/{label}",
+                              check=False, runner=runner)
+                # `print` fails for a job that is not loaded. Its text is not a
+                # stable format: a loaded job that names no path counts as not
+                # loaded rather than refusing every macOS update.
+                paths = [] if result.returncode != 0 else [
+                    line.split("=", 1)[1].strip()
+                    for line in (result.stdout or "").splitlines()
+                    if line.strip().startswith("path = ")]
+                loaded[unit] = paths[0] if paths else ""
+            return loaded
+        result = _run("systemctl", "--user", "show", "-p", "Id", "-p", "LoadState",
+                      "-p", "FragmentPath", SERVER_UNIT, RUNTIME_UNIT,
+                      check=False, runner=runner)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    for block in (result.stdout or "").split("\n\n"):
+        fields = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+        unit, state = fields.get("Id", ""), fields.get("LoadState", "")
+        if not unit or not state:
+            continue
+        fragment = fields.get("FragmentPath", "")
+        # A unit the manager knows without a file of ours (transient, masked)
+        # is someone else's: report a path no definition of ours can equal.
+        loaded[unit] = fragment or ("" if state == "not-found" else f"({state})")
+    return loaded if {SERVER_UNIT, RUNTIME_UNIT} <= loaded.keys() else None
+
+
+def _admin_refusal(action: str, runner: Runner) -> ServiceActionRefused | None:
+    """Why the admin path may not take ``action``, or None when it may."""
+    definitions = ((SERVER_UNIT, definition_path()), (RUNTIME_UNIT, runtime_definition_path()))
+    present = [definition for _, definition in definitions if definition.is_file()]
+    if not present:
+        # Nothing says whose services these are. A caller that cleans up after
+        # itself acts while its definitions still exist.
+        return refuse(action, "no_definition",
+                      f"no service definition at {definitions[0][1]}")
+    for definition in present:
+        refusal = _directories_refusal(action, definition, host=False)
+        if refusal is not None:
+            return refusal
+    loaded = _loaded_definitions(runner)
+    if loaded is None:
+        return refuse(action, "manager_unavailable",
+                      "the service manager did not say which definitions it loaded")
+    for unit, definition in definitions:
+        if loaded[unit] and not _same_path(loaded[unit], definition):
+            return refuse(
+                action, "foreign_definition",
+                f"the service manager runs {unit} from {loaded[unit]}, "
+                f"this process manages {definition}")
+    return None
+
+
+def _require_admin(action: str, runner: Runner) -> None:
+    refusal = _admin_refusal(action, runner)
+    if refusal is not None:
+        raise refusal
+
+
 def _legacy_busy_sessions() -> list[str]:
     """Busy rows owned by a pre-runtime monolith during the one-time split."""
     try:
@@ -263,6 +465,7 @@ def _require_legacy_idle() -> None:
 
 
 def install_and_restart(*, runner: Runner = subprocess.run) -> None:
+    _require_admin("install", runner)
     path = definition_path()
     runtime_path = runtime_definition_path()
     runtime_supported = runtime_path.is_file()
@@ -312,7 +515,17 @@ def install_and_restart(*, runner: Runner = subprocess.run) -> None:
     _run("systemctl", "--user", "restart", "clarp.service", runner=runner)
 
 
-def restart(*, runner: Runner = subprocess.run, check: bool = True) -> None:
+def restart(
+    *, runner: Runner = subprocess.run, check: bool = True, admin: bool = False,
+) -> None:
+    """Restart the Host. A Host restarts only the unit it runs in; clarp-admin
+    passes ``admin=True``. Raises ServiceActionRefused, whatever ``check`` is."""
+    if admin:
+        _require_admin("restart", runner)
+    else:
+        refusal = host_refusal("restart")
+        if refusal is not None:
+            raise refusal
     if platform_kind() == "macos":
         domain = launchd_domain()
         result = _run(
@@ -331,7 +544,12 @@ def restore_after_failed_install(
     *, had_previous: bool, had_runtime_previous: bool = True,
     runner: Runner = subprocess.run,
 ) -> None:
-    """Make the restored service definition authoritative after rollback."""
+    """Make the restored service definition authoritative after rollback.
+
+    After a failed FIRST installation (no previous definition) call this while
+    the new definitions still exist, then delete them: with no definition left
+    nothing says these services are the caller's, and the call is refused."""
+    _require_admin("restore", runner)
     if platform_kind() == "macos":
         domain = launchd_domain()
         _run("launchctl", "bootout", f"{domain}/{LAUNCHD_LABEL}",
@@ -362,6 +580,7 @@ def restore_after_failed_install(
 
 
 def stop_and_disable(*, runner: Runner = subprocess.run) -> None:
+    _require_admin("stop", runner)
     if platform_kind() == "macos":
         _run("launchctl", "bootout", launchd_domain(), str(definition_path()),
              check=False, runner=runner)
@@ -375,8 +594,17 @@ def stop_and_disable(*, runner: Runner = subprocess.run) -> None:
     _run("systemctl", "--user", "daemon-reload", check=False, runner=runner)
 
 
-def reload_definitions(*, runner: Runner = subprocess.run) -> None:
-    """Forget a service definition after its file has been removed."""
+def remove_definitions(*, runner: Runner = subprocess.run) -> None:
+    """Delete both service definitions and make the service manager forget them.
+
+    Standing is decided while the definitions still exist; with none left
+    there is nothing to remove and nothing runs."""
+    paths = (definition_path(), runtime_definition_path())
+    if not any(path.is_file() for path in paths):
+        return
+    _require_admin("remove", runner)
+    for path in paths:
+        path.unlink(missing_ok=True)
     if platform_kind() == "linux":
         _run("systemctl", "--user", "daemon-reload", check=False, runner=runner)
 

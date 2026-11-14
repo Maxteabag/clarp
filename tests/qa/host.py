@@ -61,6 +61,23 @@ def recording_stt(root, stub):
     return RecordingSTT(text=stub.text, ends_terminal=stub.ends_terminal)
 
 
+def refuse_service_actions(service_manager):
+    """A QA Host shares the developer's service manager with the live Host, and
+    the units have fixed names: it never acts on one (Clarp issue 322). The
+    production guard would refuse it too; this does not depend on that guard.
+    Every service-manager command is refused and logged, so nothing here can
+    reach systemctl, launchctl or systemd-run, and a route that asks whether
+    this Host may restart itself is told no."""
+    def refuse(action):
+        return service_manager.refuse(
+            action, 'disposable_host', 'a QA Host never acts on a service')
+
+    def refused_command(*command, **_options):
+        raise refuse(str(command[0]) if command else 'command')
+    service_manager._run = refused_command
+    service_manager.host_refusal = lambda action, **_options: refuse(action)
+
+
 def main():
     faulthandler.register(signal.SIGUSR1)
     parser = argparse.ArgumentParser()
@@ -107,7 +124,8 @@ def main():
             raise SystemExit('--no-instance-generation needs a fresh disposable root')
     elif not host_generation.ensure_instance_generation():
         raise SystemExit('QA host could not provision its instance generation')
-    from lib import agents, backends, codex_transcript, db, telemetry
+    from lib import agents, backends, codex_transcript, db, service_manager, telemetry
+    refuse_service_actions(service_manager)
     # Storage location is injected; discovery and parsing remain production code.
     codex_transcript._codex_home = lambda: root / 'provider'
     for path in (db.DB_PATH, telemetry.TELEMETRY_PATH):

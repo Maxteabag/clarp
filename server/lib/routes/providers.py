@@ -10,6 +10,14 @@ from lib import backends
 from lib.log import log_exception
 
 
+def _restart_own_service():
+    from lib import service_manager
+    try:
+        service_manager.restart(check=False)
+    except Exception as exc:  # noqa: BLE001 - a timer thread has no caller to tell
+        log_exception("ttsProviderRestartFail", exc)
+
+
 class ProviderRoutes:
     def _handle_application_activity(self):
         if not getattr(self, "_request_auth_validated", False):
@@ -266,12 +274,19 @@ class ProviderRoutes:
         if restart_required:
             set_toml_value(config_path, "audio", "delivery", "chunked-file")
         config_module.reset_cache()
-        payload = status() | {"restart_scheduled": restart_required}
-        self._json_ok(payload)
+        # Only the installed Host restarts clarp.service: any other Host (a QA
+        # or development one) would restart the live one. The choice is saved
+        # either way and the answer says which it was (issue 322).
+        refusal = None
         if restart_required:
             from lib import service_manager
-            timer = threading.Timer(
-                0.5, lambda: service_manager.restart(check=False))
+            refusal = service_manager.host_refusal("restart")
+        payload = status() | {"restart_scheduled": restart_required and refusal is None}
+        if refusal is not None:
+            payload["restart_refusal"] = {"reason": refusal.reason, "message": refusal.detail}
+        self._json_ok(payload)
+        if restart_required and refusal is None:
+            timer = threading.Timer(0.5, _restart_own_service)
             timer.daemon = True
             timer.start()
 

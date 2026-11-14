@@ -923,7 +923,10 @@ else:
         "default_voice": "voice-one",
     }))
     monkeypatch.setattr(custom_tts_adapters, "ROOT", root)
-    monkeypatch.setattr(service_manager, "restart", lambda **_kwargs: None)
+    restarts = []
+    monkeypatch.setattr(service_manager, "restart", lambda **kwargs: restarts.append(kwargs))
+    # This Host is the installed one: it may restart its own unit.
+    monkeypatch.setattr(service_manager, "host_refusal", lambda _action, **_options: None)
     class ImmediateTimer:
         daemon = True
 
@@ -960,7 +963,82 @@ else:
         "provider": "custom.integration", "fallback": "none", "voice": "",
     })
     assert status == 200
-    assert json.loads(body)["provider"] == "custom.integration"
+    payload = json.loads(body)
+    assert payload["provider"] == "custom.integration"
+    assert payload["restart_scheduled"] is True
+    assert "restart_refusal" not in payload
+    assert restarts == [{"check": False}]           # the Host's own restart, not the admin path
+
+
+@pytest.mark.parametrize("situation", ["outside-the-unit", "foreign-directories"])
+def test_a_host_that_is_not_the_installed_one_saves_tts_but_schedules_no_restart(
+        running_server, tmp_path, monkeypatch, situation):
+    """Clarp issue 322: a QA or development Host restarted the LIVE clarp.service.
+    The choice is saved, the answer says no restart was scheduled and why, and
+    no service-manager command runs."""
+    from lib import service_manager
+    home = tmp_path / "installed-home"
+    share = home / ".local/share/clarp"
+    monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    unit = service_manager.definition_path()
+    unit.parent.mkdir(parents=True)
+    unit.write_text(f'Environment="CLARP_SHARE_DIR={share}"\n'
+                    f'Environment="CLAUDE_PWA_DB={share / "state.sqlite"}"\n')
+    slice_ = f"/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/app.slice/"
+    if situation == "outside-the-unit":
+        monkeypatch.setenv("CLARP_SHARE_DIR", str(share))
+        monkeypatch.setenv("CLAUDE_PWA_DB", str(share / "state.sqlite"))
+        monkeypatch.setattr(service_manager, "_own_cgroup",
+                            lambda: slice_ + "clarp-runtime.service")
+        reason = "not_in_unit"
+    else:
+        # Inside the live unit's cgroup, on its own state: what a child of the
+        # live Host with a disposable state directory would be.
+        monkeypatch.setattr(service_manager, "_own_cgroup", lambda: slice_ + "clarp.service")
+        reason = "foreign_directories"
+    commands, timers = [], []
+    monkeypatch.setattr(service_manager, "_run",
+                        lambda *command, **_options: commands.append(command))
+    real_timer = threading.Timer
+
+    def timer(interval, function, *args, **kwargs):
+        if getattr(function, "__name__", "") == "_restart_own_service":
+            timers.append(function)
+        return real_timer(interval, function, *args, **kwargs)
+    monkeypatch.setattr("server.threading.Timer", timer)
+    base, _ctx, _srv = running_server
+
+    status, body = _post(base + "/tts/providers", {
+        "provider": "none", "fallback": "none", "voice": ""})
+
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["provider"] == "none"
+    assert payload["restart_scheduled"] is False
+    assert payload["restart_refusal"]["reason"] == reason
+    assert payload["restart_refusal"]["message"]
+    saved = __import__("tomllib").loads(
+        pathlib.Path(os.environ["CLAUDE_PWA_CONFIG"]).read_text())
+    assert saved["tts"]["provider"] == "none"
+    assert timers == [] and commands == []
+
+
+def test_a_restart_that_is_refused_after_the_answer_is_logged_not_lost(monkeypatch):
+    """The timer thread has no caller: its failure reaches the log."""
+    from lib import service_manager
+    from lib.routes import providers
+    logged = []
+    monkeypatch.setattr(providers, "log_exception",
+                        lambda event, exc, *rest: logged.append((event, type(exc).__name__)))
+
+    def refused(**_kwargs):
+        raise service_manager.ServiceActionRefused("restart", "not_in_unit", "moved")
+    monkeypatch.setattr(service_manager, "restart", refused)
+
+    providers._restart_own_service()
+
+    assert logged == [("ttsProviderRestartFail", "ServiceActionRefused")]
 
 
 def test_prompt_history_requires_configured_authentication(running_server):
