@@ -112,7 +112,11 @@ size:
   trace on a recorded row ended;
 - a digest of the latest user row and one of the Oracle rows.
 - a digest of each live row of the session by itself (there are few), for
-  `carry_live_rows`.
+  `carry_live_rows`;
+- for `carry_settled_turns`: the highest `settled_at` among the turn rows,
+  the boundary the record was published with, and one digest of the
+  transcript rows from that boundary on without the columns a turn's
+  settling stamps.
 
 The digests are taken in a fixed order that SQLite has no say in: the
 columns by name, the rows by message id. At a tail the rows are read again
@@ -253,19 +257,62 @@ A fourth rule is off unless switched on:
   it was the only old row with its trace, any change among the turn rows is
   a full import.
 
+A fifth is off unless switched on, and needs `carry_later_turns`:
+
+- `carry_settled_turns`: a turn that was running when the frontier was
+  published has settled. A settle changes two things. The turn row:
+  `settled_at` and `outcome` are set, once. And message rows: the turn's
+  summary is stamped on its last row and an interrupted turn's unfinished
+  tools read `interrupted` (`message_writes.stamp_turn`), under new
+  revisions. Either was a full import, so every turn cost one at its end.
+
+  What a turn before the boundary reads of a turn row is which turn was
+  running at its time: the latest that began up to two seconds after it, if
+  the time is within that turn's reach. The reach is six hours from the
+  start of an unsettled turn and two minutes from the end of a settled one,
+  so a settle moves it, and that is all it changes for an old turn. Whether
+  a trace is a turn at all does not change. The outcome is read when a row
+  is written.
+
+  So the turn row is let through when it is a settle and nothing else: its
+  `settled_at` is above every `settled_at` the record was published with,
+  and put back to unsettled it is the recorded row, which the record's
+  digests of the turn rows then prove. And when its reach still covers the
+  old turns: the last of them lies within both reaches
+  (`turn_settled_out_of_reach` otherwise), as it does for any turn that
+  began after them.
+
+  The stamped rows are let through where a tail writes them again anyway:
+  transcript rows of this file from the boundary on, written since the
+  record's base, that differ in nothing but the stamped columns
+  (`tools_json`, `display_cells_json`, `turn_json`, `revision`,
+  `updated_at`). Their other columns are proven by a digest of their own: an
+  old reply whose slot moved looks at later rows of its trace by id, slot
+  and words. A full import's record puts its base just below those rows, so
+  that a turn whose last row that import wrote can still settle as a tail.
+
+  What stays a full import: an interrupted turn with a transcript row
+  before the boundary (its unfinished tools there are written by a full
+  import only); a stamp on a row before the boundary, on the turn's `/send`
+  row (a turn that never replied) or on a live row without
+  `carry_live_rows`; and any other change to a turn row.
+
 What stays a full import on purpose: any other change to a row of this
-session (a finalized row, a turn's rows re-stamped when it settles, and
+session (a finalized row, a turn's rows re-stamped when it settles unless
+`carry_settled_turns` lets them through, and
 without `carry_live_rows` a streamed reply's live row), a new `/send` row
 with words said before (every heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
 way, as fixed words: `transcriptCarryInputsChanged what=row_live,turn_of_old_row`
 (`row_send`, `row_live`, `row_final`, `row_transcript`, `row_other`,
 `row_other_session`, `send_said_before`, `live_row_of_old_reply`, `turn_rows`,
+`turn_settled_out_of_reach`,
 `turn_before_boundary`, `turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
 frontier the process holds and to one taken from the store alike, so also
 after a Host start and after the cache has dropped the frontier: both are
 the same record.
 
-`tests/readmodel/test_rm_n14_carry.py` and `test_rm_n14_live_rows.py` run
+`tests/readmodel/test_rm_n14_carry.py`, `test_rm_n14_live_rows.py` and
+`test_rm_n14_settled.py` run
 every rule in pairs: the change it lets through is a tail and equals the full
 replay; its nearest harmful twin is a full import and equals it too, and
 imported as a tail leaves different rows.

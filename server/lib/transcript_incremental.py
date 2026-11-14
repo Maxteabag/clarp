@@ -538,7 +538,7 @@ def inputs_record(raw_inputs, checkpoint: Checkpoint, session_rows: bool,
     return message_carry.record(
         raw_inputs, carry=checkpoint.store_carry, source_file=checkpoint.source_file,
         backend_session_id=checkpoint.backend_session_id, session_rows=session_rows,
-        witness=witness)
+        witness=witness, boundary_seq=checkpoint.boundary_seq)
 
 
 def write_frontier(database, checkpoint: Checkpoint, file_hash: str, recorded: dict) -> None:
@@ -686,6 +686,10 @@ _DEFAULTS = {
     # is new, rewritten or gone, unless a reply before the boundary carries
     # its trace.
     "carry_live_rows": False,
+    # Off unless switched on (and only with carry_later_turns): a turn that
+    # was running when the frontier was published has settled, and the rows
+    # from the boundary on carry its stamps (lib.message_carry.SETTLED_TURNS).
+    "carry_settled_turns": False,
     # Off unless switched on: a tail gives the writer away only once it has
     # written something (message_writes._TailWriter). False: its batch budget
     # runs from BEGIN IMMEDIATE, so a tail on a long conversation yields
