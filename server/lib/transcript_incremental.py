@@ -676,6 +676,11 @@ _DEFAULTS = {
     # bytes read once and compared with the stored digest. False: it is
     # imported in full, as a grown file whose audit is due always is.
     "audit_unchanged_by_digest": True,
+    # Off unless switched on: a GROWN file whose audit is due has its
+    # imported bytes read once and compared with the stored digest, and is
+    # then imported as a tail, which starts the audit's clock again. False:
+    # it is imported in full, as before.
+    "audit_grown_by_digest": False,
     # What a tail may find changed among the database rows its frontier was
     # published with (lib.message_carry gives each rule's reason). False: a
     # change of that kind is a full import, as before the rule existed.
@@ -1434,6 +1439,20 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                 return refuse("prefix_content_changed")
             state = replace(state, hasher=hasher)
             audited = True
+    audit_by_digest = False
+    if reason == "audit" and not unchanged and bool(conf.get("audit_grown_by_digest")):
+        # A grown file whose audit is due. What the audit is for is the bytes
+        # a tail does not read again: are they still what was imported? That
+        # is one read of the file and a comparison; replaying every turn to
+        # find it out cost a parse of the whole file and every row of the
+        # session. The tail's other checks first (a tail too large, a
+        # rewritten head or sample, a reference outside the tail are still
+        # full imports); then every imported byte is read below, a mismatch
+        # is a full import as it always was, and the tail starts the audit's
+        # clock again.
+        reason = decide(cp, backend, path, before, audit_every=sys.maxsize,
+                        audit_seconds=float("inf"), **checks)
+        audit_by_digest = not reason
     if reason:
         if reason in ("inode", "shrink", "mtime_backwards", "prefix_rewritten", "tail_rewritten"):
             _prefix_changed(path, reason, cp)
@@ -1465,7 +1484,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     # mtime, the head, the samples, the bytes after the boundary) stand for
     # the rest until the next audit, which is a full import.
     touched = before.size == cp.size and before.mtime_ns != cp.mtime_ns
-    if bool(conf.get("digest_every_tail")) or state.hasher is None or touched:
+    if bool(conf.get("digest_every_tail")) or state.hasher is None or touched or audit_by_digest:
         previous_hash, current_hash, hasher = _read_digest(path, cp.complete_size, before.size)
         if previous_hash != state.file_hash:
             _prefix_changed(path, "imported_bytes", cp)
@@ -1482,7 +1501,9 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
                       complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
                       tail_hash=range_hash(path, cp.boundary_offset, before.size),
-                      imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
+                      imports_since_audit=0 if audit_by_digest else cp.imports_since_audit + 1,
+                      audited_at=db.now_ms() if audit_by_digest else cp.audited_at,
+                      updated_at=db.now_ms())
     recorded = None
     checkpoint_status = {}
     source_invalidated = False
@@ -1541,6 +1562,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         _tail_log("deferred_tail_source_changed", backend=backend, size=size)
         result.update(apply_mode="deferred", _clarp_transcript_completion_v1="deferred")
     else:
+        if audit_by_digest and not _checkpoint_refused(checkpoint_status):
+            _tail_log("audited_by_digest", retention=True)
         _tail_log("tail_applied", backend=backend, size=size)
     return result
 

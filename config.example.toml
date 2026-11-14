@@ -282,6 +282,10 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # audit_unchanged_by_digest = true  # an unchanged file whose audit is due (after a Host
 #                                   # start) has its bytes read once and compared with the
 #                                   # stored digest. false: it is imported in full.
+# audit_grown_by_digest = false     # true: a grown file whose audit is due has its imported
+#                                   # bytes read once and compared with the stored digest and
+#                                   # is then imported as a tail. false: it is imported in
+#                                   # full. Off by default.
 # What a tail import may find changed among the database rows its frontier was
 # published with (lib/message_carry.py gives each rule's reason). false: such a
 # change is a full import, as before the rule existed.
