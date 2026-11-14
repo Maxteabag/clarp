@@ -156,7 +156,8 @@ def model_json(run,prompt,request_suffix=''):
         if frozen.get('isolated') and adapter.isolated_oneshot is not None:
             if not shutil.which(adapter.required_binary):raise model_fallbacks.ProviderFailure('CLI unavailable')
             try:answer=adapter.isolated_oneshot(prompt,model=model.get('model') or '',home_name=f"{provider}-janitor-{frozen['template_id']}-home")
-            except (TimeoutError,RuntimeError) as exc:raise model_fallbacks.provider_error(str(exc)[:500]) from exc
+            except TimeoutError as exc:raise model_fallbacks.ProviderFailure(str(exc)[:500],'timeout') from exc
+            except RuntimeError as exc:raise model_fallbacks.provider_error(str(exc)[:500]) from exc
             usage.update(answer['usage']);return orchestrator._extract_json(answer['text'])
         cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('CLI unavailable')
