@@ -491,6 +491,16 @@ def decide(accounts: list[dict], floor: int, *,
             return False
         return True
 
+    general_candidates = [a for a in accounts if _admissible(a)]
+    if req_specs:
+        # Coverage precedes the general-quota ladder. Otherwise a 100% general
+        # account with zero Fable wins at rung 25 before a fully usable 15%
+        # account is considered at rung 10, stranding the waiting Fable work.
+        complete = [a for a in general_candidates if all(
+            (_account_model_remaining(a, fam) or 0) > 0 for fam, _ in req_specs)]
+        general_candidates = complete or [a for a in general_candidates if any(
+            (_account_model_remaining(a, fam) or 0) > 0 for fam, _ in req_specs)]
+
     noop_rung = None
     for rung in rungs(floor):
         beneath = have < rung if rung > 0 else have <= 0
@@ -498,9 +508,8 @@ def decide(accounts: list[dict], floor: int, *,
             noop_rung = rung
             break
         candidates = [
-            a for a in accounts
-            if _admissible(a)
-            and (a["remaining"] >= rung if rung > 0 else a["remaining"] > 0)
+            a for a in general_candidates
+            if (a["remaining"] >= rung if rung > 0 else a["remaining"] > 0)
         ]
         if candidates:
             if req_specs:
