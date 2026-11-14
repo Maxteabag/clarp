@@ -1342,6 +1342,8 @@ def updater_apply(
     janitor_agent_id: str = "",
     receipt: dict | None = None,
     held: tuple = (),
+    outcome: str | None = None,
+    reason: str = "",
 ) -> dict:
     """Record what the Goal keeper observed, beside the owner's own record.
 
@@ -1428,8 +1430,10 @@ def updater_apply(
                     "note": "Completed claimed without evidence; left in progress"}
                    for item_id in held_ids],
                 progress=progress[:500], next_work=next_work[:300], created_at=now,
-                outcome=("updated" if changed else "held_by_evidence_rule" if held_ids
-                         else "updated" if progress != previous else "unchanged"))
+                outcome=outcome or ("updated" if changed else "held_by_evidence_rule" if held_ids
+                                    else "updated" if progress != previous else "unchanged"))
+            if reason:
+                receipt["reason"] = reason[:200]
             janitor_store.insert_goal_keeper_receipt(con, receipt)
             receipt["stored"] = True
         con.execute("COMMIT")

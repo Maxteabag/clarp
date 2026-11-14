@@ -59,7 +59,34 @@ One prompt per goal, at most 100 KB:
 
 The cursor lives in the goal (`goal.updater.through_ms`/`through_event`).
 For a goal it has not seen, it starts at the owner's last checkpoint, at most
-24 h back.
+24 h back, except for the one-off catch-up below.
+
+## Catch-up of older goals and stalled goals (Host contract 98)
+
+The audit of 14 Nov found most open goals stale for two reasons the keeper did
+not cover: goals whose last activity predated the keeper's enabling were never
+read (the first look-back stops at 24 h), and active goals that nobody worked on
+any more kept saying "active".
+
+- **Catch-up, once.** A goal the keeper has never updated and that began before
+  the 24 h window is read once from its own start (`cursor(full=True)`). `due()`
+  queues it at once and records it in the keeper's progress under `caught_up`,
+  so it is tried once; after that it waits for triggers like any other goal. The
+  existing queue paces it (one run at a time, `max_goals_per_run` goals per run),
+  and every attempt leaves a receipt. A goal younger than 24 h needs no catch-up.
+- **Stalled, as a rule.** `stall()` reads the database only: an *active* goal is
+  stalled when neither its owner nor its helpers have had a message or a job end
+  for 3 days (`STALL_IDLE_MS`), or when the owner's last message is a usage-limit
+  or provider error (`STALL_ERROR`) that nothing followed for an hour. With
+  nothing new to read, the keeper writes the checkpoint `Stalled since <date>:
+  <cause>.` with no model call and no step change; the receipt says `stalled`,
+  reason `idle`, `usage_limit` or `provider_error`, model `rule`. With new
+  activity it makes its normal model update and puts the stalled line in front.
+  It writes the line once per stall (a second pass is `skipped`), and the hourly
+  sweep queues stalled goals that do not say so yet. Paused goals are never
+  marked stalled: the user paused them. The keeper still never completes,
+  cancels or pauses a goal; a stalled goal stays active until its owner or the
+  user acts.
 
 ## The model call
 
@@ -137,6 +164,7 @@ Every run leaves a receipt for every goal it handled, written or not (Peter, 14 
 | `failed` | The model or Antigravity failed, or the answer had no checkpoint |
 | `skipped` | Nothing new since the last update, or the goal closed or its owner left |
 | `cancelled` | The Janitor's configuration changed during the run |
+| `stalled` | An active goal has stalled (no activity for 3 days, or stopped on a usage limit or provider error): the keeper said so, by rule, with no model call and no step change |
 
 A write's receipt is stored in the same transaction as the write (`task_plans.updater_apply(receipt=...)`). If the receipt can't be stored, the write rolls back, so no committed keeper write exists without its receipt. A receipt for a goal the keeper did not write (unchanged-by-failure, refused, failed, skipped, cancelled) is stored afterwards, retried under the write lock with a bounded backoff (`RECEIPT_RETRY_DELAYS`, about 8 s); on final failure the logged line `goalKeeperReceiptLost run=… plan=… outcome=…` remains. Such a receipt never carries checkpoint text: `progress` and `next_work` are empty because nothing was written. `error` is a short code (`owner_changed_plan`, `goal_closed`, `parse_error`, `agy_exit_N`, `timeout`, `database_locked`, or the exception's class name), never the model's or provider's text. The same code is what `plan.updater.goal_error` shows. Fields are cut: title 200, progress 500, next work 300, step note 300, reason 200.
 
