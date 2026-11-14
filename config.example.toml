@@ -292,6 +292,10 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # carry_live_rows = false           # true: a live row (the row a reply streams into) may be
 #                                   # new, rewritten or gone, unless a reply before the
 #                                   # tail's boundary carries its trace. Off by default.
+# carry_settled_turns = false       # true (with carry_later_turns): a turn that was running when
+#                                   # the frontier was published may have settled, and the
+#                                   # transcript rows from the boundary on may carry its stamps.
+#                                   # Off by default.
 # tail_yield_after_first_write = false   # true: a tail import gives the writer away only once
 #                                   # it has written something. false: its batch budget runs
 #                                   # from BEGIN IMMEDIATE, so on a long conversation it
