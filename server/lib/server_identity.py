@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 96  # Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 97  # A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -157,6 +157,8 @@ FEATURES: tuple[str, ...] = (
     # Task plans carry goal.updater (the Goal keeper's checkpoint), items[].paused, criteria[].waived;
     # /task-plan/action takes waive/unwaive; a paused goal takes steps and checkpoints.
     "goal_updater",
+    # plan.updater.last_receipt and the Goal keeper's per-goal receipts in its runs.
+    "goal_keeper_receipts",
 )
 
 
@@ -219,6 +221,7 @@ FEATURE_CONTRACTS["push_unregister"] = 93  # booked by Arnold: 91 is PR 260's, 9
 FEATURE_CONTRACTS["agent_live_fcm"] = 94  # booked by Arnold, 13 Nov 2026
 FEATURE_CONTRACTS["live_activity_fcm"] = 95  # booked by Arnold, 13 Nov 2026 (94 is agent_live_fcm)
 FEATURE_CONTRACTS["goal_updater"] = 96  # PROVISIONAL: next free above main's 95 (13 Nov 2026)
+FEATURE_CONTRACTS["goal_keeper_receipts"] = 97  # PROVISIONAL: next free above main's 96 (14 Nov 2026)
 
 
 # Features that exist only while live events actually flow: the hub runs in
