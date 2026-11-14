@@ -1243,31 +1243,35 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   after_revision: int = 0,
                   before_message_id: str = "",
                   limit: int = 100,
-                  include_automated: bool = True) -> list[dict[str, Any]]:
+                  include_automated: bool = True,
+                  extra_backend_session_id: str = "") -> list[dict[str, Any]]:
     from .message_store import list_messages as _list
     return _list(
         agent_id=agent_id, backend_session_id=backend_session_id,
         after_revision=after_revision, limit=limit,
         before_message_id=before_message_id,
         include_automated=include_automated,
+        extra_backend_session_id=extra_backend_session_id,
     )
 
 
 def latest_message_revision(*, agent_id: str,
-                            backend_session_id: str = "") -> int:
+                            backend_session_id: str = "", extra_backend_session_id: str = "") -> int:
     from .message_store import latest_revision
     return latest_revision(
         agent_id=agent_id, backend_session_id=backend_session_id,
+        extra_backend_session_id=extra_backend_session_id,
     )
 
 
 def conversation_requires_replace(*, agent_id: str,
                                   backend_session_id: str = "",
-                                  after_revision: int = 0) -> bool:
+                                  after_revision: int = 0, extra_backend_session_id: str = "") -> bool:
     from .message_store import requires_replace
     return requires_replace(
         agent_id=agent_id, backend_session_id=backend_session_id,
         after_revision=after_revision,
+        extra_backend_session_id=extra_backend_session_id,
     )
 
 

@@ -409,9 +409,12 @@ class AutonomyJanitors:
 
     def _reset_notice(self,owner,run,provider,completion,*,read_failed=False):
         result=completion['result']
-        if not result.get('verified'):return
+        attention=completion.get('attention_required') and completion.get('generation')==owner['generation']
+        if not result.get('verified') and not attention:return
         rid=digest(['banked-reset',provider,completion['id']])
-        text=f"Banked reset {result['status']} for {result['account']}; quota refill verified."
+        text=(f"Banked reset {result['status']} for {result['account']}; quota refill verified."
+              if result.get('verified') else
+              "Banked reset acceptance remains uncertain after six read-only checks. Automatic retries stopped; operator review is needed before further grants can be used.")
         if read_failed:text+=' Current account status could not be refreshed; recovery is unverified.'
         payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],
                  'persona':owner['name'],'preview':text,'push':False,'reason':'account_switch',
@@ -432,8 +435,9 @@ class AutonomyJanitors:
             if self.stop_event.is_set():return
             key=f'hotseat-switcher.{provider}.last-check';lane=f'hotseat-switcher.{provider}'
             base=janitor_hotseat.interval_for(options,provider)
+            reset_field=janitor_hotseat.PROVIDERS[provider].reset_command_field
             reset_completion=self.reset_worker.peek(provider,owner)
-            reset_reconciliation=self.reset_worker.reconciliation_due(provider,owner)
+            reset_reconciliation=self.reset_worker.reconciliation_due(provider,owner,reset_field)
             if not lane_due(lane,owner,base,key,now) and reset_completion is None and reset_reconciliation is None:continue
             settings_store.set_int(key,now);lane_start(lane,owner,base,now)
             run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
