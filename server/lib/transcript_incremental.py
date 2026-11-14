@@ -223,9 +223,22 @@ class _RangePath(pathlib.PosixPath):
                                 errors=errors, newline=newline)
 
 
-def parse_range(backend: str, path: pathlib.Path, start: int, end: int) -> list[dict]:
+def parse_range(backend: str, path: pathlib.Path, start: int, end: int,
+                *, observed: dict | None = None) -> list[dict]:
+    """``observed``, when given, receives the digest of the bytes the parser
+    was handed, as ``range_hash`` would take it: "hash" when the parser
+    opened the range once and read all of it, else None."""
     from . import backends
-    return backends.parse_turns(backend, _RangePath(path, start=start, end=end))
+    ranged = _RangePath(path, start=start, end=end)
+    if observed is not None:
+        ranged._full_read = {"hash": hashlib.blake2b(digest_size=16), "bytes": 0, "opens": 0,
+                             "file": None}
+    turns = backends.parse_turns(backend, ranged)
+    if observed is not None:
+        read = ranged._full_read
+        observed["hash"] = read["hash"].hexdigest() \
+            if read["opens"] == 1 and read["bytes"] == max(0, end - start) else None
+    return turns
 
 
 def _lines(path: pathlib.Path, start: int, end: int):
@@ -696,6 +709,11 @@ _DEFAULTS = {
     # runs from BEGIN IMMEDIATE, so a tail on a long conversation yields
     # before its first row.
     "tail_yield_after_first_write": False,
+    # Off unless switched on: a tail whose file only grew while it was
+    # imported publishes its frontier for the bytes it parsed, once those
+    # are proven to be the file's still, and the next import is a tail.
+    # False: it loses its frontier and the next import is full.
+    "tail_keeps_frontier_when_grown": False,
 }
 
 
@@ -1260,6 +1278,12 @@ def _size_bucket(size):
     return "ge1024m"
 
 
+def _only_grew(before: Identity, now: Identity) -> bool:
+    """The same file, longer, and not touched backwards: bytes were added."""
+    return ((now.device, now.inode) == (before.device, before.inode)
+            and now.size > before.size and now.mtime_ns >= before.mtime_ns)
+
+
 def _tail_log(code, *, retention=False, reason=None, backend=None, size=None):
     """Fixed codes and unit counts; no session, path, text or message IDs."""
     from .log import log
@@ -1298,7 +1322,7 @@ def _checkpoint_reason(status):
 
 
 def _cache_committed_tail(key, revision, checkpoint, recorded, file_hash, *, reason_token=None,
-                          hasher=None):
+                          hasher=None, grown_ok=False):
     from . import db
     if recorded is None or file_hash is None:
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_not_written")
@@ -1310,7 +1334,8 @@ def _cache_committed_tail(key, revision, checkpoint, recorded, file_hash, *, rea
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_file_unavailable")
         _tail_log("file_unavailable_after_store", retention=True)
         return
-    if current != Identity(checkpoint.device, checkpoint.inode, checkpoint.size, checkpoint.mtime_ns):
+    described = Identity(checkpoint.device, checkpoint.inode, checkpoint.size, checkpoint.mtime_ns)
+    if current != described and not (grown_ok and _only_grew(described, current)):
         _TAIL_STATES.note_refusal(key, revision, reason_token, "publication_file_moved")
         _tail_log("file_moved_before_publication", retention=True)
         return
@@ -1484,6 +1509,10 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     # mtime, the head, the samples, the bytes after the boundary) stand for
     # the rest until the next audit, which is a full import.
     touched = before.size == cp.size and before.mtime_ns != cp.mtime_ns
+    # With ``tail_keeps_frontier_when_grown``: the running hash as it stands
+    # before this import's bytes are added, to add them a second time below.
+    keep_when_grown = bool(conf.get("tail_keeps_frontier_when_grown"))
+    earlier_hasher = None
     if bool(conf.get("digest_every_tail")) or state.hasher is None or touched or audit_by_digest:
         previous_hash, current_hash, hasher = _read_digest(path, cp.complete_size, before.size)
         if previous_hash != state.file_hash:
@@ -1492,15 +1521,37 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                 diagnostic.pop("imported", None)      # said once; the full import follows
             return refuse("prefix_content_changed")
     else:
+        if keep_when_grown:
+            earlier_hasher = state.hasher.copy()
         _, current_hash, hasher = _read_digest(path, cp.complete_size, before.size,
                                                digest=state.hasher)
-    turns = parse_range(backend, path, cp.boundary_offset, before.size)
+    observed = {} if keep_when_grown else None
+    turns = parse_range(backend, path, cp.boundary_offset, before.size, observed=observed)
     parsed = time.perf_counter()
-    if identity(path) != before:
-        return refuse("file_moved_during_parse")
+    tail_hash = None
+    grew = False            # the file only grew while it was imported
+    after_parse = identity(path)
+    if after_parse != before:
+        # The file moved while it was parsed. When it only grew, the tail
+        # can go on for the bytes it parsed, if those are still the file's:
+        # the bytes the parser was handed hash as the same range read now,
+        # and the bytes hashed before the parse hash the same read again
+        # (those added to the running hash; all of them when this import
+        # read them all). A full import has the same allowance,
+        # ``growing_prefix``. Without both proofs, or when the file was
+        # touched, rewritten or replaced, it is refused as before.
+        if not (keep_when_grown and _only_grew(before, after_parse)):
+            return refuse("file_moved_during_parse")
+        tail_hash = range_hash(path, cp.boundary_offset, before.size)
+        if observed.get("hash") != tail_hash or _read_digest(
+                path, cp.complete_size, before.size, digest=earlier_hasher)[1] != current_hash:
+            return refuse("file_moved_during_parse")
+        grew = True
+    if tail_hash is None:
+        tail_hash = range_hash(path, cp.boundary_offset, before.size)
     next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
                       complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
-                      tail_hash=range_hash(path, cp.boundary_offset, before.size),
+                      tail_hash=tail_hash,
                       imports_since_audit=0 if audit_by_digest else cp.imports_since_audit + 1,
                       audited_at=db.now_ms() if audit_by_digest else cp.audited_at,
                       updated_at=db.now_ms())
@@ -1509,6 +1560,18 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     source_invalidated = False
     witness: dict = {}      # the rows the guard hashed, for the record published below
 
+    def moved(current) -> bool:
+        """Whether the file is no longer the one that was parsed. Growth is
+        not that, with the switch: the checkpoint is for the bytes parsed,
+        and the import is reported as not complete so that it comes again."""
+        nonlocal grew
+        if current == before:
+            return False
+        if keep_when_grown and _only_grew(before, current):
+            grew = True
+            return False
+        return True
+
     def publish(database, captured):
         nonlocal recorded, source_invalidated
         try:
@@ -1516,7 +1579,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         except OSError:
             source_invalidated = True
             raise
-        if current != before:
+        if moved(current):
             source_invalidated = True
             return
         write_checkpoint(database, next_cp)
@@ -1539,18 +1602,18 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         log("transcriptCarryInputsChanged", f"what={getattr(changed, 'what', 'unknown')}")
         return refuse("carry_inputs_changed")
     try:
-        source_invalidated = source_invalidated or identity(path) != before
+        source_invalidated = source_invalidated or moved(identity(path))
     except OSError:
         source_invalidated = True
     if not _checkpoint_refused(checkpoint_status) and not source_invalidated:
         _cache_committed_tail(key, revision, next_cp, recorded, current_hash,
-                              reason_token=reason_token, hasher=hasher)
+                              reason_token=reason_token, hasher=hasher, grown_ok=keep_when_grown)
     else:
         _TAIL_STATES.note_refusal(key, revision, reason_token, _checkpoint_reason(checkpoint_status))
     # Include replacement during process-frontier publication, not just the
     # transaction callback. A refusal must not become a fresh completion.
     try:
-        source_invalidated = source_invalidated or identity(path) != before
+        source_invalidated = source_invalidated or moved(identity(path))
     except OSError:
         source_invalidated = True
     result = {"rows": next_cp.turn_count, "parse_s": parsed - started,
@@ -1559,6 +1622,18 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     if source_invalidated:
         token = _TAIL_STATES.consume(key, revision)
         _TAIL_STATES.note_refusal(key, revision, token, "publication_file_moved")
+        _tail_log("deferred_tail_source_changed", backend=backend, size=size)
+        result.update(apply_mode="deferred", _clarp_transcript_completion_v1="deferred")
+    elif grew:
+        # Imported and published up to the size that was parsed. The file is
+        # longer now, so this is not a completion: the import comes again,
+        # and finds its frontier.
+        kept = _TAIL_STATES.peek(key)
+        if kept is not None and kept[0] == revision and kept[1] is not None \
+                and kept[1].checkpoint == next_cp:
+            if audit_by_digest:
+                _tail_log("audited_by_digest", retention=True)
+            _tail_log("frontier_kept_source_grew", retention=True)
         _tail_log("deferred_tail_source_changed", backend=backend, size=size)
         result.update(apply_mode="deferred", _clarp_transcript_completion_v1="deferred")
     else:
