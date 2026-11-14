@@ -391,16 +391,32 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
 
 def record_call_notice(*, agent_id: str, backend_session_id: str,
                        notice_id: str, text: str) -> dict[str, Any] | None:
-    """A quiet group-call notice in an agent's chat (docs/group-calls.md).
-
-    An assistant-role row with origin ``system``, like the interruption
-    marker: it renders in the chat, never pushes or marks unread, and is never
-    spoken. Keyed by ``notice_id`` so a retried change cannot post it twice.
-    """
+    """Quiet, idempotent call notice; preserve its existing ID and contract."""
     if not agent_id or not backend_session_id or not notice_id or not str(text or "").strip():
         return None
+    return _record_system_notice(agent_id, backend_session_id, f"call:{notice_id}", text)
+
+
+def record_system_notice(*, agent_id: str, backend_session_id: str,
+                         notice_id: str, text: str) -> dict[str, Any] | None:
+    """Durable service notice, including a Janitor without a native conversation.
+
+    Return a persistence receipt on retries, rather than silently losing an
+    acknowledgement between the message insert and the caller's ledger write.
+    """
+    if not agent_id or not notice_id or not str(text or "").strip():
+        return None
+    msg_id = f"notice:{notice_id}"
+    row = _record_system_notice(agent_id, backend_session_id, msg_id, text)
+    if row is not None:
+        return {**row, "created": True}
+    saved = conn().execute("SELECT message_id,revision FROM messages WHERE message_id=? AND agent_id=?",
+                           (msg_id, agent_id)).fetchone()
+    return {"id": saved["message_id"], "revision": saved["revision"], "created": False} if saved else None
+
+
+def _record_system_notice(agent_id, backend_session_id, msg_id, text):
     database = conn()
-    msg_id = f"call:{notice_id}"
     row = database.execute(
         """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
              FROM messages

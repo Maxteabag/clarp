@@ -180,6 +180,7 @@ class ResetReplies:
     def __init__(self, on_offer=None, statuses=None):
         self.pending=None;self.on_offer=on_offer;self.statuses=iter(statuses or ["checking"]);self.calls=0
     def peek(self,provider,owner):return self.pending if provider=="claude" else None
+    def reconciliation_due(self,provider,owner):return None
     def ack(self,provider,receipt):self.pending=None
     def offer(self,provider,field,models,owner):
         self.calls+=1
@@ -201,6 +202,9 @@ def test_exhausted_switcher_resets_then_rereads_before_switch(switcher, monkeypa
     replies.completion();worker.hotseat_once()
     assert ("switch","hotseat","claude","b") in calls
     assert len([n for n in sent if n['preview'].startswith('Banked reset ')])==1
+    from lib.conversation import load_conversation
+    public=load_conversation(session=owner['session'],include_automated=False)
+    assert any('Banked reset redeemed' in turn.get('text','') for turn in public['turns'])
 
 
 def _configure_reset_command(monkeypatch,tmp_path):
@@ -266,7 +270,7 @@ def test_notify_mode_never_runs_a_reset_command(switcher, monkeypatch, tmp_path)
     owner,worker,readings,calls,sent=switcher
     marker=tmp_path/'spent'
     cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=(sys.executable,'-c',f"open({str(marker)!r},'w').write('spent')")))
-    current=janitors.get('hotseat');janitors.configure('hotseat',current['revision'],options={'mode':'notify'})
+    current=janitors.get('hotseat');changed=janitors.configure('hotseat',current['revision'],options={'mode':'notify'});janitors.set_enabled('hotseat',changed['revision'],True)
     readings['claude']=claude_payload(a=(True,'rejected'),b=(False,'rejected'))
     worker.hotseat_once()
     if worker.reset_worker.thread:worker.reset_worker.thread.join(2)
@@ -2296,5 +2300,69 @@ def test_reset_owner_disable_cancels_the_owned_command_group(switcher,monkeypatc
         assert not worker.reset_worker.thread.is_alive()
         result=worker.reset_worker.peek('claude',current)
         assert result and result['result']['verified'] is False
+        assert result['result']['status']=='cancelled'
     finally:
         worker.stop()
+
+
+@pytest.mark.parametrize('bound',[False,True])
+def test_reset_notice_reaches_the_app_transcript_and_sse_once_per_action(switcher,monkeypatch,bound):
+    from lib import backends,janitor_notices
+    from lib.conversation import load_conversation
+    owner,worker,readings,calls,sent=switcher
+    if bound:
+        agents.start_runtime(owner['agent_id'],'codex')
+        agents.bind_backend_session(owner['agent_id'],'native-janitor-context')
+    monkeypatch.setattr(backends,'find_session_jsonl',lambda *a,**kw:None)
+    agents.store_transcript_turns(agent_id=owner['agent_id'],backend_session_id='old-context',source_file='/tmp/old-context.jsonl',turns=[{'role':'assistant','text':'UNRELATED OLD CONVERSATION','timestamp':'2026-01-01T00:00:00Z'}])
+    emitted=[]
+    class Stream:
+        def broadcast(self,event):emitted.append(dict(event))
+    stream=Stream()
+    first=janitor_notices.publish(stream,owner,'one-reset','Banked reset redeemed for ai2; quota refill verified.')
+    again=janitor_notices.publish(stream,owner,'one-reset','Banked reset redeemed for ai2; quota refill verified.')
+    assert first['id']==again['id'] and again['created'] is False
+    response=load_conversation(session=owner['session'],include_automated=False)
+    assert len(response['turns'])==1 and response['turns'][0]['text'].startswith('Banked reset redeemed')
+    assert response['conversation_id']==('native-janitor-context' if bound else janitor_notices.conversation_id(owner['agent_id']))
+    assert all(e['type']=='transcript-updated' and e['session']==owner['session'] for e in emitted)
+
+
+def test_uncertain_reset_reconciles_with_healthy_quota_and_ack_survives_restart(switcher,monkeypatch,tmp_path):
+    import dataclasses,sys
+    from lib import config,janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    command=tmp_path/'reconcile.py';request=tmp_path/'request.json';spent=tmp_path/'spent'
+    command.write_text("import json,pathlib,sys\nr=json.load(sys.stdin);pathlib.Path(sys.argv[1]).write_text(json.dumps(r))\nif not r.get('reconcile_only'):pathlib.Path(sys.argv[2]).write_text('UNAUTHORIZED WRITE')\nprint(json.dumps({'status':'no_pending','verified':False}))\n")
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=(sys.executable,str(command),str(request),str(spent))))
+    settings_store.set_text('hotseat-reset.claude.state',json.dumps({'id':'interrupted-reset','owner':owner['agent_id'],'models':['Fable'],'next_at':0,'handled':True,'needs_reconcile':True,'result':{'status':'cancelled','verified':False,'needs_reconcile':True}}))
+    readings['claude']=claude_payload(a=(True,.1),b=(False,.2))
+    worker.hotseat_once()
+    try:
+        assert worker.reset_worker.thread is not None
+        worker.reset_worker.thread.join(3)
+        assert not worker.reset_worker.thread.is_alive()
+        assert not spent.exists()
+        assert json.loads(request.read_text()).get('reconcile_only') is True
+        worker.hotseat_once()
+        restarted=janitor_reset.ResetWorker(worker.stop_event)
+        assert restarted.peek('claude',owner) is None
+        assert restarted.reconciliation_due('claude',owner) is None
+    finally:worker.stop()
+
+
+def test_reset_worker_hands_its_database_connection_back(switcher,monkeypatch):
+    import dataclasses,sqlite3
+    from lib import config,janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=('fake',)))
+    connections=[]
+    def done(*a,**kw):
+        connections.append(db.conn());return {'status':'no_eligible_grant','verified':False}
+    monkeypatch.setattr(janitor_reset,'attempt',done)
+    current=janitor_builtins.resolve(hotseat.ROLE)
+    assert worker.reset_worker.offer('claude','claude_reset_command',('Fable',),current)=='checking'
+    worker.reset_worker.thread.join(3)
+    assert len(connections)==1
+    with pytest.raises(sqlite3.ProgrammingError,match='closed'):
+        connections[0].execute('SELECT 1')
