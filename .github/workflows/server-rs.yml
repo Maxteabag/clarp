@@ -1,0 +1,40 @@
+name: Server (Rust)
+
+# The merge gate of the Host in Rust (server-rs/REBUILD.md): format, lints and tests on every push
+# that touches it, on GitHub's machines. The inner loop is server-rs/tools/build on the XPS 15.
+
+on:
+  push:
+    paths:
+      - "server-rs/**"
+      - ".github/workflows/server-rs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-rs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server-rs
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Lints
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --locked
