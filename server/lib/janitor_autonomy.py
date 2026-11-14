@@ -269,6 +269,13 @@ def _provider_model_demand(provider: str, now_ms: int, base_seconds: int) -> tup
     return tuple(dict.fromkeys(required)), tuple(dict.fromkeys(active))
 
 
+# How long a model family that the switcher told the runtime about is not told again for the same
+# account. A wrong word starts a turn that meets the limit again, and that recovery stops every
+# working turn of the pool (1, 2, 4, 8 minutes as the relapses add up; the fifth ends the turn). A
+# reading that keeps flapping can cost that once in this time, not at every check.
+SEAT_RETELL_MS=15*60*1000
+
+
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,goal_ask=None,notice_stream=None,seat_serves=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
@@ -281,7 +288,8 @@ class AutonomyJanitors:
         # seat_serves(provider, families) tells the runtime which of the wanted model families the
         # active account serves, so turns parked for them start (runtime_seat_serves). _seat_told is
         # what it was last told per provider: (alias, families); it hears of a gain only.
-        self.seat_serves=seat_serves;self._seat_told={}
+        # _seat_told_at: (provider, alias, family) -> when it heard that (SEAT_RETELL_MS).
+        self.seat_serves=seat_serves;self._seat_told={};self._seat_told_at={}
         if hotseat_read is None:
             def hotseat_read(command,provider):return janitor_hotseat.read_accounts(command,provider,observe=self.hotseat_observe)
         self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch
@@ -566,7 +574,7 @@ class AutonomyJanitors:
                         try:self.hotseat_switched(provider,decision['target'])
                         except Exception as exc:hotseat_status.diagnose('hotseatSwitchObserverFailed',f'provider={provider} error={type(exc).__name__}')
                 else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
-            self._tell_seat_serves(provider,accounts,decision,switched,req_models)
+            self._tell_seat_serves(provider,accounts,decision,switched,req_models,now)
             _hotseat_receipt('action',lambda:hotseat_status.record_action(provider,decision,mode=options['mode'],switched=switched,now=now,floor_pct=janitor_hotseat.floor_for(options,provider),cadence_s=base,next_due_at=lane_next_run(lane,owner,base,key)))
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
             if repair_text:text=(text+'; ' if text else '')+repair_text
@@ -593,11 +601,15 @@ class AutonomyJanitors:
                 self.auth_repair.offer(repair_owner,run['run_id'],repair_payload,read_origin=repair_started)
         self.deliver_notifications(owner)
 
-    def _tell_seat_serves(self,provider,accounts,decision,switched,req_models):
+    def _tell_seat_serves(self,provider,accounts,decision,switched,req_models,now):
         """After a check: when the account now in use serves a wanted model family that it, or the
         account before it, did not serve at the last check, tell the runtime. Turns parked for that
         model while others work start then, instead of waiting for an idle pool or their half hour.
-        Told once per gain: a reading that is wrong costs one relapse, not one every check."""
+
+        A wrong word is not free: the turn it starts meets the limit again, and that recovery stops
+        every working turn of the pool for a minute or more. So it is told once per gain, and a
+        family that drops out of the same account's reading and comes back (a degraded reading, a
+        value at the edge) is not told again within SEAT_RETELL_MS of the last time."""
         if self.seat_serves is None or not janitor_hotseat.PROVIDERS[provider].model_scoped:return
         alias=decision.get('target') if switched else decision.get('active')
         account=next((a for a in accounts if a.get('alias')==alias),None)
@@ -605,14 +617,18 @@ class AutonomyJanitors:
         families=frozenset(fam for fam,_ in janitor_hotseat._unique_model_specs(req_models) if (janitor_hotseat._account_model_remaining(account,fam) or 0)>0)
         told_alias,told=self._seat_told.get(provider,(None,frozenset()))
         gained=families if told_alias!=alias else families-told
+        # The same account as at the last check: what it was told for a moment ago waits.
+        waits=frozenset(f for f in gained if told_alias==alias and now-self._seat_told_at.get((provider,alias,f),now-SEAT_RETELL_MS)<SEAT_RETELL_MS)
+        gained=gained-waits
         if gained:
             try:result=self.seat_serves(provider,sorted(gained))
             except Exception as exc:
                 hotseat_status.diagnose('hotseatSeatServesFailed',f'provider={provider} error={type(exc).__name__}');return
-            # A runtime from before this call exists answers with no status: it is told at the next check.
+            # Not heard (a runtime from before this call, or one in a recovery): told again at the next check.
             if not isinstance(result,dict) or result.get('status') not in {'started','nothing_parked'}:return
+            for family in gained:self._seat_told_at[(provider,alias,family)]=now
             if result.get('started'):log('hotseatSeatServes',f"provider={provider} account={alias} families={','.join(sorted(gained))} started={result['started']}")
-        self._seat_told[provider]=(alias,families)
+        self._seat_told[provider]=(alias,families-waits)
 
     def label_audit_once(self):
         """Label checker: one Jev request per interval, report only.
@@ -815,4 +831,6 @@ def runtime_seat_serves(provider,families):
         spec=janitor_hotseat._claude_model_spec(model)
         return spec is not None and spec[0] in wanted
     started=turn_dispatch.account_failover(provider).served_now(serves) if wanted else 0
+    # A recovery is running: its selector may end on another account. Not heard, so it is said again.
+    if started is None:return {'status':'recovering','started':0}
     return {'status':'started' if started else 'nothing_parked','started':started}
