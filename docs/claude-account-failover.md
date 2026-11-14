@@ -258,3 +258,24 @@ read-only reconciliation. The managed Linux Host uses systemd control-group
 cleanup for abrupt Host death; outside such supervision a hard-killed parent
 cannot run its cleanup and the deployment must supply equivalent process-tree
 supervision. No runtime restart is needed to activate the maintained selector.
+
+### Reconciliation admission and operator attention
+
+Pending reconciliation bypasses the ordinary cadence only while a command is
+configured, the owner is enabled in automatic mode, and the persisted budget is
+due. Unsetting the command or selecting notify mode leaves the obligation intact
+but cannot force repeated quota reads or run rows. Changing the command cancels
+its owned process group as well as owner/Stop changes.
+
+Repeated uncertain reconciliation uses persisted delays of 10, 20, 40, 80, 160
+and 320 minutes, with at most six read-only attempts per owner configuration.
+After the sixth uncertain result a durable chat notice requests operator review;
+normal exhaustion cannot bypass that cap to start a write. A deliberate Janitor
+configuration save and re-enable provides a supported read-only retry after the
+underlying problem is repaired, retaining the minimum ten-minute admission gap; do not automatically churn configuration to reset budgets.
+No deletion of the debt row is needed.
+
+Empty unbound Janitors keep an empty conversation ID until a notice exists.
+Notices live in a stable service namespace, merged with only the current native
+conversation in a Janitor's app-facing read. The normal-agent empty-pane guard,
+revision cursors, pagination and native transcript history remain isolated.

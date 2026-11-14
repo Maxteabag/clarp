@@ -60,6 +60,7 @@ from .message_live import (  # noqa: F401
 )
 from .message_previews import (  # noqa: F401
     list_messages,
+    has_system_notices,
     last_message_head,
     last_message_preview,
     dashboard_messages,

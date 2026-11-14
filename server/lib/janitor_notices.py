@@ -6,9 +6,18 @@ def conversation_id(agent_id):
     return f"janitor:{agent_id}"
 
 
+def has_notices(agent_id):
+    from . import message_store
+    return message_store.has_system_notices(agent_id=agent_id, backend_session_id=conversation_id(agent_id))
+
+
 def publish(stream, owner, notice_id, text):
     from . import agents, events, message_store
-    backend_session = agents.live_backend_session(owner['agent_id']) or conversation_id(owner['agent_id'])
+    agent=agents.get_by_agent_id(owner['agent_id'])
+    if not agent or not agent.get('is_janitor'):
+        raise ValueError('Janitor notices require a Janitor owner')
+    native_session=agents.live_backend_session(owner['agent_id'])
+    backend_session=conversation_id(owner['agent_id'])
     row = message_store.record_system_notice(agent_id=owner['agent_id'],
         backend_session_id=backend_session, notice_id=notice_id, text=text)
     if row is None:
@@ -17,5 +26,5 @@ def publish(stream, owner, notice_id, text):
         # Retrying a lost acknowledgement may repeat this revision-watermarked
         # refresh event, but never the message or a push notification.
         events.broadcast(stream, events.transcript_updated(agent_id=owner['agent_id'],
-            session=owner['session'], backend_session_id=backend_session))
+            session=owner['session'], backend_session_id=native_session or backend_session))
     return row
