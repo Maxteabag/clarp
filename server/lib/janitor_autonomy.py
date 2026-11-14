@@ -646,20 +646,21 @@ class AutonomyJanitors:
             width=max(1,min(int(config['options'].get('max_goals_per_run',5)),6));ready=ready[:width]
             run=janitor_builtins.begin_run(goal_keeper.ROLE,goal_keeper.request_id(config,ready,now),context={'input_hash':digest(ready),'target_count':len(ready)})
             if not run or not janitor_builtins.claim_run(run['run_id']):continue
-            self.goal_batch=threading.Thread(target=self._goal_keeper_batch,args=(config,run,ready,now,watch.progress_attachment),name='goal-keeper-run',daemon=True)
+            full=frozenset(p for p in ready if (progress.get('goals') or {}).get(p,{}).get('catch_up'))
+            self.goal_batch=threading.Thread(target=self._goal_keeper_batch,args=(config,run,ready,now,watch.progress_attachment,full),name='goal-keeper-run',daemon=True)
             self.goal_batch.start()
             if wait:self.goal_batch.join()
             return
 
-    def _goal_keeper_batch(self,config,run,ready,now,progress_attachment):
-        try:self._goal_keeper_batch_inner(config,run,ready,now,progress_attachment)
+    def _goal_keeper_batch(self,config,run,ready,now,progress_attachment,full=frozenset()):
+        try:self._goal_keeper_batch_inner(config,run,ready,now,progress_attachment,full)
         finally:db.close_local()  # this thread's connection goes back with it (review #311, finding 5)
 
-    def _goal_keeper_batch_inner(self,config,run,ready,now,progress_attachment):
+    def _goal_keeper_batch_inner(self,config,run,ready,now,progress_attachment,full=frozenset()):
         from . import goal_keeper
         from .log import log_exception
         try:
-            result=goal_keeper.run_batch(config,run,ready,lambda prompt,plan_id:self.goal_ask(run,prompt,plan_id),now=now,
+            result=goal_keeper.run_batch(config,run,ready,lambda prompt,plan_id:self.goal_ask(run,prompt,plan_id),now=now,full=full,
                                          current=lambda:janitor_builtins.is_current(run['run_id']))
         except Exception as exc:
             log_exception('goalKeeperRunFail',exc,detail=run['run_id'])
