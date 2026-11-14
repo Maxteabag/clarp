@@ -53,7 +53,8 @@ def test_the_parses_digests_are_a_second_reads(tmp_path, mark, how):
     path = _file(tmp_path, SIZE)
     before, read, evidence = _parsed(path, SIZE, mark, how=how)
     earlier = None if mark is None else (mark, "what the earlier import stored")
-    previous, current, hasher = inc._parsed_digests(read, evidence, before, earlier, path)
+    (previous, current, hasher), why = inc._parsed_digests(read, evidence, before, earlier, path)
+    assert why == "saved"
     again = inc._read_digest(path, SIZE if mark is None else mark, SIZE)
     assert (previous, current, hasher.hexdigest()) == (again[0], again[1], again[2].hexdigest())
     data = path.read_bytes()
@@ -105,14 +106,25 @@ def _change(path, how):
         path.unlink()
 
 
-@pytest.mark.parametrize("how", ["grown", "touched", "rewritten in place",
-                                 "rewritten in place, times put back", "replaced", "gone"])
-def test_a_file_that_changed_since_the_parse_opened_it_must_be_read(tmp_path, how):
+@pytest.mark.parametrize("how,why", [
+    ("grown", "grew"), ("touched", "touched"), ("rewritten in place", "touched"),
+    ("rewritten in place, times put back", "touched"),
+    ("replaced", "identity_changed"), ("gone", "identity_changed")])
+def test_a_file_that_changed_since_the_parse_opened_it_must_be_read(tmp_path, how, why):
+    """And the one word the journal gets for it."""
     path = _file(tmp_path, SIZE)
     before, read, evidence = _parsed(path, SIZE, None)
-    assert inc._parsed_digests(read, evidence, before, None, path) is not None
+    assert inc._parsed_digests(read, evidence, before, None, path)[1] == "saved"
     _change(path, how)
-    assert inc._parsed_digests(read, evidence, before, None, path) is None
+    assert inc._parsed_digests(read, evidence, before, None, path) == (None, why)
+
+
+def test_a_file_that_is_shorter_than_it_was_is_another_file(tmp_path):
+    path = _file(tmp_path, SIZE)
+    before, read, evidence = _parsed(path, SIZE, None)
+    with path.open("r+b") as output:
+        output.truncate(SIZE - 10)
+    assert inc._parsed_digests(read, evidence, before, None, path) == (None, "identity_changed")
 
 
 def test_a_file_that_grew_before_the_parse_opened_it_must_be_read(tmp_path):
@@ -121,22 +133,33 @@ def test_a_file_that_grew_before_the_parse_opened_it_must_be_read(tmp_path):
     with path.open("ab") as output:
         output.write(b"more\n")
     _later, read, evidence = _parsed(path, SIZE, None)
-    assert inc._parsed_digests(read, evidence, before, None, path) is None
+    assert inc._parsed_digests(read, evidence, before, None, path) == (None, "grew")
 
 
 def test_without_the_switchs_mark_or_with_another_size_it_must_be_read(tmp_path):
     path = _file(tmp_path, SIZE)
     before, read, evidence = _parsed(path, SIZE, 5000)
-    assert inc._parsed_digests(read, evidence, before, (5000, "x"), path) is not None
+    assert inc._parsed_digests(read, evidence, before, (5000, "x"), path)[1] == "saved"
     # The earlier import's size is not the one that was marked.
-    assert inc._parsed_digests(read, evidence, before, (6000, "x"), path) is None
+    moved = (None, "earlier_import_moved")
+    assert inc._parsed_digests(read, evidence, before, (6000, "x"), path) == moved
     # No mark was asked for, and an earlier import is there to compare with.
     before, read, evidence = _parsed(path, SIZE, None)
-    assert inc._parsed_digests(read, evidence, before, (5000, "x"), path) is None
+    assert inc._parsed_digests(read, evidence, before, (5000, "x"), path) == moved
     # The parse was not observed, or not the whole of it was.
-    assert inc._parsed_digests(None, evidence, before, None, path) is None
-    assert inc._parsed_digests(read, None, before, None, path) is None
+    assert inc._parsed_digests(None, evidence, before, None, path) == (None, "not_observed")
+    assert inc._parsed_digests(read, None, before, None, path) == (None, "not_observed")
 
 
 def test_the_switch_is_off_until_switched_on():
     assert inc._DEFAULTS["full_digest_while_parsing"] is False
+
+
+def test_the_journals_line_is_a_word_a_count_a_backend_and_a_size(monkeypatch):
+    from lib import log as host_log
+    seen = []
+    monkeypatch.setattr(host_log, "log", lambda event, detail="": seen.append((event, detail)))
+    inc._second_read_log("saved", "claude", 300 * 1024 * 1024)
+    inc._second_read_log("grew", "a backend nobody knows", None)
+    assert seen == [("transcriptFullDigest", "code=saved count=1 backend=claude size=lt1024m"),
+                    ("transcriptFullDigest", "code=grew count=1 backend=other size=unknown")]
