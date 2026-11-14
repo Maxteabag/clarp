@@ -43,7 +43,8 @@ def test_timeout_kills_command_descendants_and_retains_no_secret_text(tmp_path, 
     script.write_text("import subprocess,sys,time\np=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\nopen(sys.argv[1],'w').write(str(p.pid))\nprint('SECRET-WOULD-BE-IN-OUTPUT',flush=True)\ntime.sleep(60)\n")
     monkeypatch.setattr(janitor_reset.config,"load",lambda:SimpleNamespace(claude_reset_command=(sys.executable,str(script),str(pidfile))))
     monkeypatch.setattr(janitor_reset,"TIMEOUT_SECONDS",.5)
-    assert janitor_reset.attempt("claude_reset_command",["Fable"])["verified"] is False
+    result=janitor_reset.attempt("claude_reset_command",["Fable"])
+    assert result["verified"] is False and result['needs_reconcile'] is True
     pid=int(pidfile.read_text())
     # A killed descendant can briefly remain as a zombie until init reaps it.
     status=__import__('subprocess').run(['ps','-o','stat=','-p',str(pid)],capture_output=True,text=True)
