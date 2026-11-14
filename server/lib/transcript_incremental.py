@@ -1561,10 +1561,15 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
 
 
 def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
-    """(digest at the earlier import's size, digest of the parsed bytes, the
-    running hash) from the parse's own read, when a second read of the file
-    would give the same: ``_read_digest`` without reading. None when it must
-    be read.
+    """((digest at the earlier import's size, digest of the parsed bytes,
+    the running hash), "saved") from the parse's own read, when a second
+    read of the file would give the same: ``_read_digest`` without reading.
+    (None, why) when it must be read; ``why`` is a fixed word for the
+    journal: ``grew``, ``touched``, ``identity_changed`` (another file under
+    the name, a shorter one, or none), ``earlier_import_moved`` (the earlier
+    import's size is not the one the parse was told to mark),
+    ``not_observed`` (the parse was not one whole observed read; with the
+    switch off it never is, and the caller says ``switch_off``).
 
     The parser was handed bytes [0, before.size) and they were hashed as it
     took them (``_RangePath``). Those are the file's bytes when the file did
@@ -1575,22 +1580,35 @@ def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
     read again, as it always was: growth cannot be told from a rewrite
     without reading."""
     if parsed_read is None or parsed_evidence is None or parsed_read.get("stat") is None:
-        return None
+        return None, "not_observed"
     try:
         now = os.stat(path)
     except OSError:
-        return None
-    opened = parsed_read["stat"]
+        return None, "identity_changed"
+    size, mtime_ns, ctime_ns = parsed_read["stat"]
     if (now.st_dev, now.st_ino) != (before.device, before.inode) \
-            or (now.st_size, now.st_mtime_ns, now.st_ctime_ns) != opened \
-            or (opened[0], opened[1]) != (before.size, before.mtime_ns):
-        return None
+            or not before.size <= size <= now.st_size:
+        return None, "identity_changed"
+    if now.st_size != before.size:
+        return None, "grew"
+    if (now.st_mtime_ns, now.st_ctime_ns) != (mtime_ns, ctime_ns) or mtime_ns != before.mtime_ns:
+        return None, "touched"
     current = parsed_evidence[1]
     if earlier is None:
-        return current, current, parsed_read["hash"].copy()
+        return (current, current, parsed_read["hash"].copy()), "saved"
     if parsed_read.get("mark") != earlier[0] or parsed_read.get("at_mark") is None:
-        return None             # the earlier import's size was not the one marked
-    return parsed_read["at_mark"], current, parsed_read["hash"].copy()
+        return None, "earlier_import_moved"
+    return (parsed_read["at_mark"], current, parsed_read["hash"].copy()), "saved"
+
+
+def _second_read_log(code, backend, size):
+    """One line for each full import that reaches its digest: whether the
+    second read of the file was saved, or why it was made. A fixed word, a
+    count, the backend and the size's bucket; no session, path or id."""
+    from .log import log
+    log("transcriptFullDigest",
+        f"code={code} count=1 backend={backend if backend in SUPPORTED_BACKENDS else 'other'}"
+        f" size={_size_bucket(size)}")
 
 
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
@@ -1641,8 +1659,12 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                 # read are still what they were (the audit of the bytes a
                 # tail does not read again). The full import goes on either way.
                 earlier = _imported_before(imported, before, agent_id, backend_session_id, path)
-                previous, current_hash, hasher = _parsed_digests(
-                    parsed_read, parsed_evidence, before, earlier, path) or _read_digest(
+                digests, second_read = _parsed_digests(
+                    parsed_read, parsed_evidence, before, earlier, path)
+                if digests is None and not bool(conf.get("full_digest_while_parsing")):
+                    second_read = "switch_off"
+                _second_read_log(second_read, backend, before.size)
+                previous, current_hash, hasher = digests or _read_digest(
                     path, earlier[0] if earlier else before.size, before.size)
                 if earlier and previous != earlier[1]:
                     _prefix_changed(path, "imported_bytes", imported)

@@ -251,7 +251,15 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
 
             metrics["carry_changed"] = []
 
+            metrics["second_read"] = []
+
             def capture_log(event, detail=""):
+                if event == "transcriptFullDigest":
+                    # code=<word> count=1 backend=<...> size=<bucket>: nothing else.
+                    code, count, backend_field, size_field = detail.split(" ")
+                    assert count == "count=1" and backend_field.startswith("backend=") \
+                        and size_field.startswith("size=") and code.startswith("code=")
+                    metrics["second_read"].append(code[len("code="):])
                 if event == "transcriptPrefixChanged":
                     metrics["prefix_changed"].append(detail)
                 if event == "transcriptCarryInputsChanged":
