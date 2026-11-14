@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -48,6 +49,17 @@ RETRY_AFTER_MS = 60_000     # one retry; after that the sweep decides
 # A goal not yet seen starts from its owner's last checkpoint, but never
 # replays more than this: an old paused goal is not re-read in full.
 FIRST_LOOK_BACK_MS = 24 * 3600 * 1000
+# A goal the keeper has never updated is read once from its own start (its
+# owner checkpoint, else its creation), not from FIRST_LOOK_BACK_MS: goals whose
+# last activity predates the keeper's enabling were left as they stood (audit,
+# 14 Nov). The 'caught_up' marker in the keeper's progress makes it one-off.
+STALL_IDLE_MS = 3 * 24 * 3600 * 1000
+STALL_ERROR_GRACE_MS = 3600 * 1000   # a stopped turn gets an hour to recover first
+# How the owner's last turn ENDED, as the Host classified it (lib/error_classify,
+# the state log's interrupted reason), never the words of a message: 7% of final
+# messages mention a rate limit or an API error (review of #330).
+STALL_USAGE_REASONS = frozenset({"usage_limit", "account_plan"})
+STALL_PROVIDER_REASONS = frozenset({"auth", "transient", "runner_exit", "timeout", "unknown"})
 DELTA_CHARS = 40_000
 # The prompt is one argv entry, which Linux caps at 128 KiB.
 PROMPT_BYTES = 100_000
@@ -122,14 +134,61 @@ def _helpers(con, owner_id: str, since_ms: int) -> list:
         (owner_id, since_ms - HELPER_LOOKBACK_MS, MAX_HELPERS)).fetchall()
 
 
-def cursor(plan_row, now: int) -> tuple[int, int]:
-    """(message/job time, goal event id) the next update starts after."""
+def cursor(plan_row, now: int, *, full: bool = False) -> tuple[int, int]:
+    """(message/job time, goal event id) the next update starts after. ``full``:
+    a never-updated goal is read from its own start once (the catch-up)."""
     goal = _goal(plan_row)
     mine = goal.get("updater") or {}
     if mine.get("through_ms"):
         return int(mine["through_ms"]), int(mine.get("through_event") or 0)
     start = int((goal.get("checkpoint") or {}).get("at") or plan_row["created_at"])
-    return max(start, now - FIRST_LOOK_BACK_MS), 0
+    return (start if full else max(start, now - FIRST_LOOK_BACK_MS)), 0
+
+
+def stall(con, plan_row, now: int) -> tuple[int, str, str] | None:
+    """(since_ms, cause, code) when an ACTIVE goal has stalled, else None. A rule
+    over what the database holds, no model call: no activity from the owner or
+    its helpers for STALL_IDLE_MS, or the owner's last message is a usage-limit
+    or provider error that nothing followed for STALL_ERROR_GRACE_MS."""
+    if plan_row["status"] != "active":
+        return None
+    # A goal that is properly waiting is not stalled: a dependency or a timer in
+    # its continuation, or a job of the owner or a helper still running.
+    continuation = _goal(plan_row).get("continuation") or {}
+    due_at = continuation.get("due_at")
+    if continuation.get("state") == "waiting" or (isinstance(due_at, (int, float)) and due_at > now):
+        return None
+    owner = plan_row["agent_id"]
+    ids = [owner, *(h["agent_id"] for h in _helpers(con, owner, int(plan_row["created_at"])))]
+    marks = ",".join("?" * len(ids))
+    if con.execute(f"SELECT 1 FROM background_jobs WHERE agent_id IN ({marks}) "
+                   f"AND status IN ('queued','running') LIMIT 1", ids).fetchone():
+        return None
+    last = con.execute(f"SELECT MAX(updated_at) FROM messages WHERE agent_id IN ({marks})", ids).fetchone()[0]
+    jobs = con.execute(f"SELECT MAX(terminal_at) FROM background_jobs WHERE agent_id IN ({marks})",
+                       ids).fetchone()[0]
+    last = max(int(last or 0), int(jobs or 0), int(plan_row["created_at"] or 0))
+    if now - last >= STALL_IDLE_MS:
+        # No day count: the line names the date it began, so it is written once.
+        return last, "no activity from the owner or its helpers", "idle"
+    # Only the OWNER's own last turn, and only as the Host classified its end.
+    ended = con.execute("SELECT ts, kind, detail FROM state_log WHERE agent_id=? "
+                        "ORDER BY state_id DESC LIMIT 1", (owner,)).fetchone()
+    if not ended or ended["kind"] != "interrupted" or now - int(ended["ts"]) < STALL_ERROR_GRACE_MS:
+        return None
+    try:
+        reason = str((json.loads(ended["detail"] or "{}") or {}).get("reason") or "")
+    except (TypeError, ValueError):
+        return None
+    if reason in STALL_USAGE_REASONS:
+        return int(ended["ts"]), "the owner's last turn stopped on a usage limit", "usage_limit"
+    if reason in STALL_PROVIDER_REASONS:
+        return int(ended["ts"]), "the owner's last turn stopped on a provider error", "provider_error"
+    return None
+
+
+def stall_line(since_ms: int, cause: str) -> str:
+    return "Stalled since " + time.strftime("%d %b %Y", time.gmtime(since_ms / 1000)) + ": " + cause + "."
 
 
 @dataclass
@@ -348,8 +407,8 @@ def open_goals(config: dict) -> list:
         "archived_at": r["archived_at"]})]
 
 
-def _seen(con, row, now: int, watch: Triggers) -> "Activity":
-    since_ms, since_event = cursor(row, now)
+def _seen(con, row, now: int, watch: Triggers, *, full: bool = False) -> "Activity":
+    since_ms, since_event = cursor(row, now, full=full)
     helpers = _helpers(con, row["agent_id"], int(row["created_at"]))
     ids = [row["agent_id"], *(h["agent_id"] for h in helpers)]
     seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event)
@@ -379,6 +438,7 @@ def due(config: dict, progress: dict, now: int) -> list[str]:
             sweeping = True
             progress["next_sweep_at"] = compute_next_run(watch.sweep["cron"], watch.sweep["timezone"], now)
     con = db.conn()
+    caught = progress.setdefault("caught_up", {})
     ready, live = [], set()
     for row in open_goals(config):
         plan_id = row["plan_id"]
@@ -386,11 +446,23 @@ def due(config: dict, progress: dict, now: int) -> list[str]:
         state = goals.setdefault(plan_id, {})
         if state.get("retry_at") and now < state["retry_at"]:
             continue
-        seen = _seen(con, row, now, watch)
+        # The one-off catch-up: a goal never updated, not yet tried, is read in full
+        # once and queued now; the queue paces it (max_goals_per_run per run).
+        full = plan_id not in caught and _needs_catch_up(row, now)
+        seen = _seen(con, row, now, watch, full=full)
+        if full:
+            caught[plan_id] = now
+            if seen.any_messages or seen.triggers:
+                state.setdefault("first_at", now - watch.fold_ms)
+                # Read in full on this attempt and its one retry only; settle()
+                # drops the flag with the state after the second failure.
+                state["catch_up"] = True
         if seen.triggers:
             state.setdefault("first_at", seen.triggers[0][0])
             state["fast"] = bool(state.get("fast") or seen.status_change)
         elif sweeping and seen.any_messages:
+            state.setdefault("first_at", now - watch.fold_ms)
+        elif sweeping and _needs_stall_flag(con, row, now):
             state.setdefault("first_at", now - watch.fold_ms)
         first = state.get("first_at")
         if first and now - first >= (FAST_FOLD_SEC * 1000 if state.get("fast") else watch.fold_ms):
@@ -399,7 +471,28 @@ def due(config: dict, progress: dict, now: int) -> list[str]:
             goals.pop(plan_id, None)
     for gone in set(goals) - live:
         goals.pop(gone, None)
+    for gone in set(caught) - live:
+        caught.pop(gone, None)
     return ready
+
+
+def _needs_catch_up(row, now: int) -> bool:
+    """Never updated, and begun before the first look-back window: activity older
+    than FIRST_LOOK_BACK_MS would otherwise never be read."""
+    goal = _goal(row)
+    if goal.get("updater") or row["status"] != "active":
+        return False   # never a paused goal: its prompt would carry the user's messages
+    start = int((goal.get("checkpoint") or {}).get("at") or row["created_at"])
+    return start < now - FIRST_LOOK_BACK_MS
+
+
+def _needs_stall_flag(con, row, now: int) -> bool:
+    """An active goal that has stalled and does not say so yet."""
+    found = stall(con, row, now)
+    if not found:
+        return False
+    current = str((_goal(row).get("updater") or {}).get("progress") or "")
+    return not current.startswith(stall_line(found[0], found[1]))
 
 
 # Immediate re-reads after an owner conflict, per goal, before it waits for the sweep.
@@ -438,7 +531,7 @@ def settle(progress: dict, plan_id: str, outcome: str, now: int, error: str = ""
 
 
 def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=lambda: True,
-           receipt: dict | None = None) -> dict:
+           receipt: dict | None = None, full: bool = False) -> dict:
     """Read, ask, record one goal. ``ask(prompt)`` returns the model's JSON
     answer and its usage. ``current()`` is the run's authority, checked again
     just before the write. ``receipt`` is filled as the update goes, so a
@@ -454,7 +547,8 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
     owner = con.execute("SELECT * FROM agents WHERE agent_id=?", (row["agent_id"],)).fetchone()
     if not owner or owner["deleted_at"] or owner["is_janitor"]:
         return {"outcome": "skipped", "reason": "owner unavailable"}
-    since_ms, since_event = cursor(row, now)
+    goal_now = _goal(row)
+    since_ms, since_event = cursor(row, now, full=full and not goal_now.get("updater"))
     helpers = _helpers(con, owner["agent_id"], int(row["created_at"]))
     sheet, names, job_refs = fact_sheet(con, row, owner, helpers, now)
     ids = list(names)
@@ -463,8 +557,28 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
     refs = message_refs[-20:] + job_refs + ([f"goal_event:{seen.newest_event}"]
                                            if seen.newest_event else [])
     receipt["source_refs"] = refs[:40]
+    stalled = stall(con, row, now)
+    line = stall_line(stalled[0], stalled[1]) if stalled else ""
     if not text and not seen.triggers:
-        return {"outcome": "skipped", "reason": "nothing new"}
+        if not stalled:
+            return {"outcome": "skipped", "reason": "nothing new"}
+        if str((goal_now.get("updater") or {}).get("progress") or "").startswith(line):
+            return {"outcome": "skipped", "reason": "already marked stalled"}
+        # Nothing new to read: say it has stalled, with no model call and no step change.
+        if not current():
+            return {"outcome": "cancelled", "reason": "configuration changed"}
+        plan = task_plans.get(plan_id)
+        receipt.update(model="rule")
+        if "started" in receipt:
+            receipt["duration_ms"] = int((time.monotonic() - receipt["started"]) * 1000)
+        task_plans.updater_apply(
+            plan_id, seen_revision=plan["revision"], steps={}, progress=line,
+            next_work="Waiting for the owner to resume it, or for Peter to resume or close the goal.",
+            model="rule", source_refs=refs, through_ms=max(now, seen.newest_ms),
+            through_event=seen.newest_event, janitor_agent_id=janitor_agent_id,
+            receipt=receipt if receipt.get("receipt_id") else None,
+            outcome="stalled", reason=stalled[2])
+        return {"outcome": "updated", "changed_steps": 0, "stalled": stalled[2]}
     plan = task_plans.get(plan_id)
     answer, usage, model_id = ask(prompt_for(plan, sheet, text))
     usage = usage or {}
@@ -476,6 +590,8 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
     # shows a proposed checkpoint as if it were the goal's.
     if not progress_text:
         raise ValueError("model answered without a checkpoint")
+    if line and not progress_text.startswith(line):
+        progress_text = line + " " + progress_text
     if not current():
         return {"outcome": "cancelled", "reason": "configuration changed"}
     held = tuple(item_id for item_id, value in steps.items() if value["note"].startswith(HELD_NOTE))
@@ -493,7 +609,7 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
 
 
 def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
-              current=lambda: True) -> dict:
+              current=lambda: True, full: frozenset | set = frozenset()) -> dict:
     """Update up to ``max_goals_per_run`` goals in parallel within one Janitor
     run (the framework admits one run per Janitor at a time). ``ask(prompt,
     plan_id)`` returns (answer, usage, model id). Returns each goal's
@@ -508,7 +624,8 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
         started = receipt["started"] = time.monotonic()
         try:
             result = update(plan_id, now=now, ask=lambda prompt: ask(prompt, plan_id),
-                            janitor_agent_id=config["agent_id"], current=current, receipt=receipt)
+                            janitor_agent_id=config["agent_id"], current=current, receipt=receipt,
+                            full=plan_id in full)
             if result["outcome"] != "updated":  # skipped or cancelled: say why
                 receipt.update(outcome=result["outcome"], reason=str(result.get("reason") or "")[:200])
             return plan_id, result["outcome"], "", result

@@ -953,3 +953,243 @@ def test_a_real_owner_conflict_is_reread_soon_but_only_a_few_times(owner):
         assert progress["goals"][plan["plan_id"]]["retry_at"] == now + i + 15_000
     goal_keeper.settle(progress, plan["plan_id"], "conflict", now + 9, "owner_changed_plan")
     assert progress["goals"][plan["plan_id"]]["retry_at"] == 9_000_000, "capped: waits for the sweep"
+
+
+# ---- one-off catch-up of goals older than the first look-back (audit, 14 Nov) ---
+
+DAY = 24 * 3600 * 1000
+
+
+def _aged_goal(owner, *, days_old, last_message_days_ago, text="Built the harness and ran round one",
+               role="assistant", phase="final"):
+    plan = _goal()
+    now = db.now_ms()
+    created = now - days_old * DAY
+    goal = json.loads(db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?",
+                                        (plan["plan_id"],)).fetchone()[0])
+    # A goal really created days ago: its default first wake is long past too.
+    goal.setdefault("continuation", {})["due_at"] = created + 120_000
+    db.conn().execute("UPDATE task_plans SET created_at=?, goal_json=? WHERE plan_id=?",
+                      (created, json.dumps(goal), plan["plan_id"]))
+    _message(owner, role, text, at=now - int(last_message_days_ago * DAY), phase=phase)
+    return plan, now
+
+
+def _receipts(run_id):
+    from lib import janitor_store
+    return janitor_store.goal_keeper_receipts_for_run(run_id)
+
+
+def _row(plan_id):
+    return db.conn().execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
+
+
+def _full(progress, ready):
+    return frozenset(p for p in ready if (progress.get("goals") or {}).get(p, {}).get("catch_up"))
+
+
+def _turn_ended(agent_id, *, at, kind="interrupted", reason=None):
+    db.conn().execute("INSERT INTO state_log(agent_id, runtime_id, ts, kind, detail) VALUES (?,?,?,?,?)",
+                      (agent_id, None, at, kind, json.dumps({"reason": reason} if reason else {})))
+
+
+def test_a_goal_older_than_the_look_back_is_caught_up_once_and_then_left_to_triggers(owner):
+    plan, now = _aged_goal(owner, days_old=5, last_message_days_ago=2)
+    progress = {}
+    config = _config()
+    ready = goal_keeper.due(config, progress, now)
+    assert ready == [plan["plan_id"]], "queued for its one catch-up"
+    assert plan["plan_id"] in progress["caught_up"]
+    prompts = []
+
+    def ask(prompt, plan_id):
+        prompts.append(prompt)
+        return ({"steps": {"harness": {"status": "completed", "note": "Evidence: 'Built the harness'"}},
+                 "checkpoint": {"progress": "Harness built, round one run", "next_work": "Round two"}}, {}, "m")
+
+    result = goal_keeper.run_batch(config, {"run_id": "catch-1"}, ready, ask, now=now, full=_full(progress, ready))
+    assert result["outcomes"][plan["plan_id"]][0] == "updated"
+    assert "Built the harness" in prompts[0], "the 2-day-old activity was read, past the 24 h cap"
+    receipt = _receipts("catch-1")[0]
+    assert receipt["outcome"] == "updated" and receipt["progress"] == "Harness built, round one run"
+    goal_keeper.settle(progress, plan["plan_id"], "updated", now)
+    assert goal_keeper.due(config, progress, now + 1000) == [], "idempotent: not queued again"
+
+
+def test_the_catch_up_is_bounded_and_paced_by_the_queue(owner):
+    plans = [_aged_goal(owner, days_old=6, last_message_days_ago=2)[0] for _ in range(5)]
+    progress, now = {}, db.now_ms()
+    config = _config()
+    ready = goal_keeper.due(config, progress, now)
+    assert sorted(ready) == sorted(p["plan_id"] for p in plans)
+    calls = []
+
+    def ask(prompt, plan_id):
+        calls.append(plan_id)
+        return ({"steps": {}, "checkpoint": {"progress": "Caught up", "next_work": "n"}}, {}, "m")
+
+    config["options"]["max_goals_per_run"] = 2
+    done, runs = set(), 0
+    while len(done) < 5 and runs < 5:
+        at = now + runs * 20_000
+        batch = goal_keeper.due(config, progress, at)[:2]
+        result = goal_keeper.run_batch(config, {"run_id": f"pace-{runs}"}, batch, ask, now=at,
+                                       full=_full(progress, batch))
+        for plan_id, (outcome, _) in result["outcomes"].items():
+            goal_keeper.settle(progress, plan_id, outcome, at)
+            done.add(plan_id)
+        assert len(result["outcomes"]) <= 2, "max_goals_per_run per run"
+        runs += 1
+    assert done == {p["plan_id"] for p in plans} and runs == 3
+    assert sorted(calls) == sorted(done), "each goal read exactly once"
+    assert sum(len(_receipts(f"pace-{i}")) for i in range(runs)) == 5, "a receipt for each"
+    assert goal_keeper.due(config, progress, now + 200_000) == []
+
+
+def test_a_failing_catch_up_gets_one_retry_then_only_the_sweep(owner):
+    plan, now = _aged_goal(owner, days_old=10, last_message_days_ago=4)
+    progress, config, calls = {}, _config(), []
+
+    def failing(prompt, plan_id):
+        calls.append(prompt)
+        raise RuntimeError("agy exited 1")
+
+    at = now
+    for _ in range(8):   # eight passes over about seven hours: sweeps included
+        ready = goal_keeper.due(config, progress, at)
+        if ready:
+            result = goal_keeper.run_batch(config, {"run_id": f"fail-{at}"}, ready, failing, now=at,
+                                           full=_full(progress, ready))
+            for plan_id, (outcome, code) in result["outcomes"].items():
+                goal_keeper.settle(progress, plan_id, outcome, at, code)
+        at = max(at + goal_keeper.RETRY_AFTER_MS + 1000, (progress.get("next_sweep_at") or at) + 1000)
+    assert len(calls) == 2, "the catch-up attempt and its one retry, then no full-history call"
+    assert all("Built the harness" in c for c in calls)
+
+
+def test_a_paused_goal_is_not_caught_up(owner):
+    plan, now = _aged_goal(owner, days_old=10, last_message_days_ago=2)
+    _act(plan["plan_id"], "pause", reason="Waiting for Peter")
+    progress = {}
+    assert goal_keeper.due(_config(), progress, db.now_ms()) == []
+    assert plan["plan_id"] not in progress.get("caught_up", {})
+
+
+# ---- stalled goals: a rule, no model call (audit, 14 Nov; review of #330) --------
+
+
+def _boom(prompt, plan_id):
+    raise AssertionError("a stalled goal with nothing new needs no model call")
+
+
+def _seeded(owner, *, days_old=10, last_message_days_ago=4):
+    """A goal the keeper read while it was still active (so its cursor is past the old activity)."""
+    plan, now = _aged_goal(owner, days_old=days_old, last_message_days_ago=last_message_days_ago)
+    goal_keeper.run_batch(_config(), {"run_id": "seed"}, [plan["plan_id"]],
+                          lambda p, pid: ({"steps": {}, "checkpoint": {"progress": "Round one done", "next_work": "n"}}, {}, "m"),
+                          now=now - 3 * DAY, full=frozenset({plan["plan_id"]}))
+    assert task_plans.get(plan["plan_id"])["goal"]["updater"]["progress"] == "Round one done"
+    return plan, now
+
+
+def test_a_goal_idle_three_days_is_marked_once_without_a_model_call(owner):
+    plan, now = _seeded(owner)
+    before = {i["item_id"]: i["status"] for i in task_plans.get(plan["plan_id"])["items"]}
+    found = goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now)
+    assert found and found[2] == "idle"
+    goal_keeper.run_batch(_config(), {"run_id": "stall-1"}, [plan["plan_id"]], _boom, now=now + 1000)
+    mine = task_plans.get(plan["plan_id"])["goal"]["updater"]
+    assert mine["progress"].startswith("Stalled since ") and "no activity" in mine["progress"]
+    assert "days" not in mine["progress"], "no day counter in the line"
+    assert {i["item_id"]: i["status"] for i in task_plans.get(plan["plan_id"])["items"]} == before, "no step invented"
+    receipt = _receipts("stall-1")[0]
+    assert (receipt["outcome"], receipt["reason"], receipt["model"]) == ("stalled", "idle", "rule")
+    assert task_plans.get(plan["plan_id"])["status"] == "active", "never paused, cancelled or completed"
+
+
+def test_the_idle_line_is_not_rewritten_the_next_day(owner):
+    plan, now = _seeded(owner)
+    goal_keeper.run_batch(_config(), {"run_id": "day-1"}, [plan["plan_id"]], _boom, now=now)
+    first = task_plans.get(plan["plan_id"])["goal"]["updater"]
+    goal_keeper.run_batch(_config(), {"run_id": "day-2"}, [plan["plan_id"]], _boom, now=now + DAY)
+    assert _receipts("day-2")[0]["outcome"] == "skipped"
+    assert task_plans.get(plan["plan_id"])["goal"]["updater"] == first, "same line, no new write"
+    progress = {"caught_up": {plan["plan_id"]: now}}
+    config = _config()
+    goal_keeper.due(config, progress, now + DAY)
+    assert goal_keeper.due(config, progress, progress["next_sweep_at"] + 1000) == [], "the sweep has nothing to mark"
+
+
+def test_a_turn_that_mentions_a_rate_limit_but_ended_normally_is_not_marked(owner):
+    plan, now = _aged_goal(owner, days_old=2, last_message_days_ago=0.1,
+                           text="Done. The API error and the rate limit from yesterday are fixed.")
+    _turn_ended(owner, at=now - 2 * 3600_000, kind="idle")
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None
+
+
+def test_a_turn_the_host_classified_usage_limit_is_marked_after_an_hour(owner):
+    plan, now = _aged_goal(owner, days_old=2, last_message_days_ago=0.1, text="Working on round two")
+    _turn_ended(owner, at=now - 2 * 3600_000, reason="usage_limit")
+    found = goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now)
+    assert found and found[2] == "usage_limit" and "usage limit" in found[1]
+    _turn_ended(owner, at=now - 10 * MIN, reason="usage_limit")
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "an hour's grace first"
+    _turn_ended(owner, at=now - 2 * 3600_000 + 1, reason="server_restart")
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "a restart is not a stall"
+
+
+def test_only_the_owners_own_last_turn_can_mark(owner, helper):
+    plan, now = _aged_goal(owner, days_old=2, last_message_days_ago=0.1, text="Waiting for the designer")
+    _turn_ended(helper, at=now - 2 * 3600_000, reason="usage_limit")
+    _turn_ended(owner, at=now - 3 * 3600_000, kind="idle")
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "a helper's limit stop is not the owner's"
+    _message(owner, "user", "[from designer] I hit my usage limit", at=now - 2 * 3600_000)
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "a quoted limit is not a turn end"
+
+
+def test_a_goal_waiting_on_a_timer_dependency_or_running_job_is_not_stalled(owner):
+    plan, now = _aged_goal(owner, days_old=10, last_message_days_ago=5)
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now), "idle without anything to wait on"
+    _act(plan["plan_id"], "checkpoint", progress="Waiting for the reviewer", next_work="Merge",
+         continuation={"kind": "timer", "due_at": now + 10 * DAY})
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "a timer ten days out"
+    goal = json.loads(_row(plan["plan_id"])["goal_json"])
+    goal["continuation"] = {"state": "waiting", "reason": "Waiting for build", "dependency_key": "k"}
+    db.conn().execute("UPDATE task_plans SET goal_json=? WHERE plan_id=?", (json.dumps(goal), plan["plan_id"]))
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "waiting on a dependency"
+    goal["continuation"] = {"state": "ready", "reason": ""}
+    db.conn().execute("UPDATE task_plans SET goal_json=? WHERE plan_id=?", (json.dumps(goal), plan["plan_id"]))
+    cols = [r[1] for r in db.conn().execute("PRAGMA table_info(background_jobs)")]
+    values = {"job_id": "job-1", "agent_id": owner, "session": "jonatan", "kind": "build", "title": "Long build", "status": "running", "updated_at": now - DAY,
+              "started_at": now - 5 * DAY}
+    db.conn().execute(f"INSERT INTO background_jobs({','.join(k for k in values if k in cols)}) VALUES "
+                      f"({','.join('?' for k in values if k in cols)})", [v for k, v in values.items() if k in cols])
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "a job still running"
+
+
+def test_an_active_goal_with_recent_work_is_not_stalled(owner):
+    plan, now = _aged_goal(owner, days_old=5, last_message_days_ago=0.5, text="Round three judged")
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None
+
+
+def test_a_paused_goal_is_never_marked_stalled(owner):
+    plan, now = _aged_goal(owner, days_old=10, last_message_days_ago=5)
+    _act(plan["plan_id"], "pause", reason="Waiting for Peter")
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), db.now_ms()) is None
+
+
+def test_the_hourly_sweep_queues_a_stalled_goal_not_yet_marked(owner):
+    plan, now = _seeded(owner)
+    progress = {"caught_up": {plan["plan_id"]: now}}
+    config = _config()
+    assert goal_keeper.due(config, progress, now) == []
+    assert goal_keeper.due(config, progress, progress["next_sweep_at"] + 1000) == [plan["plan_id"]]
+
+
+def test_a_stalled_goal_with_new_text_keeps_the_model_update_and_says_it_stalled(owner):
+    plan, now = _aged_goal(owner, days_old=10, last_message_days_ago=4)
+    goal_keeper.run_batch(_config(), {"run_id": "both"}, [plan["plan_id"]],
+                          lambda p, pid: ({"steps": {}, "checkpoint": {"progress": "Round one done", "next_work": "n"}}, {}, "m"),
+                          now=now, full=frozenset({plan["plan_id"]}))
+    progress = task_plans.get(plan["plan_id"])["goal"]["updater"]["progress"]
+    assert progress.startswith("Stalled since ") and progress.endswith("Round one done")
