@@ -59,7 +59,7 @@ STALL_ERROR_GRACE_MS = 3600 * 1000   # a stopped turn gets an hour to recover fi
 # the state log's interrupted reason), never the words of a message: 7% of final
 # messages mention a rate limit or an API error (review of #330).
 STALL_USAGE_REASONS = frozenset({"usage_limit", "account_plan"})
-STALL_PROVIDER_REASONS = frozenset({"auth", "transient", "runner_exit", "timeout", "unknown"})
+STALL_PROVIDER_REASONS = frozenset({"auth", "transient", "connection", "runner_exit", "timeout", "unknown"})
 DELTA_CHARS = 40_000
 # The prompt is one argv entry, which Linux caps at 128 KiB.
 PROMPT_BYTES = 100_000
@@ -154,9 +154,16 @@ def stall(con, plan_row, now: int) -> tuple[int, str, str] | None:
         return None
     # A goal that is properly waiting is not stalled: a dependency or a timer in
     # its continuation, or a job of the owner or a helper still running.
+    # A dependency whose deadline has passed is no longer a wait, like an overdue
+    # timer: goal recovery normally moves such a goal on at its deadline
+    # (task_goal_recovery: 'External dependency deadline passed'), so one still
+    # 'waiting' past it is one recovery does not visit; after the idle days it is idle.
     continuation = _goal(plan_row).get("continuation") or {}
     due_at = continuation.get("due_at")
-    if continuation.get("state") == "waiting" or (isinstance(due_at, (int, float)) and due_at > now):
+    has_deadline = isinstance(due_at, (int, float)) and due_at > 0
+    if has_deadline and due_at > now:
+        return None
+    if continuation.get("state") == "waiting" and not has_deadline:
         return None
     owner = plan_row["agent_id"]
     ids = [owner, *(h["agent_id"] for h in _helpers(con, owner, int(plan_row["created_at"])))]
@@ -686,6 +693,9 @@ def error_code(exc: BaseException) -> str:
         return "goal_closed"
     if "without a checkpoint" in text or isinstance(exc, json.JSONDecodeError):
         return "parse_error"
+    from . import model_fallbacks
+    if isinstance(exc, model_fallbacks.ProviderFailure) and exc.category == "timeout":
+        return "timeout"
     match = re.search(r"agy exited (-?\d+)", text)
     if match:
         return f"agy_exit_{match.group(1)}"
