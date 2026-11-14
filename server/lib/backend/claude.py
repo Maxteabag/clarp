@@ -311,6 +311,9 @@ class ClaudeBackend(Backend):
     supports_transcript_tail_apply = True
     # Eligibility only: source incarnation and consumed-prefix hash still decide.
     supports_frozen_transcript_prefix = True
+    # A turn opens at its prompt; the user records the harness injects into a
+    # turn are dropped by the parser and open none.
+    transcript_turn_opens_at_its_prompt = True
     supports_mcp = CatalogueDefault('supports_mcp')
     supports_usage = CatalogueDefault('supports_usage')
     login_kind = CatalogueDefault('login_kind')

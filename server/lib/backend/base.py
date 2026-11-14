@@ -97,6 +97,10 @@ class Backend:
     supports_transcript_tail_apply: bool = False
     # Eligibility only: source incarnation and consumed-prefix hash still decide.
     supports_frozen_transcript_prefix = False
+    # A record that may open a user turn in this backend's transcript does so
+    # exactly when, parsed alone, it is a user turn (transcript_incremental
+    # .boundary_candidates). Not so where a turn opens at a record of its own.
+    transcript_turn_opens_at_its_prompt = False
     supports_routing: bool = CatalogueDefault('supports_routing')
     efforts: tuple[str, ...] = CatalogueDefault('efforts')
     aliases: tuple[str, ...] = CatalogueDefault('aliases')
