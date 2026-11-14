@@ -332,8 +332,16 @@ last one costs a read of the whole file. It is checked:
 
 - at the first tail after a Host start (this process has not read the bytes);
 - whenever the size is unchanged but the mtime moved;
-- at every audit, which is a full import (`audit_every` imports or
-  `audit_seconds`) and compares the bytes it reads with the stored digest;
+- at every audit (`audit_every` imports or `audit_seconds`). The audit of a
+  grown file is a full import, which compares the bytes it reads with the
+  stored digest. With `audit_grown_by_digest = true` it is that comparison
+  alone: the imported bytes are read once and compared, and the import is
+  then a tail, which starts the audit's clock again (`audited_by_digest` in
+  the journal beside `tail_applied`). A mismatch is a full import either
+  way. Everything that refuses a tail still does. What the full import did
+  besides, and this does not: replay every turn, which also put right any
+  row a tail had left wrong, and move the boundary up to the last turn. Off
+  by default;
 - at every tail when `digest_every_tail = true` in `[transcript_shadow]`,
   which is how every tail worked before.
 
