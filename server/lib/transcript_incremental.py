@@ -207,7 +207,15 @@ class _RangePath(pathlib.PosixPath):
                 def readinto(self, buffer):
                     count = super().readinto(buffer)
                     if count:
-                        record["hash"].update(memoryview(buffer)[:count])
+                        view = memoryview(buffer)[:count]
+                        mark = record.get("mark")
+                        if mark is not None and record["bytes"] < mark <= record["bytes"] + count:
+                            # The digest of the first ``mark`` bytes, on the way past.
+                            cut = mark - record["bytes"]
+                            record["hash"].update(view[:cut])
+                            record["at_mark"] = record["hash"].hexdigest()
+                            view = view[cut:]
+                        record["hash"].update(view)
                         record["bytes"] += count
                     return count
 
@@ -215,7 +223,10 @@ class _RangePath(pathlib.PosixPath):
             try:
                 stat = os.fstat(raw._file.fileno())
                 record["file"] = (stat.st_dev, stat.st_ino)
+                record["stat"] = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
                 record["opens"] += 1
+                if record.get("mark") == 0:
+                    record["at_mark"] = record["hash"].hexdigest()      # of no bytes
             except BaseException:
                 raw.close()
                 raise
@@ -676,6 +687,10 @@ _DEFAULTS = {
     # bytes read once and compared with the stored digest. False: it is
     # imported in full, as a grown file whose audit is due always is.
     "audit_unchanged_by_digest": True,
+    # Off unless switched on: a full import takes the file's digest from the
+    # bytes its parser was handed (_parsed_digests) instead of reading the
+    # file a second time, when the file did not change while it was parsed.
+    "full_digest_while_parsing": False,
     # What a tail may find changed among the database rows its frontier was
     # published with (lib.message_carry gives each rule's reason). False: a
     # change of that kind is a full import, as before the rule existed.
@@ -1549,9 +1564,42 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     return result
 
 
+def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
+    """(digest at the earlier import's size, digest of the parsed bytes, the
+    running hash) from the parse's own read, when a second read of the file
+    would give the same: ``_read_digest`` without reading. None when it must
+    be read.
+
+    The parser was handed bytes [0, before.size) and they were hashed as it
+    took them (``_RangePath``). Those are the file's bytes when the file did
+    not change while it was read: the same file, the same size, the same
+    modification and change times as when it was opened. Size or mtime alone
+    would let a rewrite in place that restores the mtime through; the change
+    time cannot be set back. A file that grew or was touched meanwhile is
+    read again, as it always was: growth cannot be told from a rewrite
+    without reading."""
+    if parsed_read is None or parsed_evidence is None or parsed_read.get("stat") is None:
+        return None
+    try:
+        now = os.stat(path)
+    except OSError:
+        return None
+    opened = parsed_read["stat"]
+    if (now.st_dev, now.st_ino) != (before.device, before.inode) \
+            or (now.st_size, now.st_mtime_ns, now.st_ctime_ns) != opened \
+            or (opened[0], opened[1]) != (before.size, before.mtime_ns):
+        return None
+    current = parsed_evidence[1]
+    if earlier is None:
+        return current, current, parsed_read["hash"].copy()
+    if parsed_read.get("mark") != earlier[0] or parsed_read.get("at_mark") is None:
+        return None             # the earlier import's size was not the one marked
+    return parsed_read["at_mark"], current, parsed_read["hash"].copy()
+
+
 def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id,
                                      turns, before, conf, *, reason_token=None,
-                                     parsed_evidence=None, imported=None):
+                                     parsed_evidence=None, imported=None, parsed_read=None):
     from . import db, message_carry, message_store, message_writes
     key = _tail_key(path, agent_id, backend_session_id)
     revision = parser_version(backend)
@@ -1597,7 +1645,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                 # read are still what they were (the audit of the bytes a
                 # tail does not read again). The full import goes on either way.
                 earlier = _imported_before(imported, before, agent_id, backend_session_id, path)
-                previous, current_hash, hasher = _read_digest(
+                previous, current_hash, hasher = _parsed_digests(
+                    parsed_read, parsed_evidence, before, earlier, path) or _read_digest(
                     path, earlier[0] if earlier else before.size, before.size)
                 if earlier and previous != earlier[1]:
                     _prefix_changed(path, "imported_bytes", imported)
@@ -1809,13 +1858,21 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                 parse_path = _RangePath(path, start=0, end=before.size)
                 parse_path._full_read = {"hash": hashlib.blake2b(digest_size=16),
                                          "bytes": 0, "opens": 0, "file": None}
+                if bool(conf.get("full_digest_while_parsing")):
+                    # The full import also wants the digest of the bytes an
+                    # earlier import read; say where they end before parsing.
+                    earlier = _imported_before(diagnostic.get("imported"), before, agent_id,
+                                               backend_session_id, path)
+                    parse_path._full_read["mark"] = earlier[0] if earlier else None
             turns = parse(parse_path)
             parsed_evidence = None
+            parsed_read = None
             if parse_path is not path:
                 read = parse_path._full_read
                 if (read["opens"] == 1 and read["bytes"] == before.size
                         and read["file"] == (before.device, before.inode)):
                     parsed_evidence = (before.size, read["hash"].hexdigest(), *read["file"])
+                    parsed_read = read if "mark" in read else None
                 else:
                     # Abnormal shrink/replacement/unrecognized parser read:
                     # retain the legacy complete parse/store response semantics.
@@ -1826,7 +1883,8 @@ def import_transcript(*, backend: str, path: pathlib.Path, agent_id: str,
                                                  turns, before, conf,
                                                  reason_token=diagnostic.get("token"),
                                                  parsed_evidence=parsed_evidence,
-                                                 imported=diagnostic.get("imported"))
+                                                 imported=diagnostic.get("imported"),
+                                                 parsed_read=parsed_read)
                 retained = _TAIL_STATES.peek(_tail_key(path, agent_id, backend_session_id))
                 admission.retained = (retained is not None
                                       and retained[0] == parser_version(backend)
