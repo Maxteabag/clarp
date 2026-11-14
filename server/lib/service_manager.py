@@ -348,13 +348,16 @@ def _directories_refusal(
             action, "foreign_directories",
             f"{definition} serves the share directory {named_share or '(none)'}, "
             f"this process works on {share}")
-    # lib.db's rule for a Host; an admin command opens no database, so only one
-    # it was explicitly given can be foreign.
-    database = os.environ.get("CLAUDE_PWA_DB") or (
-        str(xdg.data_dir() / "state.sqlite") if host else "")
+    if not host:
+        # The admin path installs and restarts what lives in its share
+        # directory and opens no database of its own: a CLAUDE_PWA_DB it
+        # inherited from its caller says nothing about what it acts on.
+        return None
+    # lib.db's rule for where a Host keeps its state.
+    database = os.environ.get("CLAUDE_PWA_DB") or str(xdg.data_dir() / "state.sqlite")
     named_database = environment.get("CLAUDE_PWA_DB") or str(
         Path(named_share) / "state.sqlite")
-    if database and not _same_path(database, named_database):
+    if not _same_path(database, named_database):
         return refuse(
             action, "foreign_directories",
             f"{definition} serves the database {named_database}, "

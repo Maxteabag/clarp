@@ -226,7 +226,7 @@ and raises `ServiceActionRefused` for everyone else, before any command runs:
 | Caller | What proves it |
 |---|---|
 | The Host itself (saving a voice provider restarts it; `POST /server-update`) | It runs inside `clarp.service`: its kernel cgroup on Linux (`/proc/self/cgroup` under `user@<uid>.service`), launchd's `XPC_SERVICE_NAME` on macOS. **And** the installed definition of that unit names the share directory and database this process works on. |
-| The admin path (`install.sh`, `clarp-admin update`, `rollback`, `network`, `tts`, `uninstall`) | The code says so (`restart(admin=True)`, or the install and uninstall functions). **And** a definition exists where this process looks, and each names its share directory (and its database, when `CLAUDE_PWA_DB` is set). **And** the service manager loaded the units from those very files, or does not know them yet (a first installation). |
+| The admin path (`install.sh`, `clarp-admin update`, `rollback`, `network`, `tts`, `uninstall`) | The code says so (`restart(admin=True)`, or the install and uninstall functions). **And** a definition exists where this process looks, and each names its share directory. **And** the service manager loaded the units from those very files, or does not know them yet (a first installation). |
 
 A Host with its own state directory (`tests/qa/host.py`, a development Host on
 another port, a Host started by hand beside the installed one) is none of
