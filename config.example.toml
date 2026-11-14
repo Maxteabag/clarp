@@ -283,6 +283,9 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #                                   # bytes read once and compared with the stored digest and
 #                                   # is then imported as a tail. false: it is imported in
 #                                   # full. Off by default.
+# audit_full_every = 8              # with audit_grown_by_digest: every Nth due audit of a
+#                                   # conversation is still a full import (it replays every
+#                                   # turn), the others are by digest. 1: every audit is full.
 # audit_unchanged_by_digest = true  # an unchanged file whose audit is due (after a Host
 #                                   # start) has its bytes read once and compared with the
 #                                   # stored digest. false: it is imported in full.
