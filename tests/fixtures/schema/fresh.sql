@@ -1,4 +1,4 @@
--- user_version 126
+-- user_version 127
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -116,6 +116,12 @@ CREATE INDEX idx_goal_documents_latest ON task_goal_documents(plan_id, name, rev
 
 -- index idx_goal_events_plan on goal_events
 CREATE INDEX idx_goal_events_plan ON goal_events(plan_id, event_id);
+
+-- index idx_goal_keeper_receipts_plan on goal_keeper_receipts
+CREATE INDEX idx_goal_keeper_receipts_plan ON goal_keeper_receipts(plan_id, created_at);
+
+-- index idx_goal_keeper_receipts_run on goal_keeper_receipts
+CREATE INDEX idx_goal_keeper_receipts_run ON goal_keeper_receipts(run_id);
 
 -- index idx_goal_runs_goal on goal_runs
 CREATE INDEX idx_goal_runs_goal ON goal_runs(goal_id, started_at DESC);
@@ -427,6 +433,9 @@ CREATE INDEX oracle_threads_owner ON oracle_threads(owner_principal, contact, up
 (implicit);
 
 -- index sqlite_autoindex_goal_events_1 on goal_events
+(implicit);
+
+-- index sqlite_autoindex_goal_keeper_receipts_1 on goal_keeper_receipts
 (implicit);
 
 -- index sqlite_autoindex_goal_runs_1 on goal_runs
@@ -1202,6 +1211,26 @@ CREATE TABLE goal_events (
     plan_revision INTEGER,
     idempotency_key TEXT NOT NULL,
     UNIQUE (plan_id, idempotency_key)
+);
+
+-- table goal_keeper_receipts on goal_keeper_receipts
+CREATE TABLE goal_keeper_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    steps_json TEXT NOT NULL DEFAULT '[]',
+    progress TEXT NOT NULL DEFAULT '',
+    next_work TEXT NOT NULL DEFAULT '',
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    model TEXT NOT NULL DEFAULT '',
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    duration_ms INTEGER,
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
 );
 
 -- table goal_runs on goal_runs

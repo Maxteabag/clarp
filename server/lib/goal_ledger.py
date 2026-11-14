@@ -176,8 +176,17 @@ def record_goal_save(con, plan_id: str, old_goal: dict, new_goal: dict) -> None:
         append(con, plan_id, kind=kind, key=f"history:{index}",
                subject=_history_subject(entry), actor=this_actor,
                reason=str(detail.get("reason") or ""), prior=before or None, new=after,
-               plan_revision=entry.get("revision"), at=entry.get("at"))
+               plan_revision=entry.get("revision"), at=entry.get("at"),
+               source_refs=_entry_refs(detail.get("source_refs")))
         prior = {}
+
+
+def _entry_refs(value) -> list[str]:
+    """A history entry's own source refs (the Goal keeper's update names the
+    messages, jobs and goal events it read), bounded like any ledger entry."""
+    if not isinstance(value, list):
+        return []
+    return [str(ref)[:200] for ref in value if isinstance(ref, str) and ref.strip()][:20]
 
 
 def _attribute(actor: dict, owner: str) -> dict:

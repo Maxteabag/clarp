@@ -91,6 +91,25 @@
                 "integer",
                 "null"
               ]
+            },
+            "last_receipt": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "goal_updater: the Goal keeper's newest receipt for this goal (ids and short notes only).",
+              "properties": {
+                "run_id": {"type": "string"},
+                "outcome": {"type": "string", "enum": ["updated", "unchanged", "held_by_evidence_rule", "refused_owner_changed", "failed", "skipped", "cancelled"]},
+                "reason": {"type": "string"},
+                "steps": {"type": "array", "items": {"type": "object", "properties": {"item_id": {"type": "string"}, "from": {"type": ["string", "null"]}, "to": {"type": "string"}, "note": {"type": "string"}}}},
+                "model": {"type": "string"},
+                "input_tokens": {"type": ["integer", "null"]},
+                "output_tokens": {"type": ["integer", "null"]},
+                "duration_ms": {"type": ["integer", "null"]},
+                "error": {"type": "string"},
+                "created_at": {"type": "integer"}
+              }
             }
           }
         }

@@ -391,6 +391,49 @@ def demand_result_json(run_id: str, c=None) -> str | None:
     return row[0] if row else None
 
 
+# ---- Goal keeper receipts ----------------------------------------------------
+
+GOAL_KEEPER_RECEIPTS_PER_GOAL = 200
+
+
+def insert_goal_keeper_receipt(c, receipt: dict) -> None:
+    """Store one receipt and keep a goal's newest ``GOAL_KEEPER_RECEIPTS_PER_GOAL``."""
+    c.execute(
+        "INSERT OR REPLACE INTO goal_keeper_receipts(receipt_id,run_id,plan_id,title,outcome,reason,"
+        "steps_json,progress,next_work,source_refs_json,model,input_tokens,output_tokens,"
+        "duration_ms,error,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (receipt["receipt_id"], receipt["run_id"], receipt["plan_id"], receipt.get("title", ""),
+         receipt["outcome"], receipt.get("reason", ""), json.dumps(receipt.get("steps") or []),
+         receipt.get("progress", ""), receipt.get("next_work", ""),
+         json.dumps(receipt.get("source_refs") or []), receipt.get("model", ""),
+         receipt.get("input_tokens"), receipt.get("output_tokens"), receipt.get("duration_ms"),
+         receipt.get("error", ""), receipt["created_at"]))
+    c.execute(
+        "DELETE FROM goal_keeper_receipts WHERE plan_id=? AND receipt_id NOT IN ("
+        "SELECT receipt_id FROM goal_keeper_receipts WHERE plan_id=? "
+        "ORDER BY created_at DESC, receipt_id DESC LIMIT ?)",
+        (receipt["plan_id"], receipt["plan_id"], GOAL_KEEPER_RECEIPTS_PER_GOAL))
+
+
+def _receipt(row) -> dict:
+    value = dict(row)
+    value["steps"] = json.loads(value.pop("steps_json") or "[]")
+    value["source_refs"] = json.loads(value.pop("source_refs_json") or "[]")
+    return value
+
+
+def goal_keeper_receipts_for_run(run_id: str, c=None) -> list[dict]:
+    return [_receipt(r) for r in _c(c).execute(
+        "SELECT * FROM goal_keeper_receipts WHERE run_id=? ORDER BY created_at, receipt_id",
+        (run_id,)).fetchall()]
+
+
+def goal_keeper_receipts_for_plan(plan_id: str, limit: int = 20, c=None) -> list[dict]:
+    return [_receipt(r) for r in _c(c).execute(
+        "SELECT * FROM goal_keeper_receipts WHERE plan_id=? ORDER BY created_at DESC, receipt_id DESC "
+        "LIMIT ?", (plan_id, max(1, min(int(limit), GOAL_KEEPER_RECEIPTS_PER_GOAL)))).fetchall()]
+
+
 def prune_completed_runs(c, *, run_glob: str, finished_before: int, limit: int) -> int:
     """Delete at most `limit` completed runs whose id matches `run_glob` and
     that finished before `finished_before`, with their demand rows. A run
