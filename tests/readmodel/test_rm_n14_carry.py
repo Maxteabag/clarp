@@ -573,3 +573,31 @@ def test_a_new_message_is_a_full_import_when_an_old_reply_reads_the_latest_user_
         assert world.imported() == ("full_carry_inputs_changed", ["latest_user_row"])
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == ("tail_applied", [])
+
+
+# ---- what an import asks SQLite for --------------------------------------------------
+
+@BACKENDS
+def test_a_tail_takes_the_send_rows_and_the_latest_user_row_from_the_rows_it_read(
+        tmp_path, backend):
+    """A tail reads every row of the session for the frontier's record (at the
+    guard, under the write lock, at publication). The /send rows and the
+    latest user row are among them, so it does not ask SQLite for those two
+    again: no index holds source_file or role, and each asking fetched every
+    row of the session from the table. A full import prepares without the
+    rows and asks as before. The pair with the full replay is what shows the
+    answers are the same ones."""
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("first", "words nobody said before", at=FAR, trace="a-turn")
+        world.turn_row("a-turn", at=FAR)
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == ("tail_applied", [])
+        reads = world.report["session_reads"]
+        assert (reads["sends"], reads["latest_user"]) == (0, 0)
+        assert reads["every_row"] >= 2
+        world.send("again", "synthetic request 2", at=FAR + 500)        # the words of an old turn
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
+        reads = world.report["session_reads"]
+        assert reads["sends"] == reads["latest_user"] == 2

@@ -136,6 +136,32 @@ value, with the rows read at publication; a full import, or a tail that
 changed a row of the first part, hashes everything and moves the base up to
 the mark.
 
+### What the rows cost to read
+
+A tail reads every row of the session three times: at the guard, under the
+write lock, and at publication. On a Host whose database fits its memory map
+that is nearly free. On one whose database is larger (laptopstudio: 7 GB
+against a 1 GiB map and an 8 MB cache) every row fetched from the table is a
+counted read of a page, about 4 KB a row, so a session of 9,500 rows is
+37 MB a pass.
+
+The import also needs the session's `/send` rows and its latest user row. No
+index holds `source_file` or `role`, so asking SQLite for either fetches
+every row of the session from the table again and keeps a few, or one. Where
+the rows were read anyway the two answers are taken from them
+(`message_import_common._session_parts`): a tail then reads the rows three
+times and not nine. The answers are the statements' own, to the row. Both
+statements order by keys that end in `seq`, which is unique within a session,
+so neither order has a tie; the values are compared as SQLite compares them
+(NULL, numbers, text by its bytes) and `LIKE 'client:%'` is matched without
+regard to ASCII case, as SQLite does. A blob where text belongs is not
+imitated: then the statements are asked. `tests/unit/test_import_session_parts.py`
+pairs the two on generated rows.
+
+A full import prepares without reading the rows, so its own preparation and
+its revalidation under the lock still ask both statements, and every import
+ends by asking for the session's live rows the same way.
+
 ### When a tail gives the writer away
 
 An import's batch ends after `IMPORT_COMMIT_EVERY` rows or
