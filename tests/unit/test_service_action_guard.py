@@ -189,8 +189,13 @@ FOREIGN = {"share": _foreign_share, "database": _foreign_database,
            "config-home": _foreign_config_home, "qa-host": _qa_host_environment}
 
 
-@pytest.mark.parametrize("action", sorted(ACTIONS))
-@pytest.mark.parametrize("foreign", sorted(FOREIGN))
+# A database variable alone makes a Host foreign, not the admin path (it opens
+# no database and is judged by its share directory; see the admin tests below).
+FOREIGN_CASES = [(foreign, action) for foreign in sorted(FOREIGN) for action in sorted(ACTIONS)
+                 if not (foreign == "database" and action in ADMIN_ACTIONS)]
+
+
+@pytest.mark.parametrize("foreign, action", FOREIGN_CASES)
 @pytest.mark.parametrize("inside_unit", [True, False])
 def test_a_host_with_foreign_directories_never_reaches_the_service_manager(
         installed, tmp_path, refusals, action, foreign, inside_unit):
@@ -452,21 +457,25 @@ def test_the_admin_path_needs_the_managers_answer(installed, answer):
     assert manager.acted == []
 
 
-def test_an_admin_command_given_a_foreign_database_is_refused(installed, tmp_path):
-    installed.monkeypatch.setenv("CLAUDE_PWA_DB", str(tmp_path / "scratch.sqlite"))
+@pytest.mark.parametrize("database", ["inherited-foreign", "unset"])
+def test_the_admin_path_is_judged_by_its_share_directory_not_a_database_variable(
+        installed, tmp_path, database):
+    """install.sh exports its share directory but inherits CLAUDE_PWA_DB from
+    whoever ran it (a test run, an agent's shell), and opens no database: the
+    installation it acts on is the one in its share directory."""
+    if database == "unset":
+        installed.monkeypatch.delenv("CLAUDE_PWA_DB")
+    else:
+        installed.monkeypatch.setenv("CLAUDE_PWA_DB", str(tmp_path / "callers/state.sqlite"))
     manager = installed.manager()
-    with pytest.raises(service_manager.ServiceActionRefused) as refused:
-        service_manager.restart(runner=manager, admin=True)
-    assert refused.value.reason == "foreign_directories"
-    assert manager.calls == []
-
-
-def test_an_admin_command_without_a_database_in_its_environment_still_acts(installed):
-    """install.sh run from a shell has no CLAUDE_PWA_DB; it opens no database."""
-    installed.monkeypatch.delenv("CLAUDE_PWA_DB")
-    manager = installed.manager()
-    service_manager.restart(runner=manager, admin=True)
+    service_manager.install_and_restart(runner=manager)
     assert ["systemctl", "--user", "restart", "clarp.service"] in manager.acted
+    # A Host is another matter: it works on that database.
+    refusal = service_manager.host_refusal("restart")
+    if database == "unset":
+        assert refusal is None
+    else:
+        assert refusal.reason == "foreign_directories" and "database" in refusal.detail
 
 
 def test_a_runtime_definition_of_another_installation_refuses_the_admin(installed, tmp_path):
@@ -595,6 +604,21 @@ def test_macos_admin_path_acts_for_its_own_jobs_and_for_a_first_installation(ins
     first = Manager({})                                              # nothing loaded
     service_manager.stop_and_disable(runner=first)
     assert [call[:2] for call in first.acted] == [["launchctl", "bootout"]] * 2
+
+
+def test_macos_job_whose_print_names_no_path_counts_as_not_loaded(installed_mac):
+    """launchctl's print text is not a stable format, and the installer tests'
+    fake launchctl prints nothing: that is a first installation, not a refusal."""
+    class Silent(Manager):
+        def __call__(self, argv, **_kwargs):
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+    manager = Silent()
+    installed_mac.monkeypatch.setenv("XPC_SERVICE_NAME", "0")
+    installed_mac.monkeypatch.setenv("CLAUDE_PWA_DB", "/a/callers/state.sqlite")
+    service_manager.install_and_restart(runner=manager)
+    assert ["launchctl", "kickstart", "-k",
+            f"{service_manager.launchd_domain()}/com.maxteabag.clarp.server"] in manager.acted
 
 
 # ---- tests/qa/host.py -------------------------------------------------------
