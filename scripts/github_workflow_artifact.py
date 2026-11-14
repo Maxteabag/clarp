@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create and update a GitHub Actions workflow-run artifact."""
 from __future__ import annotations
-import argparse, json, pathlib, subprocess, sys, time
+import argparse, json, pathlib, re, subprocess, sys, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from agent_artifacts import _request  # type: ignore
@@ -10,7 +10,7 @@ from lib import service_manager  # type: ignore
 def snapshot(repo: str, run_id: str, attempt: int | None = None) -> dict:
     out = subprocess.run(["gh","run","view",run_id,"--repo",repo,*(["--attempt",str(attempt)] if attempt else []),"--json","databaseId,url,name,status,conclusion,jobs,headBranch,headSha,attempt"], text=True, capture_output=True, timeout=30, check=True)
     raw=json.loads(out.stdout); steps=[s for j in raw.get("jobs") or [] for s in j.get("steps") or []]
-    return {"run_attempt":int(raw.get("attempt") or 1),"provider":"github","run_id":str(raw.get("databaseId") or run_id),"run_url":str(raw.get("url") or ""),"workflow_name":str(raw.get("name") or "GitHub Actions"),"repository":repo,"branch":str(raw.get("headBranch") or ""),"commit":str(raw.get("headSha") or ""),"current_step":next((str(s.get("name") or "") for s in steps if s.get("status")=="in_progress"),""),"total_steps":len(steps),"completed_steps":sum(s.get("status")=="completed" for s in steps),"conclusion":str(raw.get("conclusion") or ""),"github_status":str(raw.get("status") or "")}
+    return {"run_attempt":int(raw.get("attempt") or 1),"provider":"github","run_id":str(raw.get("databaseId") or run_id),"run_url":re.sub(r"/attempts/\d+/?$", "", str(raw.get("url") or "")),"workflow_name":str(raw.get("name") or "GitHub Actions"),"repository":repo,"branch":str(raw.get("headBranch") or ""),"commit":str(raw.get("headSha") or ""),"current_step":next((str(s.get("name") or "") for s in steps if s.get("status")=="in_progress"),""),"total_steps":len(steps),"completed_steps":sum(s.get("status")=="completed" for s in steps),"conclusion":str(raw.get("conclusion") or ""),"github_status":str(raw.get("status") or "")}
 def state(p: dict) -> str:
     if p.get("github_status")!="completed": return "active"
     return "completed" if p.get("conclusion") in {"success","neutral","skipped"} else "failed"
