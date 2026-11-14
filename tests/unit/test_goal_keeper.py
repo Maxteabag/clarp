@@ -1193,3 +1193,52 @@ def test_a_stalled_goal_with_new_text_keeps_the_model_update_and_says_it_stalled
                           now=now, full=frozenset({plan["plan_id"]}))
     progress = task_plans.get(plan["plan_id"])["goal"]["updater"]["progress"]
     assert progress.startswith("Stalled since ") and progress.endswith("Round one done")
+
+
+# ---- what the 15-second check reads ---------------------------------------------
+
+
+def test_the_check_for_new_messages_reads_only_the_new_ones(owner, helper):
+    """The keeper asks every 15 seconds, for every open goal, which messages of
+    its agents changed since its last look. No index starts with (agent,
+    updated_at), so the plain condition walked every message those agents ever
+    had: about a gigabyte of pages a pass on a Host with two million messages.
+    The rows are found through an index that holds ``updated_at`` and only
+    those are read."""
+    plan_rows = []
+    for sql in (f"SELECT agent_id, role, phase, sender_agent_id, updated_at FROM messages "
+                f"WHERE {goal_keeper._rows_since('?,?')} ORDER BY updated_at",
+                f"SELECT message_id, agent_id, timestamp, role, text, tools_json, origin, sender_agent_id "
+                f"FROM messages WHERE {goal_keeper._rows_since('?,?', until=True)} ORDER BY timestamp, seq"):
+        steps = [row[3] for row in db.conn().execute(
+            "EXPLAIN QUERY PLAN " + sql, (owner, helper, 0) + ((1,) if "<= ?" in sql else ()))]
+        plan_rows.append(steps)
+        searches = [step for step in steps if "messages" in step and ("SEARCH" in step or "SCAN" in step)]
+        assert any("COVERING INDEX" in step for step in searches), steps
+        assert all("COVERING INDEX" in step or "INTEGER PRIMARY KEY" in step for step in searches), steps
+
+
+def test_the_rewritten_condition_finds_the_rows_the_plain_one_found(owner, helper):
+    base = db.now_ms() - 10_000_000
+    for i in range(60):
+        _message(owner if i % 3 else helper, "assistant" if i % 2 else "user", f"m{i}",
+                 at=base + i * 1000, phase="final" if i % 4 == 1 else None,
+                 sender=helper if i % 5 == 0 else None)
+    key = lambda rows: sorted(repr(tuple(row)) for row in rows)
+    for since in (0, base + 20_500, base + 59_000, base + 10_000_000):
+        plain = db.conn().execute(
+            "SELECT agent_id, role, phase, sender_agent_id, updated_at FROM messages "
+            "WHERE agent_id IN (?,?) AND updated_at > ?", (owner, helper, since)).fetchall()
+        found = db.conn().execute(
+            f"SELECT agent_id, role, phase, sender_agent_id, updated_at FROM messages "
+            f"WHERE {goal_keeper._rows_since('?,?')}", (owner, helper, since)).fetchall()
+        assert key(found) == key(plain)
+        until = base + 40_000
+        plain = db.conn().execute(
+            "SELECT message_id FROM messages WHERE agent_id IN (?,?) AND updated_at > ? "
+            "AND updated_at <= ?", (owner, helper, since, until)).fetchall()
+        found = db.conn().execute(
+            f"SELECT message_id FROM messages WHERE {goal_keeper._rows_since('?,?', until=True)}",
+            (owner, helper, since, until)).fetchall()
+        assert key(found) == key(plain)
+    assert len(db.conn().execute("SELECT 1 FROM messages WHERE agent_id IN (?,?)", (owner, helper)).fetchall()) == 60

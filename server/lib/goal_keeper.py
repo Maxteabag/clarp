@@ -201,6 +201,21 @@ class Activity:
     any_messages: bool = False
 
 
+def _rows_since(marks: str, *, until: bool = False) -> str:
+    """The WHERE clause for "these agents' messages changed since the cursor".
+
+    The rows are found through an index that holds ``updated_at`` beside the
+    agent (``idx_messages_agent_revision``), and only those rows are then read.
+    Asked of the table directly, the same condition reads every message the
+    agents ever had, because no index starts with (agent, updated_at) and the
+    planner then walks the agent's rows one by one. The keeper asks this for
+    every open goal every 15 seconds: on a Host with two million messages that
+    was about a gigabyte of pages a pass; this way it is a few megabytes."""
+    bound = " AND updated_at <= ?" if until else ""
+    return (f"rowid IN (SELECT rowid FROM messages WHERE agent_id IN ({marks}) "
+            f"AND updated_at > ?{bound})")
+
+
 def activity(con, plan_row, agent_ids: list[str], helper_ids: set[str],
              since_ms: int, since_event: int) -> Activity:
     owner = plan_row["agent_id"]
@@ -208,7 +223,7 @@ def activity(con, plan_row, agent_ids: list[str], helper_ids: set[str],
     marks = ",".join("?" * len(agent_ids))
     for r in con.execute(
             f"SELECT agent_id, role, phase, sender_agent_id, updated_at FROM messages "
-            f"WHERE agent_id IN ({marks}) AND updated_at > ? ORDER BY updated_at",
+            f"WHERE {_rows_since(marks)} ORDER BY updated_at",
             (*agent_ids, since_ms)):
         at = int(r["updated_at"])
         found.any_messages = True
@@ -248,8 +263,8 @@ def delta(con, agent_ids: list[str], names: dict[str, str], since_ms: int,
     lines, refs = [], []
     for r in con.execute(
             f"SELECT message_id, agent_id, timestamp, role, text, tools_json, origin, "
-            f"sender_agent_id FROM messages WHERE agent_id IN ({marks}) "
-            f"AND updated_at > ? AND updated_at <= ? ORDER BY timestamp, seq",
+            f"sender_agent_id FROM messages WHERE {_rows_since(marks, until=True)} "
+            f"ORDER BY timestamp, seq",
             (*agent_ids, since_ms, until_ms)):
         parts = []
         text = (r["text"] or "").strip()
