@@ -8,6 +8,7 @@ import hashlib,json,threading,time,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
 from . import janitor_store,hotseat_status
 from .protocol import AgentState
+from .log import log
 
 from .persistence.schema_parts.janitor_autonomy import SCHEMA
 
@@ -269,7 +270,7 @@ def _provider_model_demand(provider: str, now_ms: int, base_seconds: int) -> tup
 
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,goal_ask=None,notice_stream=None):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,goal_ask=None,notice_stream=None,seat_serves=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
         # goal_ask(run, prompt, plan_id) -> (answer, usage, model): the Goal keeper's model call.
         self.goal_ask=goal_ask or (lambda run,prompt,plan_id:model_json(run,prompt,plan_id));self.goal_batch=None
@@ -277,6 +278,10 @@ class AutonomyJanitors:
         # the Hotseat desk's, so the stored desk stays as fresh as this cadence with no read of its own.
         # hotseat_switched(provider, alias) hears of a switch this worker made (the desk marks the account).
         self.hotseat_observe=hotseat_observe;self.hotseat_switched=hotseat_switched
+        # seat_serves(provider, families) tells the runtime which of the wanted model families the
+        # active account serves, so turns parked for them start (runtime_seat_serves). _seat_told is
+        # what it was last told per provider: (alias, families); it hears of a gain only.
+        self.seat_serves=seat_serves;self._seat_told={}
         if hotseat_read is None:
             def hotseat_read(command,provider):return janitor_hotseat.read_accounts(command,provider,observe=self.hotseat_observe)
         self.hotseat_read=hotseat_read;self.hotseat_switch=hotseat_switch
@@ -561,6 +566,7 @@ class AutonomyJanitors:
                         try:self.hotseat_switched(provider,decision['target'])
                         except Exception as exc:hotseat_status.diagnose('hotseatSwitchObserverFailed',f'provider={provider} error={type(exc).__name__}')
                 else:outcome='failed';error=error or f'{provider}: Hotseat did not confirm the switch'
+            self._tell_seat_serves(provider,accounts,decision,switched,req_models)
             _hotseat_receipt('action',lambda:hotseat_status.record_action(provider,decision,mode=options['mode'],switched=switched,now=now,floor_pct=janitor_hotseat.floor_for(options,provider),cadence_s=base,next_due_at=lane_next_run(lane,owner,base,key)))
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
             if repair_text:text=(text+'; ' if text else '')+repair_text
@@ -586,6 +592,27 @@ class AutonomyJanitors:
             if repair_enabled and not self.stop_event.is_set():
                 self.auth_repair.offer(repair_owner,run['run_id'],repair_payload,read_origin=repair_started)
         self.deliver_notifications(owner)
+
+    def _tell_seat_serves(self,provider,accounts,decision,switched,req_models):
+        """After a check: when the account now in use serves a wanted model family that it, or the
+        account before it, did not serve at the last check, tell the runtime. Turns parked for that
+        model while others work start then, instead of waiting for an idle pool or their half hour.
+        Told once per gain: a reading that is wrong costs one relapse, not one every check."""
+        if self.seat_serves is None or not janitor_hotseat.PROVIDERS[provider].model_scoped:return
+        alias=decision.get('target') if switched else decision.get('active')
+        account=next((a for a in accounts if a.get('alias')==alias),None)
+        if not alias or account is None:return
+        families=frozenset(fam for fam,_ in janitor_hotseat._unique_model_specs(req_models) if (janitor_hotseat._account_model_remaining(account,fam) or 0)>0)
+        told_alias,told=self._seat_told.get(provider,(None,frozenset()))
+        gained=families if told_alias!=alias else families-told
+        if gained:
+            try:result=self.seat_serves(provider,sorted(gained))
+            except Exception as exc:
+                hotseat_status.diagnose('hotseatSeatServesFailed',f'provider={provider} error={type(exc).__name__}');return
+            # A runtime from before this call exists answers with no status: it is told at the next check.
+            if not isinstance(result,dict) or result.get('status') not in {'started','nothing_parked'}:return
+            if result.get('started'):log('hotseatSeatServes',f"provider={provider} account={alias} families={','.join(sorted(gained))} started={result['started']}")
+        self._seat_told[provider]=(alias,families)
 
     def label_audit_once(self):
         """Label checker: one Jev request per interval, report only.
@@ -776,3 +803,16 @@ def runtime_recover(provider,owner_id,generation,approval_id=''):
         target=candidates[0]
         accepted=coordinator.request(target.agent_id,target.trace_id,command)
     return {'status':'recovering' if accepted else 'waiting'}
+
+
+def runtime_seat_serves(provider,families):
+    """Runs in the owning runtime: the account in use serves these model families now, by the
+    Hotseat switcher's reading. Turns parked for them while the pool works start."""
+    from . import turn_dispatch
+    if provider not in janitor_hotseat.PROVIDERS or not janitor_hotseat.PROVIDERS[provider].model_scoped:return {'status':'unsupported'}
+    wanted={str(f) for f in families or () if isinstance(f,str)}
+    def serves(model):
+        spec=janitor_hotseat._claude_model_spec(model)
+        return spec is not None and spec[0] in wanted
+    started=turn_dispatch.account_failover(provider).served_now(serves) if wanted else 0
+    return {'status':'started' if started else 'nothing_parked','started':started}
