@@ -97,7 +97,7 @@
                 "object",
                 "null"
               ],
-              "description": "goal_updater: the Goal keeper's newest receipt for this goal (ids and short notes only).",
+              "description": "goal_keeper_receipts (Host 97): the Goal keeper's newest receipt for this goal (ids and short notes only; error is a short code).",
               "properties": {
                 "run_id": {"type": "string"},
                 "outcome": {"type": "string", "enum": ["updated", "unchanged", "held_by_evidence_rule", "refused_owner_changed", "failed", "skipped", "cancelled"]},
