@@ -44,30 +44,32 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   after_revision: int = 0,
                   before_message_id: str = "",
                   limit: int = 100,
-                  include_automated: bool = True) -> list[dict[str, Any]]:
+                  include_automated: bool = True,
+                  extra_backend_session_id: str = "") -> list[dict[str, Any]]:
     params: list[Any] = [agent_id]
     where = "m.agent_id = ?"
-    if backend_session_id:
-        where += " AND m.backend_session_id = ?"
-        params.append(backend_session_id)
+    sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
+    if sessions:
+        where += " AND m.backend_session_id IN (" + ",".join("?" for _ in sessions) + ")"
+        params.extend(sessions)
     if after_revision:
         where += " AND m.revision > ?"
         params.append(int(after_revision))
     if before_message_id:
+        cursor_scope = " AND backend_session_id IN (" + ",".join("?" for _ in sessions) + ")" if sessions else ""
         cursor = conn().execute(
-            """SELECT COALESCE(timestamp, '') AS timestamp, seq
-                 FROM messages
-                WHERE message_id = ? AND agent_id = ?
-                  AND (? = '' OR backend_session_id = ?)""",
-            (before_message_id, agent_id, backend_session_id, backend_session_id),
+            "SELECT COALESCE(timestamp, '') AS timestamp,seq,message_id FROM messages WHERE message_id=? AND agent_id=?" + cursor_scope,
+            (before_message_id, agent_id, *sessions),
         ).fetchone()
         if cursor is None:
             raise UnknownHistoryCursor(before_message_id)
         where += """ AND (
             COALESCE(m.timestamp, '') < ?
             OR (COALESCE(m.timestamp, '') = ? AND m.seq < ?)
+            OR (COALESCE(m.timestamp, '') = ? AND m.seq = ? AND m.message_id < ?)
         )"""
-        params.extend([cursor["timestamp"], cursor["timestamp"], int(cursor["seq"])])
+        params.extend([cursor["timestamp"], cursor["timestamp"], int(cursor["seq"]),
+                       cursor["timestamp"], int(cursor["seq"]), cursor["message_id"]])
     if not include_automated:
         # Apply presentation filtering before LIMIT. Otherwise a busy heartbeat
         # or watcher can fill the entire tail window and make a healthy chat
@@ -89,7 +91,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
     # transcript's assistant turns correctly and removes any seq-collision
     # coupling between the two sources.
     if after_revision:
-        order = "m.revision ASC, COALESCE(m.timestamp, '') ASC, m.seq ASC"
+        order = "m.revision ASC, COALESCE(m.timestamp, '') ASC, m.seq ASC, m.message_id ASC"
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
@@ -116,12 +118,12 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                                    phase, turn_json
                               FROM messages m
                              WHERE {where}
-                             ORDER BY COALESCE(timestamp, '') DESC, seq DESC
+                             ORDER BY COALESCE(timestamp, '') DESC, seq DESC, message_id DESC
                              LIMIT ?
                       ) m
                       LEFT JOIN agents sender
                         ON sender.agent_id = m.sender_agent_id
-                     ORDER BY COALESCE(m.timestamp, '') ASC, m.seq ASC"""
+                     ORDER BY COALESCE(m.timestamp, '') ASC, m.seq ASC, m.message_id ASC"""
     rows = conn().execute(query, tuple(params)).fetchall()
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -570,12 +572,13 @@ def last_chat_message_activity(*, agent_id: str) -> int:
     return int(last_message_head(agent_id=agent_id).get('activity', 0))
 
 
-def latest_revision(*, agent_id: str, backend_session_id: str = "") -> int:
+def latest_revision(*, agent_id: str, backend_session_id: str = "", extra_backend_session_id: str = "") -> int:
     params: list[Any] = [agent_id]
     where = "agent_id = ?"
-    if backend_session_id:
-        where += " AND backend_session_id = ?"
-        params.append(backend_session_id)
+    sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
+    if sessions:
+        where += " AND backend_session_id IN (" + ",".join("?" for _ in sessions) + ")"
+        params.extend(sessions)
     row = conn().execute(
         f"""SELECT MAX(revision) AS revision
               FROM (
@@ -589,15 +592,21 @@ def latest_revision(*, agent_id: str, backend_session_id: str = "") -> int:
 
 
 def requires_replace(*, agent_id: str, backend_session_id: str = "",
-                     after_revision: int = 0) -> bool:
+                     after_revision: int = 0, extra_backend_session_id: str = "") -> bool:
     params: list[Any] = [agent_id]
     where = "agent_id = ?"
-    if backend_session_id:
-        where += " AND backend_session_id = ?"
-        params.append(backend_session_id)
+    sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
+    if sessions:
+        where += " AND backend_session_id IN (" + ",".join("?" for _ in sessions) + ")"
+        params.extend(sessions)
     row = conn().execute(
         f"""SELECT COALESCE(MAX(replace_revision), 0) AS revision
               FROM conversation_heads WHERE {where}""",
         tuple(params),
     ).fetchone()
     return int(row["revision"] or 0) > int(after_revision or 0)
+
+
+def has_system_notices(*, agent_id: str, backend_session_id: str) -> bool:
+    return bool(conn().execute("SELECT 1 FROM messages WHERE agent_id=? AND backend_session_id=? AND origin='system' AND message_id LIKE 'notice:%' LIMIT 1",
+                               (agent_id, backend_session_id)).fetchone())
