@@ -194,6 +194,11 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         if method == "recover_janitor_quota":
             from .janitor_autonomy import runtime_recover
             return {"ok":True,"result":runtime_recover(str(params.get("provider") or ""),str(params.get("owner_id") or ""),params.get("generation"),str(params.get("approval_id") or ""))}
+        if method == "seat_serves":
+            from .janitor_autonomy import runtime_seat_serves
+            families = params.get("families")
+            return {"ok": True, "result": runtime_seat_serves(
+                str(params.get("provider") or ""), families if isinstance(families, list) else [])}
         if method == "cancel_janitor_run":
             from . import turn_dispatch
             try:

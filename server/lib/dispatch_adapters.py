@@ -179,6 +179,14 @@ class DispatchAdapters:
         from .janitor_autonomy import runtime_recover
         return runtime_recover(provider, owner_id, generation, approval_id)
 
+    def seat_serves(self, provider, families):
+        """AutonomyJanitors: parked turns start wherever dispatch runs."""
+        runtime = getattr(self.ctx, "runtime_client", None)
+        if runtime is not None:
+            return runtime.seat_serves(provider, families)
+        from .janitor_autonomy import runtime_seat_serves
+        return runtime_seat_serves(provider, families)
+
     # -- decision delivery ----------------------------------------------------
 
     def deliver_html_form(self, submission: dict) -> None:

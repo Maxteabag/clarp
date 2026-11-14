@@ -308,6 +308,12 @@ class RuntimeClient:
         response = self._request("recover_janitor_quota", {"provider":provider,"owner_id":owner_id,"generation":generation,"approval_id":approval_id})
         return response.get("result", {"status":"runtime_unavailable"})
 
+    def seat_serves(self, provider: str, families: list[str]) -> dict[str, Any]:
+        """The Hotseat switcher's reading: the account in use serves these
+        model families. A runtime from before this method answers not ok."""
+        response = self._request("seat_serves", {"provider": provider, "families": list(families)})
+        return dict(response.get("result") or {}) if response.get("ok") else {"status": "runtime_unavailable"}
+
     def cancel_janitor_run(self, run_id: str) -> dict[str, Any]:
         response = self._request("cancel_janitor_run", {"run_id": run_id})
         if not response.get("ok"):

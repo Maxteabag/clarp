@@ -3189,6 +3189,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
             adapters.decided_heartbeat, apns.send_user_notification,
             notice_stream=ctx.stream,
             recover=adapters.recover_janitor_quota,
+            seat_serves=adapters.seat_serves,
             hotseat_switch_lock=desk.switch_lock if desk is not None else None,
             hotseat_observe=desk.absorb_switcher_read if desk is not None else None,
             hotseat_switched=desk.mark_switched if desk is not None else None))
