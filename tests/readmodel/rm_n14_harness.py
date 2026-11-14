@@ -405,6 +405,28 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     metrics["yield_seq"] = writer.seq
 
                 stack.enter_context(patch.object(message_writes._ImportWriter, "yield_writer", intervene_during_yield))
+            if faults.get("commit_before_checkpoint"):
+                # Another writer commits after the tail's probe pass began to
+                # read and before it publishes: its snapshot is stale. The
+                # write is a settings row no import reads, its value the tick
+                # (it has to change a page: SQLite writes nothing for an
+                # UPDATE that sets a row to what it holds). A test that
+                # compares the lanes gives the reference the same row.
+                publish_checkpoint, committed = message_writes._write_checkpoint, []
+
+                def commit_then_publish(writer, native, *args, **kwargs):
+                    if not writer.locked and not committed:
+                        committed.append(True)
+                        with sqlite3.connect(database) as other:
+                            other.execute(
+                                "INSERT INTO settings(key, value, updated_at) VALUES "
+                                "('lane.other_writer', ?, 0) ON CONFLICT(key) DO UPDATE "
+                                "SET value = excluded.value", (str(tick),))
+                    return publish_checkpoint(writer, native, *args, **kwargs)
+
+                stack.enter_context(patch.object(
+                    message_writes, "_write_checkpoint", commit_then_publish))
+                metrics["probe_commits"] = committed
             if faults.get("single_row_batches"):
                 stack.enter_context(patch.object(message_store, "IMPORT_COMMIT_EVERY", 1))
                 stack.enter_context(patch.object(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9))
