@@ -402,6 +402,10 @@ def due(config: dict, progress: dict, now: int) -> list[str]:
     return ready
 
 
+# Immediate re-reads after an owner conflict, per goal, before it waits for the sweep.
+MAX_CONFLICT_RETRIES = 3
+
+
 def settle(progress: dict, plan_id: str, outcome: str, now: int, error: str = "") -> None:
     """Record how one goal's update ended: done clears its window; a failure is
     retried once after a minute, then left to the sweep; a conflict (the owner
@@ -412,7 +416,14 @@ def settle(progress: dict, plan_id: str, outcome: str, now: int, error: str = ""
         return
     state["last_error"] = error[:300]
     if outcome == "conflict":
-        state["retry_at"] = now + 15_000
+        # The owner wrote meanwhile: read again soon, but only a few times in a row;
+        # then the goal waits for the sweep like any other failure.
+        state["conflicts"] = int(state.get("conflicts") or 0) + 1
+        if state["conflicts"] <= MAX_CONFLICT_RETRIES:
+            state["retry_at"] = now + 15_000
+        else:
+            progress["goals"][plan_id] = {"retry_at": progress.get("next_sweep_at") or now + 3600_000,
+                                          "last_error": error[:300]}
         return
     state["failures"] = int(state.get("failures") or 0) + 1
     if state["failures"] == 1:
@@ -533,10 +544,13 @@ def error_code(exc: BaseException) -> str:
     provider's free text (it is shown on every plan read)."""
     import re
     import sqlite3
+    from . import task_plans
     text = str(exc)
-    if "plan changed" in text:
+    # By the store's own exception types, never by text: a provider's output or
+    # an agent's quote can contain "plan changed" (issue: 240 model calls an hour).
+    if isinstance(exc, task_plans.PlanChanged):
         return "owner_changed_plan"
-    if "goal is closed" in text:
+    if isinstance(exc, task_plans.GoalClosed):
         return "goal_closed"
     if "without a checkpoint" in text or isinstance(exc, json.JSONDecodeError):
         return "parse_error"
