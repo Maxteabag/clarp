@@ -210,6 +210,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v125(con)
         if 0 < version < 126:  # Data only: a new database has no paused goals.
             _migrate_to_v126(con)
+        if version < 127:
+            _migrate_to_v127(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1010,6 +1012,20 @@ def _migrate_to_v125(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
     if "supported_conversation_modes" not in columns:
         con.execute("ALTER TABLE device_tokens ADD COLUMN supported_conversation_modes TEXT NOT NULL DEFAULT ''")
+
+def _migrate_to_v127(con: sqlite3.Connection) -> None:
+    """``goal_keeper_receipts``: one receipt per goal per Goal keeper run. A new table and its
+    two indexes, created if missing, so a rerun is a no-op; older code never reads it, so a
+    rollback needs no down-migration."""
+    start = db_schema._SCHEMA_SQL.index("CREATE TABLE goal_keeper_receipts")
+    tail = "ON goal_keeper_receipts(plan_id, created_at);"
+    end = db_schema._SCHEMA_SQL.index(tail, start) + len(tail)
+    for statement in db_schema._SCHEMA_SQL[start:end].split(";"):
+        statement = statement.strip()
+        if statement:
+            con.execute(statement.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+                        .replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1))
+
 
 def _migrate_to_v126(con: sqlite3.Connection) -> None:
     """Data only: stop the clock of steps on durable goals that were paused before pausing froze

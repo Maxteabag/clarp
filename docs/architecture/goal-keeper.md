@@ -122,3 +122,20 @@ owners' own records.
 ## Goals paused before the install
 
 Pausing freezes a running step's clock: `active_ms` takes the elapsed time and `started_at` is set to NULL. A goal paused before this code still has `started_at` set, so a resume, an owner's step update or the Goal keeper's write would count the whole paused span as active time. Schema step v126 (`db_migrations._migrate_to_v126`, data only) freezes those steps once at install. It freezes from the goal's last `pause` history entry, else the plan's `updated_at`, never from now. It is guarded by `started_at IS NOT NULL`, so a rerun changes nothing. Tested by `test_a_goal_paused_before_the_install_never_counts_its_paused_span` for resume, owner update and keeper write.
+
+
+## Receipts
+
+Every run leaves a receipt for every goal it handled, written or not (Peter, 14 Nov: "a receipt of every action it does"). A receipt is a row in `goal_keeper_receipts` (schema step v127). It holds the run and goal ids, the goal's title, the outcome and why, the steps changed (`{item_id, from, to, note}`, with a `held` entry where a completed claim without evidence was left in progress), the checkpoint text written, the source refs (message ids, job handles, goal events it read), the model, input and output tokens, the duration and any error. It never holds the prompt or transcript text.
+
+| Outcome | When |
+|---|---|
+| `updated` | A step changed, or the keeper's checkpoint text changed |
+| `unchanged` | It read new activity and had nothing new to record |
+| `held_by_evidence_rule` | The only proposed change was a completion without quoted evidence, left in progress |
+| `refused_owner_changed` | The owner changed the plan between read and write; it reads again |
+| `failed` | The model or Antigravity failed, or the answer had no checkpoint |
+| `skipped` | Nothing new since the last update, or the goal closed or its owner left |
+| `cancelled` | The Janitor's configuration changed during the run |
+
+A goal keeps its newest 200 receipts (`janitor_store.GOAL_KEEPER_RECEIPTS_PER_GOAL`). Receipts are readable in three places: under `receipts` in the keeper's run history (`clarp-admin janitor runs clarp-goal-keeper`), with `clarp-goal receipts PLAN_ID [LIMIT]`, and as `plan.updater.last_receipt`. The updater's ledger event (`kind: updater`) now carries the same source refs, so the ledger's own record of a write names what it was based on.

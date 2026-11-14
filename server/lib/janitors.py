@@ -844,6 +844,9 @@ def _public_run(row) -> dict:
                          "after": r["after_label"], "outcome": r["outcome"], "reason": r["reason"],
                          "created_at": r["created_at"]}
                         for r in store.effect_rows(row["run_id"])]
+    receipts = store.goal_keeper_receipts_for_run(row["run_id"])
+    if receipts:  # the Goal keeper's per-goal receipts; other Janitors have none
+        value["receipts"] = receipts
     return value
 
 
