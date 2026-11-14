@@ -215,28 +215,40 @@ an idle boundary. The one-time migration from a pre-runtime release refuses to
 start while an agent is marked busy, so the old monolithic service is never
 silently cut off during installation.
 
-### Who may act on the services
+### Who may touch the services
 
 The two services have fixed names and every process of the user shares one
 service manager, so "restart `clarp.service`" from the wrong process restarts
-the live Host. `service_manager` therefore runs a command against the units for
-two callers only, and refuses, logs (`serviceActionRefused action=… reason=…`)
-and raises `ServiceActionRefused` for everyone else, before any command runs:
+the live Host. Every entry point of `service_manager` that touches a unit, a
+unit file or the service manager therefore first obtains a standing from the
+module's one gate (`_standing`), and its one command runner (`_run`) takes
+nothing else. Without standing the call is refused, logged
+(`serviceActionRefused action=… reason=…`) and raised as
+`ServiceActionRefused` before anything runs or is written:
 
-| Caller | What proves it |
-|---|---|
-| The Host itself (saving a voice provider restarts it; `POST /server-update`) | It runs inside `clarp.service`: its kernel cgroup on Linux (`/proc/self/cgroup` under `user@<uid>.service`), launchd's `XPC_SERVICE_NAME` on macOS. **And** the installed definition of that unit names the share directory and database this process works on. |
-| The admin path (`install.sh`, `clarp-admin update`, `rollback`, `network`, `tts`, `uninstall`) | The code says so (`restart(admin=True)`, or the install and uninstall functions). **And** a definition exists where this process looks, and each names its share directory. **And** the service manager loaded the units from those very files, or does not know them yet (a first installation). |
+| Standing | Entry points | What proves it |
+|---|---|---|
+| `host` | The Host's own restart (saving a voice provider; `POST /server-update` asks the same question) | It runs inside `clarp.service`: its kernel cgroup on Linux (`/proc/self/cgroup` under `user@<uid>.service`), launchd's `XPC_SERVICE_NAME` on macOS. **And** the installed definition names the share directory and database this process works on. |
+| `admin` | `install.sh` and `clarp-admin` (`update`, `rollback`, `network`, `tts`, `uninstall`): `restart(admin=True)`, `install_and_restart`, `restore_after_failed_install`, `stop_and_disable`, `remove_definitions` | The code says so. **And** a definition exists where this process looks, and each names its share directory. **And** the service manager loaded the units from those very files, or does not know them yet (a first installation). |
+| `member` | `launch_detached` (a transient unit), `is_active`, `is_runtime_active` | The installed definition names this process's share directory and database. A refusal answers "not launched" or "not active" instead of raising. |
+| `installation` | `wait_until_ready` | The installed definition names this process's share directory. |
+| `write` | `write_definition` | The share directory written is the process's own, and no definition that serves another share directory is replaced. |
 
 A Host with its own state directory (`tests/qa/host.py`, a development Host on
-another port, a Host started by hand beside the installed one) is none of
+another port, a Host started by hand beside the installed one) has none of
 these: it saves what it was asked to save, schedules no restart and says why
-(`restart_refusal`, [protocol.md](protocol.md)), and its `POST /server-update`
-answers 409. An installation into a scratch home or config directory is
-refused with `foreign_definition` instead of restarting the live Host. A
-process whose directories are foreign never reaches `systemctl` or `launchctl`,
-not even to ask; only a caller with its own matching definitions asks the one
-read-only question (`systemctl --user show -p Id -p LoadState -p FragmentPath`).
+(`restart_refusal`, [protocol.md](protocol.md)), its `POST /server-update`
+answers 409, and it starts no transient unit. An installation into a scratch
+home or config directory is refused with `foreign_definition` instead of
+restarting the live Host. Every refusal but that one is decided from files and
+the kernel; only the admin path, once its own definitions match, asks the
+manager one read-only question
+(`systemctl --user show -p Id -p LoadState -p FragmentPath`).
+
+A process of the installation with a private `XDG_CONFIG_HOME` (an agent's
+shell) is still a member: the definition is also looked for at the account's
+default location. The admin path manages files exactly where it looks, so
+there it is refused (`no_definition`).
 
 The reasons are `not_in_unit`, `no_definition`, `foreign_directories`,
 `foreign_definition`, `manager_unavailable` and, on a QA Host,

@@ -14,8 +14,9 @@ from lib import service_manager
 def _standing(monkeypatch):
     """These tests are about WHICH commands run. Who may run them is
     tests/unit/test_service_action_guard.py; here the caller has standing."""
-    monkeypatch.setattr(service_manager, "_admin_refusal", lambda _action, _runner: None)
-    monkeypatch.setattr(service_manager, "host_refusal", lambda _action, **_options: None)
+    monkeypatch.setattr(
+        service_manager, "_standing",
+        lambda kind, action, *_args, **_options: service_manager._Standing(kind, action))
 
 
 def test_test_suite_blocks_live_service_manager_commands():

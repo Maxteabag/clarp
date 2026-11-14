@@ -63,19 +63,24 @@ def recording_stt(root, stub):
 
 def refuse_service_actions(service_manager):
     """A QA Host shares the developer's service manager with the live Host, and
-    the units have fixed names: it never acts on one (Clarp issue 322). The
+    the units have fixed names: it never touches one (Clarp issue 322). The
     production guard would refuse it too; this does not depend on that guard.
-    Every service-manager command is refused and logged, so nothing here can
-    reach systemctl, launchctl or systemd-run, and a route that asks whether
-    this Host may restart itself is told no."""
+    The module's one gate (_standing) and its one command runner (_run) both
+    refuse and log, so no entry point here can reach systemctl, launchctl or
+    systemd-run, or write a unit file, and a route that asks whether this Host
+    may restart itself is told no."""
     def refuse(action):
         return service_manager.refuse(
-            action, 'disposable_host', 'a QA Host never acts on a service')
+            action, 'disposable_host', 'a QA Host never touches a service')
+
+    def refused_standing(_kind, action, *_args, **_options):
+        raise refuse(action)
 
     def refused_command(*command, **_options):
-        raise refuse(str(command[0]) if command else 'command')
+        named = [str(part) for part in command if isinstance(part, str)]
+        raise refuse(named[0] if named else 'command')
+    service_manager._standing = refused_standing
     service_manager._run = refused_command
-    service_manager.host_refusal = lambda action, **_options: refuse(action)
 
 
 def main():
