@@ -1242,3 +1242,105 @@ def test_the_rewritten_condition_finds_the_rows_the_plain_one_found(owner, helpe
             (owner, helper, since, until)).fetchall()
         assert key(found) == key(plain)
     assert len(db.conn().execute("SELECT 1 FROM messages WHERE agent_id IN (?,?)", (owner, helper)).fetchall()) == 60
+
+# ---- review leftovers (#330, #311, #328) -------------------------------------
+
+
+def test_a_turn_the_host_classified_as_a_lost_connection_is_a_provider_error(owner):
+    plan, now = _aged_goal(owner, days_old=2, last_message_days_ago=0.1, text="Working on round two")
+    _turn_ended(owner, at=now - 2 * 3600_000, reason="connection")
+    found = goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now)
+    assert found and found[2] == "provider_error"
+
+
+def _set_continuation(plan_id, continuation):
+    goal = json.loads(_row(plan_id)["goal_json"])
+    goal["continuation"] = continuation
+    db.conn().execute("UPDATE task_plans SET goal_json=? WHERE plan_id=?", (json.dumps(goal), plan_id))
+
+
+def test_a_dependency_past_its_deadline_is_treated_like_an_overdue_timer(owner):
+    # Goal recovery normally moves such a goal on at its deadline ('External dependency
+    # deadline passed', tests/integration/test_task_goal_recovery.py); one still waiting
+    # past it is one recovery does not visit, and after the idle days it is idle.
+    plan, now = _aged_goal(owner, days_old=10, last_message_days_ago=5)
+    waiting = {"state": "waiting", "reason": "Waiting for build", "dependency_key": "k"}
+    _set_continuation(plan["plan_id"], {**waiting, "due_at": now + DAY})
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "deadline still ahead"
+    _set_continuation(plan["plan_id"], {**waiting, "due_at": now - 4 * DAY})
+    found = goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now)
+    assert found and found[2] == "idle", "deadline passed, idle for days"
+    _set_continuation(plan["plan_id"], waiting)
+    assert goal_keeper.stall(db.conn(), _row(plan["plan_id"]), now) is None, "no deadline: still a wait"
+    plan2, now2 = _aged_goal(owner, days_old=10, last_message_days_ago=1)
+    _set_continuation(plan2["plan_id"], {**waiting, "due_at": now2 - 4 * DAY})
+    assert goal_keeper.stall(db.conn(), _row(plan2["plan_id"]), now2) is None, "recent work: not idle"
+
+
+def test_only_goals_flagged_for_catch_up_are_read_in_full(owner):
+    flagged, now = _aged_goal(owner, days_old=5, last_message_days_ago=2, text="OLD-FLAGGED harness built")
+    other, _ = _aged_goal(owner, days_old=5, last_message_days_ago=2, text="OLD-OTHER harness built")
+    _message(owner, "assistant", "NEW turn ended", at=now - 10 * MIN, phase="final")
+    prompts = {}
+
+    def ask(prompt, plan_id):
+        prompts[plan_id] = prompt
+        return ({"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}}, {}, "m")
+
+    goal_keeper.run_batch(_config(), {"run_id": "full-1"}, [flagged["plan_id"], other["plan_id"]], ask,
+                          now=now, full=frozenset({flagged["plan_id"]}))
+    assert "OLD-FLAGGED" in prompts[flagged["plan_id"]], "the flagged goal is read from its start"
+    assert "OLD-OTHER" not in prompts[other["plan_id"]] and "OLD-FLAGGED" not in prompts[other["plan_id"]], \
+        "the other only its recent delta"
+    assert "NEW turn ended" in prompts[other["plan_id"]]
+
+
+def test_the_store_refuses_the_keepers_write_to_a_closed_goal_with_goal_closed(owner):
+    plan = _goal()
+    current = task_plans.get(plan["plan_id"])
+    _act(plan["plan_id"], "cancel", reason="Done elsewhere")
+    with pytest.raises(task_plans.GoalClosed):
+        task_plans.updater_apply(plan["plan_id"], seen_revision=current["revision"], steps={},
+                                 progress="p", next_work="n", model="m", source_refs=[])
+
+
+def test_a_real_agy_timeout_reads_timeout(monkeypatch):
+    from lib import backends, model_fallbacks
+
+    class Agy:
+        supports_routing = True
+        required_binary = "sh"
+
+        @staticmethod
+        def isolated_oneshot(prompt, *, model, home_name):
+            raise TimeoutError("agy did not answer within 150 s")
+
+    monkeypatch.setattr(backends, "get", lambda provider: Agy)
+    monkeypatch.setattr(janitor_builtins, "is_current", lambda run_id: True)
+    monkeypatch.setattr(model_fallbacks, "execute", lambda agent_id, request_id, primary, invoke, **kw: invoke(primary))
+    run = {"run_id": "t-1", "agent_id": "keeper", "configuration": {
+        "provider": "agy", "model": "gemini-4-hydrogen-low", "effort": "", "isolated": True,
+        "template_id": "goal-keeper"}}
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        janitor_autonomy.model_json(run, "prompt")
+    assert caught.value.category == "timeout"
+    assert goal_keeper.error_code(caught.value) == "timeout", "was ProviderFailure"
+    assert goal_keeper.error_code(model_fallbacks.ProviderFailure("something else")) == "ProviderFailure"
+
+
+def test_delta_reads_messages_in_timestamp_then_seq_order(owner):
+    """Rows inserted out of order come back by (timestamp, seq): the ORDER BY is
+    what keeps the model's view chronological (review of PR 333)."""
+    base = db.now_ms() - 600_000
+    rows = [  # (message_id, minute offset, seq), inserted in this deliberately wrong order
+        ("m-late", 5, 1), ("m-early", 1, 2), ("m-same-b", 3, 9), ("m-same-a", 3, 4)]
+    for message_id, minute, seq in rows:
+        at = base + minute * 60_000
+        stamp = datetime.fromtimestamp(at / 1000, timezone.utc).isoformat()
+        db.conn().execute(
+            "INSERT INTO messages(message_id,agent_id,backend_session_id,seq,role,timestamp,text,"
+            "tools_json,updated_at,origin,sender_agent_id,phase) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (message_id, owner, "s-order", seq, "assistant", stamp, "text " + message_id, "[]", at,
+             "user", None, "final"))
+    _text, refs = goal_keeper.delta(db.conn(), [owner], {owner: "Jonatan"}, base - 1, db.now_ms())
+    assert refs == ["message:m-early", "message:m-same-a", "message:m-same-b", "message:m-late"]
