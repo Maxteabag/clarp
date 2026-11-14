@@ -756,7 +756,7 @@ def test_a_write_refused_because_the_owner_changed_the_plan_leaves_a_receipt(own
 
     monkeypatch.setattr(task_plans, "updater_apply", refused)
     [receipt] = _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}})
-    assert receipt["outcome"] == "refused_owner_changed" and "plan changed" in receipt["error"]
+    assert (receipt["outcome"], receipt["error"]) == ("refused_owner_changed", "owner_changed_plan")
     assert receipt["source_refs"], "what it had read is still on the receipt"
 
 
@@ -802,3 +802,109 @@ def test_a_goal_keeps_its_newest_receipts_only(owner, monkeypatch):
         _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}}, run_id=f"run-{n}")
     kept = janitor_store.goal_keeper_receipts_for_plan(plan["plan_id"], limit=10)
     assert [r["run_id"] for r in kept] == ["run-4", "run-3", "run-2"]
+
+
+# ---- review of PR #326 (issue #311): receipts can't be lost or leak text ------
+
+
+def test_a_receipt_that_cannot_be_stored_rolls_the_goal_write_back(owner, helper, monkeypatch):
+    import sqlite3
+    plan = _goal()
+    _activity(owner, plan, "Harness built")
+    real_insert, calls = janitor_store.insert_goal_keeper_receipt, []
+
+    def flaky(c, receipt):
+        calls.append(receipt["outcome"])
+        if len(calls) == 1:  # the write's own receipt, inside updater_apply's transaction
+            raise sqlite3.OperationalError("database is locked")
+        return real_insert(c, receipt)
+
+    monkeypatch.setattr(janitor_store, "insert_goal_keeper_receipt", flaky)
+    [receipt] = _batch(plan, {"steps": {_short_id(plan, "harness"): {
+        "status": "completed", "evidence": "Harness built"}},
+        "checkpoint": {"progress": "Harness done", "next_work": "Baseline"}})
+    assert _item(plan, "harness")["status"] == "pending", "no committed keeper write without its receipt"
+    assert "updater" not in task_plans.get(plan["plan_id"])["goal"]
+    assert db.conn().execute("SELECT count(*) FROM goal_events WHERE plan_id=? AND kind='updater'",
+                             (plan["plan_id"],)).fetchone()[0] == 0
+    assert (receipt["outcome"], receipt["error"]) == ("failed", "database_locked")
+    assert (receipt["progress"], receipt["next_work"]) == ("", ""), "nothing was written"
+
+
+def test_a_lost_receipt_leaves_a_logged_line_after_bounded_retries(owner, monkeypatch):
+    plan = _goal()
+    logged, attempts = [], []
+    monkeypatch.setattr(goal_keeper, "RECEIPT_RETRY_DELAYS", (0.0, 0.0))
+
+    def always_fail(c, receipt):
+        attempts.append(1)
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(janitor_store, "insert_goal_keeper_receipt", always_fail)
+    monkeypatch.setattr(goal_keeper, "log_exception", lambda event, exc, detail="": logged.append((event, detail)))
+    assert _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}}, run_id="run-x") == []
+    assert len(attempts) == 3, "one try and two bounded retries"
+    assert ("goalKeeperReceiptLost", f"run=run-x plan={plan['plan_id']} outcome=skipped") in logged
+
+
+@pytest.mark.parametrize("case", ["refused", "cancelled", "closed"])
+def test_a_receipt_for_a_goal_not_written_carries_no_checkpoint_text(owner, helper, monkeypatch, case):
+    plan = _goal()
+    _activity(owner, plan)
+    if case == "refused":
+        monkeypatch.setattr(task_plans, "updater_apply",
+                            lambda *a, **k: (_ for _ in ()).throw(ValueError("plan changed; reload before editing")))
+    if case == "closed":
+        _act(plan["plan_id"], "cancel", reason="Not needed")
+    config = {"agent_id": "keeper-1", "model": "m", "options": {"max_goals_per_run": 1}}
+    answer = {"steps": {}, "checkpoint": {"progress": "PROPOSED TEXT", "next_work": "PROPOSED NEXT"}}
+    goal_keeper.run_batch(config, {"run_id": "run-1"}, [plan["plan_id"]],
+                          lambda prompt, plan_id: (answer, {}, "m"), now=db.now_ms(),
+                          current=(lambda: False) if case == "cancelled" else (lambda: True))
+    [receipt] = janitor_store.goal_keeper_receipts_for_run("run-1")
+    assert receipt["outcome"] == {"refused": "refused_owner_changed", "cancelled": "cancelled",
+                                  "closed": "skipped"}[case]
+    assert (receipt["progress"], receipt["next_work"]) == ("", "")
+    assert "PROPOSED" not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize("failure,code", [
+    (RuntimeError("agy exited 1: Quota exceeded for project 1234, see https://… long provider text"), "agy_exit_1"),
+    (TimeoutError("agy did not answer within 150 s"), "timeout"),
+    ({"steps": {}}, "parse_error"),
+    (KeyError("weird"), "KeyError"),
+])
+def test_receipt_and_plan_errors_are_short_codes_never_provider_text(owner, helper, failure, code):
+    plan = _goal()
+    _activity(owner, plan)
+    [receipt] = _batch(plan, failure)
+    assert receipt["error"] == code
+    shown = task_plans.get(plan["plan_id"])["updater"]
+    assert shown["last_receipt"]["error"] == code
+    assert "provider text" not in json.dumps(shown) and "Quota" not in json.dumps(shown)
+
+
+def test_receipt_fields_are_cut_to_their_lengths(owner, helper):
+    plan = task_plans.create(
+        session="jonatan", title="T" * 400, items=[{"id": "harness", "title": "Harness"}],
+        goal={"criteria": ["Done"], "limits": "None", "enroll": True})
+    _activity(owner, plan)
+    [receipt] = _batch(plan, {"steps": {_short_id(plan, "harness"): {
+        "status": "in_progress", "note": "n" * 2000}},
+        "checkpoint": {"progress": "p" * 3000, "next_work": "w" * 3000}})
+    assert receipt["outcome"] == "updated"
+    assert len(receipt["title"]) == 200
+    assert (len(receipt["progress"]), len(receipt["next_work"])) == (500, 300)
+    assert len(receipt["steps"][0]["note"]) == 300
+
+
+def test_the_per_goal_cap_deletes_the_oldest_receipts_in_the_store(owner):
+    plan = _goal()
+    c = db.conn()
+    for n in range(janitor_store.GOAL_KEEPER_RECEIPTS_PER_GOAL + 5):
+        janitor_store.insert_goal_keeper_receipt(c, {"receipt_id": f"r{n:04d}", "run_id": f"run-{n}",
+                                                     "plan_id": plan["plan_id"], "outcome": "skipped",
+                                                     "created_at": 1_000 + n})
+    kept = c.execute("SELECT count(*), min(created_at) FROM goal_keeper_receipts WHERE plan_id=?",
+                     (plan["plan_id"],)).fetchone()
+    assert tuple(kept) == (janitor_store.GOAL_KEEPER_RECEIPTS_PER_GOAL, 1_005)
