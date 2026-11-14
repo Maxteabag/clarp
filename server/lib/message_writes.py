@@ -38,6 +38,7 @@ from .message_import_common import (  # noqa: F401 - facade compatibility
     _PARKED_SEQ_BASE,
     _client_provenance_rows,
     _client_provenance,
+    _session_parts,
 )
 from .message_import_rows import (  # noqa: F401 - facade compatibility
     _own_turns_row,
@@ -1056,24 +1057,36 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
     if raw_only:
         # A checkpoint callback captures only ordered raw inputs in its final
         # transaction. No normalization/index/phase work moves under the writer.
+        turn_rows = message_turns.TurnIndex.read_rows(database, agent_id)
+        carry_rows = _carry_message_rows(database, agent_id, backend_session_id, session_rows)
+        rows, user = _sends_and_latest_user(database, agent_id, backend_session_id, carry_rows)
         return (
-            message_turns.TurnIndex.read_rows(database, agent_id),
-            _client_provenance_rows(database, agent_id, backend_session_id),
-            _latest_user_provenance(database, agent_id, backend_session_id),
-            _carry_message_rows(database, agent_id, backend_session_id, session_rows),
+            turn_rows, rows, user, carry_rows,
             database.execute("SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id",
                              (agent_id,)).fetchall())
     turn_index = message_turns.TurnIndex(database, agent_id)
     phases = _row_phases(turns) if phases is None else phases
-    rows = _client_provenance_rows(database, agent_id, backend_session_id)
     carry_rows = _carry_message_rows(
         database, agent_id, backend_session_id, session_rows) if guard_carry else None
+    rows, user = _sends_and_latest_user(database, agent_id, backend_session_id, carry_rows)
     oracle_rows = database.execute(
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if guard_carry else None
-    return _ImportPrelude(turn_index, phases, _client_provenance(rows),
-                          _latest_user_provenance(database, agent_id, backend_session_id),
+    return _ImportPrelude(turn_index, phases, _client_provenance(rows), user,
                           rows, carry_rows, oracle_rows, session_rows)
+
+
+def _sends_and_latest_user(database, agent_id, backend_session_id, message_rows):
+    """The session's /send rows and its latest user row. From ``message_rows``
+    when the caller has read the session's rows anyway (every column, the
+    session's or the agent's): the two statements fetch every row of the
+    session from the table once more each, and return the same."""
+    parts = _session_parts(message_rows, backend_session_id) \
+        if message_rows is not None else None
+    if parts is not None:
+        return parts
+    return (_client_provenance_rows(database, agent_id, backend_session_id),
+            _latest_user_provenance(database, agent_id, backend_session_id))
 
 
 def _revalidate_import_prelude(database, agent_id, backend_session_id,
@@ -1083,17 +1096,16 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
     # of membership and ordering. A count/MAX fingerprint cannot certify that.
     # No normalization or index rebuilding is done unless that input changed.
     turn_rows = message_turns.TurnIndex.read_rows(database, agent_id)
-    client_rows = _client_provenance_rows(database, agent_id, backend_session_id)
-    user = _latest_user_provenance(database, agent_id, backend_session_id)
+    carry_rows = _carry_message_rows(
+        database, agent_id, backend_session_id, prelude.session_rows
+    ) if prelude.carry_rows is not None else None
+    client_rows, user = _sends_and_latest_user(database, agent_id, backend_session_id, carry_rows)
     turn_index = prelude.turn_index
     if turn_rows != turn_index._rows:
         turn_index = message_turns.TurnIndex.from_rows(turn_rows)
     provenance = prelude.client_user_provenance
     if client_rows != prelude.client_rows:
         provenance = _client_provenance(client_rows)
-    carry_rows = _carry_message_rows(
-        database, agent_id, backend_session_id, prelude.session_rows
-    ) if prelude.carry_rows is not None else None
     oracle_rows = database.execute(
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if prelude.carry_rows is not None else None
