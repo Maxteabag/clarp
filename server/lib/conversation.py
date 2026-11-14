@@ -76,10 +76,15 @@ def load_conversation(*, session: str, after_revision: int = 0,
     agent_id = agent["agent_id"]
     backend = backends.normalize(agent.get("backend"))
     backend_session_id = _live_backend_session(agent_id)
-    service_conversation = not backend_session_id and bool(agent.get("is_janitor"))
-    if service_conversation:
-        from .janitor_notices import conversation_id
-        backend_session_id = conversation_id(agent_id)
+    service_namespace = ""
+    service_conversation = False
+    if agent.get("is_janitor"):
+        from .janitor_notices import conversation_id, has_notices
+        if backend_session_id:
+            service_namespace = conversation_id(agent_id)
+        elif has_notices(agent_id):
+            service_conversation = True
+            backend_session_id = conversation_id(agent_id)
 
     # No live UUID yet — the agent was just (re)launched and hasn't fired
     # its first hook, so the runtime row's backend_session_id is still NULL.
@@ -152,6 +157,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
     turns = agents_db.list_messages(
         agent_id=agent_id,
         backend_session_id=backend_session_id,
+        extra_backend_session_id=service_namespace,
         after_revision=after_revision,
         before_message_id=before_message_id,
         limit=limit + 1,
@@ -197,6 +203,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 turn["display_cells"] = []
     head_revision = agents_db.latest_message_revision(
         agent_id=agent_id, backend_session_id=backend_session_id,
+        extra_backend_session_id=service_namespace,
     )
     # Never advance an incremental cursor beyond rows actually delivered.
     # Doing so permanently skips the remainder of a backlog larger than limit.
@@ -209,6 +216,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
         agent_id=agent_id,
         backend_session_id=backend_session_id,
         after_revision=after_revision,
+        extra_backend_session_id=service_namespace,
     )
     latest_ts = max((row.get("timestamp") or "" for row in turns), default="")
     return {

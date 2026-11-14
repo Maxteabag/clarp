@@ -180,7 +180,7 @@ class ResetReplies:
     def __init__(self, on_offer=None, statuses=None):
         self.pending=None;self.on_offer=on_offer;self.statuses=iter(statuses or ["checking"]);self.calls=0
     def peek(self,provider,owner):return self.pending if provider=="claude" else None
-    def reconciliation_due(self,provider,owner):return None
+    def reconciliation_due(self,provider,owner,field):return None
     def ack(self,provider,receipt):self.pending=None
     def offer(self,provider,field,models,owner):
         self.calls+=1
@@ -2282,25 +2282,47 @@ def test_hotseat_demand_includes_unpaused_queued_and_recently_limited_agents_and
     assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "ai7")]
 
 
-def test_reset_owner_disable_cancels_the_owned_command_group(switcher,monkeypatch,tmp_path):
+@pytest.mark.parametrize('cancel_by',['owner','command'])
+def test_reset_owner_disable_cancels_the_owned_command_group(switcher,monkeypatch,tmp_path,cancel_by):
     import dataclasses,sys,time,subprocess
     from lib import config,janitor_reset
     owner,worker,readings,calls,sent=switcher
     script=tmp_path/'hang.py';marker=tmp_path/'started'
     script.write_text("import pathlib,sys,time\npathlib.Path(sys.argv[1]).write_text('ready')\ntime.sleep(60)\n")
-    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=(sys.executable,str(script),str(marker))))
+    cfg=config.load();command=[(sys.executable,str(script),str(marker))]
+    monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=command[0]))
     current=janitor_builtins.resolve(hotseat.ROLE)
     assert worker.reset_worker.offer('claude','claude_reset_command',('Fable',),current)=='checking'
     try:
         deadline=time.monotonic()+3
         while not marker.exists() and time.monotonic()<deadline:time.sleep(.01)
         assert marker.exists()
-        changed=janitors.get('hotseat');janitors.set_enabled('hotseat',changed['revision'],False)
+        if cancel_by=='owner':
+            changed=janitors.get('hotseat');janitors.set_enabled('hotseat',changed['revision'],False)
+        else:command[0]=()
         worker.reset_worker.thread.join(3)
         assert not worker.reset_worker.thread.is_alive()
         result=worker.reset_worker.peek('claude',current)
         assert result and result['result']['verified'] is False
         assert result['result']['status']=='cancelled'
+        assert result['result']['needs_reconcile'] is True and result['needs_reconcile'] is True
+        request=tmp_path/'reconcile-request.jsonl';spent=tmp_path/'unexpected-spend'
+        replay=tmp_path/'readonly.py'
+        replay.write_text("import json,pathlib,sys\nr=json.load(sys.stdin);pathlib.Path(sys.argv[1]).open('a').write(json.dumps(r)+'\\n')\nif not r.get('reconcile_only'):pathlib.Path(sys.argv[2]).write_text('spent')\nprint(json.dumps({'status':'no_pending','verified':False}))\n")
+        command[0]=(sys.executable,str(replay),str(request),str(spent))
+        if cancel_by=='owner':
+            saved=janitors.get('hotseat');janitors.set_enabled('hotseat',saved['revision'],True)
+        readings['claude']=claude_payload(a=(True,.1),b=(False,.2))
+        clock=[result['next_at']+1];monkeypatch.setattr(db,'now_ms',lambda:clock[0])
+        worker.hotseat_once()  # Handle the real cancellation result, no hand-seeded debt.
+        clock[0]+=1;worker.hotseat_once()
+        worker.reset_worker.thread.join(3)
+        assert not worker.reset_worker.thread.is_alive()
+        clock[0]+=1;worker.hotseat_once()
+        for _ in range(20):clock[0]+=15_000;worker.hotseat_once()
+        requests=[json.loads(line) for line in request.read_text().splitlines()]
+        assert len(requests)==1 and requests[0].get('reconcile_only') is True
+        assert not spent.exists()
     finally:
         worker.stop()
 
@@ -2325,6 +2347,7 @@ def test_reset_notice_reaches_the_app_transcript_and_sse_once_per_action(switche
     response=load_conversation(session=owner['session'],include_automated=False)
     assert len(response['turns'])==1 and response['turns'][0]['text'].startswith('Banked reset redeemed')
     assert response['conversation_id']==('native-janitor-context' if bound else janitor_notices.conversation_id(owner['agent_id']))
+    assert len(emitted)==2
     assert all(e['type']=='transcript-updated' and e['session']==owner['session'] for e in emitted)
 
 
@@ -2347,7 +2370,7 @@ def test_uncertain_reset_reconciles_with_healthy_quota_and_ack_survives_restart(
         worker.hotseat_once()
         restarted=janitor_reset.ResetWorker(worker.stop_event)
         assert restarted.peek('claude',owner) is None
-        assert restarted.reconciliation_due('claude',owner) is None
+        assert restarted.reconciliation_due('claude',owner,'claude_reset_command') is None
     finally:worker.stop()
 
 
@@ -2366,3 +2389,97 @@ def test_reset_worker_hands_its_database_connection_back(switcher,monkeypatch):
     assert len(connections)==1
     with pytest.raises(sqlite3.ProgrammingError,match='closed'):
         connections[0].execute('SELECT 1')
+
+
+@pytest.mark.parametrize('disabled_by',['command','notify'])
+def test_pending_reconcile_does_not_override_cadence_when_execution_disabled(switcher,monkeypatch,disabled_by):
+    import dataclasses
+    from lib import config
+    owner,worker,readings,calls,sent=switcher
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=() if disabled_by=='command' else ('never',)))
+    if disabled_by=='notify':
+        current=janitors.get('hotseat');changed=janitors.configure('hotseat',current['revision'],options={'mode':'notify'});janitors.set_enabled('hotseat',changed['revision'],True)
+    current=janitor_builtins.resolve(hotseat.ROLE)
+    debt={'id':'unsettled','owner':current['agent_id'],'generation':current['generation'],'models':['Fable'],'handled':True,'needs_reconcile':True,'next_at':0,'result':{'status':'unverified','verified':False}}
+    settings_store.set_text('hotseat-reset.claude.state',json.dumps(debt))
+    readings['claude']=claude_payload(a=(True,.1),b=(False,.2))
+    service.setup();initial=db.conn().execute('select count(*) from janitor_runs').fetchone()[0]
+    clock=[db.now_ms()+1000];monkeypatch.setattr(db,'now_ms',lambda:clock[0])
+    for _ in range(20):worker.hotseat_once();clock[0]+=15_000
+    assert len([c for c in calls if c[:3]==('read','hotseat','claude')])==1
+    assert db.conn().execute('select count(*) from janitor_runs').fetchone()[0]-initial<=2
+    assert json.loads(settings_store.get_text('hotseat-reset.claude.state'))==debt
+    assert worker.reset_worker.thread is None
+
+
+def test_uncertain_reconciliation_backoff_and_cap_survive_restart_and_cannot_be_bypassed(switcher,monkeypatch):
+    import dataclasses,threading
+    from lib import config,janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=('fake',)))
+    current=janitor_builtins.resolve(hotseat.ROLE);attempts=[]
+    def uncertain(*a,**kw):attempts.append(kw);return {'status':'unverified','verified':False,'needs_reconcile':True}
+    monkeypatch.setattr(janitor_reset,'attempt',uncertain)
+    debt={'id':'uncertain','owner':current['agent_id'],'generation':current['generation'],'models':['Fable'],'handled':True,'needs_reconcile':True,'next_at':0,'result':{'status':'unverified','verified':False}}
+    settings_store.set_text('hotseat-reset.claude.state',json.dumps(debt))
+    clock=[db.now_ms()+1000];monkeypatch.setattr(db,'now_ms',lambda:clock[0])
+    for expected_interval in [600_000,1_200_000,2_400_000,4_800_000,9_600_000,19_200_000]:
+        w=janitor_reset.ResetWorker(threading.Event())
+        start=clock[0]
+        assert w.offer('claude','claude_reset_command',('Fable',),current,reconcile_only=True)=='checking'
+        w.thread.join(3);assert not w.thread.is_alive()
+        result=w.peek('claude',current);assert result
+        w.ack('claude',result)
+        state=json.loads(settings_store.get_text('hotseat-reset.claude.state'))
+        assert state['next_at']-start==expected_interval
+        clock[0]=state['next_at']
+    restarted=janitor_reset.ResetWorker(threading.Event())
+    assert restarted.reconciliation_due('claude',current,'claude_reset_command') is None
+    assert restarted.offer('claude','claude_reset_command',('Fable',),current,reconcile_only=True)=='attention_required'
+    assert restarted.offer('claude','claude_reset_command',('Fable',),current)=='attention_required'
+    assert len(attempts)==6 and all(a['reconcile_only'] for a in attempts)
+    current_config=janitors.get('hotseat')
+    saved=janitors.configure('hotseat',current_config['revision'],options={'mode':'automatic'})
+    janitors.set_enabled('hotseat',saved['revision'],True)
+    renewed=janitor_builtins.resolve(hotseat.ROLE)
+    assert restarted.reconciliation_due('claude',renewed,'claude_reset_command')
+    assert restarted.offer('claude','claude_reset_command',('Fable',),renewed)=='checking'
+    restarted.thread.join(3)
+    assert len(attempts)==7 and attempts[-1]['reconcile_only'] is True
+
+
+@pytest.mark.parametrize('bound',[False,True])
+def test_janitor_namespace_cannot_expose_notices_to_an_ordinary_agent(switcher,monkeypatch,bound):
+    from lib import backends,janitor_notices,message_store
+    from lib.conversation import load_conversation
+    monkeypatch.setattr(backends,'find_session_jsonl',lambda *a,**kw:None)
+    aid=agents.create_agent(persona='Ordinary',voice_id='v',cwd='/tmp',session='ordinary-notice',backend='codex')
+    if bound:
+        agents.start_runtime(aid,'codex');agents.bind_backend_session(aid,'ordinary-native')
+        agents.store_transcript_turns(agent_id=aid,backend_session_id='ordinary-native',source_file='/tmp/ordinary.jsonl',turns=[{'role':'assistant','text':'native retained','timestamp':'2026-01-01T00:00:00Z'}])
+    with pytest.raises(ValueError,match='Janitor'):
+        janitor_notices.publish(None,{'agent_id':aid,'session':'ordinary-notice'},'rejected','not permitted')
+    message_store.record_system_notice(agent_id=aid,backend_session_id=janitor_notices.conversation_id(aid),notice_id='private-service-row',text='MUST NOT LEAK')
+    result=load_conversation(session='ordinary-notice')
+    assert [r['text'] for r in result['turns']]==(['native retained'] if bound else [])
+    assert result['conversation_id']==('ordinary-native' if bound else '')
+
+
+def test_empty_janitor_keeps_empty_id_and_notices_survive_native_binding_with_pagination(switcher,monkeypatch):
+    from lib import backends,janitor_notices,message_store,message_writes
+    from lib.conversation import load_conversation
+    owner,worker,readings,calls,sent=switcher
+    monkeypatch.setattr(backends,'find_session_jsonl',lambda *a,**kw:None)
+    assert load_conversation(session=owner['session'])['conversation_id']==''
+    fixed=db.now_ms();monkeypatch.setattr(message_writes,'now_ms',lambda:fixed)
+    janitor_notices.publish(None,owner,'z-service','service notice retained')
+    agents.start_runtime(owner['agent_id'],'codex');agents.bind_backend_session(owner['agent_id'],'new-native')
+    message_store.record_system_notice(agent_id=owner['agent_id'],backend_session_id='new-native',notice_id='a-native',text='native notice retained')
+    first=load_conversation(session=owner['session'],limit=1)
+    assert first['conversation_id']=='new-native' and first['has_more']
+    second=load_conversation(session=owner['session'],limit=1,before_message_id=first['turns'][0]['id'])
+    assert {first['turns'][0]['text'],second['turns'][0]['text']}=={'service notice retained','native notice retained'}
+    previous=load_conversation(session=owner['session'])['latest_revision']
+    janitor_notices.publish(None,owner,'later','later service notice')
+    delta=load_conversation(session=owner['session'],after_revision=previous)
+    assert [r['text'] for r in delta['turns']]==['later service notice']

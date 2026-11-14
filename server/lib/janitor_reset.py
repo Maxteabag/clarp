@@ -15,6 +15,7 @@ from .log import log_fault
 
 TIMEOUT_SECONDS = 150
 CHECK_INTERVAL_MS = 10 * 60_000
+MAX_RECONCILE_ATTEMPTS = 6
 
 
 def _kill_group(process):
@@ -28,14 +29,14 @@ def _kill_group(process):
 def attempt(command_field: str, models, *, stop_event=None, cancelled=None, reconcile_only=False) -> dict:
     command = getattr(config.load(), command_field, ()) if command_field else ()
     if not command:
-        return {"status": "disabled", "verified": False}
+        return {"status": "disabled", "verified": False, "needs_reconcile": reconcile_only}
     process = None
     try:
         # The supported broker is POSIX-only; do not silently leak a Windows tree.
         if os.name != "posix":
             raise OSError("reset process groups unavailable")
         if (stop_event and stop_event.is_set()) or (cancelled and cancelled()):
-            return {"status": "cancelled", "verified": False, "needs_reconcile": False}
+            return {"status": "cancelled", "verified": False, "needs_reconcile": reconcile_only}
         process = subprocess.Popen(list(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, start_new_session=True)
         deadline = time.monotonic() + TIMEOUT_SECONDS
@@ -57,7 +58,7 @@ def attempt(command_field: str, models, *, stop_event=None, cancelled=None, reco
         if not isinstance(receipt, dict):
             raise ValueError("unreadable reset receipt")
         verified = (process.returncode == 0 and receipt.get("verified") is True
-                    and receipt.get("status") in {"redeemed", "reconciled"}
+                    and receipt.get("status") in ({"reconciled"} if reconcile_only else {"redeemed", "reconciled"})
                     and isinstance(receipt.get("account"), str)
                     and re.fullmatch(r"ai(?:[1-9]|1[0-5])", receipt["account"]) is not None)
         status = receipt.get("status")
@@ -67,13 +68,13 @@ def attempt(command_field: str, models, *, stop_event=None, cancelled=None, reco
             status = "unverified"
         return {"status": status, "verified": verified,
                 "account": receipt.get("account") if verified else None,
-                "needs_reconcile": status in {"unverified", "cancelled"}}
+                "needs_reconcile": status in {"unverified", "cancelled"} or (reconcile_only and not (verified or status == "no_pending"))}
     except InterruptedError as exc:
         log_fault("claudeBankedResetCancelled", exc)
-        return {"status": "cancelled", "verified": False, "needs_reconcile": process is not None}
+        return {"status": "cancelled", "verified": False, "needs_reconcile": reconcile_only or process is not None}
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
         log_fault("claudeBankedResetCommandFailed", exc)
-        return {"status": "unverified", "verified": False, "needs_reconcile": process is not None}
+        return {"status": "unverified", "verified": False, "needs_reconcile": reconcile_only or process is not None}
     finally:
         if process is not None:
             _kill_group(process)
@@ -106,11 +107,19 @@ class ResetWorker:
             log_fault("bankedResetStateUnreadable", exc)
         return None
 
-    def reconciliation_due(self, provider, owner):
+    def reconciliation_due(self, provider, owner, command_field):
+        if (not command_field or self.stop_event.is_set() or owner["options"]["mode"] != "automatic"
+                or not getattr(config.load(), command_field, ())):
+            return None
         try:
             value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
-            if (value.get("owner") == owner["agent_id"] and value.get("id")
-                    and value.get("next_at", float('inf')) <= db.now_ms()
+            same_generation = value.get("generation") == owner["generation"]
+            capped = same_generation and value.get("reconcile_attempts", 0) >= MAX_RECONCILE_ATTEMPTS
+            due_at = value.get("next_at", float('inf'))
+            if not same_generation:
+                due_at = min(due_at, value.get("started", 0) + CHECK_INTERVAL_MS)
+            if (not capped and value.get("owner") == owner["agent_id"] and value.get("id")
+                    and due_at <= db.now_ms()
                     and ((value.get("handled") and value.get("needs_reconcile"))
                          or not value.get("result"))):
                 return value
@@ -126,7 +135,8 @@ class ResetWorker:
                 settings_store.set_text(self._key(provider), json.dumps(value))
 
     def offer(self, provider, field, models, owner, *, reconcile_only=False):
-        if not getattr(config.load(), field, ()):
+        expected_command=tuple(getattr(config.load(), field, ()))
+        if not expected_command:
             return "disabled"
         if owner["options"]["mode"] != "automatic" or self.stop_event.is_set():
             return "disabled"
@@ -142,11 +152,25 @@ class ResetWorker:
             with settings_store.transaction():
                 now = db.now_ms()
                 prior = json.loads(settings_store.get_text(self._key(provider), default="{}"))
-                if prior.get("next_at", 0) > now:
+                same_generation = prior.get("owner") == owner["agent_id"] and prior.get("generation") == owner["generation"]
+                due_at = prior.get("next_at", 0)
+                if not same_generation:
+                    due_at = min(due_at, prior.get("started", 0) + CHECK_INTERVAL_MS)
+                if due_at > now:
                     return "cooldown"
-                claim.update(started=now, next_at=now + CHECK_INTERVAL_MS, handled=False)
+                # Unsettled effects cannot be bypassed by an exhaustion offer.
+                reconcile_only = bool(reconcile_only or prior.get("needs_reconcile")
+                    or (prior.get("id") and not prior.get("result")))
+                same_generation = prior.get("owner") == owner["agent_id"] and prior.get("generation") == owner["generation"]
+                attempts = prior.get("reconcile_attempts", 0) if same_generation else 0
+                if reconcile_only and attempts >= MAX_RECONCILE_ATTEMPTS:
+                    return "attention_required"
+                attempts = attempts + 1 if reconcile_only else 0
+                interval = CHECK_INTERVAL_MS * 2 ** max(0, attempts - 1)
+                claim.update(started=now, next_at=now + interval, handled=False,
+                             reconcile_only=reconcile_only, reconcile_attempts=attempts)
                 settings_store.set_text(self._key(provider), json.dumps(claim))
-            self.thread = threading.Thread(target=self._work, args=(provider, field, claim),
+            self.thread = threading.Thread(target=self._work, args=(provider, field, claim, expected_command),
                                            name="janitor-banked-reset", daemon=True)
             self.thread.start()
             launched = True
@@ -158,7 +182,7 @@ class ResetWorker:
             if not launched:
                 self._slot.release()
 
-    def _work(self, provider, field, claim):
+    def _work(self, provider, field, claim, expected_command):
         from . import janitor_builtins, turn_queue
         last_check = 0
         still_owned = True
@@ -169,7 +193,8 @@ class ResetWorker:
             if now - last_check >= 1:
                 last_check = now
                 latest = janitor_builtins.resolve("account-hotseat")
-                still_owned = bool(latest and latest["agent_id"] == claim["owner"]
+                still_owned = bool(tuple(getattr(config.load(),field,())) == expected_command
+                    and latest and latest["agent_id"] == claim["owner"]
                     and latest["generation"] == claim["generation"]
                     and latest["options"]["mode"] == "automatic"
                     and turn_queue.user_stop_generation(claim["owner"]) == claim["stop_generation"])
@@ -186,7 +211,8 @@ class ResetWorker:
                     value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
                     if value.get("id") == claim["id"]:
                         value.update(result=result, completed=db.now_ms(),
-                                     needs_reconcile=bool(result.get("needs_reconcile")))
+                                     needs_reconcile=bool(result.get("needs_reconcile")),
+                                     attention_required=bool(result.get("needs_reconcile") and claim.get("reconcile_attempts",0)>=MAX_RECONCILE_ATTEMPTS))
                         settings_store.set_text(self._key(provider), json.dumps(value))
             except Exception as exc:
                 log_fault("bankedResetResultStoreFailed", exc)
