@@ -368,19 +368,30 @@ rollback_failed_activation() {
         elif [[ "$TOOLCHAIN_MODE" == "managed" ]]; then
             rm -f "$SHARE/toolchain"
         fi
+        restore_services() {
+            PYTHONPATH="$RELEASE" "$PYTHON" -c \
+                'import sys; from lib import service_manager; service_manager.restore_after_failed_install(had_previous=bool(int(sys.argv[1])), had_runtime_previous=bool(int(sys.argv[2])))' \
+                "$UNIT_HAD_PREVIOUS" "$RUNTIME_UNIT_HAD_PREVIOUS" >/dev/null 2>&1 || true
+        }
+        restore_runtime_definition() {
+            if [[ $RUNTIME_UNIT_HAD_PREVIOUS -eq 1 && -f "$RUNTIME_UNIT_BACKUP" ]]; then
+                cp "$RUNTIME_UNIT_BACKUP" "$RUNTIME_SERVICE_FILE"
+            else
+                rm -f "$RUNTIME_SERVICE_FILE"
+            fi
+        }
         if [[ $UNIT_HAD_PREVIOUS -eq 1 && -f "$UNIT_BACKUP" ]]; then
             cp "$UNIT_BACKUP" "$SERVICE_FILE"
+            restore_runtime_definition
+            restore_services
         else
+            # service_manager acts only for the installation its definitions
+            # name. A failed first installation therefore stops what it started
+            # while its own definitions still exist, and removes them afterwards.
+            restore_services
             rm -f "$SERVICE_FILE"
+            restore_runtime_definition
         fi
-        if [[ $RUNTIME_UNIT_HAD_PREVIOUS -eq 1 && -f "$RUNTIME_UNIT_BACKUP" ]]; then
-            cp "$RUNTIME_UNIT_BACKUP" "$RUNTIME_SERVICE_FILE"
-        else
-            rm -f "$RUNTIME_SERVICE_FILE"
-        fi
-        PYTHONPATH="$RELEASE" "$PYTHON" -c \
-            'import sys; from lib import service_manager; service_manager.restore_after_failed_install(had_previous=bool(int(sys.argv[1])), had_runtime_previous=bool(int(sys.argv[2])))' \
-            "$UNIT_HAD_PREVIOUS" "$RUNTIME_UNIT_HAD_PREVIOUS" >/dev/null 2>&1 || true
         restore_external
     fi
     exit $_rc

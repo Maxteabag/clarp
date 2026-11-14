@@ -10,9 +10,20 @@ import threading
 from lib import service_manager
 
 
+@pytest.fixture(autouse=True)
+def _standing(monkeypatch):
+    """These tests are about WHICH commands run. Who may run them is
+    tests/unit/test_service_action_guard.py; here the caller has standing."""
+    monkeypatch.setattr(
+        service_manager, "_standing",
+        lambda kind, action, *_args, **_options: service_manager._Standing(kind, action))
+
+
 def test_test_suite_blocks_live_service_manager_commands():
     with pytest.raises(AssertionError, match="live service-manager command"):
         service_manager.restart()
+    with pytest.raises(AssertionError, match="live service-manager command"):
+        service_manager.is_active()
 
 
 def test_test_suite_blocks_live_service_commands_in_subprocesses():
@@ -274,18 +285,30 @@ def test_pre_runtime_release_stops_runtime_before_restarting_legacy_server(
     ]
 
 
-def test_linux_definition_reload_after_unlink(monkeypatch):
+def test_linux_definitions_are_removed_and_forgotten(monkeypatch, tmp_path):
     monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    paths = (service_manager.definition_path(tmp_path),
+             service_manager.runtime_definition_path(tmp_path))
+    paths[0].parent.mkdir(parents=True)
+    for path in paths:
+        path.write_text("unit")
     recorder = Recorder()
-    service_manager.reload_definitions(runner=recorder)
-    assert recorder.calls[0][0] == ["systemctl", "--user", "daemon-reload"]
+    service_manager.remove_definitions(runner=recorder)
+    assert [call[0] for call in recorder.calls] == [["systemctl", "--user", "daemon-reload"]]
+    assert not any(path.exists() for path in paths)
 
 
-def test_macos_definition_reload_after_unlink_is_noop(monkeypatch):
+def test_macos_definitions_are_removed_without_a_reload(monkeypatch, tmp_path):
     monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", "macos")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = service_manager.definition_path()
+    path.parent.mkdir(parents=True)
+    path.write_text("plist")
     recorder = Recorder()
-    service_manager.reload_definitions(runner=recorder)
+    service_manager.remove_definitions(runner=recorder)
     assert recorder.calls == []
+    assert not path.exists()
 
 
 def test_macos_failed_install_reboots_restored_definition(monkeypatch, tmp_path):

@@ -1617,7 +1617,7 @@ def cmd_relay(args) -> int:
             write(credentials, settings)
             if _network_config().get("network", {}).get("relay_enabled", False):
                 restart_attempted = True
-                service_manager.restart()
+                service_manager.restart(admin=True)
         elif action in {"enable", "migrate"}:
             if action == "migrate":
                 settings = import_legacy(CONFIG_FILE.parent / "relay.env")
@@ -1633,13 +1633,13 @@ def cmd_relay(args) -> int:
                 _legacy_relay_control("stop")
                 legacy_stopped = True
             restart_attempted = True
-            service_manager.restart()
+            service_manager.restart(admin=True)
             if legacy_stopped:
                 _legacy_relay_control("disable")
         elif action == "disable":
             set_toml_value(CONFIG_FILE, "network", "relay_enabled", False)
             restart_attempted = True
-            service_manager.restart()
+            service_manager.restart(admin=True)
     except BaseException as original_error:
         if previous_config is not None:
             CONFIG_FILE.write_bytes(previous_config)
@@ -1656,7 +1656,7 @@ def cmd_relay(args) -> int:
         errors = []
         if restart_attempted:
             try:
-                service_manager.restart()
+                service_manager.restart(admin=True)
             except Exception as error:
                 errors.append(f"Host restart: {type(error).__name__}")
         if legacy_stopped:
@@ -1702,13 +1702,13 @@ def cmd_local_network(args) -> int:
             _ensure_network_auth()
             set_toml_value(CONFIG_FILE, "network", "local_tls_port", port)
         set_toml_value(CONFIG_FILE, "network", "local_enabled", args.local_command == "enable")
-        service_manager.restart()
+        service_manager.restart(admin=True)
         observed = api_request("GET", "/server-info", retries=6, retry_delay=0.25).get("local_connection", {})
         if args.local_command == "enable" and (not observed.get("enabled") or observed.get("port") != port):
             raise RuntimeError("local HTTPS did not start; previous configuration restored")
     except BaseException:
         CONFIG_FILE.write_bytes(old)
-        service_manager.restart()
+        service_manager.restart(admin=True)
         raise
     print(json.dumps({"enabled": args.local_command == "enable", "port": port}))
     return 0
@@ -1796,7 +1796,7 @@ def cmd_network(args) -> int:
         if mode == "off":
             set_toml_value(CONFIG_FILE, "network", "relay_enabled", False)
             set_toml_value(CONFIG_FILE, "network", "local_enabled", False)
-        service_manager.restart()
+        service_manager.restart(admin=True)
         if serve_ports_to_remove:
             _remove_managed_tailscale_serve(
                 previous_port, https_ports=serve_ports_to_remove)
@@ -1816,7 +1816,7 @@ def cmd_network(args) -> int:
             serve_marker.write_bytes(previous_marker)
         rollback_errors: list[str] = []
         try:
-            service_manager.restart()
+            service_manager.restart(admin=True)
         except Exception as exc:  # noqa: BLE001 - report with original failure
             rollback_errors.append(f"service restore: {exc}")
 
@@ -2186,7 +2186,7 @@ def cmd_tts(args) -> int:
         section = args.provider
         set_toml_value(CONFIG_FILE, section, "api_key", key)
         if (SHARE / "current").exists():
-            service_manager.restart(check=False)
+            service_manager.restart(check=False, admin=True)
         print(f"configured {args.provider} credentials")
         return 0
 
@@ -2220,7 +2220,7 @@ def cmd_tts(args) -> int:
     if provider != "cartesia":
         set_toml_value(CONFIG_FILE, "audio", "delivery", "chunked-file")
     if (SHARE / "current").exists():
-        service_manager.restart(check=False)
+        service_manager.restart(check=False, admin=True)
     print(json.dumps({"ok": True, "provider": provider,
                       "fallback": fallback}, indent=2))
     return 0
@@ -2658,12 +2658,21 @@ def activate_release(release: Path, *, allow_older_schema: bool = False) -> None
                 replacement.replace(SHARE / "toolchain")
             elif (SHARE / "toolchain").is_symlink():
                 (SHARE / "toolchain").unlink()
+            # service_manager acts only for the installation its definitions
+            # name: with no previous unit, stop what this activation started
+            # while its definition still exists, then remove it.
             if previous_unit is not None:
                 live_unit.write_bytes(previous_unit)
-            elif live_unit.exists():
+            try:
+                service_manager.restore_after_failed_install(
+                    had_previous=previous_unit is not None)
+            except service_manager.ServiceActionRefused as refusal:
+                # The activation failure that triggered the rollback is the
+                # one to report; the rest of the restore still runs.
+                print(f"warning: the services were not restored: {refusal.detail}",
+                      file=sys.stderr)
+            if previous_unit is None and live_unit.exists():
                 live_unit.unlink()
-            service_manager.restore_after_failed_install(
-                had_previous=previous_unit is not None)
             try:
                 cmd_skills(argparse.Namespace(skills_command="repair-links"))
             except BaseException:
@@ -2831,7 +2840,14 @@ def cmd_uninstall(args) -> int:
                 "Restore Tailscale and retry, or pass --force-network-cleanup "
                 "to accept the dangling-route risk") from exc
         print(f"warning: {exc}; continuing forced uninstall", file=sys.stderr)
-    service_manager.stop_and_disable()
+    try:
+        service_manager.stop_and_disable()
+    except service_manager.ServiceActionRefused as refusal:
+        # Any other refusal means these are not this installation's services.
+        if refusal.reason != "no_definition":
+            raise
+        print("warning: no Clarp service definition is installed; "
+              "no service was stopped", file=sys.stderr)
     for skill_id in selected_skills(): unlink_skill(skill_id)
     from lib.backend.agy_hooks import configure_hooks
     configure_hooks(SHARE, HOME, remove=True)
@@ -2853,9 +2869,7 @@ def cmd_uninstall(args) -> int:
                     managed = False
             if managed:
                 path.unlink()
-    unit = service_manager.definition_path(HOME)
-    if unit.is_file(): unit.unlink()
-    service_manager.reload_definitions()
+    service_manager.remove_definitions()
     for name in ("current", "server.py", "lib", "static", "scripts", "skills",
                  "plugin", "systemd", "docs", "requirements.txt",
                  "pyproject.toml", "uv.lock", "DEPLOYED_VERSION",
@@ -3524,7 +3538,12 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
 
 def main() -> int:
     args = parser().parse_args()
-    return int(args.func(args) or 0)
+    try:
+        return int(args.func(args) or 0)
+    except service_manager.ServiceActionRefused as refusal:
+        # Already logged where it was decided; a traceback adds nothing.
+        print(f"clarp-admin: {refusal}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

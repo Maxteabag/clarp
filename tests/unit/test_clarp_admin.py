@@ -241,7 +241,7 @@ def test_network_tailscale_configures_loopback_https_and_auth(
         return result
 
     monkeypatch.setattr(admin.subprocess, "run", run)
-    monkeypatch.setattr(admin.service_manager, "restart", lambda: None)
+    monkeypatch.setattr(admin.service_manager, "restart", lambda *, admin, check=True: None)
     args = argparse.Namespace(
         network_command="use", mode="tailscale", url="")
     assert admin.cmd_network(args) == 0
@@ -347,7 +347,7 @@ def test_failed_replacement_restores_tailscale_config_before_cleanup(
         lambda *_args, **_kwargs: removed.append(True))
     restarts = []
 
-    def restart(*, check=True):
+    def restart(*, admin, check=True):
         restarts.append(check)
         if len(restarts) == 1:
             raise RuntimeError("restart failed")
@@ -390,7 +390,7 @@ def test_failed_tailscale_activation_removes_new_route(
         lambda _port, **kwargs: routes.append(kwargs))
     restarts = []
 
-    def restart(*, check=True):
+    def restart(*, admin, check=True):
         restarts.append(check)
         if len(restarts) == 1:
             raise RuntimeError("restart failed")
@@ -436,7 +436,7 @@ def test_failed_tailscale_rollback_is_retried_and_reported(
     monkeypatch.setattr(admin, "_set_managed_tailscale_serve", route)
     restarts = []
 
-    def restart(*, check=True):
+    def restart(*, admin, check=True):
         restarts.append(check)
         if len(restarts) == 1:
             raise RuntimeError("restart failed")
@@ -484,7 +484,7 @@ def test_reapplying_tailscale_keeps_existing_route(
     monkeypatch.setattr(
         admin, "_remove_managed_tailscale_serve",
         lambda *_args, **kwargs: removed.append(kwargs))
-    monkeypatch.setattr(admin.service_manager, "restart", lambda: None)
+    monkeypatch.setattr(admin.service_manager, "restart", lambda *, admin, check=True: None)
 
     assert admin.cmd_network(argparse.Namespace(
         network_command="use", mode="tailscale", url="")) == 0
@@ -517,7 +517,7 @@ def test_tailscale_activation_rejects_unrelated_root_handler(
     monkeypatch.setattr(
         admin, "_set_managed_tailscale_serve",
         lambda *_args, **kwargs: configured.append(kwargs))
-    monkeypatch.setattr(admin.service_manager, "restart", lambda **_kwargs: None)
+    monkeypatch.setattr(admin.service_manager, "restart", lambda *, admin, check=True: None)
 
     with pytest.raises(SystemExit, match="another application"):
         admin.cmd_network(argparse.Namespace(
@@ -556,9 +556,7 @@ def test_uninstall_requires_explicit_force_when_tailscale_cleanup_is_unavailable
         lambda _ports: (_ for _ in ()).throw(
             PermissionError("daemon unavailable")))
     monkeypatch.setattr(admin.service_manager, "stop_and_disable", lambda: None)
-    monkeypatch.setattr(admin.service_manager, "reload_definitions", lambda: None)
-    monkeypatch.setattr(
-        admin.service_manager, "definition_path", lambda *_args: tmp_path / "unit")
+    monkeypatch.setattr(admin.service_manager, "remove_definitions", lambda: None)
 
     with pytest.raises(SystemExit, match="--force-network-cleanup"):
         admin.cmd_uninstall(argparse.Namespace(
@@ -606,7 +604,7 @@ def test_leaving_tailscale_removes_only_clarp_root_handler(
         return result
 
     monkeypatch.setattr(admin.subprocess, "run", run)
-    monkeypatch.setattr(admin.service_manager, "restart", lambda: None)
+    monkeypatch.setattr(admin.service_manager, "restart", lambda *, admin, check=True: None)
 
     assert admin.cmd_network(argparse.Namespace(
         network_command="use", mode="off", url="",
@@ -634,7 +632,7 @@ def test_local_only_removes_orphaned_route_despite_stale_mode(
     monkeypatch.setattr(
         admin, "_remove_managed_tailscale_serve",
         lambda port, **kwargs: removed.append((port, kwargs)))
-    monkeypatch.setattr(admin.service_manager, "restart", lambda: None)
+    monkeypatch.setattr(admin.service_manager, "restart", lambda *, admin, check=True: None)
 
     assert admin.cmd_network(argparse.Namespace(
         network_command="use", mode="off", url="")) == 0
@@ -662,7 +660,7 @@ def test_network_cleanup_includes_listener_port_from_marker(
     monkeypatch.setattr(
         admin, "_remove_managed_tailscale_serve",
         lambda port, **kwargs: removed.append((port, kwargs)))
-    monkeypatch.setattr(admin.service_manager, "restart", lambda: None)
+    monkeypatch.setattr(admin.service_manager, "restart", lambda *, admin, check=True: None)
 
     assert admin.cmd_network(argparse.Namespace(
         network_command="use", mode="off", url="")) == 0
@@ -692,9 +690,7 @@ def test_uninstall_checks_actual_tailscale_route_even_when_mode_is_off(
         admin, "_remove_managed_tailscale_serve",
         lambda port, **kwargs: cleaned.append((port, kwargs)))
     monkeypatch.setattr(admin.service_manager, "stop_and_disable", lambda: None)
-    monkeypatch.setattr(admin.service_manager, "reload_definitions", lambda: None)
-    monkeypatch.setattr(
-        admin.service_manager, "definition_path", lambda *_args: tmp_path / "unit")
+    monkeypatch.setattr(admin.service_manager, "remove_definitions", lambda: None)
 
     assert admin.cmd_uninstall(argparse.Namespace(purge_data=False)) == 0
     assert cleaned == [(7000, {"https_ports": {"443"}})]
@@ -1069,7 +1065,7 @@ def test_setup_post_processing_failure_reactivates_previous_release(
     assert restored == [old]
 
 
-def test_activate_release_restores_previous_on_restart_failure(tmp_path, monkeypatch):
+def _two_activatable_releases(tmp_path, monkeypatch):
     share = tmp_path / "share"
     old = share / "releases/old"
     new = share / "releases/new"
@@ -1096,14 +1092,23 @@ def test_activate_release_restores_previous_on_restart_failure(tmp_path, monkeyp
     state = tmp_path / "install.json"
     state.write_text('{"skills": []}')
     monkeypatch.setattr(admin, "SHARE", share)
+    # clarp-admin's share directory is its environment's (the installed wrapper
+    # exports it); definitions are written only for the process's own.
+    monkeypatch.setenv("CLARP_SHARE_DIR", str(share))
     monkeypatch.setattr(admin, "INSTALL_STATE", state)
     monkeypatch.setattr(admin, "HOME", tmp_path)
     live_unit = tmp_path / ".config/systemd/user/clarp.service"
     live_unit.parent.mkdir(parents=True)
-    live_unit.write_text("old live unit")
     monkeypatch.setattr(
         admin.service_manager, "install_and_restart",
         lambda: (_ for _ in ()).throw(RuntimeError("restart failed")))
+    return share, old, new, current, old_toolchain, live_unit
+
+
+def test_activate_release_restores_previous_on_restart_failure(tmp_path, monkeypatch):
+    share, old, new, current, old_toolchain, live_unit = _two_activatable_releases(
+        tmp_path, monkeypatch)
+    live_unit.write_text("old live unit")
     restored = []
     monkeypatch.setattr(
         admin.service_manager, "restore_after_failed_install",
@@ -1115,6 +1120,34 @@ def test_activate_release_restores_previous_on_restart_failure(tmp_path, monkeyp
     assert (share / "toolchain").resolve() == old_toolchain.resolve()
     assert live_unit.read_text() == "old live unit"
     assert restored == [{"had_previous": True}]
+
+
+def test_a_failed_first_activation_stops_its_services_before_removing_its_unit(
+        tmp_path, monkeypatch, capsys):
+    """No unit existed before: service_manager acts only while a definition
+    says whose services these are, so the new unit is removed afterwards."""
+    share, old, new, current, _toolchain, live_unit = _two_activatable_releases(
+        tmp_path, monkeypatch)
+    restored = []
+    monkeypatch.setattr(
+        admin.service_manager, "restore_after_failed_install",
+        lambda **kwargs: restored.append((kwargs, live_unit.is_file())))
+    with pytest.raises(RuntimeError, match="restart failed"):
+        admin.activate_release(new)
+    assert restored == [({"had_previous": False}, True)]
+    assert not live_unit.exists()
+    assert current.resolve() == old.resolve()
+
+    # A refusal to restore does not hide the failure that caused the rollback.
+    def refused(**_kwargs):
+        raise admin.service_manager.ServiceActionRefused(
+            "restore", "foreign_definition", "the unit is another installation's")
+    monkeypatch.setattr(admin.service_manager, "restore_after_failed_install", refused)
+    with pytest.raises(RuntimeError, match="restart failed"):
+        admin.activate_release(new)
+    assert "the services were not restored: the unit is another installation's" \
+        in capsys.readouterr().err
+    assert not live_unit.exists()
 
 
 def test_prompt_accepts_explicit_watcher_origin(monkeypatch):
@@ -1597,3 +1630,85 @@ def test_controller_action_list_prints_actions_and_their_gestures(monkeypatch, c
                       "action_id": "rk-demo-leak"}]})
     out = capsys.readouterr().out
     assert code == 0 and "rk-demo-leak" in out and "secondary swipe-up" in out
+
+
+# ---- service actions are the admin path's, for its own installation (issue 322)
+
+def test_uninstall_stops_the_services_before_it_removes_their_definitions(
+        tmp_path, monkeypatch):
+    """service_manager acts only while a definition says whose services these
+    are, so the definitions go last."""
+    config = tmp_path / "config/config.toml"
+    config.parent.mkdir()
+    config.write_text("[server]\nport = 7000\n")
+    share = tmp_path / "share"
+    share.mkdir()
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "HOME", tmp_path / "home")
+    monkeypatch.setattr(admin, "selected_skills", lambda: [])
+    monkeypatch.setattr(admin, "_managed_tailscale_serve_routes", lambda _ports: {})
+    order = []
+    monkeypatch.setattr(admin.service_manager, "stop_and_disable",
+                        lambda: order.append("stop"))
+    monkeypatch.setattr(admin.service_manager, "remove_definitions",
+                        lambda: order.append("remove"))
+
+    assert admin.cmd_uninstall(argparse.Namespace(purge_data=False)) == 0
+    assert order == ["stop", "remove"]
+
+
+@pytest.mark.parametrize("reason, uninstalls", [
+    ("no_definition", True), ("foreign_definition", False), ("foreign_directories", False)])
+def test_uninstall_goes_on_only_when_no_service_was_ever_defined(
+        tmp_path, monkeypatch, capsys, reason, uninstalls):
+    config = tmp_path / "config/config.toml"
+    config.parent.mkdir()
+    config.write_text("[server]\nport = 7000\n")
+    share = tmp_path / "share"
+    share.mkdir()
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "HOME", tmp_path / "home")
+    monkeypatch.setattr(admin, "selected_skills", lambda: [])
+    monkeypatch.setattr(admin, "_managed_tailscale_serve_routes", lambda _ports: {})
+    removed = []
+
+    def refused():
+        raise admin.service_manager.ServiceActionRefused("stop", reason, "not ours")
+    monkeypatch.setattr(admin.service_manager, "stop_and_disable", refused)
+    monkeypatch.setattr(admin.service_manager, "remove_definitions",
+                        lambda: removed.append(True))
+
+    if uninstalls:
+        assert admin.cmd_uninstall(argparse.Namespace(purge_data=False)) == 0
+        assert "no service was stopped" in capsys.readouterr().err
+        assert removed == [True]
+    else:
+        with pytest.raises(admin.service_manager.ServiceActionRefused):
+            admin.cmd_uninstall(argparse.Namespace(purge_data=False))
+        assert removed == []
+
+
+def test_a_refused_service_action_ends_the_command_with_its_reason(monkeypatch, capsys):
+    def refused(_args):
+        raise admin.service_manager.ServiceActionRefused(
+            "restart", "foreign_directories", "the unit serves another share directory")
+    monkeypatch.setattr(admin, "parser", lambda: type("P", (), {
+        "parse_args": lambda self: argparse.Namespace(func=refused)})())
+
+    assert admin.main() == 1
+    assert "clarp-admin: Clarp service action refused (restart): " \
+        "the unit serves another share directory" in capsys.readouterr().err
+
+
+def test_every_clarp_admin_restart_names_the_admin_path():
+    """A bare restart() is the Host's own: it is refused outside clarp.service,
+    and clarp-admin never runs inside it."""
+    import re
+    source = Path(admin.__file__).read_text()
+    restarts = re.findall(r"service_manager\.restart\(([^)]*)\)", source)
+    assert len(restarts) >= 10
+    assert all("admin=True" in arguments for arguments in restarts)

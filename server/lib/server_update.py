@@ -214,6 +214,15 @@ def _worker_script() -> pathlib.Path:
 
 def _launch_update(session: str, status: dict) -> tuple[int, dict]:
     from . import agents, background_jobs, service_manager
+    # The update replaces the installation and restarts its services. Only the
+    # installed Host may ask for it; a QA or development Host would update the
+    # live one (issue 322).
+    refusal = service_manager.host_refusal("update")
+    if refusal is not None:
+        return 409, {
+            "ok": False,
+            "message": f"This Host is not the installed Clarp service: {refusal.detail}.",
+        }
     existing = background_jobs.get(UPDATE_JOB_ID)
     if service_manager.platform_kind() == "linux":
         active = subprocess.run(

@@ -15,7 +15,7 @@ def configured(tmp_path, monkeypatch):
     monkeypatch.setattr(admin, '_legacy_relay_active', lambda: False)
     monkeypatch.setattr(admin, 'api_request', lambda *a: {'enabled': True, 'state': 'connected'})
     calls = []
-    monkeypatch.setattr(admin.service_manager, 'restart', lambda: calls.append('restart'))
+    monkeypatch.setattr(admin.service_manager, 'restart', lambda *, admin: calls.append('restart'))
     return path, calls
 
 
@@ -34,7 +34,7 @@ def test_enable_and_disable_preserve_tailscale(configured, capsys):
 def test_failed_restart_restores_original_config_and_service(configured, monkeypatch):
     path, calls = configured
     original = path.read_bytes()
-    def restart():
+    def restart(*, admin):
         calls.append('restart')
         if len(calls) == 1:
             raise RuntimeError('simulated startup failure')
@@ -77,7 +77,7 @@ def test_failed_migration_restores_settings_and_old_connector(configured, monkey
     legacy.chmod(0o600)
     monkeypatch.setattr(admin, '_legacy_relay_active', lambda: True)
     monkeypatch.setattr(admin, '_legacy_relay_control', lambda action: calls.append(action))
-    def restart():
+    def restart(*, admin):
         calls.append('restart')
         if calls.count('restart') == 1:
             raise RuntimeError('candidate failed')
@@ -105,7 +105,7 @@ def test_secure_local_access_preserves_remote_network_and_restores_on_failure(co
     assert data['network']['mode']=='tailscale'
     assert data['server']['public_base_url']=='https://host.tail.test'
     original=path.read_bytes()
-    def restart():
+    def restart(*, admin):
         calls.append('restart')
         if len(calls)==2: raise RuntimeError('port busy')
     monkeypatch.setattr(admin.service_manager,'restart',restart)

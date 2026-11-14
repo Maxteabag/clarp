@@ -744,6 +744,20 @@ any subset. Payload shapes are documented in the handler docstrings in
 | Diagnostics | `/crash` (MetricKit), `/diagnostics/health` | `ios_diagnostics.py`, `health.py` |
 | Tool explanations | `POST /tool-explanations`, `GET /tool-explanations/stats` (see below) | `tool_explanations.py`, `tool_explanation_learning.py`, `docs/tool-explanations.md` |
 
+### Saving a voice provider: `POST /tts/providers`
+
+`{"provider", "fallback", "voice"}` saves the choice and answers the provider
+status plus `restart_scheduled`. Every provider but Cartesia needs a Host
+restart; the Host restarts its own service half a second after the answer.
+
+Only the installed Host does that (Host contract 99, [installation.md](installation.md)
+"Who may touch the services"). Any other Host still saves, and answers
+`restart_scheduled: false` with
+`restart_refusal: {"reason": "not_in_unit" | "no_definition" | "foreign_directories" | "disposable_host", "message": "…"}`.
+`restart_refusal` is absent whenever a restart was scheduled or none was
+needed. The same Hosts answer `POST /server-update` with
+`409 {"ok": false, "message": "This Host is not the installed Clarp service: …"}`.
+
 ### Inspecting a background process: `GET /background-jobs/<job_id>`
 
 Returns 404 for an unknown job, otherwise:

@@ -1,0 +1,892 @@
+"""Who may act on clarp.service and clarp-runtime.service (Clarp issue 322).
+
+The units have fixed names and every process of the user shares one service
+manager, so a disposable Host that restarted "clarp.service" restarted the
+LIVE Host. Every entry point of service_manager that touches a unit, a unit
+file or the service manager now needs a standing from the module's one gate,
+and its one command runner takes nothing else. Every test here uses the
+module's runner seam: no service-manager command is real.
+"""
+from __future__ import annotations
+
+import ast
+import importlib.util
+import os
+import pathlib
+import plistlib
+import subprocess
+
+import pytest
+
+from lib import service_manager
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+SLICE = "/user.slice/user-{uid}.slice/user@{uid}.service/app.slice/"
+
+
+class Manager:
+    """The runner seam: records every command, answers `show` like systemd."""
+
+    def __init__(self, loaded: dict[str, str] | None = None, *, show_rc: int = 0):
+        self.calls: list[list[str]] = []
+        self.loaded = loaded if loaded is not None else {}
+        self.show_rc = show_rc
+
+    def __call__(self, argv, **_kwargs):
+        argv = list(argv)
+        self.calls.append(argv)
+        if argv[:3] == ["systemctl", "--user", "show"]:
+            blocks = []
+            for unit in (service_manager.SERVER_UNIT, service_manager.RUNTIME_UNIT):
+                path = self.loaded.get(unit, "")
+                blocks.append(f"Id={unit}\nLoadState={'loaded' if path else 'not-found'}\n"
+                              f"FragmentPath={path}\n")
+            return subprocess.CompletedProcess(argv, self.show_rc, "\n".join(blocks), "")
+        if argv[:2] == ["launchctl", "print"]:
+            unit = next(unit for unit, label in service_manager._LAUNCHD_LABELS
+                        if argv[2].endswith("/" + label))
+            path = self.loaded.get(unit, "")
+            return subprocess.CompletedProcess(
+                argv, 0 if path else 113, f"{argv[2]} = {{\n\tpath = {path}\n}}\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    @property
+    def acted(self) -> list[list[str]]:
+        """Commands that change something: everything but the standing question."""
+        return [call for call in self.calls
+                if call[:3] != ["systemctl", "--user", "show"]
+                and call[:2] != ["launchctl", "print"]]
+
+
+def _unit_text(share: pathlib.Path, database: pathlib.Path | None = None) -> str:
+    return (f'[Service]\nEnvironment="PATH=/usr/bin"\n'
+            f'Environment="CLARP_SHARE_DIR={share}"\n'
+            f'Environment="CLAUDE_PWA_DB={database or share / "state.sqlite"}"\n'
+            "ExecStart=/usr/bin/true\n")
+
+
+def _never(what: str):
+    def fail(*_args, **_kwargs):
+        raise AssertionError(what)
+    return fail
+
+
+class Installation:
+    """An installed Clarp in a temporary home, and this process as its Host."""
+
+    def __init__(self, tmp_path, monkeypatch, *, platform: str = "linux"):
+        self.monkeypatch = monkeypatch
+        self.home = tmp_path / "home"
+        self.share = self.home / ".local/share/clarp"
+        self.share.mkdir(parents=True)
+        monkeypatch.setenv("CLARP_PLATFORM_OVERRIDE", platform)
+        monkeypatch.setenv("HOME", str(self.home))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(self.home / ".config"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(self.home / ".local/share"))
+        monkeypatch.setenv("CLARP_SHARE_DIR", str(self.share))
+        monkeypatch.setenv("CLAUDE_PWA_DB", str(self.share / "state.sqlite"))
+        monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+        # Never the developer's own installation: the account home is this one.
+        monkeypatch.setattr(service_manager, "_account_home", lambda: self.home)
+        # Nothing here may start a process or reach a Host over HTTP.
+        monkeypatch.setattr(service_manager.subprocess, "Popen", _never("a process was started"))
+        monkeypatch.setattr(service_manager.urllib.request, "build_opener",
+                            _never("a Host was asked over HTTP"))
+        self.server = service_manager.definition_path()
+        self.runtime = service_manager.runtime_definition_path()
+        assert self.home in self.server.parents
+        self.write_definitions()
+        self.cgroup(service_manager.SERVER_UNIT)
+        if platform == "macos":
+            monkeypatch.setenv("XPC_SERVICE_NAME", service_manager.LAUNCHD_LABEL)
+
+    def write_definitions(self, share: pathlib.Path | None = None,
+                          database: pathlib.Path | None = None):
+        share = share or self.share
+        self.server.parent.mkdir(parents=True, exist_ok=True)
+        for path in (self.server, self.runtime):
+            if path.suffix == ".plist":
+                path.write_bytes(plistlib.dumps({"EnvironmentVariables": {
+                    "CLARP_SHARE_DIR": str(share),
+                    "CLAUDE_PWA_DB": str(database or share / "state.sqlite")}}))
+            else:
+                path.write_text(_unit_text(share, database))
+
+    def cgroup(self, unit: str, *, uid: int | None = None, prefix: str | None = None):
+        uid = os.getuid() if uid is None else uid
+        path = (SLICE.format(uid=uid) if prefix is None else prefix) + unit
+        self.monkeypatch.setattr(service_manager, "_own_cgroup", lambda: path)
+
+    def manager(self) -> Manager:
+        """A service manager that loaded both units from this installation."""
+        return Manager({service_manager.SERVER_UNIT: str(self.server),
+                        service_manager.RUNTIME_UNIT: str(self.runtime)})
+
+    def definitions(self) -> dict:
+        """Every definition file under the temporary root, with its content."""
+        root = self.home.parent
+        return {str(path): path.read_bytes() for path in sorted(root.rglob("*"))
+                if path.is_file() and path.name.startswith(("clarp", "com.maxteabag.clarp"))}
+
+
+@pytest.fixture
+def installed(tmp_path, monkeypatch):
+    return Installation(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def refusals(monkeypatch):
+    """Every refusal the module logged, as (action, reason)."""
+    from lib import log as log_module
+    seen = []
+    real = log_module.log
+
+    def recording(event, detail=""):
+        if event == "serviceActionRefused":
+            fields = dict(part.split("=", 1) for part in detail.split()[:2])
+            seen.append((fields["action"], fields["reason"]))
+        return real(event, detail)
+    monkeypatch.setattr(log_module, "log", recording)
+    return seen
+
+
+# Every public entry point of the module that touches a unit, a unit file or
+# the service manager, called as its callers call it.
+def _write(_runner):
+    return service_manager.write_definition(
+        python=pathlib.Path("/usr/bin/python3"),
+        share=pathlib.Path(os.environ["CLARP_SHARE_DIR"]), service_path="/usr/bin",
+        inherited_environment={})
+
+
+def _await(_runner):
+    return service_manager.wait_until_ready(
+        pathlib.Path(os.environ["CLARP_SHARE_DIR"]) / "absent-config.toml",
+        expected_release_id="release", timeout=0.01)
+
+
+ACTIONS = {
+    "restart": lambda runner: service_manager.restart(runner=runner),
+    "restart-unchecked": lambda runner: service_manager.restart(runner=runner, check=False),
+    "restart-admin": lambda runner: service_manager.restart(runner=runner, admin=True),
+    "install": lambda runner: service_manager.install_and_restart(runner=runner),
+    "restore": lambda runner: service_manager.restore_after_failed_install(
+        had_previous=True, runner=runner),
+    "restore-first-install": lambda runner: service_manager.restore_after_failed_install(
+        had_previous=False, had_runtime_previous=False, runner=runner),
+    "stop": lambda runner: service_manager.stop_and_disable(runner=runner),
+    "remove": lambda runner: service_manager.remove_definitions(runner=runner),
+    "write": _write,
+    "await": _await,
+    "launch": lambda runner: service_manager.launch_detached(
+        ["/bin/true"], unit="clarp-guard-test", runner=runner),
+    "status": lambda runner: service_manager.is_active(runner=runner),
+    "runtime-status": lambda runner: service_manager.is_runtime_active(runner=runner),
+}
+# The standing each needs (service_manager._standing).
+KIND = {"restart": "host", "restart-unchecked": "host", "restart-admin": "admin",
+        "install": "admin", "restore": "admin", "restore-first-install": "admin",
+        "stop": "admin", "remove": "admin", "write": "write", "await": "installation",
+        "launch": "member", "status": "member", "runtime-status": "member"}
+ADMIN_ACTIONS = [name for name in ACTIONS if KIND[name] == "admin"]
+# Public function -> the standing it must obtain before it touches anything.
+TOUCHING = {
+    "restart": {"host", "admin"}, "install_and_restart": {"admin"},
+    "restore_after_failed_install": {"admin"}, "stop_and_disable": {"admin"},
+    "remove_definitions": {"admin"}, "write_definition": {"write"},
+    "wait_until_ready": {"installation"}, "launch_detached": {"member"},
+    "is_active": {"member"}, "is_runtime_active": {"member"},
+}
+# Public function -> why it needs none: it touches no unit, no unit file and
+# no service-manager command.
+UNTOUCHING = {
+    "platform_kind": "reads the platform",
+    "definition_path": "computes a path",
+    "runtime_definition_path": "computes a path",
+    "launchd_domain": "formats the launchd domain",
+    "configured_environment": "reads [env] from a config file it is given",
+    "render": "returns a definition's bytes from a release's template; writes no definition",
+    "refuse": "logs a refusal and returns it",
+    "runs_in_unit": "reads this process's own cgroup or environment",
+    "host_refusal": "asks the gate and returns its answer",
+}
+# What touching looks like in the source.
+_TOUCHES = {"write_text", "write_bytes", "unlink", "symlink_to", "rename", "fdopen", "mkstemp",
+            "Popen", "build_opener", "urlopen", "_run", "runner"}
+
+
+def _module_functions() -> dict[str, ast.FunctionDef]:
+    tree = ast.parse((ROOT / "server/lib/service_manager.py").read_text())
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+
+def _called(node: ast.AST) -> list[tuple[str, ast.Call]]:
+    """(name, call) for every call in ``node``: f(...) and anything.f(...)."""
+    found = []
+    for call in ast.walk(node):
+        if isinstance(call, ast.Call):
+            name = getattr(call.func, "id", None) or getattr(call.func, "attr", None)
+            if name:
+                found.append((name, call))
+    return found
+
+
+def _refused(name: str, manager, refusals) -> str:
+    """Take one entry point to its refusal, as its caller sees it; the reason."""
+    logged = len(refusals)
+    if name == "launch":
+        launched, error = ACTIONS[name](manager)
+        assert launched is False and error.startswith("Clarp service action refused (launch): ")
+    elif name in ("status", "runtime-status"):
+        assert ACTIONS[name](manager) is False
+    else:
+        with pytest.raises(service_manager.ServiceActionRefused) as refused:
+            ACTIONS[name](manager)
+        assert refused.value.reason == refusals[-1][1]
+    assert len(refusals) == logged + 1                    # logged once, never silent
+    assert refusals[-1][1] in service_manager.REFUSAL_REASONS
+    return refusals[-1][1]
+
+
+def test_every_public_function_is_classified_and_every_touching_one_is_exercised():
+    """A new public function of the module must be put in TOUCHING (and get the
+    gate) or in UNTOUCHING (with its reason): it cannot slip in unguarded."""
+    public = {name for name in _module_functions() if not name.startswith("_")}
+    assert public == set(TOUCHING) | set(UNTOUCHING)
+    assert not set(TOUCHING) & set(UNTOUCHING)
+    source = (ROOT / "tests/unit/test_service_action_guard.py").read_text()
+    table = source[source.index("\nACTIONS = {"):source.index("\n# The standing each needs")]
+    for name in TOUCHING:
+        assert f"service_manager.{name}(" in source[:source.index("\n# The standing each needs")], name
+    assert {kind for kinds in TOUCHING.values() for kind in kinds} == set(KIND.values())
+    assert table.count("service_manager.") >= len(TOUCHING) - 2      # write and await are helpers
+
+
+@pytest.mark.parametrize("name", sorted(TOUCHING))
+def test_a_touching_entry_point_asks_the_gate_before_it_touches_anything(name):
+    function = _module_functions()[name]
+    calls = _called(function)
+    gates = [call for called, call in calls if called == "_standing"]
+    assert gates, f"{name} never asks _standing()"
+    kinds = {constant.value for gate in gates for constant in ast.walk(gate.args[0])
+             if isinstance(constant, ast.Constant)}
+    assert kinds == TOUCHING[name]
+    first_gate = min(gate.lineno for gate in gates)
+    touching = [(called, call.lineno) for called, call in calls if called in _TOUCHES]
+    assert touching, f"{name} is listed as touching but touches nothing"
+    assert all(line > first_gate for _, line in touching), touching
+
+
+def test_no_command_runs_and_no_standing_is_made_outside_the_gate():
+    functions = _module_functions()
+    for name, function in functions.items():
+        for called, call in _called(function):
+            if called == "_run":
+                # Every command carries the standing its function obtained.
+                proof = getattr(call.args[0], "id", "")
+                assert proof == ("_ASKING" if name == "_loaded_definitions" else "standing"), name
+            if called == "runner":
+                assert name == "_run", f"{name} calls the runner past _run"
+            if called == "_Standing":
+                assert name == "_standing", f"{name} makes its own standing"
+            if called in ("run", "check_output", "check_call", "call"):
+                assert getattr(call.func, "value", None) is None or \
+                    getattr(call.func.value, "id", "") != "subprocess", name
+            if called == "Popen":
+                assert name == "launch_detached"          # macOS and containers: no unit
+    with pytest.raises(TypeError, match="needs a standing"):
+        service_manager._run("systemctl", "--user", "restart", "clarp.service",
+                             runner=_never("a command ran without standing"))
+    with pytest.raises(TypeError, match="only the standing question"):
+        service_manager._run(service_manager._ASKING, "systemctl", "--user", "restart",
+                             "clarp.service", runner=_never("the question restarted a unit"))
+
+
+def test_an_untouching_function_reaches_nothing_that_touches():
+    """Through everything it calls in the module, short of the gate itself."""
+    functions = _module_functions()
+    for name in UNTOUCHING:
+        seen, queue = set(), [name]
+        while queue:
+            current = queue.pop()
+            if current in seen or current == "_standing":
+                continue
+            seen.add(current)
+            for called, _call in _called(functions[current]):
+                assert called not in _TOUCHES, f"{name} reaches {called} through {current}"
+                if called in functions:
+                    queue.append(called)
+        assert not seen & set(TOUCHING), f"{name} reaches a touching entry point"
+
+
+def _foreign_share(installed, tmp_path):
+    installed.monkeypatch.setenv("CLARP_SHARE_DIR", str(tmp_path / "qa/share"))
+
+
+def _foreign_database(installed, tmp_path):
+    installed.monkeypatch.setenv("CLAUDE_PWA_DB", str(tmp_path / "qa/state.sqlite"))
+
+
+def _private_config_home(installed, tmp_path):
+    installed.monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "qa/xdg-config"))
+
+
+def _qa_host_environment(installed, tmp_path):
+    """What tests/qa/host.py gives its process."""
+    root = tmp_path / "qa"
+    for key, suffix in {"CLAUDE_PWA_DB": "state.sqlite", "CLARP_SHARE_DIR": "share",
+                        "CLARP_CONFIG_DIR": "config", "XDG_CONFIG_HOME": "xdg-config",
+                        "XDG_DATA_HOME": "xdg-data"}.items():
+        installed.monkeypatch.setenv(key, str(root / suffix))
+
+
+FOREIGN = {"share": _foreign_share, "database": _foreign_database,
+           "config-home": _private_config_home, "qa-host": _qa_host_environment}
+
+
+def _foreign_to(foreign: str, name: str) -> bool:
+    """Whether that environment makes this entry point's caller foreign."""
+    kind = KIND[name]
+    if foreign == "share":
+        return True
+    if foreign == "database":
+        # Only a process that keeps state works on a database; install.sh and
+        # clarp-admin are judged by their share directory.
+        return kind in ("host", "member")
+    if foreign == "config-home":
+        # The installation's own share and database with a private config
+        # home: still of the installation, but it manages no definitions there.
+        return kind == "admin"
+    # A QA Host's environment. Definitions it wrote into its own config home
+    # would replace nothing; tests/qa/host.py refuses that itself (below).
+    return kind != "write"
+
+
+FOREIGN_CASES = [(foreign, name) for foreign in sorted(FOREIGN) for name in sorted(ACTIONS)
+                 if _foreign_to(foreign, name)]
+
+
+@pytest.mark.parametrize("foreign, action", FOREIGN_CASES)
+@pytest.mark.parametrize("inside_unit", [True, False])
+def test_a_host_with_foreign_directories_touches_nothing(
+        installed, tmp_path, refusals, action, foreign, inside_unit):
+    """No service-manager command (not even a question), no process, no HTTP
+    request, no definition written or removed. Inside the live unit's cgroup
+    or not (a QA Host started by an agent runs in the runtime's)."""
+    FOREIGN[foreign](installed, tmp_path)
+    if not inside_unit:
+        installed.cgroup(service_manager.RUNTIME_UNIT)
+    manager = installed.manager()
+    before = installed.definitions()
+
+    if action == "remove" and foreign in ("config-home", "qa-host"):
+        ACTIONS[action](manager)          # nothing of its own to remove: a no-op
+    else:
+        _refused(action, manager, refusals)
+
+    assert manager.calls == []
+    assert installed.definitions() == before and len(before) == 2
+
+
+def test_a_private_config_home_alone_does_not_make_the_installation_foreign(
+        installed, tmp_path, refusals):
+    """An agent's shell with its own XDG_CONFIG_HOME, on the installation's
+    share and database: `clarp-admin prompt --delay` still schedules, and the
+    Host is still the Host. It finds the definition at the account's default."""
+    _private_config_home(installed, tmp_path)
+    manager = installed.manager()
+
+    launched, error = service_manager.launch_detached(
+        ["/bin/true"], unit="clarp-guard-test", runner=manager)
+    assert (launched, error) == (True, "")
+    assert service_manager.is_active(runner=manager) is True
+    service_manager.restart(runner=manager, check=False)
+
+    assert [call[0] for call in manager.calls] == ["systemd-run", "systemctl", "systemctl", "systemctl"]
+    assert refusals == []
+
+
+@pytest.mark.parametrize("action", ["restart", "restart-unchecked"])
+@pytest.mark.parametrize("where", [
+    "runtime-unit", "terminal", "unknown", "other-user", "system-unit", "lookalike"])
+def test_a_host_outside_the_unit_does_not_restart_it(installed, refusals, action, where):
+    """The installation's own directories are not enough: a Host started by
+    hand beside the live one restarts nothing."""
+    import os
+    if where == "runtime-unit":
+        installed.cgroup(service_manager.RUNTIME_UNIT)
+    elif where == "terminal":
+        installed.cgroup("app-kitty-1234.scope")
+    elif where == "unknown":
+        installed.monkeypatch.setattr(service_manager, "_own_cgroup", lambda: "")
+    elif where == "other-user":
+        installed.cgroup(service_manager.SERVER_UNIT, uid=os.getuid() + 1)
+    elif where == "system-unit":
+        installed.cgroup(service_manager.SERVER_UNIT, prefix="/system.slice/")
+    else:
+        installed.cgroup("not-clarp.service")
+    manager = installed.manager()
+
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        ACTIONS[action](manager)
+
+    assert refused.value.reason == "not_in_unit"
+    assert refusals == [("restart", "not_in_unit")]
+    assert manager.calls == []
+
+
+def test_the_installed_host_restarts_its_own_unit(installed, refusals):
+    manager = installed.manager()
+
+    service_manager.restart(runner=manager, check=False)
+
+    assert manager.calls == [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "restart", "clarp.service"],
+    ]
+    assert refusals == []
+    assert service_manager.host_refusal("restart") is None
+
+
+def test_a_host_in_a_sub_cgroup_of_its_unit_is_inside_it(installed):
+    installed.cgroup(service_manager.SERVER_UNIT + "/worker")
+    assert service_manager.runs_in_unit(service_manager.SERVER_UNIT)
+    assert not service_manager.runs_in_unit(service_manager.RUNTIME_UNIT)
+
+
+def test_a_host_whose_unit_has_no_definition_is_refused(installed, refusals):
+    installed.server.unlink()
+    manager = installed.manager()
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.restart(runner=manager)
+    assert refused.value.reason == "no_definition"
+    assert manager.calls == []
+
+
+@pytest.mark.parametrize("admin", [False, True])
+def test_a_definition_that_names_no_share_directory_proves_nothing(installed, admin):
+    """A hand-written or very old unit: nothing in it says whose it is. The
+    admin has no database in its environment here, so only the share decides."""
+    for path in (installed.server, installed.runtime):
+        path.write_text("[Service]\nExecStart=/usr/bin/true\n")
+    if admin:
+        installed.monkeypatch.delenv("CLAUDE_PWA_DB")
+    manager = installed.manager()
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.restart(runner=manager, admin=admin)
+    assert refused.value.reason == "foreign_directories"
+    assert "share directory (none)" in refused.value.detail
+    assert manager.calls == []
+
+
+def test_a_host_database_defaults_like_lib_db(installed, tmp_path):
+    """Without CLAUDE_PWA_DB a Host opens <data dir>/state.sqlite (lib.db), not
+    <share>/state.sqlite: a share given alone does not make the database ours."""
+    elsewhere = tmp_path / "elsewhere"
+    installed.write_definitions(share=elsewhere)
+    installed.monkeypatch.setenv("CLARP_SHARE_DIR", str(elsewhere))
+    installed.monkeypatch.delenv("CLAUDE_PWA_DB")
+    manager = installed.manager()
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.restart(runner=manager)
+    assert refused.value.reason == "foreign_directories"
+    assert "database" in refused.value.detail
+    assert manager.calls == []
+
+
+def test_directories_are_compared_as_real_paths(installed, tmp_path):
+    link = tmp_path / "share-link"
+    link.symlink_to(installed.share, target_is_directory=True)
+    installed.monkeypatch.setenv("CLARP_SHARE_DIR", str(link))
+    installed.monkeypatch.setenv("CLAUDE_PWA_DB", str(link / "state.sqlite"))
+    assert service_manager.host_refusal("restart") is None
+
+
+# ---- the admin path: install.sh and clarp-admin ----------------------------
+
+@pytest.mark.parametrize("where", ["runtime-unit", "update-unit", "terminal"])
+def test_the_admin_path_acts_from_any_cgroup(installed, refusals, where):
+    """clarp-admin run by an agent sits in the runtime's cgroup, the Host's own
+    update in clarp-update.service, the owner's in a terminal scope."""
+    installed.cgroup({"runtime-unit": service_manager.RUNTIME_UNIT,
+                      "update-unit": "clarp-update.service",
+                      "terminal": "app-kitty-1234.scope"}[where])
+    manager = installed.manager()
+
+    service_manager.restart(runner=manager, admin=True)
+
+    assert manager.calls[0][:3] == ["systemctl", "--user", "show"]
+    assert manager.acted == [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "restart", "clarp.service"],
+    ]
+    assert refusals == []
+
+
+def test_the_installer_installs_and_starts_both_units(installed):
+    manager = installed.manager()
+    service_manager.install_and_restart(runner=manager)
+    assert manager.acted == [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "is-active", "--quiet", "clarp-runtime.service"],
+        ["systemctl", "--user", "enable", "--now", "clarp-runtime.service"],
+        ["systemctl", "--user", "enable", "clarp.service"],
+        ["systemctl", "--user", "restart", "clarp.service"],
+    ]
+
+
+def test_a_first_installation_meets_a_manager_that_knows_no_unit(installed):
+    manager = Manager({})                       # LoadState=not-found for both
+    service_manager.install_and_restart(runner=manager)
+    assert ["systemctl", "--user", "restart", "clarp.service"] in manager.acted
+
+
+def test_rollback_restores_the_previous_services(installed):
+    manager = installed.manager()
+    service_manager.restore_after_failed_install(had_previous=True, runner=manager)
+    assert ["systemctl", "--user", "restart", "clarp.service"] in manager.acted
+
+
+def test_a_failed_first_installation_cleans_up_while_its_definitions_exist(installed, refusals):
+    manager = installed.manager()
+    service_manager.restore_after_failed_install(
+        had_previous=False, had_runtime_previous=False, runner=manager)
+    assert manager.acted[1:] == [
+        ["systemctl", "--user", "disable", "--now", "clarp.service"],
+        ["systemctl", "--user", "disable", "--now", "clarp-runtime.service"],
+    ]
+    # With the definitions already deleted nothing says whose services they are.
+    installed.server.unlink()
+    installed.runtime.unlink()
+    again = installed.manager()
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.restore_after_failed_install(had_previous=False, runner=again)
+    assert refused.value.reason == "no_definition"
+    assert again.calls == []
+    assert refusals == [("restore", "no_definition")]
+
+
+def test_uninstall_stops_the_services_then_removes_their_definitions(installed):
+    manager = installed.manager()
+    service_manager.stop_and_disable(runner=manager)
+    service_manager.remove_definitions(runner=manager)
+    assert manager.acted == [
+        ["systemctl", "--user", "disable", "--now", "clarp.service"],
+        ["systemctl", "--user", "disable", "--now", "clarp-runtime.service"],
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+    assert not installed.server.exists() and not installed.runtime.exists()
+    # A second uninstall finds nothing of its own and runs nothing.
+    again = installed.manager()
+    service_manager.remove_definitions(runner=again)
+    assert again.calls == []
+
+
+@pytest.mark.parametrize("action", ADMIN_ACTIONS)
+def test_a_sandbox_installation_does_not_touch_the_live_units(
+        installed, tmp_path, refusals, action):
+    """A test or scratch installation writes its own definitions under its own
+    config home, and they name its own share. The service manager's units are
+    the live Host's: it is asked which file they come from, and nothing else."""
+    sandbox = tmp_path / "sandbox"
+    live = installed.manager()                      # units loaded from the live files
+    installed.monkeypatch.setenv("XDG_CONFIG_HOME", str(sandbox / ".config"))
+    installed.monkeypatch.setenv("CLARP_SHARE_DIR", str(sandbox / "share"))
+    installed.monkeypatch.setenv("CLAUDE_PWA_DB", str(sandbox / "share/state.sqlite"))
+    for path in (service_manager.definition_path(), service_manager.runtime_definition_path()):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_unit_text(sandbox / "share"))
+
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        ACTIONS[action](live)
+
+    assert refused.value.reason == "foreign_definition"
+    assert live.acted == []
+    assert len(live.calls) == 1 and live.calls[0][:3] == ["systemctl", "--user", "show"]
+    assert service_manager.definition_path().is_file()       # `remove` deleted nothing
+    assert refusals[-1][1] == "foreign_definition"
+
+
+@pytest.mark.parametrize("answer", ["fails", "empty", "missing-binary", "transient", "masked"])
+def test_the_admin_path_needs_the_managers_answer(installed, answer):
+    manager = installed.manager()
+    reason = "manager_unavailable"
+    if answer == "fails":
+        manager.show_rc = 1
+    elif answer == "empty":
+        manager = Manager()
+        manager.__class__ = type("Silent", (Manager,), {
+            "__call__": lambda self, argv, **_k: (
+                self.calls.append(list(argv)),
+                subprocess.CompletedProcess(argv, 0, "", ""))[1]})
+    elif answer == "missing-binary":
+        class Missing(Manager):
+            def __call__(self, argv, **_kwargs):
+                self.calls.append(list(argv))
+                raise FileNotFoundError("systemctl")
+        manager = Missing()
+    else:
+        class Odd(Manager):
+            def __call__(self, argv, **_kwargs):
+                self.calls.append(list(argv))
+                fragment = "" if answer == "transient" else "/dev/null"
+                state = "loaded" if answer == "transient" else "masked"
+                text = "\n".join(f"Id={unit}\nLoadState={state}\nFragmentPath={fragment}\n"
+                                 for unit in (service_manager.SERVER_UNIT,
+                                              service_manager.RUNTIME_UNIT))
+                return subprocess.CompletedProcess(argv, 0, text, "")
+        manager, reason = Odd(), "foreign_definition"
+
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.restart(runner=manager, admin=True)
+
+    assert refused.value.reason == reason
+    assert manager.acted == []
+
+
+@pytest.mark.parametrize("database", ["inherited-foreign", "unset"])
+def test_the_admin_path_is_judged_by_its_share_directory_not_a_database_variable(
+        installed, tmp_path, database):
+    """install.sh exports its share directory but inherits CLAUDE_PWA_DB from
+    whoever ran it (a test run, an agent's shell), and opens no database: the
+    installation it acts on is the one in its share directory."""
+    if database == "unset":
+        installed.monkeypatch.delenv("CLAUDE_PWA_DB")
+    else:
+        installed.monkeypatch.setenv("CLAUDE_PWA_DB", str(tmp_path / "callers/state.sqlite"))
+    manager = installed.manager()
+    service_manager.install_and_restart(runner=manager)
+    assert ["systemctl", "--user", "restart", "clarp.service"] in manager.acted
+    # A Host is another matter: it works on that database.
+    refusal = service_manager.host_refusal("restart")
+    if database == "unset":
+        assert refusal is None
+    else:
+        assert refusal.reason == "foreign_directories" and "database" in refusal.detail
+
+
+def test_a_runtime_definition_of_another_installation_refuses_the_admin(installed, tmp_path):
+    installed.runtime.write_text(_unit_text(tmp_path / "other/share"))
+    manager = installed.manager()
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.install_and_restart(runner=manager)
+    assert refused.value.reason == "foreign_directories"
+    assert manager.calls == []
+
+
+def test_definitions_are_written_only_for_the_process_own_share_directory(
+        installed, tmp_path, refusals):
+    """Whatever share directory the caller names: a process writes definitions
+    for the installation it works on, and replaces no other installation's."""
+    before = installed.definitions()
+    other = tmp_path / "other/share"
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.write_definition(
+            python=pathlib.Path("/usr/bin/python3"), share=other, service_path="/usr/bin",
+            inherited_environment={})
+    assert refused.value.reason == "foreign_directories"
+    assert "this process works on" in refused.value.detail
+    # Its own share, but the definitions in place serve another installation.
+    installed.monkeypatch.setenv("CLARP_SHARE_DIR", str(other))
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.write_definition(
+            python=pathlib.Path("/usr/bin/python3"), share=other, service_path="/usr/bin",
+            inherited_environment={})
+    assert "is not replaced" in refused.value.detail
+    assert installed.definitions() == before
+    assert [reason for _, reason in refusals] == ["foreign_directories"] * 2
+
+
+def test_the_rendered_definitions_satisfy_the_guard(tmp_path, monkeypatch):
+    """The real templates, rendered by write_definition as the installer does."""
+    installed = Installation(tmp_path, monkeypatch)
+    installed.server.unlink()
+    installed.runtime.unlink()
+    release = installed.share / "current"
+    (release / "systemd").mkdir(parents=True)
+    for name in ("clarp.service", "clarp-runtime.service"):
+        (release / "systemd" / name).write_text((ROOT / "systemd" / name).read_text())
+    (release / "runtime.py").touch()
+    monkeypatch.setenv("CLARP_CONFIG_DIR", str(installed.home / ".config/clarp"))
+    monkeypatch.setenv("CLARP_CACHE_DIR", str(installed.home / ".cache/clarp"))
+
+    service_manager.write_definition(
+        python=pathlib.Path("/usr/bin/python3"), share=installed.share,
+        service_path="/usr/bin", home=installed.home, inherited_environment={})
+
+    environment = service_manager._definition_environment(installed.server)
+    assert environment["CLARP_SHARE_DIR"] == str(installed.share)
+    assert environment["CLAUDE_PWA_DB"] == str(installed.share / "state.sqlite")
+    assert service_manager.host_refusal("restart") is None
+    manager = installed.manager()
+    service_manager.install_and_restart(runner=manager)
+    assert ["systemctl", "--user", "restart", "clarp.service"] in manager.acted
+
+
+# ---- the kernel's word for where this process runs -------------------------
+
+@pytest.mark.parametrize("text, expected", [
+    ("0::/user.slice/user-1000.slice/user@1000.service/app.slice/clarp.service\n",
+     "/user.slice/user-1000.slice/user@1000.service/app.slice/clarp.service"),
+    ("12:pids:/user.slice\n1:name=systemd:/user.slice/user-1000.slice/user@1000.service/clarp.service\n",
+     "/user.slice/user-1000.slice/user@1000.service/clarp.service"),
+    ("12:pids:/user.slice/clarp.service\n", ""),
+    ("", ""),
+])
+def test_own_cgroup_reads_the_systemd_hierarchy(monkeypatch, tmp_path, text, expected):
+    source = tmp_path / "cgroup"
+    source.write_text(text)
+    real = pathlib.Path
+
+    def path(value, *rest):
+        return real(source) if value == "/proc/self/cgroup" else real(value, *rest)
+    monkeypatch.setattr(service_manager, "Path", path)
+    assert service_manager._own_cgroup() == expected
+
+
+def test_an_unreadable_cgroup_is_unknown(monkeypatch, tmp_path):
+    real = pathlib.Path
+    monkeypatch.setattr(service_manager, "Path", lambda value, *rest: (
+        real(tmp_path / "absent") if value == "/proc/self/cgroup" else real(value, *rest)))
+    assert service_manager._own_cgroup() == ""
+
+
+def test_the_environment_alone_does_not_put_a_process_in_the_unit(installed, monkeypatch):
+    """INVOCATION_ID is inherited by every child and can be copied; on Linux the
+    cgroup decides."""
+    installed.cgroup("app-kitty-1234.scope")
+    monkeypatch.setenv("INVOCATION_ID", "f4123ba2eba14f9e9052e10b8870b8b2")
+    monkeypatch.setenv("XPC_SERVICE_NAME", service_manager.LAUNCHD_LABEL)
+    assert service_manager.host_refusal("restart").reason == "not_in_unit"
+
+
+# ---- macOS ------------------------------------------------------------------
+
+@pytest.fixture
+def installed_mac(tmp_path, monkeypatch):
+    return Installation(tmp_path, monkeypatch, platform="macos")
+
+
+def test_macos_host_restarts_only_the_job_launchd_started_it_as(installed_mac, refusals):
+    manager = installed_mac.manager()
+    service_manager.restart(runner=manager, check=False)
+    assert manager.calls == [["launchctl", "kickstart", "-k",
+                              f"{service_manager.launchd_domain()}/com.maxteabag.clarp.server"]]
+
+    for name in ("0", service_manager.RUNTIME_LAUNCHD_LABEL, ""):
+        installed_mac.monkeypatch.setenv("XPC_SERVICE_NAME", name)
+        outside = installed_mac.manager()
+        with pytest.raises(service_manager.ServiceActionRefused) as refused:
+            service_manager.restart(runner=outside)
+        assert refused.value.reason == "not_in_unit" and outside.calls == []
+
+
+def test_macos_foreign_host_and_sandbox_admin_are_refused(installed_mac, tmp_path, refusals):
+    live = installed_mac.manager()
+    installed_mac.monkeypatch.setenv("CLARP_SHARE_DIR", str(tmp_path / "qa/share"))
+    for action in sorted(ACTIONS):
+        if action == "launch":
+            continue                    # no unit on macOS: a plain detached process
+        assert _refused(action, live, refusals) == "foreign_directories"
+    assert live.calls == []
+
+    # A sandbox home with its own plists, against launchd's live jobs.
+    sandbox = tmp_path / "sandbox-home"
+    installed_mac.monkeypatch.setenv("HOME", str(sandbox))
+    installed_mac.monkeypatch.setenv("CLARP_SHARE_DIR", str(sandbox / "share"))
+    installed_mac.monkeypatch.setenv("CLAUDE_PWA_DB", str(sandbox / "share/state.sqlite"))
+    for path in (service_manager.definition_path(), service_manager.runtime_definition_path()):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(plistlib.dumps({"EnvironmentVariables": {
+            "CLARP_SHARE_DIR": str(sandbox / "share")}}))
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager.install_and_restart(runner=live)
+    assert refused.value.reason == "foreign_definition"
+    assert live.acted == []
+
+
+def test_macos_admin_path_acts_for_its_own_jobs_and_for_a_first_installation(installed_mac):
+    installed_mac.monkeypatch.setenv("XPC_SERVICE_NAME", "0")       # a terminal
+    manager = installed_mac.manager()
+    service_manager.restart(runner=manager, admin=True)
+    assert manager.acted == [["launchctl", "kickstart", "-k",
+                              f"{service_manager.launchd_domain()}/com.maxteabag.clarp.server"]]
+    first = Manager({})                                              # nothing loaded
+    service_manager.stop_and_disable(runner=first)
+    assert [call[:2] for call in first.acted] == [["launchctl", "bootout"]] * 2
+
+
+def test_macos_job_whose_print_names_no_path_counts_as_not_loaded(installed_mac):
+    """launchctl's print text is not a stable format, and the installer tests'
+    fake launchctl prints nothing: that is a first installation, not a refusal."""
+    class Silent(Manager):
+        def __call__(self, argv, **_kwargs):
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+    manager = Silent()
+    installed_mac.monkeypatch.setenv("XPC_SERVICE_NAME", "0")
+    installed_mac.monkeypatch.setenv("CLAUDE_PWA_DB", "/a/callers/state.sqlite")
+    service_manager.install_and_restart(runner=manager)
+    assert ["launchctl", "kickstart", "-k",
+            f"{service_manager.launchd_domain()}/com.maxteabag.clarp.server"] in manager.acted
+
+
+# ---- tests/qa/host.py -------------------------------------------------------
+
+def _qa_host_module():
+    spec = importlib.util.spec_from_file_location("qa_host_under_test", ROOT / "tests/qa/host.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_qa_host_refuses_every_entry_point_outright(installed, monkeypatch, refusals):
+    """Even with every fact of the installed Host in its favour: it replaces
+    the module's one gate and its one command runner."""
+    for name in ("_run", "_standing"):
+        monkeypatch.setattr(service_manager, name, getattr(service_manager, name))
+    manager = installed.manager()
+    before = installed.definitions()
+    assert service_manager.host_refusal("restart") is None        # the Host it imitates may
+
+    _qa_host_module().refuse_service_actions(service_manager)
+
+    for action in sorted(ACTIONS):
+        assert _refused(action, manager, refusals) == "disposable_host"
+    assert service_manager.host_refusal("update").reason == "disposable_host"
+    # A command that found its way past the gate is refused by the runner too.
+    with pytest.raises(service_manager.ServiceActionRefused) as refused:
+        service_manager._run(service_manager._ASKING, "systemctl", "--user", "show",
+                             runner=manager)
+    assert refused.value.reason == "disposable_host"
+    assert manager.calls == []
+    assert installed.definitions() == before
+
+
+def test_the_qa_host_installs_its_refusal_before_it_builds_the_server():
+    source = (ROOT / "tests/qa/host.py").read_text()
+    assert source.index("refuse_service_actions(service_manager)\n") < source.index(
+        "spec.loader.exec_module(module)")
+
+
+# ---- the Host's own update --------------------------------------------------
+
+def test_a_host_outside_the_unit_does_not_launch_the_update(installed, monkeypatch, refusals):
+    from lib import server_update
+    installed.cgroup(service_manager.RUNTIME_UNIT)
+    monkeypatch.setattr(server_update, "get_update_status", lambda: {
+        "update_method": "managed", "update_command": "clarp-admin update",
+        "update_available": True, "latest_version": "next"})
+    commands = []
+    monkeypatch.setattr(server_update.subprocess, "run",
+                        lambda command, **_k: commands.append(command))
+    monkeypatch.setattr(server_update.subprocess, "Popen",
+                        lambda command, **_k: commands.append(command))
+
+    code, result = server_update.request_update("mike")
+
+    assert code == 409 and result["ok"] is False
+    assert "not the installed Clarp service" in result["message"]
+    assert commands == []
+    assert refusals == [("update", "not_in_unit")]
