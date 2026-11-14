@@ -1092,6 +1092,9 @@ def _two_activatable_releases(tmp_path, monkeypatch):
     state = tmp_path / "install.json"
     state.write_text('{"skills": []}')
     monkeypatch.setattr(admin, "SHARE", share)
+    # clarp-admin's share directory is its environment's (the installed wrapper
+    # exports it); definitions are written only for the process's own.
+    monkeypatch.setenv("CLARP_SHARE_DIR", str(share))
     monkeypatch.setattr(admin, "INSTALL_STATE", state)
     monkeypatch.setattr(admin, "HOME", tmp_path)
     live_unit = tmp_path / ".config/systemd/user/clarp.service"
@@ -1697,8 +1700,8 @@ def test_a_refused_service_action_ends_the_command_with_its_reason(monkeypatch, 
         "parse_args": lambda self: argparse.Namespace(func=refused)})())
 
     assert admin.main() == 1
-    assert "refused to restart the Clarp service: the unit serves another share directory" \
-        in capsys.readouterr().err
+    assert "clarp-admin: Clarp service action refused (restart): " \
+        "the unit serves another share directory" in capsys.readouterr().err
 
 
 def test_every_clarp_admin_restart_names_the_admin_path():

@@ -751,7 +751,7 @@ status plus `restart_scheduled`. Every provider but Cartesia needs a Host
 restart; the Host restarts its own service half a second after the answer.
 
 Only the installed Host does that (Host contract 99, [installation.md](installation.md)
-"Who may act on the services"). Any other Host still saves, and answers
+"Who may touch the services"). Any other Host still saves, and answers
 `restart_scheduled: false` with
 `restart_refusal: {"reason": "not_in_unit" | "no_definition" | "foreign_directories" | "disposable_host", "message": "…"}`.
 `restart_refusal` is absent whenever a restart was scheduled or none was

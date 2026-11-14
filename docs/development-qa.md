@@ -25,9 +25,9 @@ durable queue. `tests/qa/host.py --state-dir /owned/disposable/path` exposes the
 same harness for client QA. It binds only loopback; both state and telemetry
 databases must stay inside the marked directory. Nothing in tests/qa is installed
 into a production runtime. A QA Host shares the developer's service manager with
-the live Host, so it refuses every service-manager command outright
+the live Host, so it refuses every entry point of `service_manager` outright
 (`refuse_service_actions`, reason `disposable_host`): it can never reach
-`systemctl`, `launchctl` or `systemd-run`.
+`systemctl`, `launchctl` or `systemd-run`, or write a unit file.
 
 ## Debug evidence
 
