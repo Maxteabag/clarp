@@ -752,7 +752,7 @@ def test_a_write_refused_because_the_owner_changed_the_plan_leaves_a_receipt(own
     _activity(owner, plan)
 
     def refused(*args, **kwargs):
-        raise ValueError("plan changed; reload before editing")
+        raise task_plans.PlanChanged("plan changed; reload before editing")
 
     monkeypatch.setattr(task_plans, "updater_apply", refused)
     [receipt] = _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}})
@@ -853,7 +853,7 @@ def test_a_receipt_for_a_goal_not_written_carries_no_checkpoint_text(owner, help
     _activity(owner, plan)
     if case == "refused":
         monkeypatch.setattr(task_plans, "updater_apply",
-                            lambda *a, **k: (_ for _ in ()).throw(ValueError("plan changed; reload before editing")))
+                            lambda *a, **k: (_ for _ in ()).throw(task_plans.PlanChanged("plan changed; reload before editing")))
     if case == "closed":
         _act(plan["plan_id"], "cancel", reason="Not needed")
     config = {"agent_id": "keeper-1", "model": "m", "options": {"max_goals_per_run": 1}}
@@ -908,3 +908,48 @@ def test_the_per_goal_cap_deletes_the_oldest_receipts_in_the_store(owner):
     kept = c.execute("SELECT count(*), min(created_at) FROM goal_keeper_receipts WHERE plan_id=?",
                      (plan["plan_id"],)).fetchone()
     assert tuple(kept) == (janitor_store.GOAL_KEEPER_RECEIPTS_PER_GOAL, 1_005)
+
+
+# ---- owner conflicts by exception type, not text; capped re-reads -----------
+
+
+def test_a_provider_error_quoting_plan_changed_is_a_failure_not_a_conflict(owner):
+    quoted = RuntimeError("agy exited 1: the agent said 'plan changed; reload before editing'")
+    assert goal_keeper.error_code(quoted) == "agy_exit_1"
+    assert goal_keeper.error_code(ValueError("plan changed; reload before editing")) == "ValueError"
+    assert goal_keeper.error_code(task_plans.PlanChanged("x")) == "owner_changed_plan"
+    assert goal_keeper.error_code(task_plans.GoalClosed("x")) == "goal_closed"
+
+    plan = _goal()
+    _message(owner, "assistant", "Turn ended", at=db.now_ms() - 400_000, phase="final")
+    db.conn().execute("UPDATE task_plans SET created_at=created_at-500000 WHERE plan_id=?", (plan["plan_id"],))
+    calls = []
+
+    def ask(prompt):
+        calls.append(1)
+        raise RuntimeError("agy exited 1: plan changed; reload before editing")
+
+    config = janitors.get(_keeper()["session"])
+    result = goal_keeper.run_batch(config, {"run_id": "r1"}, [plan["plan_id"]],
+                                   lambda prompt, plan_id: ask(prompt), now=db.now_ms())
+    outcome, code = result["outcomes"][plan["plan_id"]]
+    assert (outcome, code) == ("failed", "agy_exit_1"), "retried like any other provider error"
+    progress, now = {"next_sweep_at": 10_000_000}, 1_000_000
+    goal_keeper.settle(progress, plan["plan_id"], outcome, now, code)
+    assert progress["goals"][plan["plan_id"]]["retry_at"] == now + goal_keeper.RETRY_AFTER_MS
+    goal_keeper.settle(progress, plan["plan_id"], outcome, now + 1, code)
+    assert progress["goals"][plan["plan_id"]]["retry_at"] == 10_000_000, "then only the sweep"
+
+
+def test_a_real_owner_conflict_is_reread_soon_but_only_a_few_times(owner):
+    plan = _goal()
+    current = task_plans.get(plan["plan_id"])
+    with pytest.raises(task_plans.PlanChanged):
+        task_plans.updater_apply(plan["plan_id"], seen_revision=current["revision"] - 1, steps={},
+                                 progress="p", next_work="n", model="m", source_refs=[])
+    progress, now = {"next_sweep_at": 9_000_000}, 1_000_000
+    for i in range(goal_keeper.MAX_CONFLICT_RETRIES):
+        goal_keeper.settle(progress, plan["plan_id"], "conflict", now + i, "owner_changed_plan")
+        assert progress["goals"][plan["plan_id"]]["retry_at"] == now + i + 15_000
+    goal_keeper.settle(progress, plan["plan_id"], "conflict", now + 9, "owner_changed_plan")
+    assert progress["goals"][plan["plan_id"]]["retry_at"] == 9_000_000, "capped: waits for the sweep"

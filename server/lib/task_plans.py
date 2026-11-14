@@ -448,12 +448,22 @@ def list_for_session(session: str) -> list[dict]:
     ]
 
 
+class PlanChanged(ValueError):
+    """The plan changed since the caller read it (its revision moved). A type of its
+    own so callers decide by the exception, never by its text: provider output and
+    agents quote the message ("plan changed; reload before editing")."""
+
+
+class GoalClosed(ValueError):
+    """The goal is no longer active or paused."""
+
+
 # Outcome commitments share the task plan store and its write transactions.
 def _goal_check_revision(plan, revision):
     if revision is None and json.loads(plan["goal_json"] or "{}"):
         raise ValueError("revision required for durable goal")
     if revision is not None and revision != plan["revision"]:
-        raise ValueError("plan changed; reload before editing")
+        raise PlanChanged("plan changed; reload before editing")
 
 
 # The goal keeps its newest history entries inline; the append-only ledger keeps
@@ -1362,9 +1372,9 @@ def updater_apply(
     try:
         plan = con.execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
         if not plan or plan["status"] not in {"active", "paused"}:
-            raise ValueError("goal is closed")
+            raise GoalClosed("goal is closed")
         if plan["revision"] != seen_revision:
-            raise ValueError("plan changed; reload before editing")
+            raise PlanChanged("plan changed; reload before editing")
         goal = json.loads(plan["goal_json"] or "{}")
         if not goal:
             raise ValueError("not a durable goal")
