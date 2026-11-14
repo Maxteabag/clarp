@@ -66,7 +66,7 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 3. **The client contract does not change** in stages 1 to 3: `contract/`, `HOST_CONTRACT`, routes, payloads and
    event types are frozen for this program. The Rust Host leaves out of `FEATURES` what it does not have yet.
 4. **Main moves by fast-forward, after the gates:** the repository's gates in `AGENTS.md`, plus a green
-   `Server (Rust)` run on the exact commit. No force-push, no rewriting main, no secrets in commits.
+   `Server (Rust)` run, started by hand, on the exact commit. No force-push, no rewriting main, no secrets in commits.
 5. **Fail safe.** Unknown, partial or contradictory means stop and report. Never retry a write that may have
    landed; read back first.
 6. **Never `pkill -f` or `pgrep -f`.** Kill only process ids you captured.
@@ -156,7 +156,9 @@ family from the authors and never edit sources.
 - Your compiler is `server-rs/tools/build check` (seconds once warm), then `test`, `clippy`, `fmt`; `status` shows
   who holds the queue. It works from any checkout on elitebook or laptopstudio and runs on the XPS 15. Write the
   crate first (D13); a queue with one slot is fast only if nobody compiles after every function.
-- The merge gate is CI: `git push origin <branch>`, then `gh run list -R Maxteabag/clarp --workflow server-rs.yml
+- The merge gate is the `Server (Rust)` workflow, and it never starts by itself: Peter does not want tests that
+  run automatically (his word of 10 Nov 2026). Whoever lands a commit starts it on that commit:
+  `gh workflow run server-rs.yml -R Maxteabag/clarp --ref <branch>`, then `gh run list --workflow server-rs.yml
   --branch <branch>` and `gh run view <id> --log-failed`. Start a watcher that wakes your goal instead of waiting
   in a turn (`clarp-background-jobs`, `run_detached_job.sh --goal ...`).
 - Report to the lead with `clarp-admin prompt --to maximus-6c37 --from <you> --text "..."`: branch, head, done,

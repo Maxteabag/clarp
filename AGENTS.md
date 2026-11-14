@@ -142,7 +142,8 @@ constants disagree; keep them in step in the same commit.
 
 `server-rs/` is the rebuild of the Host in Rust (Peter's go of 14 Nov 2026). Read `server-rs/REBUILD.md` before you
 touch it: it names the lead, the rules, and who owns which crate. Its Rust compiles on the XPS 15 through
-`server-rs/tools/build` (one build at a time, Peter's word of 15 Nov 2026) and in the `Server (Rust)` workflow. The
+`server-rs/tools/build` (one build at a time, Peter's word of 15 Nov 2026) and in the `Server (Rust)` workflow,
+which runs only when started by hand. The
 rule in the next section still holds on elitebook and laptopstudio, for `server-rs` too. Nothing in `server/` changes
 for it: the Python Host and its gates are as before.
 

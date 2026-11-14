@@ -1,13 +1,12 @@
 name: Server (Rust)
 
-# The merge gate of the Host in Rust (server-rs/REBUILD.md): format, lints and tests on every push
-# that touches it, on GitHub's machines. The inner loop is server-rs/tools/build on the XPS 15.
+# The merge gate of the Host in Rust (server-rs/REBUILD.md): format, lints and tests on GitHub's
+# machines. It runs only when someone starts it, on the commit that is about to go to main:
+#   gh workflow run server-rs.yml -R Maxteabag/clarp --ref <branch>
+# Peter does not want tests that run by themselves (10 Nov 2026), and the everyday compiler is
+# server-rs/tools/build on the XPS 15, so there is no push trigger here.
 
 on:
-  push:
-    paths:
-      - "server-rs/**"
-      - ".github/workflows/server-rs.yml"
   workflow_dispatch:
 
 permissions:
