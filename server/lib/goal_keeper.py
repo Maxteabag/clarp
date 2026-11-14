@@ -54,11 +54,12 @@ FIRST_LOOK_BACK_MS = 24 * 3600 * 1000
 # last activity predates the keeper's enabling were left as they stood (audit,
 # 14 Nov). The 'caught_up' marker in the keeper's progress makes it one-off.
 STALL_IDLE_MS = 3 * 24 * 3600 * 1000
-STALL_ERROR_GRACE_MS = 3600 * 1000   # a usage-limit stop gets an hour to recover first
-STALL_ERROR = re.compile(
-    r"usage limit|rate limit|session limit|hit your (session|usage|weekly) limit|"
-    r"out of credits|quota (exceeded|exhausted)|overloaded|api error|provider error",
-    re.IGNORECASE)
+STALL_ERROR_GRACE_MS = 3600 * 1000   # a stopped turn gets an hour to recover first
+# How the owner's last turn ENDED, as the Host classified it (lib/error_classify,
+# the state log's interrupted reason), never the words of a message: 7% of final
+# messages mention a rate limit or an API error (review of #330).
+STALL_USAGE_REASONS = frozenset({"usage_limit", "account_plan"})
+STALL_PROVIDER_REASONS = frozenset({"auth", "transient", "runner_exit", "timeout", "unknown"})
 DELTA_CHARS = 40_000
 # The prompt is one argv entry, which Linux caps at 128 KiB.
 PROMPT_BYTES = 100_000
@@ -151,27 +152,38 @@ def stall(con, plan_row, now: int) -> tuple[int, str, str] | None:
     or provider error that nothing followed for STALL_ERROR_GRACE_MS."""
     if plan_row["status"] != "active":
         return None
+    # A goal that is properly waiting is not stalled: a dependency or a timer in
+    # its continuation, or a job of the owner or a helper still running.
+    continuation = _goal(plan_row).get("continuation") or {}
+    due_at = continuation.get("due_at")
+    if continuation.get("state") == "waiting" or (isinstance(due_at, (int, float)) and due_at > now):
+        return None
     owner = plan_row["agent_id"]
     ids = [owner, *(h["agent_id"] for h in _helpers(con, owner, int(plan_row["created_at"])))]
     marks = ",".join("?" * len(ids))
+    if con.execute(f"SELECT 1 FROM background_jobs WHERE agent_id IN ({marks}) "
+                   f"AND status IN ('queued','running') LIMIT 1", ids).fetchone():
+        return None
     last = con.execute(f"SELECT MAX(updated_at) FROM messages WHERE agent_id IN ({marks})", ids).fetchone()[0]
     jobs = con.execute(f"SELECT MAX(terminal_at) FROM background_jobs WHERE agent_id IN ({marks})",
                        ids).fetchone()[0]
     last = max(int(last or 0), int(jobs or 0), int(plan_row["created_at"] or 0))
     if now - last >= STALL_IDLE_MS:
-        days = int((now - last) // (24 * 3600 * 1000))
-        return last, f"no activity from the owner or its helpers for {days} days", "idle"
-    final = con.execute(
-        "SELECT role, text, updated_at FROM messages WHERE agent_id=? AND text IS NOT NULL "
-        "ORDER BY updated_at DESC, seq DESC LIMIT 1", (owner,)).fetchone()
-    if (final and final["role"] == "assistant" and int(final["updated_at"]) >= last
-            and now - int(final["updated_at"]) >= STALL_ERROR_GRACE_MS):
-        hit = STALL_ERROR.search(final["text"] or "")
-        if hit:
-            kind = "a usage limit" if "limit" in hit.group(0).lower() or "credit" in hit.group(0).lower() \
-                else "a provider error"
-            return int(final["updated_at"]), f"the owner's last turn stopped on {kind}", \
-                "usage_limit" if kind == "a usage limit" else "provider_error"
+        # No day count: the line names the date it began, so it is written once.
+        return last, "no activity from the owner or its helpers", "idle"
+    # Only the OWNER's own last turn, and only as the Host classified its end.
+    ended = con.execute("SELECT ts, kind, detail FROM state_log WHERE agent_id=? "
+                        "ORDER BY state_id DESC LIMIT 1", (owner,)).fetchone()
+    if not ended or ended["kind"] != "interrupted" or now - int(ended["ts"]) < STALL_ERROR_GRACE_MS:
+        return None
+    try:
+        reason = str((json.loads(ended["detail"] or "{}") or {}).get("reason") or "")
+    except (TypeError, ValueError):
+        return None
+    if reason in STALL_USAGE_REASONS:
+        return int(ended["ts"]), "the owner's last turn stopped on a usage limit", "usage_limit"
+    if reason in STALL_PROVIDER_REASONS:
+        return int(ended["ts"]), "the owner's last turn stopped on a provider error", "provider_error"
     return None
 
 
@@ -442,6 +454,9 @@ def due(config: dict, progress: dict, now: int) -> list[str]:
             caught[plan_id] = now
             if seen.any_messages or seen.triggers:
                 state.setdefault("first_at", now - watch.fold_ms)
+                # Read in full on this attempt and its one retry only; settle()
+                # drops the flag with the state after the second failure.
+                state["catch_up"] = True
         if seen.triggers:
             state.setdefault("first_at", seen.triggers[0][0])
             state["fast"] = bool(state.get("fast") or seen.status_change)
@@ -465,8 +480,8 @@ def _needs_catch_up(row, now: int) -> bool:
     """Never updated, and begun before the first look-back window: activity older
     than FIRST_LOOK_BACK_MS would otherwise never be read."""
     goal = _goal(row)
-    if goal.get("updater"):
-        return False
+    if goal.get("updater") or row["status"] != "active":
+        return False   # never a paused goal: its prompt would carry the user's messages
     start = int((goal.get("checkpoint") or {}).get("at") or row["created_at"])
     return start < now - FIRST_LOOK_BACK_MS
 
@@ -516,7 +531,7 @@ def settle(progress: dict, plan_id: str, outcome: str, now: int, error: str = ""
 
 
 def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=lambda: True,
-           receipt: dict | None = None) -> dict:
+           receipt: dict | None = None, full: bool = False) -> dict:
     """Read, ask, record one goal. ``ask(prompt)`` returns the model's JSON
     answer and its usage. ``current()`` is the run's authority, checked again
     just before the write. ``receipt`` is filled as the update goes, so a
@@ -533,7 +548,7 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
     if not owner or owner["deleted_at"] or owner["is_janitor"]:
         return {"outcome": "skipped", "reason": "owner unavailable"}
     goal_now = _goal(row)
-    since_ms, since_event = cursor(row, now, full=not goal_now.get("updater"))
+    since_ms, since_event = cursor(row, now, full=full and not goal_now.get("updater"))
     helpers = _helpers(con, owner["agent_id"], int(row["created_at"]))
     sheet, names, job_refs = fact_sheet(con, row, owner, helpers, now)
     ids = list(names)
@@ -594,7 +609,7 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
 
 
 def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
-              current=lambda: True) -> dict:
+              current=lambda: True, full: frozenset | set = frozenset()) -> dict:
     """Update up to ``max_goals_per_run`` goals in parallel within one Janitor
     run (the framework admits one run per Janitor at a time). ``ask(prompt,
     plan_id)`` returns (answer, usage, model id). Returns each goal's
@@ -609,7 +624,8 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
         started = receipt["started"] = time.monotonic()
         try:
             result = update(plan_id, now=now, ask=lambda prompt: ask(prompt, plan_id),
-                            janitor_agent_id=config["agent_id"], current=current, receipt=receipt)
+                            janitor_agent_id=config["agent_id"], current=current, receipt=receipt,
+                            full=plan_id in full)
             if result["outcome"] != "updated":  # skipped or cancelled: say why
                 receipt.update(outcome=result["outcome"], reason=str(result.get("reason") or "")[:200])
             return plan_id, result["outcome"], "", result
