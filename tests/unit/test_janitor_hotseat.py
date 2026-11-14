@@ -176,22 +176,123 @@ def switcher(monkeypatch):
     return owner, worker, readings, calls, sent
 
 
+class ResetReplies:
+    def __init__(self, on_offer=None, statuses=None):
+        self.pending=None;self.on_offer=on_offer;self.statuses=iter(statuses or ["checking"]);self.calls=0
+    def peek(self,provider,owner):return self.pending if provider=="claude" else None
+    def ack(self,provider,receipt):self.pending=None
+    def offer(self,provider,field,models,owner):
+        self.calls+=1
+        if self.on_offer:self.on_offer()
+        return next(self.statuses,"cooldown")
+    def completion(self):
+        self.pending={"id":"reset-action-1","result":{"status":"redeemed","account":"ai2","verified":True}}
+
+
 def test_exhausted_switcher_resets_then_rereads_before_switch(switcher, monkeypatch):
-    from lib import janitor_reset
     owner,worker,readings,calls,sent=switcher
     readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,"rejected"))
     monkeypatch.setattr(service,"_provider_model_demand",lambda *a: (("Fable",),("Fable",)))
-    def refill(field,models):
-        assert field=="claude_reset_command" and models==("Fable",)
-        calls.append(("reset",))
-        readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,0))
-        readings["claude"]["accounts"][1]["usage"]["scoped"]=[{"model":"Fable","used":0}]
-        return {"status":"redeemed","account":"ai2","verified":True}
-    monkeypatch.setattr(janitor_reset,"attempt",refill)
+    replies=ResetReplies();worker.reset_worker=replies
     worker.hotseat_once()
-    reset_index=calls.index(("reset",))
-    assert any(c[0]=="read" and c[2]=="claude" for c in calls[reset_index+1:])
+    assert replies.calls==1 and not [c for c in calls if c[0]=="switch"]
+    readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,0))
+    readings["claude"]["accounts"][1]["usage"]["scoped"]=[{"model":"Fable","used":0}]
+    replies.completion();worker.hotseat_once()
     assert ("switch","hotseat","claude","b") in calls
+    assert len([n for n in sent if n['preview'].startswith('Banked reset ')])==1
+
+
+def _configure_reset_command(monkeypatch,tmp_path):
+    import dataclasses,sys
+    from lib import config
+    command=tmp_path/'command.py';receipt=tmp_path/'receipt.json';marker=tmp_path/'attempts'
+    command.write_text("import pathlib,sys\np=pathlib.Path(sys.argv[2]);p.open('a').write('attempt\\n')\nprint(pathlib.Path(sys.argv[1]).read_text())\n")
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=(sys.executable,str(command),str(receipt),str(marker))))
+    return receipt,marker
+
+
+@pytest.mark.parametrize('completed',[False,True])
+def test_reset_does_not_bypass_inflight_repair_or_spend_because_it_hides_a_healthy_seat(switcher,monkeypatch,tmp_path,completed):
+    owner,worker,readings,calls,sent=switcher
+    receipt,marker=_configure_reset_command(monkeypatch,tmp_path)
+    receipt.write_text(json.dumps({'status':'redeemed','verified':True,'account':'ai2'}))
+    from lib import janitor_reset
+    worker.reset_worker=janitor_reset.ResetWorker(worker.stop_event)
+    worker.auth_repair.profiles=(hotseat.RepairProfile("b","b@example.com","org"),)
+    readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,0))
+    if completed:
+        settings_store.set_text('hotseat-reset.claude.state',json.dumps({'id':'prior-completion','owner':owner['agent_id'],'result':{'status':'redeemed','verified':True,'account':'ai2'},'handled':False}))
+    worker.hotseat_once()
+    if worker.reset_worker.thread:worker.reset_worker.thread.join(3)
+    assert not [c for c in calls if c[0]=='switch']
+    assert not marker.exists(), 'authentication withholding must never cause grant spending'
+
+
+def test_transient_reset_status_does_not_repeat_an_exhaustion_push(switcher,monkeypatch,tmp_path):
+    from lib import janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    receipt,marker=_configure_reset_command(monkeypatch,tmp_path)
+    worker.reset_worker=janitor_reset.ResetWorker(worker.stop_event)
+    readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,"rejected"))
+    clock=[db.now_ms()+1000];monkeypatch.setattr(db,'now_ms',lambda:clock[0])
+    for status in ["cooldown","cooldown","busy","cooldown","no_eligible_grant","unverified"]:
+        receipt.write_text(json.dumps({'status':status,'verified':False}))
+        _check_again("hotseat-switcher.claude");worker.hotseat_once()
+        if worker.reset_worker.thread:
+            worker.reset_worker.thread.join(3)
+            assert not worker.reset_worker.thread.is_alive()
+        clock[0]+=1;worker.hotseat_once()  # Deliver an async completion, if any.
+        clock[0]+=10*60_000
+    assert len([n for n in sent if n.get('push')])==1
+
+
+def test_verified_reset_read_failure_stays_failed_and_reports_the_spent_action(switcher):
+    owner,worker,readings,calls,sent=switcher
+    readings["claude"]=claude_payload(a=(True,"rejected"),b=(False,"rejected"))
+    worker.reset_worker=replies=ResetReplies();worker.hotseat_once();replies.completion()
+    def unreadable(command,provider):
+        if provider=="claude":raise RuntimeError("private reading failure")
+        return []
+    worker.hotseat_read=unreadable;worker.hotseat_once()
+    notes=[n for n in sent if n['preview'].startswith('Banked reset ')]
+    assert len(notes)==1 and 'could not be refreshed' in notes[0]['preview']
+    assert not notes[0]['push'] and not [c for c in calls if c[0]=='switch']
+
+
+def test_notify_mode_never_runs_a_reset_command(switcher, monkeypatch, tmp_path):
+    import dataclasses,sys
+    from lib import config
+    owner,worker,readings,calls,sent=switcher
+    marker=tmp_path/'spent'
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=(sys.executable,'-c',f"open({str(marker)!r},'w').write('spent')")))
+    current=janitors.get('hotseat');janitors.configure('hotseat',current['revision'],options={'mode':'notify'})
+    readings['claude']=claude_payload(a=(True,'rejected'),b=(False,'rejected'))
+    worker.hotseat_once()
+    if worker.reset_worker.thread:worker.reset_worker.thread.join(2)
+    assert not marker.exists()
+
+
+def test_host_reset_budget_survives_worker_restart_and_hang_does_not_hold_codex_lane(switcher,monkeypatch):
+    import dataclasses,threading,time
+    from lib import config,janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=('fake',)))
+    entered=threading.Event();release=threading.Event()
+    def hanging(*args,**kwargs):
+        entered.set();assert release.wait(5);return {'status':'no_eligible_grant','verified':False}
+    monkeypatch.setattr(janitor_reset,'attempt',hanging)
+    readings['claude']=claude_payload(a=(True,'rejected'),b=(False,'rejected'))
+    try:
+        worker.hotseat_once()
+        assert entered.wait(2) and worker.reset_worker.thread.is_alive()
+        assert any(c[:3]==('read','hotseat','codex') for c in calls)
+        another=janitor_reset.ResetWorker(threading.Event())
+        actual=janitor_builtins.resolve(hotseat.ROLE)
+        assert another.offer('claude','claude_reset_command',('Fable',),actual)=='cooldown'
+    finally:
+        release.set()
+        if worker.reset_worker.thread:worker.reset_worker.thread.join(3)
 
 
 def test_the_phone_is_pushed_only_when_no_account_can_serve(switcher):
@@ -2175,3 +2276,25 @@ def test_hotseat_demand_includes_unpaused_queued_and_recently_limited_agents_and
     now[0] += 60_000
     worker.hotseat_once()
     assert [c for c in calls if c[0] == "switch"] == [("switch", "hotseat", "claude", "ai7")]
+
+
+def test_reset_owner_disable_cancels_the_owned_command_group(switcher,monkeypatch,tmp_path):
+    import dataclasses,sys,time,subprocess
+    from lib import config,janitor_reset
+    owner,worker,readings,calls,sent=switcher
+    script=tmp_path/'hang.py';marker=tmp_path/'started'
+    script.write_text("import pathlib,sys,time\npathlib.Path(sys.argv[1]).write_text('ready')\ntime.sleep(60)\n")
+    cfg=config.load();monkeypatch.setattr(config,'load',lambda:dataclasses.replace(cfg,claude_reset_command=(sys.executable,str(script),str(marker))))
+    current=janitor_builtins.resolve(hotseat.ROLE)
+    assert worker.reset_worker.offer('claude','claude_reset_command',('Fable',),current)=='checking'
+    try:
+        deadline=time.monotonic()+3
+        while not marker.exists() and time.monotonic()<deadline:time.sleep(.01)
+        assert marker.exists()
+        changed=janitors.get('hotseat');janitors.set_enabled('hotseat',changed['revision'],False)
+        worker.reset_worker.thread.join(3)
+        assert not worker.reset_worker.thread.is_alive()
+        result=worker.reset_worker.peek('claude',current)
+        assert result and result['result']['verified'] is False
+    finally:
+        worker.stop()
