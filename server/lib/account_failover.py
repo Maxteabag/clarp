@@ -450,6 +450,48 @@ class AccountFailover:
                 proven.add(model)
         return proven
 
+    def _start_parked(self, back: list[Attempt]) -> None:
+        """Start turns parked while the pool works: their model is served
+        again. Called with the lock held."""
+        if not back:
+            return
+        at = self.last_resumed = self.now()
+        # All of them out first: a resumed turn registers its new process,
+        # which must not find the others still parked.
+        for attempt in back:
+            self.attempts.pop(attempt.agent_id, None)
+        for attempt in back:
+            self.resumed_at[(attempt.agent_id, attempt.trace_id)] = at
+            attempt.resume()
+
+    def served_now(self, serves: Callable[[str], bool]) -> int:
+        """The machine's account was changed by someone else (the Hotseat
+        switcher, the desk) and is known to serve the models ``serves``
+        accepts. The turns parked for them while the pool works start now;
+        returns how many.
+
+        Without this they waited for the pool to go idle or for their own
+        half hour, though the account that serves them was already active:
+        nothing told the pool, and it does not ask the selector while other
+        turns work. Measured on 14 Nov 2026: the switcher moved to an account
+        with Fable at 23:31:30, seven Fable turns started at 23:47:33, when
+        the one Opus turn that kept the pool busy was stopped by hand.
+
+        Nothing is stopped and the selector is not run. During a recovery
+        nothing is done here: its own pass asks the selector. A turn started
+        here that meets the limit again is a relapse, as after a recovery."""
+        with self.lock:
+            if self.recovering:
+                return 0
+            back = [attempt for attempt in self._parked() if serves(attempt.model)]
+            self._start_parked(back)
+            models = sorted({attempt.model for attempt in back})
+        if back:
+            log("claudeAccountModelBack",
+                f"resumed={len(back)} for {models}: the active account was changed "
+                "to one that serves them")
+        return len(back)
+
     def _arm_hold(self) -> None:
         """Look again in a recheck at the work that stays parked while the
         pool works. Called with the lock held."""
@@ -480,13 +522,7 @@ class AccountFailover:
             proven = self._proven()
             back = [attempt for attempt in parked if attempt.model in proven]
             parked = [attempt for attempt in parked if attempt not in back]
-            if back:
-                at = self.last_resumed = self.now()
-                for attempt in back:
-                    self.attempts.pop(attempt.agent_id, None)
-                for attempt in back:
-                    self.resumed_at[(attempt.agent_id, attempt.trace_id)] = at
-                    attempt.resume()
+            self._start_parked(back)
             self._note_trials(overdue, parked)
             running = any(attempt.owned() and not attempt.state.get("account_recovery")
                           for attempt in self.attempts.values())
