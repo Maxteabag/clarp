@@ -464,7 +464,7 @@ class AccountFailover:
             self.resumed_at[(attempt.agent_id, attempt.trace_id)] = at
             attempt.resume()
 
-    def served_now(self, serves: Callable[[str], bool]) -> int:
+    def served_now(self, serves: Callable[[str], bool]) -> int | None:
         """The machine's account was changed by someone else (the Hotseat
         switcher, the desk) and is known to serve the models ``serves``
         accepts. The turns parked for them while the pool works start now;
@@ -478,11 +478,13 @@ class AccountFailover:
         the one Opus turn that kept the pool busy was stopped by hand.
 
         Nothing is stopped and the selector is not run. During a recovery
-        nothing is done here: its own pass asks the selector. A turn started
-        here that meets the limit again is a relapse, as after a recovery."""
+        nothing is done here and the answer is None: its own pass asks the
+        selector, and may end on an account that does not serve them, so
+        whoever reports must report again. A turn started here that meets
+        the limit again is a relapse, as after a recovery."""
         with self.lock:
             if self.recovering:
-                return 0
+                return None
             back = [attempt for attempt in self._parked() if serves(attempt.model)]
             self._start_parked(back)
             models = sorted({attempt.model for attempt in back})

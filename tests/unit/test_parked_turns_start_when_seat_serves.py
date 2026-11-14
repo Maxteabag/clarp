@@ -77,7 +77,10 @@ def test_during_a_recovery_the_selector_decides_not_the_report(tmp_path, monkeyp
     assert fleet.coordinator.recovering and fleet.waiting() == ["waiting", "waiting"]
     spawned = len(fleet.backends.spawned)
 
-    assert fleet.coordinator.served_now(lambda model: True) == 0
+    # None, not 0: the recovery may end on an account without the model, so
+    # the one who reports must not take this for heard.
+    assert fleet.coordinator.served_now(lambda model: True) is None
+    assert service.runtime_seat_serves("claude", ["fable"]) == {"status": "recovering", "started": 0}
 
     assert fleet.coordinator.recovering and len(fleet.backends.spawned) == spawned
 
@@ -180,8 +183,13 @@ def told(switcher, monkeypatch):  # noqa: F811
         return dict(answer)
     worker.seat_serves = seat_serves
 
-    def check():
+    from lib import db
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+
+    def check(minutes=5):
         from tests.unit.test_janitor_hotseat import _check_again
+        clock[0] += minutes * 60_000
         _check_again("hotseat-switcher.claude")
         worker.hotseat_once()
     return SimpleNamespace(worker=worker, readings=readings, calls=calls, heard=heard,
@@ -224,6 +232,76 @@ def test_a_runtime_that_cannot_hear_it_yet_is_told_at_the_next_check(told):
 
     told.answer.update(status="nothing_parked", started=0)
     told.check()
+    told.check()
+    assert told.heard == [("claude", ["fable"])] * 3
+
+
+def test_a_runtime_in_a_recovery_is_told_again_until_it_hears(told):
+    """Review of PR 342, finding 1: the tell arrived while the pool was
+    recovering, the recovery then ended on an account without the model and
+    parked the turn, and the switcher, believing itself heard, never told
+    again: the turn waited its half hour as before."""
+    told.readings["claude"] = _fable(claude_payload(a=(True, 0.2), b=(False, 0.1)), a=0.3, b=1.0)
+    told.answer.clear()
+    told.answer.update(status="recovering", started=0)
+    told.check()
+    told.check()
+    assert told.heard == [("claude", ["fable"])] * 2
+
+    told.answer.update(status="started", started=1)
+    told.check()
+    told.check()
+    assert told.heard == [("claude", ["fable"])] * 3
+
+
+def _with_fable(share):
+    return _fable(claude_payload(a=(True, 0.2), b=(False, 0.1)), a=share, b=1.0)
+
+
+def test_a_reading_that_flaps_is_not_told_at_every_flap(told):
+    """Review of PR 342, finding 2: a family that drops out of the reading
+    and comes back was a gain each time, and a wrong word stops every working
+    turn. The same account is told again only after SEAT_RETELL_MS."""
+    assert service.SEAT_RETELL_MS == 15 * 60_000
+    told.readings["claude"] = _with_fable(0.3)
+    told.check()                                        # minute 5: told
+    assert told.heard == [("claude", ["fable"])]
+    for share in (1.0, 0.3):                            # minutes 10 and 15: gone, back
+        told.readings["claude"] = _with_fable(share)
+        told.check()
+    assert told.heard == [("claude", ["fable"])]
+    told.readings["claude"] = _with_fable(1.0)
+    told.check()                                        # minute 20: gone again
+    told.readings["claude"] = _with_fable(0.3)
+    told.check()                                        # minute 25: back, 20 minutes after the tell
+    assert told.heard == [("claude", ["fable"])] * 2
+
+
+def test_a_gain_held_back_is_told_when_its_time_is_over(told):
+    """What was held back is not forgotten: a reset that lands on the account
+    in use within the time is told at the first check after it."""
+    told.readings["claude"] = _with_fable(0.3)
+    told.check()
+    told.readings["claude"] = _with_fable(1.0)
+    told.check()
+    told.readings["claude"] = _with_fable(0.0)          # minute 15: the reset
+    told.check()
+    assert told.heard == [("claude", ["fable"])]        # 10 minutes after the tell: held back
+    told.check()                                        # minute 20: the reading has not changed
+    assert told.heard == [("claude", ["fable"])] * 2
+
+
+def test_another_account_is_told_at_once_also_within_the_time(told):
+    told.readings["claude"] = _fable(claude_payload(a=(True, 0.2), b=(False, 0.1)), a=0.3, b=0.4)
+    told.check()                                        # a serves Fable: told
+    # a's Fable is spent, b has it: the switcher moves to b.
+    told.readings["claude"] = _fable(claude_payload(a=(True, 0.2), b=(False, 0.1)), a=1.0, b=0.4)
+    told.check()
+    assert ("switch", "hotseat", "claude", "b") in told.calls
+    assert told.heard == [("claude", ["fable"])] * 2
+    # And back on a (the desk switched, a's reset landed), ten minutes after a
+    # was told: it is another account than at the last check, so it is told.
+    told.readings["claude"] = _fable(claude_payload(a=(True, 0.2), b=(False, 0.1)), a=0.3, b=0.4)
     told.check()
     assert told.heard == [("claude", ["fable"])] * 3
 
