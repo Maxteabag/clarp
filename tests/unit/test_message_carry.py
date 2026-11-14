@@ -333,13 +333,157 @@ def test_the_latest_user_row_counts_unless_the_checkpoint_says_no_reply_read_it(
 
 def test_every_rule_has_its_switch_and_the_live_rows_rule_is_off_until_switched_on():
     assert set(carry.RULES) == {key for key in inc._DEFAULTS if key.startswith("carry_")}
-    on = frozenset(carry.RULES) - {carry.LIVE_ROWS}
+    off = {carry.LIVE_ROWS, carry.SETTLED_TURNS}
+    on = frozenset(carry.RULES) - off
     assert {rule for rule in carry.RULES if inc._DEFAULTS[rule] is True} == on
-    assert inc._DEFAULTS[carry.LIVE_ROWS] is False
+    assert all(inc._DEFAULTS[rule] is False for rule in off)
     assert inc.carry_rules(inc._DEFAULTS) == on
-    assert inc.carry_rules({**inc._DEFAULTS, carry.LIVE_ROWS: True}) == frozenset(carry.RULES)
+    assert inc.carry_rules({**inc._DEFAULTS, **dict.fromkeys(off, True)}) == frozenset(carry.RULES)
     for rule in on:
         assert inc.carry_rules({**inc._DEFAULTS, rule: False}) == on - {rule}
     # A module the parser version does not hash would let a change to a rule
     # keep every checkpoint that was certified under the old one.
     assert "message_carry.py" in inc._COMMON_SOURCES
+
+
+# ---- a turn that settled (SETTLED_TURNS) ------------------------------------------
+
+LATEST = 300_000            # the last old turn's time
+HOURS = 3_600_000
+SETTLING = frozenset(carry.RULES) - {carry.LIVE_ROWS}
+
+
+def _settled_turn(trace, started, settled=None, outcome=None):
+    return {"trace_id": trace, "started_at": started, "settled_at": settled, "outcome": outcome}
+
+
+def _tail_row(message_id, seq, *, revision, trace="t", tools="[]", text="x", turn=None):
+    return {**_row(message_id, seq=seq, revision=revision, trace=trace, text=text),
+            "tools_json": tools, "display_cells_json": "[]", "turn_json": turn, "updated_at": revision}
+
+
+def _all_columns(rows):
+    return [{"display_cells_json": "[]", "turn_json": None, "updated_at": 0, **row} for row in rows]
+
+
+def test_a_turn_row_above_the_mark_is_put_back_to_unsettled_and_no_other():
+    turns = carry._turn_values([_settled_turn("old", 1, 50, "completed"),
+                                _settled_turn("at-the-mark", 2, 90, "failed"),
+                                _settled_turn("since", 3, 91, "interrupted"),
+                                _settled_turn("running", 4)])
+    assert carry._settled_mark(turns) == 91
+    restored, settled = carry._unsettled(turns, 90)
+    assert restored == [("old", 1, 50, "completed"), ("at-the-mark", 2, 90, "failed"),
+                        ("since", 3, None, None), ("running", 4, None, None)]
+    assert settled == [("since", 3, 91, "interrupted")]
+    assert carry._unsettled(turns, 91) == (turns, [])
+    assert carry._settled_mark(carry._turn_values([_settled_turn("running", 4)])) == 0
+
+
+@pytest.mark.parametrize("started,settled,covers", [
+    (LATEST + 2_001, LATEST + 5_000, True),          # began and ended after every old turn
+    (1_000, LATEST - 120_000, True),                 # two minutes before the last old turn: just covers
+    (1_000, LATEST - 120_001, False),                # a millisecond short: the last old turn falls out
+    (1_000, LATEST + 50_000, True),
+    (LATEST - 6 * HOURS, LATEST + 1, True),          # six hours before: the old reach just covered it
+    (LATEST - 6 * HOURS - 1, LATEST + 1, False),     # a millisecond more: the turn would gain it
+])
+def test_the_reach_of_a_settled_turn_covers_the_old_turns_or_it_does_not(started, settled, covers):
+    row = ("t", started, settled, "completed")
+    assert carry._reach_covers(row, {"prefix_latest_ms": LATEST}) is covers
+    assert carry._reach_covers(row, {}) is False            # a checkpoint that recorded no time
+
+
+def _settle_world(*, boundary=10, after=None, started=LATEST + 5_000):
+    """A frontier published while turn "t" ran, its rows from the boundary on,
+    and what a settle then leaves: the turn row, and a stamp on its last row."""
+    rows = _all_columns([_row(f"m-{n}", seq=n, revision=n + 1, trace="old") for n in range(boundary)])
+    tail = [_tail_row("m-10", 10, revision=20), _tail_row("m-11", 11, revision=21)]
+    stored = {"prefix_latest_ms": LATEST}
+    before = _inputs(turns=[_turn("old", 1, "completed"), _settled_turn("t", started)],
+                     rows=rows + tail)
+    recorded = carry.record(before, carry=stored, boundary_seq=boundary, **WHERE)
+    stamped = [tail[0], {**tail[1], "revision": 30, "updated_at": 30,
+                         "turn_json": '{"turn_id":"t"}', **(after or {})}]
+    now = _inputs(turns=[_turn("old", 1, "completed"),
+                         _settled_turn("t", started, LATEST + 9_000, "completed")],
+                  rows=rows + stamped)
+    return recorded, now, stored, boundary
+
+
+def _asked(recorded, now, stored, boundary, rules=SETTLING):
+    return carry.changed(recorded, now, rules=frozenset(rules), carry=stored,
+                         boundary_seq=boundary, **WHERE)
+
+
+def test_a_settle_and_its_stamp_are_let_through_and_the_stamp_alone_is_not_enough():
+    recorded, now, stored, boundary = _settle_world()
+    assert recorded["version"] == 3 and recorded["boundary"] == boundary
+    assert recorded["base"] == 19 and recorded["settled"] == 0      # below the turn's rows
+    assert _asked(recorded, now, stored, boundary) == ""
+    without = SETTLING - {carry.SETTLED_TURNS}
+    assert _asked(recorded, now, stored, boundary, without) == "row_transcript"
+    assert _asked(recorded, now, stored, boundary, SETTLING - {carry.LATER_TURNS}) \
+        == "row_transcript,turn_rows"
+    # The same row with other words is not a stamp.
+    recorded, now, stored, boundary = _settle_world(after={"text": "other words"})
+    assert _asked(recorded, now, stored, boundary) == "row_transcript"
+    recorded, now, stored, boundary = _settle_world(after={"trace_id": "another"})
+    assert _asked(recorded, now, stored, boundary) == "row_transcript"
+    # A turn that holds old turns by time and ends too early for the last of them.
+    recorded, now, stored, boundary = _settle_world(started=1_000)
+    turns, _sends, user, rows, oracle = now
+    early = (turns[:1] + [_settled_turn("t", 1_000, LATEST - 130_000, "completed")], [], user,
+             rows, oracle)
+    assert _asked(recorded, now, stored, boundary) == ""
+    assert _asked(recorded, early, stored, boundary) == "turn_settled_out_of_reach"
+
+
+def test_a_stamp_is_let_through_only_on_a_transcript_row_from_the_boundary_on():
+    """The same stamp on the same row, with the row somewhere else each time."""
+    _recorded, now, stored, boundary = _settle_world()
+    turns, sends, user, rows, oracle = now
+    running = (turns[:1] + [_settled_turn("t", LATEST + 5_000)], sends, user)
+    for change, word in (({}, ""),
+                         ({"seq": boundary - 1}, "row_transcript"),         # before the boundary
+                         ({"seq": 10 ** 12 + 5}, "row_transcript"),         # a parked row
+                         ({"source_file": "final:t"}, "row_final"),
+                         ({"source_file": "client:t"}, "row_send"),
+                         ({"source_file": "live:t"}, "row_live"),
+                         ({"backend_session_id": "another-session"}, "row_other_session")):
+        stamped = {**rows[-1], **change}
+        unstamped = {**stamped, "revision": 21, "updated_at": 21, "turn_json": None}
+        recorded = carry.record((*running, rows[:-1] + [unstamped], oracle), carry=stored,
+                                boundary_seq=boundary, **WHERE)
+        after = (turns, sends, user, rows[:-1] + [stamped], oracle)
+        assert _asked(recorded, after, stored, boundary) == word, change
+
+
+def test_a_full_imports_record_keeps_the_rows_from_the_boundary_on_out_of_its_base():
+    rows = _all_columns([_row(f"m-{n}", seq=n, revision=100 - n) for n in range(12)])
+    whole = carry.record(_inputs(rows=rows), boundary_seq=None, **WHERE)
+    assert whole["base"] == whole["mark"] == 100 and whole["boundary"] is None
+    cut = carry.record(_inputs(rows=rows), boundary_seq=8, **WHERE)
+    # Rows 8 to 11 hold revisions 92 to 89: the base ends just below the lowest.
+    assert (cut["mark"], cut["base"], cut["boundary"]) == (100, 88, 8)
+    assert cut["rows"]["base"]["row_tail"] == whole["rows"]["since"]["row_tail"]
+    assert cut["rows"]["since"]["row_tail"] != whole["rows"]["since"]["row_tail"]
+    assert cut["tail"] != whole["tail"]
+    assert carry.loads(carry.dumps(cut)) == cut
+    for broken in ({"settled": None}, {"tail": None}, {"boundary": "8"}, {"version": 2}):
+        assert carry.loads(carry.dumps({**cut, **broken})) is None
+
+
+def test_an_interrupted_turn_with_a_row_before_the_boundary_is_not_let_through():
+    stored = {"prefix_latest_ms": LATEST}
+    rows = _all_columns([_row("m-0", seq=0, revision=1, trace="old"),
+                         _row("m-1", seq=1, revision=2, trace="t")])
+    before = _inputs(turns=[_settled_turn("t", 1_000)], rows=rows)
+    recorded = carry.record(before, carry=stored, boundary_seq=5, **WHERE)
+    for outcome, wanted in (("completed", ""), ("failed", ""), ("interrupted", "turn_of_old_row")):
+        now = _inputs(turns=[_settled_turn("t", 1_000, LATEST + 9_000, outcome)], rows=rows)
+        assert _asked(recorded, now, stored, 5) == wanted, outcome
+    # With its rows from the boundary on only, an interrupted turn is let through.
+    recorded = carry.record(before, carry=stored, boundary_seq=1, **WHERE)
+    now = _inputs(turns=[_settled_turn("t", 1_000, LATEST + 9_000, "interrupted")], rows=rows)
+    assert _asked(recorded, now, stored, 1) == ""
