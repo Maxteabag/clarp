@@ -298,6 +298,40 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                         writer._database = FenceReadFailure(native)
 
                 stack.enter_context(patch.object(message_writes._ImportWriter, "__init__", with_read_fault))
+            if faults.get("during_parse"):
+                # The file changes while the full import's parser has it: the
+                # moment after the parser read its last byte and before it
+                # returns. "grow": a record is appended. "touch": only the
+                # mtime moves. "rewrite": one byte of an old record changes in
+                # place. "rewrite_keep_times": the same, and atime and mtime
+                # are put back, so only the change time tells.
+                how, parser = faults["during_parse"], type(backends.by_id(backend))
+                native_parse, changed = parser.parse_transcript, []
+
+                def parse_then_change(self, path, *args, **kwargs):
+                    turns = native_parse(self, path, *args, **kwargs)
+                    if not changed:
+                        changed.append(how)
+                        stat = transcript.stat()
+                        if how == "grow":
+                            with transcript.open("ab") as output:
+                                output.write(append_bytes(backend, 900 + tick))
+                        elif how == "touch":
+                            os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+                        else:
+                            data = transcript.read_bytes()
+                            at = data.index(b"synthetic")
+                            with transcript.open("r+b") as output:
+                                output.seek(at)
+                                output.write(b"S")
+                            if how == "rewrite_keep_times":
+                                os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+                                kept = transcript.stat()
+                                assert (kept.st_size, kept.st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)
+                                assert kept.st_ctime_ns != stat.st_ctime_ns
+                    return turns
+
+                stack.enter_context(patch.object(parser, "parse_transcript", parse_then_change))
             if faults.get("checkpoint"):
                 original_checkpoint = inc.write_checkpoint
 
