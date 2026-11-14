@@ -11,7 +11,9 @@ grew or was touched meanwhile is read again, as it always was.
 The digest must be the one a second read gives, byte for byte. Here that is
 checked against a digest the test takes of the file itself, and every case is
 run with the switch off beside it. ``digest_reads`` counts the second reads:
-"all" is every imported byte read again, [] is none.
+"all" is every imported byte read again, [] is none. ``second_read`` is the
+word a full import puts in the journal (``transcriptFullDigest code=...``):
+``saved``, or why the read was made.
 """
 from __future__ import annotations
 
@@ -55,6 +57,7 @@ def test_a_full_import_of_a_file_that_stands_still_reads_it_once(tmp_path, backe
     due. The digest stored is the file's own each time; the tail goes on
     from the running hash the parse left, and reads only what was added."""
     how = _settings(switch)
+    said = "saved" if switch else "switch_off"
     reference, candidate, transcript = _world(tmp_path, backend, records=40)
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
@@ -62,6 +65,7 @@ def test_a_full_import_of_a_file_that_stands_still_reads_it_once(tmp_path, backe
             first = actual.tick(0, faults=how)
             assert _decision(first) == "full_no_frontier(missing_unknown)"
             assert first["digest_reads"] == ([] if switch else ["all"])
+            assert first["second_read"] == [said]
             assert _stored_digest(candidate) == _digest_of(transcript)
             harness.assert_product_equal(reference, candidate)
 
@@ -69,6 +73,7 @@ def test_a_full_import_of_a_file_that_stands_still_reads_it_once(tmp_path, backe
             full.tick(1)
             tail = actual.tick(1, faults=how)
             assert (_decision(tail), tail["digest_reads"]) == ("tail_applied", ["added"])
+            assert tail["second_read"] == []            # a tail is not a full import
             assert _stored_digest(candidate) == _digest_of(transcript)
             harness.assert_product_equal(reference, candidate)
 
@@ -77,6 +82,7 @@ def test_a_full_import_of_a_file_that_stands_still_reads_it_once(tmp_path, backe
             audit = actual.tick(2, faults=_settings(switch, audit_every=1))
             assert _decision(audit) == "full_audit"
             assert audit["digest_reads"] == ([] if switch else ["all"])
+            assert audit["second_read"] == [said]
             assert audit["prefix_changed"] == []
             assert _stored_digest(candidate) == _digest_of(transcript)
             harness.assert_product_equal(reference, candidate)
@@ -115,6 +121,7 @@ def test_the_audit_still_finds_bytes_rewritten_in_place(tmp_path, backend, switc
             found = actual.tick(2, faults=_settings(switch, audit_every=1))
     assert _decision(found) == "full_audit"
     assert found["digest_reads"] == ([] if switch else ["all"])
+    assert found["second_read"] == ["saved" if switch else "switch_off"]
     [line] = found["prefix_changed"]
     assert f"file={transcript} what=imported_bytes" in line
     assert _stored_digest(candidate) == _digest_of(transcript)
@@ -140,6 +147,8 @@ def test_a_file_that_changed_while_it_was_parsed_is_read_again(tmp_path, backend
                 full.tick(0)
                 first = actual.tick(0, faults={**_settings(switch), "during_parse": change})
                 assert first["digest_reads"] == ["all"]
+                assert first["second_read"] == [
+                    {"grow": "grew", "touch": "touched"}[change] if switch else "switch_off"]
                 assert _stored_digest(candidate) == _digest_of(transcript, size)
                 harness.assert_product_equal(reference, candidate)
                 full.tick(1)
@@ -168,6 +177,8 @@ def test_bytes_rewritten_while_the_file_was_parsed_are_caught_by_the_second_read
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             first = actual.tick(0, faults={**_settings(switch), "during_parse": change})
         assert first["digest_reads"] == ["all"]
+        # The size is what it was; the mtime, or only the change time, is not.
+        assert first["second_read"] == ["touched" if switch else "switch_off"]
         assert "parsed_prefix_changed" in _retentions(first)
         with sqlite3.connect(candidate) as connection:
             assert connection.execute(
@@ -201,6 +212,7 @@ def test_a_partial_last_record_publishes_nothing_either_way(tmp_path, backend, s
             full.tick(0)
             first = actual.tick(0, faults=_settings(switch))
             assert "partial_record" in _retentions(first) and first["digest_reads"] == []
+            assert first["second_read"] == []           # refused before any digest is wanted
             with sqlite3.connect(candidate) as connection:
                 assert connection.execute(
                     "SELECT count(*) FROM transcript_import_frontiers").fetchone() == (0,)
@@ -211,6 +223,7 @@ def test_a_partial_last_record_publishes_nothing_either_way(tmp_path, backend, s
             whole = actual.tick(1, faults=_settings(switch))
             assert whole["apply_mode"] == "full"
             assert whole["digest_reads"] == ([] if switch else ["all"])
+            assert whole["second_read"] == ["saved" if switch else "switch_off"]
             assert _stored_digest(candidate) == _digest_of(transcript)
             harness.assert_product_equal(reference, candidate)
 
@@ -230,6 +243,7 @@ def test_an_unchanged_file_imported_in_full_at_its_audit_reads_once(tmp_path, ba
             audit = restarted.tick(3600, faults=how)
     assert _decision(audit) == "full_audit"
     assert audit["digest_reads"] == ([] if switch else ["all"])
+    assert audit["second_read"] == ["saved" if switch else "switch_off"]
     assert audit["prefix_changed"] == []
     assert _stored_digest(candidate) == _digest_of(transcript)
     harness.assert_product_equal(reference, candidate)
