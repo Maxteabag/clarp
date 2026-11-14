@@ -3187,6 +3187,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         desk = getattr(ctx, "hotseat_desk", None)
         return started(AutonomyJanitors(
             adapters.decided_heartbeat, apns.send_user_notification,
+            notice_stream=ctx.stream,
             recover=adapters.recover_janitor_quota,
             hotseat_switch_lock=desk.switch_lock if desk is not None else None,
             hotseat_observe=desk.absorb_switcher_read if desk is not None else None,

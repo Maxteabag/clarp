@@ -235,7 +235,7 @@ def _provider_model_demand(provider: str, now_ms: int, base_seconds: int) -> tup
 
 
 class AutonomyJanitors:
-    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None):
+    def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,notice_stream=None):
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
         # hotseat_observe(provider, payload, started_at=ms) gets every scheduled read: the server passes
         # the Hotseat desk's, so the stored desk stays as fresh as this cadence with no read of its own.
@@ -249,6 +249,7 @@ class AutonomyJanitors:
         if hotseat_switch_lock is None:
             own_locks={provider:threading.Lock() for provider in janitor_hotseat.PROVIDERS};hotseat_switch_lock=own_locks.__getitem__
         self.hotseat_switch_lock=hotseat_switch_lock
+        self.notice_stream=notice_stream
         self.auth_repair=janitor_hotseat.RepairWorker(self.stop_event)
         from .janitor_reset import ResetWorker
         self.reset_worker=ResetWorker(self.stop_event)
@@ -382,6 +383,8 @@ class AutonomyJanitors:
                  'owner_generation':owner['generation']}
         # A durable phone-chat receipt, once per action. PR305 permits a push
         # only for stopped work, not for a refill or a successful switch.
+        from . import janitor_notices
+        janitor_notices.publish(self.notice_stream,owner,rid,text)
         janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),db.now_ms())
 
     def hotseat_once(self):
@@ -395,7 +398,8 @@ class AutonomyJanitors:
             key=f'hotseat-switcher.{provider}.last-check';lane=f'hotseat-switcher.{provider}'
             base=janitor_hotseat.interval_for(options,provider)
             reset_completion=self.reset_worker.peek(provider,owner)
-            if not lane_due(lane,owner,base,key,now) and reset_completion is None:continue
+            reset_reconciliation=self.reset_worker.reconciliation_due(provider,owner)
+            if not lane_due(lane,owner,base,key,now) and reset_completion is None and reset_reconciliation is None:continue
             settings_store.set_int(key,now);lane_start(lane,owner,base,now)
             run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
             if not run or not janitor_builtins.claim_run(run['run_id']):
@@ -479,7 +483,10 @@ class AutonomyJanitors:
                 self.reset_worker.ack(provider,reset_completion)
                 reset_text='Banked resets: '+reset_completion['result']['status']
             reset_field=janitor_hotseat.PROVIDERS[provider].reset_command_field
-            if decision['action']=='exhausted' and options['mode']=='automatic' and reset_field and not reset_completion:
+            if reset_reconciliation and options['mode']=='automatic' and reset_field and not reset_completion:
+                status=self.reset_worker.offer(provider,reset_field,reset_reconciliation['models'],owner,reconcile_only=True)
+                reset_text='Banked reset reconciliation: '+status
+            elif decision['action']=='exhausted' and options['mode']=='automatic' and reset_field and not reset_completion:
                 raw_decision=janitor_hotseat.decide(raw_accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
                 # A withheld healthy account is not quota exhaustion. Never spend
                 # a grant merely because authentication repair hid a candidate.

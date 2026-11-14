@@ -57,8 +57,11 @@ passes through the same repair ledger, quarantine and in-flight withholding as
 every other check. Authentication withholding alone cannot admit a reset.
 Other outcomes remain visible in the Janitor summary and never prove recovery.
 Transient reset words do not change the exhaustion notification identity. A
-verified spent/reconciled reset gets one durable chat receipt, including when a
-fresh read fails; the provider remains unreadable rather than turning into a
+verified spent/reconciled reset gets one actual system-authored chat message,
+including for a Janitor without a native provider conversation. The existing
+`/log` and transcript-update SSE deliver it to the app, with a Janitor-only read
+namespace that cannot leak a previous native conversation. Publication is
+idempotent across acknowledgement retries, including when a fresh read fails; the provider remains unreadable rather than turning into a
 successful noop. As with other repair notes, this action receipt does not push:
 the user's push rule is reserved for stopped work. Neither adapter nor Janitor
 claims affected turns made progress from a refill.
@@ -237,3 +240,21 @@ Deploy through the normal versioned installer. The runtime adopts a new release
 at an idle boundary, so check the runtime's release ID as well as HTTP health
 before claiming recovery is active. Configure the selector's absolute path on
 the Host and verify its executable dependencies are available to the runtime.
+
+### Interrupted command reconciliation
+
+An interrupted, timed-out or otherwise uncertain command retains a persisted
+reconciliation obligation even if a fresh ordinary quota read looks healthy.
+Once the owner is enabled again and the Host budget permits, it calls the broker
+with `reconcile_only:true` (and the original model demand). A compatible command
+must only reconcile its existing private intent: if none exists it returns
+`no_pending`, and must not select or redeem another grant. The maintained
+`claude-auto-reset` adapter supports this protocol; install it before configuring
+the Host command. Reconciliation cannot resume an explicitly paused Janitor.
+
+Successful acknowledgement is durable and suppresses replay after restart.
+Cancellation is reported as `cancelled`, with uncertain effects still requiring
+read-only reconciliation. The managed Linux Host uses systemd control-group
+cleanup for abrupt Host death; outside such supervision a hard-killed parent
+cannot run its cleanup and the deployment must supply equivalent process-tree
+supervision. No runtime restart is needed to activate the maintained selector.
