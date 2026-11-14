@@ -126,7 +126,7 @@ Pausing freezes a running step's clock: `active_ms` takes the elapsed time and `
 
 ## Receipts
 
-Every run leaves a receipt for every goal it handled, written or not (Peter, 14 Nov: "a receipt of every action it does"). A receipt is a row in `goal_keeper_receipts` (schema step v127). It holds the run and goal ids, the goal's title, the outcome and why, the steps changed (`{item_id, from, to, note}`, with a `held` entry where a completed claim without evidence was left in progress), the checkpoint text written, the source refs (message ids, job handles, goal events it read), the model, input and output tokens, the duration and any error. It never holds the prompt or transcript text.
+Every run leaves a receipt for every goal it handled, written or not (Peter, 14 Nov: "a receipt of every action it does"; feature `goal_keeper_receipts`, Host contract 97). A receipt is a row in `goal_keeper_receipts` (schema step v127). It holds the run and goal ids, the goal's title, the outcome and why, the steps changed (`{item_id, from, to, note}`, with a `held` entry where a completed claim without evidence was left in progress), the checkpoint text written, the source refs (message ids, job handles, goal events it read), the model, input and output tokens, the duration and any error. It never holds the prompt or transcript text.
 
 | Outcome | When |
 |---|---|
@@ -137,5 +137,7 @@ Every run leaves a receipt for every goal it handled, written or not (Peter, 14 
 | `failed` | The model or Antigravity failed, or the answer had no checkpoint |
 | `skipped` | Nothing new since the last update, or the goal closed or its owner left |
 | `cancelled` | The Janitor's configuration changed during the run |
+
+A write's receipt is stored in the same transaction as the write (`task_plans.updater_apply(receipt=...)`). If the receipt can't be stored, the write rolls back, so no committed keeper write exists without its receipt. A receipt for a goal the keeper did not write (unchanged-by-failure, refused, failed, skipped, cancelled) is stored afterwards, retried under the write lock with a bounded backoff (`RECEIPT_RETRY_DELAYS`, about 8 s); on final failure the logged line `goalKeeperReceiptLost run=… plan=… outcome=…` remains. Such a receipt never carries checkpoint text: `progress` and `next_work` are empty because nothing was written. `error` is a short code (`owner_changed_plan`, `goal_closed`, `parse_error`, `agy_exit_N`, `timeout`, `database_locked`, or the exception's class name), never the model's or provider's text. The same code is what `plan.updater.goal_error` shows. Fields are cut: title 200, progress 500, next work 300, step note 300, reason 200.
 
 A goal keeps its newest 200 receipts (`janitor_store.GOAL_KEEPER_RECEIPTS_PER_GOAL`). Receipts are readable in three places: under `receipts` in the keeper's run history (`clarp-admin janitor runs clarp-goal-keeper`), with `clarp-goal receipts PLAN_ID [LIMIT]`, and as `plan.updater.last_receipt`. The updater's ledger event (`kind: updater`) now carries the same source refs, so the ledger's own record of a write names what it was based on.

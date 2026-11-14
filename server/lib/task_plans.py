@@ -1330,8 +1330,16 @@ def updater_apply(
     through_ms: int = 0,
     through_event: int = 0,
     janitor_agent_id: str = "",
+    receipt: dict | None = None,
+    held: tuple = (),
 ) -> dict:
     """Record what the Goal keeper observed, beside the owner's own record.
+
+    ``receipt`` (the Goal keeper's, with receipt_id, run_id and plan_id) is
+    completed and stored in the SAME transaction as the write, so no committed
+    keeper write exists without its receipt; if the receipt cannot be stored
+    the whole write rolls back (review #311, PR #326 follow-up). ``held`` are
+    the items whose "completed" was held back for want of evidence.
 
     ``steps`` maps item_id -> {"status", "note"}. Only step statuses and the
     updater's own checkpoint (``goal["updater"]``) change: never the plan's
@@ -1381,6 +1389,7 @@ def updater_apply(
                  now if status == "completed" else None, active_ms, item_id))
             changed.append({"item_id": item_id, "from": row["status"], "status": status,
                             "note": str((wanted or {}).get("note") or "")[:500]})
+        previous = (goal.get("updater") or {}).get("progress") or ""
         # through_*: where the next update starts reading (lib/goal_keeper.py).
         goal["updater"] = dict(at=now, progress=progress, next_work=next_work, model=model,
                                source_refs=list(source_refs)[:40],
@@ -1398,8 +1407,26 @@ def updater_apply(
         from . import artifacts
 
         artifacts.sync_plan(plan_id)
+        if receipt is not None:
+            from . import janitor_store
+            changed_ids = {c["item_id"] for c in changed}
+            held_ids = [item_id for item_id in held if item_id not in changed_ids]
+            receipt.update(
+                steps=[{"item_id": c["item_id"], "from": c["from"], "to": c["status"],
+                        "note": c["note"][:300]} for c in changed]
+                + [{"item_id": item_id, "from": None, "to": "held",
+                    "note": "Completed claimed without evidence; left in progress"}
+                   for item_id in held_ids],
+                progress=progress[:500], next_work=next_work[:300], created_at=now,
+                outcome=("updated" if changed else "held_by_evidence_rule" if held_ids
+                         else "updated" if progress != previous else "unchanged"))
+            janitor_store.insert_goal_keeper_receipt(con, receipt)
+            receipt["stored"] = True
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
+        if receipt is not None:  # nothing was written, so the receipt says nothing was
+            for key in ("stored", "steps", "progress", "next_work", "outcome", "created_at"):
+                receipt.pop(key, None)
         raise
     return {"changed_steps": changed, "stored": True}

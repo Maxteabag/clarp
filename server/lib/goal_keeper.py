@@ -460,33 +460,23 @@ def update(plan_id: str, *, now: int, ask, janitor_agent_id: str = "", current=l
     receipt.update(model=str(model_id or ""), input_tokens=usage.get("input_tokens"),
                    output_tokens=usage.get("output_tokens"))
     steps, progress_text, next_work = decide(plan, answer)
-    receipt.update(progress=progress_text[:500], next_work=next_work[:300])
+    # The checkpoint text goes on the receipt only when it is written, inside
+    # updater_apply's transaction: a refused, cancelled or skipped receipt never
+    # shows a proposed checkpoint as if it were the goal's.
     if not progress_text:
         raise ValueError("model answered without a checkpoint")
     if not current():
         return {"outcome": "cancelled", "reason": "configuration changed"}
-    previous = ((plan.get("goal") or {}).get("updater") or {}).get("progress") or ""
+    held = tuple(item_id for item_id, value in steps.items() if value["note"].startswith(HELD_NOTE))
+    if "started" in receipt:
+        receipt["duration_ms"] = int((time.monotonic() - receipt["started"]) * 1000)
     result = task_plans.updater_apply(
         plan_id, seen_revision=plan["revision"], steps=steps, progress=progress_text,
         next_work=next_work, model=model_id, source_refs=refs,
         through_ms=max(now, seen.newest_ms), through_event=seen.newest_event,
-        janitor_agent_id=janitor_agent_id)
+        janitor_agent_id=janitor_agent_id, held=held,
+        receipt=receipt if receipt.get("receipt_id") else None)
     changed = result["changed_steps"]
-    held = [item_id for item_id, value in steps.items()
-            if value["note"].startswith(HELD_NOTE) and item_id not in {c["item_id"] for c in changed}]
-    receipt["steps"] = ([{"item_id": c["item_id"], "from": c["from"], "to": c["status"],
-                          "note": c["note"][:300]} for c in changed]
-                        + [{"item_id": item_id, "from": None, "to": "held",
-                            "note": "Completed claimed without evidence; left in progress"}
-                           for item_id in held])
-    if changed:
-        receipt["outcome"] = "updated"
-    elif held:
-        receipt["outcome"] = "held_by_evidence_rule"
-    elif progress_text != previous:
-        receipt["outcome"] = "updated"
-    else:
-        receipt["outcome"] = "unchanged"
     return {"outcome": "updated", "changed_steps": len(changed),
             "input_tokens": usage.get("input_tokens")}
 
@@ -501,23 +491,26 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
     outcomes: dict[str, tuple[str, str]] = {}
 
     def one(plan_id: str):
-        receipt: dict = {"model": str(config.get("model") or "")}
-        started = time.monotonic()
+        run_id = str(run.get("run_id") or "")
+        receipt: dict = {"receipt_id": f"{run_id}:{plan_id}", "run_id": run_id, "plan_id": plan_id,
+                         "model": str(config.get("model") or "")}
+        started = receipt["started"] = time.monotonic()
         try:
             result = update(plan_id, now=now, ask=lambda prompt: ask(prompt, plan_id),
                             janitor_agent_id=config["agent_id"], current=current, receipt=receipt)
             if result["outcome"] != "updated":  # skipped or cancelled: say why
-                receipt.update(outcome=result["outcome"], reason=str(result.get("reason") or ""))
+                receipt.update(outcome=result["outcome"], reason=str(result.get("reason") or "")[:200])
             return plan_id, result["outcome"], "", result
         except Exception as exc:  # noqa: BLE001 - one goal's failure is its own, logged
             log_exception("goalKeeperUpdateFail", exc, detail=plan_id)
-            conflict = "plan changed" in str(exc)
-            error = f"{type(exc).__name__}: {exc}"
-            receipt.update(outcome="refused_owner_changed" if conflict else "failed", error=error[:500])
-            return plan_id, "conflict" if conflict else "failed", error, {}
+            code = error_code(exc)
+            conflict = code == "owner_changed_plan"
+            receipt.update(outcome="refused_owner_changed" if conflict else "failed", error=code)
+            return plan_id, "conflict" if conflict else "failed", code, {}
         finally:
-            receipt["duration_ms"] = int((time.monotonic() - started) * 1000)
-            _store_receipt(run, plan_id, receipt)
+            if not receipt.get("stored"):  # a write stores its receipt in its own transaction
+                receipt["duration_ms"] = int((time.monotonic() - started) * 1000)
+                _store_receipt(receipt)
             # Each pool thread opened its own connection: give it back (review #311,
             # finding 5: 3 open handles before twelve passes, 25 after).
             db.close_local()
@@ -532,18 +525,50 @@ def run_batch(config: dict, run: dict, plan_ids: list[str], ask, *, now: int,
     return {"outcomes": outcomes, "updated": updated, "failed": failed, "changed_steps": changed}
 
 
-def _store_receipt(run: dict, plan_id: str, receipt: dict) -> None:
-    """One durable receipt per goal per run, whatever happened (Peter, 14 Nov:
-    "a receipt of every action it does"). Ids and short notes only."""
+RECEIPT_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0)  # about 8 s in all, then the logged line
+
+
+def error_code(exc: BaseException) -> str:
+    """A receipt's error: a short class or code, never the model's or the
+    provider's free text (it is shown on every plan read)."""
+    import re
+    import sqlite3
+    text = str(exc)
+    if "plan changed" in text:
+        return "owner_changed_plan"
+    if "goal is closed" in text:
+        return "goal_closed"
+    if "without a checkpoint" in text or isinstance(exc, json.JSONDecodeError):
+        return "parse_error"
+    match = re.search(r"agy exited (-?\d+)", text)
+    if match:
+        return f"agy_exit_{match.group(1)}"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, sqlite3.OperationalError):
+        return "database_locked" if "locked" in text else "database_error"
+    return type(exc).__name__[:60]
+
+
+def _store_receipt(receipt: dict) -> bool:
+    """Store a receipt for a goal the run did not write (unchanged writes and
+    updates store theirs in the write's own transaction). Retried under the
+    write lock with a bounded backoff; on final failure the logged line
+    ``goalKeeperReceiptLost`` names the run, goal and outcome."""
     from . import janitor_store, janitors
-    try:
-        with janitors._write() as c:
-            janitor_store.insert_goal_keeper_receipt(c, {
-                **receipt, "receipt_id": f"{run.get('run_id', '')}:{plan_id}",
-                "run_id": str(run.get("run_id") or ""), "plan_id": plan_id,
-                "outcome": receipt.get("outcome") or "failed", "created_at": db.now_ms()})
-    except Exception as exc:  # noqa: BLE001 - a lost receipt is logged, never silent
-        log_exception("goalKeeperReceiptFail", exc, detail=plan_id)
+    row = {**receipt, "outcome": receipt.get("outcome") or "failed"}
+    for attempt, delay in enumerate((0.0, *RECEIPT_RETRY_DELAYS)):
+        if delay:
+            time.sleep(delay)
+        try:
+            with janitors._write() as c:
+                janitor_store.insert_goal_keeper_receipt(c, {**row, "created_at": db.now_ms()})
+            return True
+        except Exception as exc:  # noqa: BLE001 - retried, then logged as lost
+            last = exc
+    log_exception("goalKeeperReceiptLost", last,
+                  detail=f"run={row.get('run_id')} plan={row.get('plan_id')} outcome={row['outcome']}")
+    return False
 
 
 def public_state(plan_id: str) -> dict:
