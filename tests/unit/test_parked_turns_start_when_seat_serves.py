@@ -25,7 +25,7 @@ from lib.runtime_bridge import RuntimeClient
 from tests.unit.test_account_failover_followup import (  # noqa: F401
     MINUTE, WEEKLY, _fable_parked_beside_sonnet, _started)
 from tests.unit.test_account_plan_hostage import (  # noqa: F401
-    Fleet, _dispatch, _local_dispatch_runtime)
+    Fleet, _dispatch, _local_dispatch_runtime, _parked_beside_a_working_turn)
 from tests.unit.test_janitor_hotseat import claude_payload, switcher  # noqa: F401
 from tests.unit.test_runtime_dispatch_characterization import rpc  # noqa: F401
 from tests.unit.test_dispatch_adapters import adapters  # noqa: F401
@@ -99,6 +99,32 @@ def test_a_turn_started_on_a_wrong_report_is_a_relapse(tmp_path, monkeypatch):
     fleet.limit(0, WEEKLY)
 
     assert fleet.coordinator._relapsed(key) and fleet.coordinator.relapses == 1
+
+
+def test_a_turn_a_stop_took_or_whose_park_is_over_is_left_alone():
+    """Review of PR 342, finding 6: with the check for this removed every
+    test passed. ``b`` was taken by a Stop while parked; ``c``'s half hour
+    is over, so it runs and fails visibly and is parked by nobody again."""
+    coordinator, _clock, _scheduled, asked, (b, c), _attempt = _parked_beside_a_working_turn(
+        [frozenset({"sonnet"})])
+    b.owned.return_value = False
+    coordinator.park_expired.add((c.agent_id, c.trace_id))
+
+    assert coordinator.served_now(lambda model: model == "fable") == 0
+
+    assert not b.resume.called and not c.resume.called
+    assert asked == [["fable", "sonnet"]]             # the selector was not run for it
+
+
+def test_only_the_owned_unexpired_turn_of_the_family_starts():
+    coordinator, _clock, _scheduled, _asked, (b, c), _attempt = _parked_beside_a_working_turn(
+        [frozenset({"sonnet"})])
+    b.owned.return_value = False
+
+    assert coordinator.served_now(lambda model: model == "fable") == 1
+
+    assert not b.resume.called and c.resume.call_count == 1
+    assert "c" not in coordinator.attempts
 
 
 # --- the runtime's side of the call -----------------------------------------
