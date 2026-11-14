@@ -25,7 +25,7 @@ def _kill_group(process):
         pass
 
 
-def attempt(command_field: str, models, *, stop_event=None, cancelled=None) -> dict:
+def attempt(command_field: str, models, *, stop_event=None, cancelled=None, reconcile_only=False) -> dict:
     command = getattr(config.load(), command_field, ()) if command_field else ()
     if not command:
         return {"status": "disabled", "verified": False}
@@ -35,11 +35,14 @@ def attempt(command_field: str, models, *, stop_event=None, cancelled=None) -> d
         if os.name != "posix":
             raise OSError("reset process groups unavailable")
         if (stop_event and stop_event.is_set()) or (cancelled and cancelled()):
-            return {"status": "cancelled", "verified": False}
+            return {"status": "cancelled", "verified": False, "needs_reconcile": False}
         process = subprocess.Popen(list(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, start_new_session=True)
         deadline = time.monotonic() + TIMEOUT_SECONDS
-        payload = json.dumps({"models": models})
+        request = {"models": models}
+        if reconcile_only:
+            request["reconcile_only"] = True
+        payload = json.dumps(request)
         while True:
             if time.monotonic() >= deadline:
                 raise subprocess.TimeoutExpired("banked-reset", TIMEOUT_SECONDS)
@@ -58,15 +61,19 @@ def attempt(command_field: str, models, *, stop_event=None, cancelled=None) -> d
                     and isinstance(receipt.get("account"), str)
                     and re.fullmatch(r"ai(?:[1-9]|1[0-5])", receipt["account"]) is not None)
         status = receipt.get("status")
-        allowed = {"disabled", "not_applicable", "no_owned_reset_accounts", "busy", "cooldown",
+        allowed = {"no_pending", "cancelled", "disabled", "not_applicable", "no_owned_reset_accounts", "busy", "cooldown",
                    "unverified", "no_eligible_grant", "eligible", "redeemed", "reconciled"}
         if status not in allowed or process.returncode or (status in {"redeemed", "reconciled"} and not verified):
             status = "unverified"
         return {"status": status, "verified": verified,
-                "account": receipt.get("account") if verified else None}
+                "account": receipt.get("account") if verified else None,
+                "needs_reconcile": status in {"unverified", "cancelled"}}
+    except InterruptedError as exc:
+        log_fault("claudeBankedResetCancelled", exc)
+        return {"status": "cancelled", "verified": False, "needs_reconcile": process is not None}
     except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
         log_fault("claudeBankedResetCommandFailed", exc)
-        return {"status": "unverified", "verified": False}
+        return {"status": "unverified", "verified": False, "needs_reconcile": process is not None}
     finally:
         if process is not None:
             _kill_group(process)
@@ -99,6 +106,18 @@ class ResetWorker:
             log_fault("bankedResetStateUnreadable", exc)
         return None
 
+    def reconciliation_due(self, provider, owner):
+        try:
+            value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
+            if (value.get("owner") == owner["agent_id"] and value.get("id")
+                    and value.get("next_at", float('inf')) <= db.now_ms()
+                    and ((value.get("handled") and value.get("needs_reconcile"))
+                         or not value.get("result"))):
+                return value
+        except (ValueError, TypeError, AttributeError) as exc:
+            log_fault("bankedResetReconcileStateUnreadable", exc)
+        return None
+
     def ack(self, provider, receipt):
         with settings_store.transaction():
             value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
@@ -106,7 +125,7 @@ class ResetWorker:
                 value["handled"] = True
                 settings_store.set_text(self._key(provider), json.dumps(value))
 
-    def offer(self, provider, field, models, owner):
+    def offer(self, provider, field, models, owner, *, reconcile_only=False):
         if not getattr(config.load(), field, ()):
             return "disabled"
         if owner["options"]["mode"] != "automatic" or self.stop_event.is_set():
@@ -118,6 +137,7 @@ class ResetWorker:
             from . import turn_queue
             claim = {"id": uuid.uuid4().hex, "owner": owner["agent_id"],
                      "generation": owner["generation"], "models": list(models),
+                     "reconcile_only": reconcile_only,
                      "stop_generation": turn_queue.user_stop_generation(owner["agent_id"])}
             with settings_store.transaction():
                 now = db.now_ms()
@@ -154,9 +174,10 @@ class ResetWorker:
                     and latest["options"]["mode"] == "automatic"
                     and turn_queue.user_stop_generation(claim["owner"]) == claim["stop_generation"])
             return not still_owned
-        result = {"status": "unverified", "verified": False}
+        result = {"status": "unverified", "verified": False, "needs_reconcile": True}
         try:
-            result = attempt(field, claim["models"], stop_event=self.stop_event, cancelled=cancelled)
+            result = attempt(field, claim["models"], stop_event=self.stop_event, cancelled=cancelled,
+                             reconcile_only=claim.get("reconcile_only", False))
         except Exception as exc:
             log_fault("bankedResetWorkerFailed", exc)
         finally:
@@ -164,7 +185,8 @@ class ResetWorker:
                 with settings_store.transaction():
                     value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
                     if value.get("id") == claim["id"]:
-                        value.update(result=result, completed=db.now_ms())
+                        value.update(result=result, completed=db.now_ms(),
+                                     needs_reconcile=bool(result.get("needs_reconcile")))
                         settings_store.set_text(self._key(provider), json.dumps(value))
             except Exception as exc:
                 log_fault("bankedResetResultStoreFailed", exc)
