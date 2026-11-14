@@ -22,7 +22,7 @@ def main(argv: list[str]) -> int:
         "goal SESSION ALIAS TITLE JSON_ITEMS JSON_GOAL | "
         "act PLAN_ID REVISION ACTION JSON_DATA | step PLAN_ID REVISION ITEM STATUS [DETAIL] | "
         "subgoal PLAN_ID add|update JSON | ledger PLAN_ID [AFTER_EVENT] | "
-        "bookkeeping observe DELEGATION [JSON_OPTIONS] | "
+        "receipts PLAN_ID [LIMIT] | bookkeeping observe DELEGATION [JSON_OPTIONS] | "
         "bookkeeping record DELEGATION PLAN_ID WAKE_ID JSON_BATCH"
     )
     if len(argv) < 2:
@@ -34,6 +34,12 @@ def main(argv: list[str]) -> int:
         command = argv[1]
         if command == "bookkeeping":
             return _bookkeeping(argv[2:], usage)
+        if command == "receipts" and len(argv) in {3, 4}:
+            # Read-only: the Goal keeper's receipts for one goal, newest first.
+            from lib import janitor_store
+            print(json.dumps(janitor_store.goal_keeper_receipts_for_plan(
+                argv[2], int(argv[3]) if len(argv) == 4 else 20), ensure_ascii=False))
+            return 0
         if command == "ledger" and len(argv) in {3, 4}:
             print(json.dumps(goal_ledger.events(argv[2], after=int(argv[3]) if len(argv) == 4 else 0),
                              ensure_ascii=False))

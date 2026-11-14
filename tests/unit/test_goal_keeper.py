@@ -673,3 +673,132 @@ def test_schema_126_leaves_active_goals_and_their_running_clocks_alone(owner):
     row = db.conn().execute("SELECT started_at, active_ms FROM task_items WHERE item_id=?", (item_id,)).fetchone()
     assert (row[0], row[1]) == (started, 5), "a running step of an active goal keeps its clock"
     assert task_plans.get(plan["plan_id"])["status"] == "active"
+
+
+# ---- a receipt for every action (Peter, 14 Nov) -------------------------------
+
+from lib import janitor_store  # noqa: E402
+
+
+def _activity(owner, plan, text="More work", ago_ms=400_000):
+    _message(owner, "assistant", text, at=db.now_ms() - ago_ms, phase="final")
+    db.conn().execute("UPDATE task_plans SET created_at=created_at-500000 WHERE plan_id=?", (plan["plan_id"],))
+
+
+def _batch(plan, answer, *, usage=None, model="gemini-4-hydrogen-low", run_id="run-1"):
+    config = {"agent_id": "keeper-1", "model": model, "options": {"max_goals_per_run": 2}}
+
+    def ask(prompt, plan_id):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer, (usage if usage is not None else {"input_tokens": 1234, "output_tokens": 56}), model
+
+    goal_keeper.run_batch(config, {"run_id": run_id}, [plan["plan_id"]], ask, now=db.now_ms())
+    return janitor_store.goal_keeper_receipts_for_run(run_id)
+
+
+def _short_id(plan, stable):
+    return goal_keeper._short(plan["plan_id"], _item(plan, stable)["item_id"])
+
+
+def test_an_update_leaves_a_receipt_with_steps_sources_model_tokens_and_time(owner, helper):
+    plan = _goal()
+    _activity(owner, plan, "Harness built: screenshots in /var/tmp/shots")
+    [receipt] = _batch(plan, {"steps": {_short_id(plan, "harness"): {
+        "status": "completed", "evidence": "Harness built: screenshots in /var/tmp/shots"}},
+        "checkpoint": {"progress": "Harness done", "next_work": "Baseline round"}})
+    assert receipt["outcome"] == "updated" and receipt["plan_id"] == plan["plan_id"]
+    assert receipt["title"] == "Booking UI hill-climb"
+    assert receipt["steps"] == [{"item_id": _item(plan, "harness")["item_id"], "from": "pending",
+                                 "to": "completed", "note": receipt["steps"][0]["note"]}]
+    assert receipt["steps"][0]["note"].startswith("Evidence:")
+    assert receipt["progress"] == "Harness done" and receipt["next_work"] == "Baseline round"
+    assert receipt["model"] == "gemini-4-hydrogen-low"
+    assert (receipt["input_tokens"], receipt["output_tokens"]) == (1234, 56)
+    assert isinstance(receipt["duration_ms"], int) and receipt["error"] == ""
+    assert any(ref.startswith("message:") for ref in receipt["source_refs"]), "it names what it read"
+    # The ledger's own receipt of the write now carries those sources too.
+    refs = json.loads(db.conn().execute(
+        "SELECT source_refs FROM goal_events WHERE plan_id=? AND kind='updater'",
+        (plan["plan_id"],)).fetchone()[0])
+    assert refs and refs == receipt["source_refs"][:20]
+    assert task_plans.get(plan["plan_id"])["updater"]["last_receipt"]["outcome"] == "updated"
+
+
+def test_nothing_new_to_say_leaves_an_unchanged_receipt(owner, helper):
+    plan = _goal()
+    answer = {"steps": {}, "checkpoint": {"progress": "Still waiting on Peter", "next_work": "Wait"}}
+    _activity(owner, plan, "Asked Peter")
+    _batch(plan, answer, run_id="run-1")
+    _activity(owner, plan, "Still no answer", ago_ms=-1000)  # after the first update's cursor
+    [receipt] = _batch(plan, answer, run_id="run-2")
+    assert receipt["outcome"] == "unchanged" and receipt["steps"] == []
+
+
+def test_a_completed_claim_without_evidence_is_held_and_says_so(owner, helper):
+    plan = _goal()
+    _step(plan, "harness", "in_progress")
+    _activity(owner, plan, "I think the harness is done")
+    [receipt] = _batch(plan, {"steps": {_short_id(plan, "harness"): {"status": "completed"}},
+                              "checkpoint": {"progress": "Harness probably done", "next_work": "Check"}})
+    assert receipt["outcome"] == "held_by_evidence_rule"
+    assert receipt["steps"] == [{"item_id": _item(plan, "harness")["item_id"], "from": None, "to": "held",
+                                 "note": "Completed claimed without evidence; left in progress"}]
+    assert _item(plan, "harness")["status"] == "in_progress"
+
+
+def test_a_write_refused_because_the_owner_changed_the_plan_leaves_a_receipt(owner, helper, monkeypatch):
+    plan = _goal()
+    _activity(owner, plan)
+
+    def refused(*args, **kwargs):
+        raise ValueError("plan changed; reload before editing")
+
+    monkeypatch.setattr(task_plans, "updater_apply", refused)
+    [receipt] = _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}})
+    assert receipt["outcome"] == "refused_owner_changed" and "plan changed" in receipt["error"]
+    assert receipt["source_refs"], "what it had read is still on the receipt"
+
+
+@pytest.mark.parametrize("answer", [RuntimeError("agy exited 1"), {"steps": {}}])
+def test_a_model_failure_or_a_bad_answer_leaves_a_failed_receipt(owner, helper, answer):
+    plan = _goal()
+    _activity(owner, plan)
+    [receipt] = _batch(plan, answer)
+    assert receipt["outcome"] == "failed" and receipt["error"]
+    assert receipt["title"] == "Booking UI hill-climb" and receipt["model"] == "gemini-4-hydrogen-low"
+
+
+def test_a_goal_with_nothing_new_is_skipped_with_a_receipt(owner):
+    plan = _goal()
+    [receipt] = _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}})
+    assert (receipt["outcome"], receipt["reason"]) == ("skipped", "nothing new")
+    assert receipt["input_tokens"] is None, "no model call, no tokens"
+
+
+def test_receipts_persist_per_goal_and_show_in_the_keepers_run_history(owner, helper):
+    keeper = _keeper()
+    janitors.set_enabled(keeper["session"], keeper["revision"], True)
+    plan = _goal()
+    _activity(owner, plan, "Started")
+
+    def ask(run, prompt, plan_id):
+        return ({"steps": {}, "checkpoint": {"progress": "Helper started", "next_work": "Wait"}},
+                {"input_tokens": 10, "output_tokens": 2}, "gemini-4-hydrogen-low")
+
+    janitor_autonomy.AutonomyJanitors(dispatch=None, notify=None, goal_ask=ask).goal_keeper_once(wait=True)
+    [run] = janitors.list_runs(keeper["session"], limit=1)
+    assert [r["plan_id"] for r in run["receipts"]] == [plan["plan_id"]]
+    assert run["receipts"][0]["run_id"] == run["run_id"]
+    stored = janitor_store.goal_keeper_receipts_for_plan(plan["plan_id"])
+    assert [r["receipt_id"] for r in stored] == [run["receipts"][0]["receipt_id"]]
+    assert "prompt" not in stored[0] and "Started" not in json.dumps(stored[0]), "ids, not transcript text"
+
+
+def test_a_goal_keeps_its_newest_receipts_only(owner, monkeypatch):
+    monkeypatch.setattr(janitor_store, "GOAL_KEEPER_RECEIPTS_PER_GOAL", 3)
+    plan = _goal()
+    for n in range(5):
+        _batch(plan, {"steps": {}, "checkpoint": {"progress": "p", "next_work": "n"}}, run_id=f"run-{n}")
+    kept = janitor_store.goal_keeper_receipts_for_plan(plan["plan_id"], limit=10)
+    assert [r["run_id"] for r in kept] == ["run-4", "run-3", "run-2"]
