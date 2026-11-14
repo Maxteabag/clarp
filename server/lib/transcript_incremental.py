@@ -672,15 +672,15 @@ _DEFAULTS = {
     # import, as before. False: at the first tail after a Host start, at
     # every audit, and whenever the file looks touched (see _try_tail).
     "digest_every_tail": False,
-    # True: an UNCHANGED file whose audit is due (after a Host start) has its
-    # bytes read once and compared with the stored digest. False: it is
-    # imported in full, as a grown file whose audit is due always is.
-    "audit_unchanged_by_digest": True,
     # Off unless switched on: a GROWN file whose audit is due has its
     # imported bytes read once and compared with the stored digest, and is
     # then imported as a tail, which starts the audit's clock again. False:
     # it is imported in full, as before.
     "audit_grown_by_digest": False,
+    # True: an UNCHANGED file whose audit is due (after a Host start) has its
+    # bytes read once and compared with the stored digest. False: it is
+    # imported in full, as a grown file whose audit is due always is.
+    "audit_unchanged_by_digest": True,
     # What a tail may find changed among the database rows its frontier was
     # published with (lib.message_carry gives each rule's reason). False: a
     # change of that kind is a full import, as before the rule existed.
