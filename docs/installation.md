@@ -215,6 +215,37 @@ an idle boundary. The one-time migration from a pre-runtime release refuses to
 start while an agent is marked busy, so the old monolithic service is never
 silently cut off during installation.
 
+### Who may act on the services
+
+The two services have fixed names and every process of the user shares one
+service manager, so "restart `clarp.service`" from the wrong process restarts
+the live Host. `service_manager` therefore runs a command against the units for
+two callers only, and refuses, logs (`serviceActionRefused action=… reason=…`)
+and raises `ServiceActionRefused` for everyone else, before any command runs:
+
+| Caller | What proves it |
+|---|---|
+| The Host itself (saving a voice provider restarts it; `POST /server-update`) | It runs inside `clarp.service`: its kernel cgroup on Linux (`/proc/self/cgroup` under `user@<uid>.service`), launchd's `XPC_SERVICE_NAME` on macOS. **And** the installed definition of that unit names the share directory and database this process works on. |
+| The admin path (`install.sh`, `clarp-admin update`, `rollback`, `network`, `tts`, `uninstall`) | The code says so (`restart(admin=True)`, or the install and uninstall functions). **And** a definition exists where this process looks, and each names its share directory (and its database, when `CLAUDE_PWA_DB` is set). **And** the service manager loaded the units from those very files, or does not know them yet (a first installation). |
+
+A Host with its own state directory (`tests/qa/host.py`, a development Host on
+another port, a Host started by hand beside the installed one) is none of
+these: it saves what it was asked to save, schedules no restart and says why
+(`restart_refusal`, [protocol.md](protocol.md)), and its `POST /server-update`
+answers 409. An installation into a scratch home or config directory is
+refused with `foreign_definition` instead of restarting the live Host. A
+process whose directories are foreign never reaches `systemctl` or `launchctl`,
+not even to ask; only a caller with its own matching definitions asks the one
+read-only question (`systemctl --user show -p Id -p LoadState -p FragmentPath`).
+
+The reasons are `not_in_unit`, `no_definition`, `foreign_directories`,
+`foreign_definition`, `manager_unavailable` and, on a QA Host,
+`disposable_host`. A cleanup that deletes the definitions (uninstall, a failed
+first installation) stops the services first: with no definition left nothing
+says whose services they are. The runtime's hand-over to a new release does not
+go through the service manager at all: the runtime exits and `Restart=always`
+starts the new one.
+
 ## Agent toolchains
 
 Managed mode downloads a checksummed Node runtime into Clarp's private data
