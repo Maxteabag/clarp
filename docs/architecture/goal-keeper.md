@@ -81,13 +81,16 @@ any more kept saying "active".
 - **Stalled, as a rule.** `stall()` reads the database only, never the words of
   a message (review of #330: 7% of final messages mention a rate limit or an
   API error). An *active* goal that is properly waiting is never stalled: a
-  dependency (`continuation.state == "waiting"`), a timer still in the future
-  (`continuation.due_at`), or a background job of the owner or a helper still
-  queued or running. Otherwise it is stalled when neither its owner nor its
+  dependency (`continuation.state == "waiting"`) whose deadline, if it has one,
+  is still ahead, a timer still in the future (`continuation.due_at`), or a
+  background job of the owner or a helper still queued or running. A dependency
+  past its deadline counts like an overdue timer: goal recovery normally moves
+  such a goal on at the deadline ("External dependency deadline passed"), so one
+  still waiting past it is one recovery does not visit. Otherwise it is stalled when neither its owner nor its
   helpers have had a message or a job end for 3 days (`STALL_IDLE_MS`), or when
   the OWNER's own latest state is a turn the Host recorded as `interrupted` with
   reason `usage_limit`/`account_plan` (a usage limit) or `auth`, `transient`,
-  `runner_exit`, `timeout`, `unknown` (a provider error), with nothing after it
+  `connection`, `runner_exit`, `timeout`, `unknown` (a provider error), with nothing after it
   for an hour. A helper's turn, a quoted message or a server restart never
   marks a goal. With nothing new to read, the keeper writes the checkpoint
   `Stalled since <date>: <cause>.` with no model call and no step change; the
