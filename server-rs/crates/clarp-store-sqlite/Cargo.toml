@@ -1,0 +1,16 @@
+[package]
+name = "clarp-store-sqlite"
+description = "The SQLite log engine: one append-only file per agent, clustered by position"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+clarp-ports.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+clarp-codec.workspace = true
+
+[lints]
+workspace = true
