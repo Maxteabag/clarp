@@ -185,6 +185,14 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
     def counted(sql):
         verb = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else "EMPTY"
         metrics["queries"][verb] = metrics["queries"].get(verb, 0) + 1
+        # The three reads that fetch every row of the session from the table.
+        reads = metrics.setdefault("session_reads", {"sends": 0, "latest_user": 0, "every_row": 0})
+        if "source_file LIKE 'client:%'" in sql and "ORDER BY updated_at" in sql:
+            reads["sends"] += 1
+        elif "role = 'user'" in sql and "LIMIT 1" in sql:
+            reads["latest_user"] += 1
+        elif sql.startswith("SELECT * FROM messages WHERE agent_id=") and "ORDER BY message_id" in sql:
+            reads["every_row"] += 1
 
     def timed(name, original):
         def call(*args, **kwargs):

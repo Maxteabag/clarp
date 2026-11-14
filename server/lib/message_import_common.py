@@ -56,12 +56,86 @@ def _latest_user_provenance(database, agent_id: str,
             LIMIT 1""",
         (agent_id, backend_session_id),
     ).fetchone()
+    return _user_provenance(row)
+
+
+def _user_provenance(row) -> tuple[str, str, str]:
     if row is None:
         return "", "user", ""
     return (
         row["message_id"], row["origin"] or "user",
         row["sender_agent_id"] or "",
     )
+
+
+# ---- the same two answers from message rows that were read anyway --------------
+#
+# A frontier is published with every row of the session, every column
+# (message_writes._carry_message_rows). An import that has read those rows
+# has the /send rows and the latest user row in its hands; asking SQLite for
+# them again makes it fetch every row of the session from the table twice
+# more, because no index holds source_file or role (on a Host whose database
+# is larger than its memory map that was two thirds of what a tail read).
+#
+# The answers must be the statements' own, to the row. Both statements order
+# by columns that end in seq, and (agent_id, backend_session_id, seq) is
+# unique, so within one session neither order has a tie and both are fully
+# determined: sorting the same rows by the same keys gives the same list.
+# What is left is to compare as SQLite compares: NULL, then numbers, then
+# text by its bytes, then blobs; and to match LIKE as SQLite does, without
+# regard to the case of ASCII letters.
+
+def _sqlite_order(value):
+    """A key that orders plain column values as SQLite's ORDER BY does."""
+    if value is None:
+        return (0, 0)
+    if isinstance(value, (int, float)):
+        return (1, value)
+    if isinstance(value, str):
+        return (2, value.encode("utf-8", "surrogatepass"))
+    return (3, bytes(value))
+
+
+def _like_prefix(value, prefix: str) -> bool:
+    """``value LIKE '<prefix>%'`` for an ASCII prefix without wildcards."""
+    if not isinstance(value, str):
+        return False                    # NULL; anything else never gets here (_derivable)
+    head = value[:len(prefix)]
+    return head.isascii() and head.lower() == prefix
+
+
+def _derivable(rows, backend_session_id) -> bool:
+    """Whether every value the two answers are decided by is of a kind this
+    module compares exactly as SQLite does. A blob where text belongs is not
+    (LIKE and = read it differently); then the statements are asked."""
+    if not isinstance(backend_session_id, str):
+        return False
+    for row in rows:
+        if not isinstance(row["backend_session_id"], (str, type(None))) \
+                or not isinstance(row["source_file"], (str, type(None))) \
+                or not isinstance(row["role"], (str, type(None))):
+            return False
+    return True
+
+
+def _session_parts(rows, backend_session_id):
+    """(the /send rows, the latest user row's provenance) of one session, from
+    message rows read with every column: what ``_client_provenance_rows`` and
+    ``_latest_user_provenance`` return for the same rows. ``rows`` are the
+    session's rows or the whole agent's. None when they cannot be taken from
+    the rows (``_derivable``)."""
+    if not _derivable(rows, backend_session_id):
+        return None
+    own = [row for row in rows if row["backend_session_id"] == backend_session_id]
+    sends = sorted(
+        (row for row in own if _like_prefix(row["source_file"], "client:")),
+        key=lambda row: (_sqlite_order(row["updated_at"]), _sqlite_order(row["seq"])))
+    users = [row for row in own if row["role"] == "user"]
+    latest = max(users, key=lambda row: (_sqlite_order(row["updated_at"]),
+                                         _sqlite_order(row["revision"]),
+                                         _sqlite_order(row["seq"]))) if users else None
+    return ([(row["message_id"], row["text"], row["origin"], row["sender_agent_id"],
+              row["timestamp"]) for row in sends], _user_provenance(latest))
 
 
 _FINAL_TWIN_WINDOW_S = 600
@@ -92,20 +166,21 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
 _PARKED_SEQ_BASE = 10 ** 12
 
 
-def _client_provenance_rows(database, agent_id, backend_session_id):
-    return database.execute(
+def _client_provenance_rows(database, agent_id, backend_session_id) -> list[tuple]:
+    """The /send rows of a session in the order they were written, as plain
+    tuples (message_id, text, origin, sender_agent_id, timestamp)."""
+    return [tuple(row) for row in database.execute(
         """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
               AND source_file LIKE 'client:%'
             ORDER BY updated_at ASC, seq ASC""",
-        (agent_id, backend_session_id)).fetchall()
+        (agent_id, backend_session_id))]
 
 
 def _client_provenance(rows) -> dict[str, list[tuple[str, str, str, str]]]:
     provenance: dict[str, list[tuple[str, str, str, str]]] = {}
-    for row in rows:
-        key = _norm_text(row["text"])
+    for message_id, text, origin, sender_agent_id, timestamp in rows:
+        key = _norm_text(text)
         provenance.setdefault(key, []).append((
-            row["message_id"], row["origin"] or "user",
-            row["sender_agent_id"] or "", row["timestamp"]))
+            message_id, origin or "user", sender_agent_id or "", timestamp))
     return provenance
