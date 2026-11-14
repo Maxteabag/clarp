@@ -76,6 +76,10 @@ def load_conversation(*, session: str, after_revision: int = 0,
     agent_id = agent["agent_id"]
     backend = backends.normalize(agent.get("backend"))
     backend_session_id = _live_backend_session(agent_id)
+    service_conversation = not backend_session_id and bool(agent.get("is_janitor"))
+    if service_conversation:
+        from .janitor_notices import conversation_id
+        backend_session_id = conversation_id(agent_id)
 
     # No live UUID yet — the agent was just (re)launched and hasn't fired
     # its first hook, so the runtime row's backend_session_id is still NULL.
@@ -92,7 +96,7 @@ def load_conversation(*, session: str, after_revision: int = 0,
                 "includes_automated": include_automated}
 
     # The backend locates and parses its own transcript.
-    latest = backends.find_session_jsonl(backend, backend_session_id)
+    latest = None if service_conversation else backends.find_session_jsonl(backend, backend_session_id)
 
     if latest is not None:
         def import_latest():
