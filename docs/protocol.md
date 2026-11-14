@@ -958,7 +958,9 @@ In every task plan (`GET /task-plans`, `GET /task-plan`, plan artifacts):
   `{run_id, outcome, reason, steps, model, input_tokens, output_tokens,
   duration_ms, error, created_at}`, where `outcome` is one of `updated`,
   `unchanged`, `held_by_evidence_rule`, `refused_owner_changed`, `failed`,
-  `skipped`, `cancelled` and `steps` lists `{item_id, from, to, note}`. `error`
+  `skipped`, `cancelled` (and, with feature `goal_keeper_stalled`, Host contract
+  98, `stalled`: the goal is active but stalled, reason `idle`, `usage_limit` or
+  `provider_error`) and `steps` lists `{item_id, from, to, note}`. `error`
   is a short code, never free text, and a receipt for a goal the keeper did not
   write has empty `progress`/`next_work`.
   Every run leaves one receipt per goal it handled; `GET /janitors/<session>/runs` for

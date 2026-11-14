@@ -100,7 +100,7 @@
               "description": "goal_keeper_receipts (Host 97): the Goal keeper's newest receipt for this goal (ids and short notes only; error is a short code).",
               "properties": {
                 "run_id": {"type": "string"},
-                "outcome": {"type": "string", "enum": ["updated", "unchanged", "held_by_evidence_rule", "refused_owner_changed", "failed", "skipped", "cancelled"]},
+                "outcome": {"type": "string", "enum": ["updated", "unchanged", "held_by_evidence_rule", "refused_owner_changed", "failed", "skipped", "cancelled", "stalled"]},
                 "reason": {"type": "string"},
                 "steps": {"type": "array", "items": {"type": "object", "properties": {"item_id": {"type": "string"}, "from": {"type": ["string", "null"]}, "to": {"type": "string"}, "note": {"type": "string"}}}},
                 "model": {"type": "string"},
