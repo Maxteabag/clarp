@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+from unittest import mock
 
 import pytest
 
@@ -117,6 +118,25 @@ def test_a_file_that_changed_since_the_parse_opened_it_must_be_read(tmp_path, ho
     assert inc._parsed_digests(read, evidence, before, None, path)[1] == "saved"
     _change(path, how)
     assert inc._parsed_digests(read, evidence, before, None, path) == (None, why)
+
+
+def test_another_file_under_the_name_is_read_whatever_its_times_say(tmp_path):
+    """A file put in the other's place has a new change time wherever the
+    file system keeps it finely, and the comparison of the times would do.
+    Where it is kept coarsely the replacement can carry the old file's size
+    and both its times to the tick. Its inode is what says so then."""
+    path = _file(tmp_path, SIZE)
+    before, read, evidence = _parsed(path, SIZE, None)
+    real = os.stat(path)
+
+    class Replacement:
+        st_dev, st_ino = real.st_dev, real.st_ino + 1
+        st_size, st_mtime_ns, st_ctime_ns = real.st_size, real.st_mtime_ns, real.st_ctime_ns
+
+    assert inc._parsed_digests(read, evidence, before, None, path)[1] == "saved"
+    with mock.patch.object(inc.os, "stat", lambda _path: Replacement):
+        found = inc._parsed_digests(read, evidence, before, None, path)
+    assert found == (None, "identity_changed")
 
 
 def test_a_file_that_is_shorter_than_it_was_is_another_file(tmp_path):
