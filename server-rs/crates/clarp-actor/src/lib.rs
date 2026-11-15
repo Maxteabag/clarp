@@ -675,6 +675,11 @@ impl Actor {
         Ok(waiting)
     }
 
+    /// The message a turn that ended answered.
+    pub fn message_of(&self, turn: &Settled) -> Result<Message, ActorError> {
+        self.message_at(turn.message_seq)
+    }
+
     /// The message the log holds at this position.
     fn message_at(&self, message_seq: Seq) -> Result<Message, ActorError> {
         let stored = self

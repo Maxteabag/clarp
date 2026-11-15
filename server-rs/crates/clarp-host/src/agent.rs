@@ -1171,12 +1171,19 @@ impl Worker {
             matches!(closed.entry, Entry::Reply(_)).then_some((ended, closed))
         });
         if let Some((ended, reply)) = &answer {
-            let asked = was_live
-                .filter(|was| was.turn == ended.id)
-                .map(|was| was.message_id.clone())
-                .unwrap_or_default();
+            // The message the turn answered, and the app it came from: a user who asked at
+            // the desk is not paged.
+            let (message_id, client) = actor.message_of(ended).map_or_else(
+                |_| (String::new(), String::new()),
+                |message| (message.id, message.client.unwrap_or_default()),
+            );
+            let asked = wire::Asked {
+                message_id: &message_id,
+                client: &client,
+            };
             let id = format!("pn-{}", ids::hex(6));
-            // A reply with nothing for the user in it is not something to be told of.
+            // A reply with nothing for the user in it is not something to be told of, and
+            // neither is what agents say to each other.
             if let Some(told) =
                 wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms)
             {
