@@ -169,16 +169,31 @@ CLARP_BUILD_ENV="CLARP_TEST_CLAUDE=1" server-rs/tools/build test --test host -- 
 It needs a logged-in Claude Code on the machine that runs it. On 15 Nov the XPS 15's was not; the test was run on
 elitebook with the binaries the XPS had built (running a built binary is not compiling).
 
-**Conformance (D18) runs.** `conformance/` holds the corpus, the planted changes and the driver; the workflow
-`Conformance (Rust Host)` records the Python Host, proves that every planted change is caught, and compares the
-Rust Host; `tools/build conform` is the everyday loop against the recorded answers (about 20 seconds). Read
-`conformance/README.md` before you change anything a client can see: the recorded answers are the specification.
+**The Rust Host conforms (15 Nov 2026, run 43683008178 and after).** `conformance/` holds the corpus, the planted
+changes and the driver; the workflow `Conformance (Rust Host)` records the Python Host twice, proves that every
+planted change is caught, and compares the Rust Host. Eight differences are left, all registered with their
+reason in `docs/differences.md`; what the runs showed to be wrong in the Python Host is in
+`docs/reference-defects.md` (nine entries, none reported yet). `tools/build conform` is the everyday loop against
+the recorded answers (about 20 seconds). Read `conformance/README.md` before you change anything a client can
+see: the recorded answers are the specification. Still open on this proof: planted changes written by someone
+other than the author, and a corpus for Codex agents (the Python Host runs Codex through its app server, the
+harness has no fake for it).
+
+**Codex runs** (`crates/clarp-backend/src/codex.rs`): one `codex exec --json` per turn, written against
+recordings of codex-cli 0.167.1. A real Codex turn has been through the Host, killed while its command ran; the
+next turn resumed Codex's thread (`CLARP_TEST_CODEX=1`, run the same way as the Claude test above).
 
 **Pairing is there** (`clarp-host pair --url ...`, `POST /pairing/exchange`, scopes, revoke), the Python Host's
 scheme word for word.
 
-Not there yet, in the order it is planned: closing the remaining conformance differences; the importer that moves
-one agent with its conversation; the Codex adapter; then stage 3 (speech in and out, push, artifacts, goals).
+**An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
+Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
+the Rust Host has to run on his machine as a service of its own first.
+
+Not there yet, in the order it is planned: the first kept move (stage 2's gate); then stage 3, which is what
+makes an agent livable on this Host: speech in and out, push, portraits, artifacts, goals and their wakes. The
+iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every other
+feature out of `capabilities.features`.
 
 ## 7. Stages and gates
 
