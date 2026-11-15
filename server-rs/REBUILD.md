@@ -226,9 +226,11 @@ one ends; the inbox in the order the apps show it. An agent keeps its artifacts 
 serves them as the Python Host does (`library.rs`: `/artifacts`, `/pinned-artifacts`, `/decisions`,
 `/attention`, the events `artifact-updated` and `attention-updated`), tells an agent its answer as a message
 written in one append with the mark that it was told, and gives the agent its tool (`clarp-agent-artifacts`,
-`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: countdowns,
-podcast episodes (each says it is not available on this Host yet), and `/attention/inbox`. Recordings, films,
-files, reports and forms came later, below.
+`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: countdowns and
+podcast episodes (each says it is not available on this Host yet). Recordings, films, files, reports, forms
+and the paged list the apps call Updates (`GET /attention/inbox`, `artifacts/updates.rs`: what failed first,
+then what is ready, then what is in the making, with a cursor that holds as long as nothing shown has
+changed; 54 recorded calls and the scenario `updates`) came later, below.
 
 **The user is told, also when the phone is in a pocket** (15 Nov 2026). Who is told when a turn ends is the
 Python Host's rule (`clarp-kernel/src/notify.rs`, 86,016 recorded combinations): a reply for the user tells

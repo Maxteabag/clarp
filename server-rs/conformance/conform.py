@@ -609,11 +609,32 @@ def published(value, found: dict) -> dict:
     return found
 
 
+def cut_lists(value, found: dict) -> dict:
+    """The names of the lists of Updates a capture's pages were cut from, and the cursors its
+    pages ended with: each Host's own, named here in the order a client learns of them. What is
+    compared is whether two pages are of one list and whether a page has more after it."""
+    if isinstance(value, list):
+        for item in value:
+            cut_lists(item, found)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key in ('snapshot_revision', 'next_cursor') and isinstance(item, str) and item:
+                kind = 'snapshot' if key == 'snapshot_revision' else 'cursor'
+                known = len({name for name in found.values() if name.startswith(f'<{kind}:')})
+                found.setdefault(item, f'<{kind}:{known + 1}>')
+            else:
+                cut_lists(item, found)
+    return found
+
+
 def seen_by_a_client(raw: dict) -> dict:
     """A capture, normalized, and cut down to the channels a client sees."""
     assets = published([exchange['body'] for exchange in raw['http']], {})
     if assets:
         raw = {**raw, 'http': by_name(raw['http'], assets), 'sse': by_name(raw['sse'], assets)}
+    lists = cut_lists([exchange['body'] for exchange in raw['http']], {})
+    if lists:
+        raw = {**raw, 'http': by_name(raw['http'], lists)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})

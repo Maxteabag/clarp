@@ -58,6 +58,8 @@ pub const MIN_IOS_CONTRACT: u64 = 1;
 /// it names is built and held to the Python Host; what is half there is not listed.
 pub const FEATURES: &[(&str, u64)] = &[
     // What agents make and ask: the library, the inbox, requests and every way they end.
+    // `GET /attention/inbox`: what agents made, a page at a time.
+    ("attention_index", 2),
     ("artifact_summary_v1", 73),
     ("flat_artifact_responses", 1),
     ("artifacts", 1),

@@ -22,9 +22,8 @@ introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 15 Nov 2026 
 `durable_task_goals`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`,
 `artifact_pins`, `decision_lifecycle`, `text_input_requests`, `push_grants`, `push_unregister`,
 `desktop_send_quiet_push`, `snapshot_without_archived`, `helper_agents`, `media`, `html_reports`,
-`html_report_revisions`, `html_form_network`. Everything else in the Python Host's list is absent, also where a part
-of it is built (`attention_index`: `GET /attention` is there, the paged `GET /attention/inbox` is
-not; `goal_updater`: a criterion can be set aside, the Goal keeper is not there;
+`html_report_revisions`, `html_form_network`, `attention_index`. Everything else in the Python Host's list is absent, also where a part
+of it is built (`goal_updater`: a criterion can be set aside, the Goal keeper is not there;
 `log_turn_summary`: rows carry the turn's end, an answer that tool work follows is not yet marked
 as commentary).
 
@@ -90,6 +89,8 @@ it covers that exact difference and nothing else.
 | `POST /tools/media` | not there | the same as `POST /media`, for the token a turn is given for its agent's tools | That token opens `/tools/` and nothing else, and publishing a file is a tool's act |
 | A file one agent published and another agent shows, after the second has moved to this Host (`clarp-host import`) | does not arise: the files of all agents are in one table | kept in the log of the agent that shows it too, marked as one that came along: fetched under its id, not in that agent's gallery, and no artifact of that agent is made of it. An id stands for one file on the Host: another file under it is refused | An agent's log holds what the agent needs to be shown whole. The file is kept once on the disk, whoever names it |
 | An artifact that names a published file, after its agent's session has another name | not found for this session: the file is looked up by the session name it was published under | found: an agent's files are in the agent's own log | A file belongs to the agent that published it, whatever the agent is called |
+| The name of a list of Updates (`snapshot_revision` of `GET /attention/inbox`) and the cursor a page ends with | a digest of the rows as its table has them; a cursor is that name and a place, in base 64 | a digest of the same fields as this Host has them; a cursor of the same shape | Each Host's own: a client hands a cursor back and compares names, and reads neither. The run compares whether two pages are of one list and whether a page has more after it. A cursor of one Host is stale on the other |
+| A countdown in Updates | shown where its clock stands | not shown | Countdowns are not built |
 | An artifact with a `podcast` in its payload | read as an episode (`podcast_live`) | refused: podcast episodes are not available on this Host yet | Not built. What is not there says so |
 | A form whose schema of answers has a word of JSON Schema other than `type`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`, `minLength`, `maxLength`, `minItems`, `maxItems`, `minimum`, `maximum`, or the words that say nothing of an answer (`title`, `description`, `default`, `examples`, `format`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `$schema`, `contentMediaType`, `contentEncoding`) | taken: a library reads all of JSON Schema (jsonschema, draft 2020-12) | refused when the form is made, with the word: `answer_schema says \`pattern\`, which this Host does not read yet` | This Host reads a schema itself, and says of answers that do not fit what the library says first (1,423 recorded pairs). A form is not taken whose answers it would judge otherwise. The four forms of the measured week use `type`, `properties` and `enum`. A word that means nothing to the library means nothing here either |
 | Of several answers nobody asked for that do not fit a schema given as `additionalProperties`, which one the user is told of | whichever the library's set gives first: not the same from one start of the Host to the next | the first as the answers were sent | The library leaves it open |
