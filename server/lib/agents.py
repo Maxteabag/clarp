@@ -710,7 +710,7 @@ def dashboard_states() -> dict[str, dict[str, Any]]:
                    AND b.kind IN ('thinking', 'tool', 'compacting')
                    AND b.ts > COALESCE((SELECT MAX(e.ts) FROM state_log e
                                          WHERE e.agent_id = a.agent_id
-                                           AND e.kind IN ('done', 'idle', 'stopped')), 0)
+                                           AND e.kind IN ('done', 'idle', 'stopped', 'interrupted')), 0)
                ) AS turn_started_at,
                (SELECT c.ts FROM state_log c
                  WHERE c.agent_id = a.agent_id
@@ -793,22 +793,28 @@ def turn_started_at(agent_id: str) -> int:
     """Epoch ms of the current (or most recent) turn start.
 
     Defined as the first busy state event (THINKING / TOOL / COMPACTING)
-    after the most recent turn-end event (DONE / IDLE / STOPPED). Drives
-    the "thinking…" / "running X… 4s" banner — the client subtracts
-    this from now() to show live elapsed time, just like Claude Code's
-    CLI spinner.
+    after the most recent turn-end event (DONE / IDLE / STOPPED /
+    INTERRUPTED). Drives the "thinking…" / "running X… 4s" banner — the
+    client subtracts this from now() to show live elapsed time, just like
+    Claude Code's CLI spinner.
+
+    INTERRUPTED ends a turn too (a Stop, a usage limit, a runner exit, a
+    server restart). Without it the turn after such an end was counted from
+    the interrupted turn's start: 356 of 1,873 turn starts on one Host in
+    three days, often by hours (issue 354).
     """
     row = conn().execute("""
         WITH last_end AS (
             SELECT MAX(ts) AS t FROM state_log
              WHERE agent_id = ?
-               AND kind IN (?, ?, ?)
+               AND kind IN (?, ?, ?, ?)
         )
         SELECT MIN(ts) AS t FROM state_log
          WHERE agent_id = ?
            AND kind IN (?, ?, ?)
            AND ts > COALESCE((SELECT t FROM last_end), 0)
     """, (agent_id, AgentState.DONE, AgentState.IDLE, AgentState.STOPPED,
+          AgentState.INTERRUPTED,
           agent_id, AgentState.THINKING, AgentState.TOOL,
           AgentState.COMPACTING)).fetchone()
     return int(row["t"] or 0)

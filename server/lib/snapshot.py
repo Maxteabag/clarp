@@ -460,8 +460,10 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         status_text = shown_status(a, state, visible_labels,
                                    helper_activity.get(agent_id, []), processes)
         turn_started_at = int(state.get('turn_started_at') or 0)
-        if active and not turn_started_at:
-            turn_started_at = int(rt.get('open_turn_started_at') or 0)
+        # While a turn runs, its own row says when it began; the clock read
+        # from the states is the fallback (a busy agent with no open turn).
+        if active:
+            turn_started_at = int(rt.get('open_turn_started_at') or 0) or turn_started_at
         if active and turn_started_at <= 0:
             # Busy with no recorded turn start (a handle adopted mid-turn):
             # "since now" is honest; 0 read as 1970 in a client's timer.
