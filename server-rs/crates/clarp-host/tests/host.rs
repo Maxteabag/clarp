@@ -1607,11 +1607,7 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
     );
     assert_eq!(artifacts(&["frobnicate"]).0, 2);
     assert_eq!(artifacts(&[]).0, 1);
-    // A form that takes answers is not here yet, and its verbs say so.
-    assert_eq!(
-        artifacts(&["create-form", &session, "Form", "form.html", "schema.json"]).0,
-        69
-    );
+    // What a form's page logs of its use is not kept here yet, and its verb says so.
     assert_eq!(artifacts(&["form-events", "no-such"]).0, 69);
 
     // What the user does with an artifact: archive it, pin it, discard it.
@@ -6401,4 +6397,246 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
         page.header("content-security-policy")
             .contains("connect-src 'none';")
     );
+}
+
+#[test]
+fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
+    let place = Place::new("form");
+    let token = "form-token";
+    let host = place.start_with_token(token);
+    let maker = host.new_agent("Maker");
+    let work = place.root.join("work");
+    let page = "<form><select name=\"when\"><option>now</option></select></form>";
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "when": { "type": "string", "enum": ["now", "later"] },
+            "budget": { "type": "number", "minimum": 0 },
+        },
+        "required": ["when"],
+        "additionalProperties": false,
+    });
+    std::fs::write(work.join("form.html"), page).unwrap();
+    std::fs::write(work.join("schema.json"), schema.to_string()).unwrap();
+    let beyond = json!({ "type": "object", "properties": { "a": { "pattern": "^a" } } });
+    std::fs::write(work.join("beyond.json"), beyond.to_string()).unwrap();
+    let artifacts = |args: &[&str]| {
+        let mut all = vec!["clarp-agent-artifacts"];
+        all.extend_from_slice(args);
+        tool(&host, &work, None, &all)
+    };
+
+    // What a form needs is said at once; a dry run makes nothing.
+    let (code, _, err) = artifacts(&["create-form", &maker, "Plan", "form.html"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("the following arguments are required: schema_file, --version, --artifact-id"),
+        "{err}"
+    );
+    let form = [
+        "create-form",
+        &maker,
+        "Plan: it's time",
+        "form.html",
+        "schema.json",
+        "--version",
+        "1",
+        "--artifact-id",
+        "form-plan",
+        "--summary",
+        "Choose",
+    ];
+    let (code, out, err) = artifacts(&[&form[..], &["--dry-run"]].concat());
+    assert_eq!(code, 0, "{out}{err}");
+    let dry: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(dry["body"]["payload"]["answer_schema"], schema);
+    assert_eq!(dry["body"]["payload"].get("read_only"), None);
+    let listed = host.get(&format!("/artifacts?session={maker}"));
+    assert!(listed["artifacts"].as_array().unwrap().is_empty());
+
+    // A schema with a word this Host does not read is refused by that word.
+    let (code, _, err) = artifacts(&[
+        "create-form",
+        &maker,
+        "Beyond",
+        "form.html",
+        "beyond.json",
+        "--version",
+        "1",
+        "--artifact-id",
+        "form-beyond",
+    ]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("HTTP Error 409") && err.contains("answer_schema says `pattern`"),
+        "{err}"
+    );
+
+    // The form: made once, shown with its page and its schema, and never changed.
+    let (code, out, err) = artifacts(&form);
+    assert_eq!(code, 0, "{out}{err}");
+    let made: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&made["type"], &made["version"], &made["content"]),
+        (&json!("html_form"), &json!("1"), &json!(page))
+    );
+    assert_eq!(made["payload"]["answer_schema"], schema);
+    let (code, _, err) = artifacts(&form);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("UNIQUE constraint failed: artifacts.artifact_id"),
+        "{err}"
+    );
+    let (status, changed) = host.ask(
+        "POST",
+        "/artifacts/form-plan",
+        Some(&json!({ "payload_patch": { "version": "2" } })),
+    );
+    assert_eq!(status, 409, "{changed}");
+    assert!(
+        changed.to_string().contains("HTML forms are immutable"),
+        "{changed}"
+    );
+    let shown = fetch(&host, token, "GET", "/artifacts/form-plan/html", &[], b"");
+    assert!(
+        shown.status == 200 && shown.text().contains(page),
+        "{}",
+        shown.text()
+    );
+    let listed = host.get(&format!(
+        "/artifacts?session={maker}&representation=summary-v1"
+    ));
+    assert_eq!(listed["artifacts"][0]["payload"].get("content"), None);
+    // The page is kept beside the log, once.
+    assert_eq!(files_under(&place.root.join("data").join("media")), 1);
+
+    // What is no submission, and what the form does not take.
+    let send = |host: &Host, form: &str, body: &Value| -> (u16, Value) {
+        host.ask("POST", &format!("/artifacts/{form}/submit"), Some(body))
+    };
+    let answers =
+        |id: &str, given: Value| json!({ "submission_id": id, "version": "1", "answers": given });
+    let raw = fetch(
+        &host,
+        token,
+        "POST",
+        "/artifacts/form-plan/submit",
+        &[],
+        b"[1]",
+    );
+    assert_eq!(raw.status, 400);
+    assert!(
+        raw.text().contains("JSON object required"),
+        "{}",
+        raw.text()
+    );
+    let (status, said) = send(&host, "form-plan", &answers("short", json!({})));
+    assert_eq!(
+        (status, &said["error"]),
+        (409, &json!("invalid submission_id"))
+    );
+    let first = "0a1b2c3d-0000-4000-8000-000000000001";
+    let (status, said) = send(&host, "form-plan", &answers(first, json!({ "budget": 3 })));
+    assert_eq!(status, 409);
+    assert_eq!(
+        said["error"],
+        "answers do not match the form schema: 'when' is a required property"
+    );
+    let (status, said) = send(
+        &host,
+        "form-plan",
+        &answers(first, json!({ "when": "soon", "colour": "red" })),
+    );
+    assert_eq!(status, 409);
+    assert_eq!(
+        said["error"],
+        "answers do not match the form schema: 'soon' is not one of ['now', 'later']"
+    );
+    let (status, said) = send(
+        &host,
+        "no-such-form",
+        &answers(first, json!({ "when": "now" })),
+    );
+    assert_eq!(
+        (status, &said["error"]),
+        (409, &json!("HTML form not found"))
+    );
+    let (status, report) = host.ask(
+        "POST",
+        "/artifacts",
+        Some(&json!({ "session": maker, "type": "html_form", "title": "A report", "artifact_id": "report-1",
+                      "payload": { "content": "<p>Read.</p>", "version": "1", "read_only": true } })),
+    );
+    assert_eq!(status, 201, "{report}");
+    let (status, said) = send(&host, "report-1", &answers(first, json!({})));
+    assert_eq!(status, 400, "{said}");
+    assert_eq!(
+        said["error"],
+        "read-only report; it does not accept answers"
+    );
+    assert!(host.conversation(&maker).is_empty(), "nothing was told yet");
+
+    // Answers that fit: a receipt, and the agent is told them as what its user said.
+    let given = json!({ "when": "now", "budget": 12.5 });
+    let (status, receipt) = send(&host, "form-plan", &answers(first, given.clone()));
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(
+        receipt,
+        json!({ "submission_id": first, "artifact_id": "form-plan", "version": "1",
+                "accepted": true, "delivery_status": "pending" })
+    );
+    wait_for("the agent's answer to the form's answers", || {
+        host.conversation(&maker).len() == 2 && host.state(&maker) == "done"
+    });
+    let told = format!(
+        "The user submitted answers to HTML form \"Plan: it's time\".\nArtifact ID: form-plan\n\
+         Version: 1\nSubmission ID: {first}\nThese are user preferences for review, not \
+         approval to perform protected actions. Interpret the answers in the context of the \
+         originating plan.\nAnswers:\n{{\"budget\":12.5,\"when\":\"now\"}}"
+    );
+    assert_eq!(host.conversation(&maker)[0], ("user".to_string(), told));
+    let rows = host.turns(&maker);
+    assert_eq!(rows[0]["id"], format!("u-html-form-{first}"));
+    // Sent again, they are the same answers: answered as told, and told once.
+    let (status, again) = send(&host, "form-plan", &answers(first, given.clone()));
+    assert_eq!(
+        (status, &again["delivery_status"]),
+        (200, &json!("delivered"))
+    );
+    let (status, other) = send(
+        &host,
+        "form-plan",
+        &answers(first, json!({ "when": "later" })),
+    );
+    assert_eq!(status, 409);
+    assert_eq!(
+        other["error"],
+        "submission ID already used for different answers"
+    );
+    assert_eq!(host.conversation(&maker).len(), 2);
+
+    // After the Host was killed the form, its page and what was answered are all there.
+    host.kill();
+    let host = place.start_with_token(token);
+    let (status, again) = send(&host, "form-plan", &answers(first, given));
+    assert_eq!(
+        (status, &again["delivery_status"]),
+        (200, &json!("delivered"))
+    );
+    let second = "0a1b2c3d-0000-4000-8000-000000000002";
+    let (status, receipt) = send(
+        &host,
+        "form-plan",
+        &answers(second, json!({ "when": "later" })),
+    );
+    assert_eq!(
+        (status, &receipt["delivery_status"]),
+        (200, &json!("pending"))
+    );
+    wait_for("the agent's answer to the second answers", || {
+        host.conversation(&maker).len() == 4 && host.state(&maker) == "done"
+    });
+    assert_eq!(host.turns(&maker)[2]["id"], format!("u-html-form-{second}"));
+    let shown = fetch(&host, token, "GET", "/artifacts/form-plan/html", &[], b"");
+    assert!(shown.status == 200 && shown.text().contains(page));
 }

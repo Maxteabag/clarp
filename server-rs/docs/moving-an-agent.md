@@ -20,8 +20,11 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 
 - Its portrait and voice (stage 3).
 - What it threw away: an artifact that was discarded stays where it was.
-- A form that takes answers arrives as it is and is shown; it takes no answers on the Rust
-  Host yet.
+- What users answered to a form before the move: it is in the conversation, where the agent
+  was told it. The form arrives as it is and takes answers anew, unless its schema has a
+  word this Host does not read (`docs/differences.md`): then it is shown, and answers to it
+  are refused with that word. Answers that were sent and not yet told to the agent when it
+  moved do not come: move an agent when nothing waits for it.
 - The older versions of a goal's documents: the newest of each comes, with its number.
 - What a goal waits for when it waits for a background job: jobs do not move, so the wait
   is over on arrival, as it is when a job is gone.

@@ -379,12 +379,9 @@ fn unread(error: &std::io::Error, file: &str) -> String {
     }
 }
 
-/// `create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V]
-/// [--connect HTTPS_ORIGIN]... [--dry-run]`: a page of HTML is handed to the user. The Host
-/// reads the page where the tool was called: the file is the agent's, on this machine.
-/// Under an id that is this agent's report already, the report is revised.
-async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Value, String> {
-    // What a page may reach can be said several times.
+/// What a page may reach can be said several times: the origins that were said, and the
+/// other arguments.
+fn connects(rest: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
     let (mut connect, mut others) = (Vec::new(), Vec::new());
     let mut args = rest.iter();
     while let Some(arg) = args.next() {
@@ -399,6 +396,76 @@ async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Va
             others.push(arg.clone());
         }
     }
+    Ok((connect, others))
+}
+
+/// A file of the agent's, read where the tool was called, as text.
+fn text_of(call: &ToolCall, file: &str, what: &str) -> Result<String, String> {
+    let content = std::fs::read(std::path::Path::new(&call.cwd).join(file))
+        .map_err(|error| unread(&error, file))?;
+    String::from_utf8(content).map_err(|_| format!("{what} is not text in UTF-8: '{file}'"))
+}
+
+/// `create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID
+/// [--summary S] [--connect HTTPS_ORIGIN]... [--dry-run]`: a page that asks its user for
+/// answers, with the schema that says what an answer is. The Host reads both files where
+/// the tool was called. A form is made once: its id is the agent's to choose and to keep.
+async fn create_form(app: &App, call: &ToolCall, rest: &[String]) -> Result<Value, String> {
+    let (connect, others) = connects(rest)?;
+    let names = ["session", "title", "html_file", "schema_file"];
+    let parsed = parse(
+        &others,
+        &["--summary", "--artifact-id", "--version"],
+        &["--dry-run"],
+        &["[session]", "[title]", "[html_file]", "[schema_file]"],
+    )?;
+    // What is missing is said at once, what has a place first.
+    let mut missing: Vec<&str> = names[parsed.positional.len().min(names.len())..].to_vec();
+    for option in ["--version", "--artifact-id"] {
+        if parsed.option(option).is_none() {
+            missing.push(option);
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        ));
+    }
+    let network = reports::connect_origins(&json!(connect)).map_err(|refused| refused.message)?;
+    let (session, title) = (&parsed.positional[0], &parsed.positional[1]);
+    let content = text_of(call, &parsed.positional[2], "the form's HTML")?;
+    let schema = text_of(call, &parsed.positional[3], "the form's schema")?;
+    let schema: Value = serde_json::from_str(&schema)
+        .map_err(|error| format!("the form's schema is not JSON: {error}"))?;
+    let mut payload = json!({
+        "content": content,
+        "version": parsed.option("--version").unwrap_or(""),
+        "answer_schema": schema,
+    });
+    if !connect.is_empty() {
+        payload["connect_origins"] = json!(network);
+    }
+    let body = json!({
+        "session": session, "title": title, "type": "html_form",
+        "summary": parsed.option("--summary").unwrap_or(""),
+        "artifact_id": parsed.option("--artifact-id").unwrap_or(""), "payload": payload,
+    });
+    if parsed.flags.contains("--dry-run") {
+        return Ok(json!({ "method": "POST", "path": "/artifacts", "body": body }));
+    }
+    let asked = body.as_object().cloned().unwrap_or_default();
+    library::create(app, &asked)
+        .await
+        .map_err(|error| refusal(&error))
+}
+
+/// `create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V]
+/// [--connect HTTPS_ORIGIN]... [--dry-run]`: a page of HTML is handed to the user. The Host
+/// reads the page where the tool was called: the file is the agent's, on this machine.
+/// Under an id that is this agent's report already, the report is revised.
+async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Value, String> {
+    let (connect, others) = connects(rest)?;
     let parsed = parse(
         &others,
         &["--summary", "--artifact-id", "--version"],
@@ -411,10 +478,7 @@ async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Va
         &parsed.positional[1],
         &parsed.positional[2],
     );
-    let content = std::fs::read(std::path::Path::new(&call.cwd).join(file))
-        .map_err(|error| unread(&error, file))?;
-    let content = String::from_utf8(content)
-        .map_err(|_| format!("the report's HTML is not text in UTF-8: '{file}'"))?;
+    let content = text_of(call, file, "the report's HTML")?;
     if content.trim().is_empty() {
         return Err("report HTML is empty".to_string());
     }
@@ -495,7 +559,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     };
     let printed = |value: &Value| ToolAnswer::printed(0, value.to_string());
     let result: Result<Value, String> = match (cmd.as_str(), rest.len()) {
-        ("create-form" | "form-events", _) => {
+        ("form-events", _) => {
             return ToolAnswer::said(
                 NOT_HERE,
                 format!(
@@ -504,6 +568,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                 ),
             );
         }
+        ("create-form", _) => create_form(app, call, rest).await,
         ("create-report", _) => create_report(app, call, rest).await,
         ("report-history", _) => report_history(app, rest).await,
         ("create", 3..=5) => {

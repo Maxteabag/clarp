@@ -64,6 +64,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // What an agent publishes: `POST /media`, an agent's gallery, a file fetched whole and
     // in parts.
     ("media", 1),
+    // A report: a page of HTML an agent hands its user, served behind its policy; what it
+    // was, version by version; and the origins its page may reach.
+    ("html_reports", 19),
+    ("html_report_revisions", 49),
+    ("html_form_network", 59),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
     // Pairing codes and devices with tokens of their own.

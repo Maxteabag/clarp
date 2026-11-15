@@ -226,9 +226,9 @@ one ends; the inbox in the order the apps show it. An agent keeps its artifacts 
 serves them as the Python Host does (`library.rs`: `/artifacts`, `/pinned-artifacts`, `/decisions`,
 `/attention`, the events `artifact-updated` and `attention-updated`), tells an agent its answer as a message
 written in one append with the mark that it was told, and gives the agent its tool (`clarp-agent-artifacts`,
-`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: forms that take
-answers, countdowns, podcast episodes (each says it is not available on this Host yet), and
-`/attention/inbox`. Recordings, films, files and reports came later, below.
+`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: countdowns,
+podcast episodes (each says it is not available on this Host yet), and `/attention/inbox`. Recordings, films,
+files, reports and forms came later, below.
 
 **The user is told, also when the phone is in a pocket** (15 Nov 2026). Who is told when a turn ends is the
 Python Host's rule (`clarp-kernel/src/notify.rs`, 86,016 recorded combinations): a reply for the user tells
@@ -385,8 +385,31 @@ token in the address, which the page's own scripts could read) and `GET /artifac
 agent's tool has its verbs: `clarp-agent-artifacts create-report` (the Host reads the page where the tool was
 called; published again under its id, the tool finds the version the new one follows) and `report-history`.
 Held end to end (`tests/host.rs`, an agent hands its user a report) and by the scenario `reports`. Not there
-yet: forms that take answers (their answers are held to a JSON Schema the agent writes, which this Host
-cannot read yet; asking for one says so), countdowns and podcast episodes.
+yet: countdowns and podcast episodes.
+
+**An agent asks its user with a form** (15 Nov 2026). The last kind of artifact agents made in the measured
+week that this Host refused: a page that asks for answers, with a JSON Schema that says what an answer is. The
+Python Host asks a library whether the schema is one and whether answers fit, and tells the user the
+library's own sentence. This Host reads the part of JSON Schema forms are written with itself
+(`artifacts/answers.rs`: `type`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`,
+lengths and bounds) and says the sentence the library says first, by asking a schema's words in the order they
+are written: 1,423 recorded pairs of a schema and answers, and 222 values as Python shows and writes them
+(`python.rs`), since a sentence names the value that does not fit. A word the library reads and this Host does
+not is refused by name when the form is made, so no form is taken whose answers would be judged otherwise; a
+word that means nothing to the library means nothing here. The choice costs the forms that use the rest of
+JSON Schema (`pattern`, `oneOf` and the like: none of the four of the measured week) and buys a Host without a
+schema library and its dependencies. A form is made once and never changed; its page is kept beside the log
+like a report's. A user's answers come under an id the app chose (`POST /artifacts/<id>/submit`): they are
+held to the schema, kept on the form as a submission, and answered with a receipt; the same answers under the
+same id are answered the same, on the whole Host, and anything else under a used id is refused. What the
+form's agent is told is written into its log together with the mark that it was told, as what its user said
+(`u-html-form-<id>`), so it is told once, also when the Host is killed in between. The rules and their order
+are the Python Host's (`server/lib/html_forms.py`), held by 71 recorded calls of a form's whole life, end to
+end (`tests/host.rs`, an agent asks its user with a form), and by the scenario `forms`. The vectors found a
+fault that had nothing to do with forms: a fraction of seventeen digits could be read one step off
+(`9.999999900000001e-05` as `9.9999999e-05`), so a number an agent published could come back as another;
+fractions are read exactly now (`float_roundtrip`). Not there: what a form's page logs of its use
+(`html_form_events`), and the reply spoken.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
