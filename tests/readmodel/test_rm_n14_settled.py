@@ -473,3 +473,97 @@ def test_without_the_rule_for_later_turns_the_rule_does_nothing(tmp_path, backen
         world.turn_row("a-turn", at=T * 1000)
         world.grow(_turn(backend, 8))
         assert world.imported() == ("full_carry_inputs_changed", ["turn_rows"])
+
+
+# ---- two guards only a pair can show (from the review of #338) -----------------------
+
+def _both(world, change):
+    for database in (world.reference, world.candidate):
+        with sqlite3.connect(database) as other:
+            change(other)
+
+
+def _moved_past(world, trace, later):
+    """A full import (its audit is due) until the boundary lies after the
+    rows of ``trace`` and not after those of ``later``."""
+    for _ in range(2):
+        assert _audited(world) == ("full_audit", [])
+        if max(_seqs(world, trace)) < _boundary(world) <= min(_seqs(world, later)):
+            return
+    raise AssertionError("the boundary did not move between the two turns")
+
+
+@BACKENDS
+def test_a_row_from_the_boundary_on_made_the_twin_of_an_old_reply(tmp_path, backend):
+    """Why the stamped rows' other columns are proven. A reply from the
+    boundary on is given the trace and the words of a reply before the
+    boundary, an id that is not its slot's, and a new revision: what an
+    earlier import leaves when it adopted a reply whose slot then moved. A
+    full replay finds it from the old reply's side (a later row of its
+    trace with its words, message_import_rows._shifted_twin) and puts it in
+    the old reply's slot. A tail starts at the boundary and never asks.
+    The row differs in more than its stamps, so the tail is refused; let
+    through, the products differ."""
+    with World(tmp_path, backend, _history(backend), settings=ON) as world:
+        world.started(6)
+        _begin(world, "a-turn", T)
+        assert world.imported() == ("tail_applied", [])
+        _settle(world, "a-turn", T * 1000 + 500)
+        _begin(world, "b-turn", T + 50)
+        _moved_past(world, "a-turn", "b-turn")
+        source, slots = str(world.transcript), {}
+
+        def twin(other):
+            last = ("SELECT message_id, seq, text FROM messages WHERE trace_id=? AND source_file=? "
+                    "AND role='assistant' ORDER BY seq DESC LIMIT 1")
+            _old_id, slots["old"], words = other.execute(last, ("a-turn", source)).fetchone()
+            later_id, slots["later"], _text = other.execute(last, ("b-turn", source)).fetchone()
+            assert other.execute(
+                "UPDATE messages SET message_id='adopted-twin', trace_id='a-turn', text=?, "
+                "revision=?, updated_at=updated_at+1 WHERE message_id=?",
+                (words, world.next_revision(other), later_id)).rowcount == 1
+
+        _both(world, twin)
+        assert slots["old"] < _boundary(world) <= slots["later"]
+        world.grow(_turn(backend, T + 100))
+        assert world.imported() == ("full_carry_inputs_changed", ["row_transcript"])
+        with sqlite3.connect(world.candidate) as stored:
+            assert stored.execute(
+                "SELECT seq FROM messages WHERE message_id='adopted-twin'").fetchone() == (slots["old"],)
+        world.grow(_turn(backend, T + 101))
+        assert world.imported() == ("tail_applied", [])
+
+
+@BACKENDS
+def test_a_turn_with_a_message_steered_into_it_that_settles_too_early_for_it(tmp_path, backend):
+    """Why the reach of the settled turn is asked, in the direction where
+    the turn LOSES old rows. A message is steered into the running turn: it
+    has a trace and no turn of its own, so what follows it is the running
+    turn's. A full import moves the boundary past all of it. Then the turn
+    settles, at a time 300 seconds before the steered message's, and its
+    own stamp fails. Its reach now ends two minutes after it began: for a
+    full replay no turn was running when the steered message came, and the
+    replies after it are the message's own. A tail would leave them the
+    turn's."""
+    with World(tmp_path, backend, _history(backend), settings=ON) as world:
+        world.started(6)
+        _begin(world, "a-turn", T)
+        assert world.imported() == ("tail_applied", [])
+        world.send("steered", f"synthetic request {T + 300}", at=(T + 300) * 1000 - 100,
+                   trace="the-steered-message")
+        world.grow(_turn(backend, T + 300))
+        assert world.imported() == ("tail_applied", [])
+        world.grow(_turn(backend, T + 600))
+        assert _audited(world) == ("full_audit", [])
+        boundary, held = _boundary(world), _traces(world)
+        late = [seq for seq, trace in held.items() if seq < boundary and trace == "a-turn"
+                and seq > max(_seqs(world, "a-turn")[:2])]
+        assert late                                   # replies after the steered message, the turn's
+        _settle(world, "a-turn", T * 1000 + 500, stamp=False)
+        world.grow(_turn(backend, T + 601))
+        assert world.imported() == ("full_carry_inputs_changed", ["turn_settled_out_of_reach"])
+        now = _traces(world)
+        changed = {seq: now[seq] for seq in held if seq < boundary and now[seq] != held[seq]}
+        assert changed and set(changed.values()) == {"the-steered-message"}
+        world.grow(_turn(backend, T + 602))
+        assert world.imported() == ("tail_applied", [])
