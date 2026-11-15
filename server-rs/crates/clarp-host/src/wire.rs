@@ -374,8 +374,10 @@ const NOTHING_TO_DO: [&str; 4] = [
 /// when it said something aloud (`speak`), otherwise what it wrote (`text-reply`). `None` for
 /// a reply that has nothing for the user in it.
 pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
+    // Cleaned as what it is, something spoken: an emotion tag the engine acts out is not
+    // shown. (The Python Host cleans the blocks' inner text and shows the tag.)
     let spoken = markup::speak_blocks(reply, true).join(" ");
-    let spoken = markup::clean_for_display(&spoken, true);
+    let spoken = markup::clean_for_display(&format!("<speak>{spoken}</speak>"), true);
     if !spoken.is_empty() {
         return Some((cut(spoken, NOTIFICATION_PREVIEW_MAX, false), "speak"));
     }
@@ -1355,6 +1357,11 @@ mod tests {
         assert_eq!(
             notification_preview("All <break time=\"300ms\"/> done."),
             Some(("All done.".to_string(), "text-reply"))
+        );
+        assert_eq!(
+            notification_preview("<speak>Good. [sigh] Finally done.</speak>"),
+            Some(("Good. Finally done.".to_string(), "speak")),
+            "what the engine acts out is not shown"
         );
         assert_eq!(notification_preview("HEARTBEAT_OK"), None);
         assert_eq!(
