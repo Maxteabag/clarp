@@ -14,12 +14,13 @@ use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{
-    Action, Actor, ActorError, Changed, ImportedRow, Outputs, Profile, QueueState, Sent, Status,
-    Waiting,
+    Action, Actor, ActorError, Changed, ImportedRow, Kept, Outputs, Profile, QueueState, Sent,
+    Status, Waiting,
 };
 use clarp_backend::Backend;
+use clarp_kernel::artifacts::{Artifact, ArtifactBook, Ctx, Maker};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
-use clarp_kernel::goals::{GoalBook, Looked, Owner, Seen, TurnSeen, World};
+use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
 use clarp_ports::clock::Clock;
@@ -399,6 +400,55 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
     })
 }
 
+fn kept_goal(change: &GoalChange) -> Kept<'_> {
+    Kept {
+        goal: Some(change),
+        artifacts: &[],
+    }
+}
+
+/// The artifact a plan is shown as in the apps, as a change of the plan leaves it: made
+/// with the plan, under the title the plan was given, and following its state from then on.
+fn plan_shown(
+    artifacts: &ArtifactBook,
+    record: &AgentRecord,
+    change: &GoalChange,
+    title: Option<&str>,
+    now_ms: i64,
+) -> Option<Artifact> {
+    let maker = Maker {
+        agent_id: &record.agent_id,
+        session: &record.session,
+        persona: &record.persona,
+    };
+    let mut ctx = Ctx {
+        now_ms,
+        token_hex: &mut ids::hex,
+        // An id of twelve random bytes is nobody else's.
+        taken: &|_| false,
+    };
+    let given = title.unwrap_or(&change.plan.title);
+    artifacts
+        .plan_synced(maker, &change.plan, given, title.is_some(), &mut ctx)
+        .ok()
+}
+
+/// Writes a change of a goal and, with it, the artifact its plan is shown as.
+fn keep_goal(
+    actor: &mut Actor,
+    record: &AgentRecord,
+    change: &GoalChange,
+    title: Option<&str>,
+    now_ms: i64,
+) -> Result<Outputs, ActorError> {
+    let shown = plan_shown(actor.artifacts(), record, change, title, now_ms);
+    let kept = Kept {
+        goal: Some(change),
+        artifacts: shown.as_slice(),
+    };
+    actor.keep(&kept, now_ms)
+}
+
 /// Asks an agent's book of goals something, with the world around it as its actor has it.
 fn with_goals<T>(
     actor: &Actor,
@@ -566,7 +616,9 @@ impl Worker {
                     };
                     let paused = with_goals(actor, now, |book, world| book.stopped(&reason, world));
                     for change in &paused {
-                        out.changed.goals |= actor.goal(change, now)?.changed.goals;
+                        let kept = keep_goal(actor, &self.setup.record, change, None, now)?;
+                        out.changed.goals |= kept.changed.goals;
+                        out.changed.artifacts |= kept.changed.artifacts;
                     }
                     Ok(((told, paused.len()), out))
                 });
@@ -622,9 +674,14 @@ impl Worker {
                 let (said, change) = with_goals(actor, now, |book, world| {
                     goaltool::answer(book, owner, &ask, world)
                 });
+                // A plan that is made is shown under the title it was given.
+                let title = match &ask {
+                    goaltool::Ask::Create { title, .. } => Some(title.trim()),
+                    _ => None,
+                };
                 // What the tool prints of a change is true once the change is written.
                 let written = match &change {
-                    Some(change) => actor.goal(change, now),
+                    Some(change) => keep_goal(actor, &self.setup.record, change, title, now),
                     None => Ok(Outputs::default()),
                 };
                 answered(written.map(|out| (said, out)), answer)?
@@ -702,6 +759,15 @@ impl Worker {
             // What a Stop left held is not work the agent still has: nothing runs it until
             // someone resumes it, and a goal that is being worked was resumed after that Stop.
             let resting = status.live.is_none() && (status.waiting.is_empty() || status.paused);
+            // An agent that waits for an approval, or for an answer it said it cannot go on
+            // without, is not woken to go on.
+            let busy = if actor.artifacts().has_blocking_decision(now) {
+                Some(("approval", "Waiting for an answer or approval"))
+            } else if resting {
+                None
+            } else {
+                Some(("working", "Owner has live or queued work"))
+            };
             let last = status.last.as_ref().filter(|_| status.live.is_none());
             let rested = last.and_then(seen_end);
             let looked = {
@@ -724,7 +790,7 @@ impl Worker {
                         now_ms: now,
                         session: &self.setup.record.session,
                         native_session: status.backend_session.as_deref().unwrap_or(""),
-                        busy: (!resting).then_some(("working", "Owner has live or queued work")),
+                        busy,
                         rested: rested.as_ref(),
                         job: &|id| jobs.get(id),
                         wake: &wake,
@@ -734,7 +800,7 @@ impl Worker {
             };
             match looked {
                 Looked::Nothing => {}
-                Looked::Noted(change) => outs.push(actor.goal(&change, now)?),
+                Looked::Noted(change) => outs.push(actor.keep(&kept_goal(&change), now)?),
                 Looked::Wake {
                     change,
                     request_id,
@@ -750,7 +816,12 @@ impl Worker {
                         sender: None,
                         client: None,
                     };
-                    outs.push(actor.wake(&change, &message, now)?.1);
+                    // Said to the agent, not left for later: a goal that is being worked was
+                    // resumed or made after the last Stop, and what that Stop still holds
+                    // does not hold it.
+                    let woken =
+                        actor.keep_with(&kept_goal(&change), &message, Admission::Queue, now)?;
+                    outs.push(woken.1);
                 }
             }
         }

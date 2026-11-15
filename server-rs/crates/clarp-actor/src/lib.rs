@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Rest};
+use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
     Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
 };
@@ -137,6 +138,8 @@ pub struct Changed {
     pub jobs: bool,
     /// One of the agent's goals or plans changed.
     pub goals: bool,
+    /// Something the agent made for its user, or asks its user, changed.
+    pub artifacts: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -296,6 +299,22 @@ pub struct Status {
     pub resting: Option<Rest>,
 }
 
+/// What changed in the agent's books together, to be written together: a goal, and
+/// artifacts as changes left them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Kept<'a> {
+    pub goal: Option<&'a GoalChange>,
+    pub artifacts: &'a [Artifact],
+}
+
+/// Changes of the books on their way into the log: the items to append, and the records
+/// they are, for the books to take once the items are written.
+struct Written {
+    items: Vec<NewItem>,
+    goal: Option<GoalRecord>,
+    artifacts: Vec<ArtifactRecord>,
+}
+
 /// The turn that holds the agent, as the actor follows it.
 struct LiveTurn {
     turn: TurnId,
@@ -338,6 +357,8 @@ pub struct Actor {
     jobs: JobBook,
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
+    /// What the agent made for its user and what it asks its user, as the log has it.
+    artifacts: ArtifactBook,
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
@@ -372,12 +393,19 @@ fn records<R: serde::de::DeserializeOwned>(
     }
 }
 
-/// What the log keeps of a change to a goal.
-fn goal_item(record: &GoalRecord, now_ms: i64) -> Result<NewItem, ActorError> {
+/// A record of one of the agent's books, as an item of its log.
+fn record_item<R: serde::Serialize>(
+    kind: u16,
+    key: String,
+    record: &R,
+    now_ms: i64,
+) -> Result<NewItem, ActorError> {
     let body = serde_json::to_vec(record).map_err(|error| {
-        ActorError::Corrupt(format!("a goal record could not be written: {error}"))
+        ActorError::Corrupt(format!(
+            "a record of kind {kind} could not be written: {error}"
+        ))
     })?;
-    Ok(NewItem::new(kind::GOAL, now_ms, body).keyed(format!("g-{}", record.plan_id)))
+    Ok(NewItem::new(kind, now_ms, body).keyed(key))
 }
 
 fn io_error(what: &Path, error: std::io::Error) -> ActorError {
@@ -484,12 +512,22 @@ impl Actor {
                 goals.apply(&record);
             },
         )?;
+        let mut artifacts = ArtifactBook::new();
+        records(
+            recorder.log(),
+            kind::ARTIFACTS,
+            kind::ARTIFACT,
+            |record: ArtifactRecord| {
+                artifacts.apply(&record);
+            },
+        )?;
         let mut actor = Self {
             profile,
             backend,
             recorder,
             jobs,
             goals,
+            artifacts,
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
@@ -718,17 +756,58 @@ impl Actor {
         &self.goals
     }
 
-    /// Writes a change that was decided on the agent's book of goals, and takes it.
-    pub fn goal(&mut self, change: &GoalChange, now_ms: i64) -> Result<Outputs, ActorError> {
-        let record = self.goals.record(change, now_ms);
-        let item = goal_item(&record, now_ms)?;
-        let mut batch = self.recorder.batch();
-        batch.item(item);
-        batch.commit()?;
-        self.goals.apply(&record);
+    /// What the agent made for its user and what it asks its user.
+    pub fn artifacts(&self) -> &ArtifactBook {
+        &self.artifacts
+    }
+
+    /// Writes what was decided on the agent's books, all of it in one append, and takes it.
+    pub fn keep(&mut self, kept: &Kept<'_>, now_ms: i64) -> Result<Outputs, ActorError> {
+        let mut written = self.written(kept, now_ms)?;
         let mut out = Outputs::default();
-        out.changed.goals = true;
+        let mut batch = self.recorder.batch();
+        for item in std::mem::take(&mut written.items) {
+            batch.item(item);
+        }
+        batch.commit()?;
+        self.take_written(&written, &mut out);
         Ok(out)
+    }
+
+    /// What the log is to keep of changes to the books.
+    fn written(&self, kept: &Kept<'_>, now_ms: i64) -> Result<Written, ActorError> {
+        let goal = kept.goal.map(|change| self.goals.record(change, now_ms));
+        let artifacts: Vec<ArtifactRecord> = kept
+            .artifacts
+            .iter()
+            .map(|artifact| ArtifactBook::record(artifact, now_ms))
+            .collect();
+        let mut items = Vec::new();
+        if let Some(record) = &goal {
+            let key = format!("g-{}", record.plan_id);
+            items.push(record_item(kind::GOAL, key, record, now_ms)?);
+        }
+        for record in &artifacts {
+            let key = format!("a-{}", record.artifact.artifact_id);
+            items.push(record_item(kind::ARTIFACT, key, record, now_ms)?);
+        }
+        Ok(Written {
+            items,
+            goal,
+            artifacts,
+        })
+    }
+
+    /// Takes into the books what is in the log now.
+    fn take_written(&mut self, written: &Written, out: &mut Outputs) {
+        if let Some(record) = &written.goal {
+            self.goals.apply(record);
+            out.changed.goals = true;
+        }
+        for record in &written.artifacts {
+            self.artifacts.apply(record);
+            out.changed.artifacts = true;
+        }
     }
 
     /// Counts every running job as heard from now: after the machine slept, what was not
@@ -798,26 +877,25 @@ impl Actor {
         self.take(message, admission, Vec::new(), now_ms)
     }
 
-    /// Wakes the agent for one of its goals: the message it is woken with and what the goal
-    /// says of the wake are written together, so there is never a wake the goal does not
-    /// know of, nor a goal that counts a wake that was not sent.
-    pub fn wake(
+    /// Tells the agent something of the Host's own, and writes what belongs with it in the
+    /// same append: a goal's record of the wake it is, a request's mark that its answer was
+    /// told. So there is never a message without its record, nor a record of a message that
+    /// was not sent.
+    pub fn keep_with(
         &mut self,
-        change: &GoalChange,
+        kept: &Kept<'_>,
         message: &Message,
+        admission: Admission,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        let record = self.goals.record(change, now_ms);
-        let item = goal_item(&record, now_ms)?;
-        // Said to the agent, not left for later: a goal that is being worked was resumed or
-        // made after the last Stop, and what that Stop still holds does not hold it.
-        let (sent, mut out) = self.take(message, Admission::Queue, vec![item], now_ms)?;
+        let mut written = self.written(kept, now_ms)?;
+        let items = std::mem::take(&mut written.items);
+        let (sent, mut out) = self.take(message, admission, items, now_ms)?;
         if sent.duplicate {
-            // The message is there already; the goal has still to learn of it.
-            return Ok((sent, self.goal(change, now_ms)?));
+            // The message is there already; what belongs with it has still to be written.
+            return Ok((sent, self.keep(kept, now_ms)?));
         }
-        self.goals.apply(&record);
-        out.changed.goals = true;
+        self.take_written(&written, &mut out);
         Ok((sent, out))
     }
 
