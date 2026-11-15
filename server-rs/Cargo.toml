@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/clarp-actor",
+    "crates/clarp-backend",
     "crates/clarp-ports",
     "crates/clarp-protocol",
     "crates/clarp-shim",
@@ -20,6 +22,9 @@ publish = false
 clarp-ports = { path = "crates/clarp-ports" }
 clarp-codec = { path = "crates/clarp-codec" }
 clarp-store-mem = { path = "crates/clarp-store-mem" }
+clarp-kernel = { path = "crates/clarp-kernel" }
+clarp-backend = { path = "crates/clarp-backend" }
+clarp-actor = { path = "crates/clarp-actor" }
 clarp-spool = { path = "crates/clarp-spool" }
 nix = { version = "0.29", features = ["signal", "process"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

@@ -45,6 +45,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
+name = "clarp-actor"
+version = "0.0.1"
+dependencies = [
+ "clarp-backend",
+ "clarp-codec",
+ "clarp-kernel",
+ "clarp-ports",
+ "clarp-spool",
+ "clarp-store-mem",
+ "serde_json",
+]
+
+[[package]]
+name = "clarp-backend"
+version = "0.0.1"
+dependencies = [
+ "clarp-kernel",
+ "clarp-spool",
+ "serde_json",
+]
+
+[[package]]
 name = "clarp-codec"
 version = "0.0.1"
 dependencies = [

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::codec::{CodecSet, Compressor};
-use crate::log::{Item, LogEngine, NewItem};
+use crate::log::{Item, Kinds, LogEngine, NewItem, Seq};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -69,11 +69,12 @@ pub fn compressor_conformance(codec: &dyn Compressor) {
     let _ = codec.decompress(&noise(300, 3));
 }
 
-fn item(turn: Option<u64>, kind: u16, ts_ms: i64, body: &[u8]) -> NewItem {
+fn item(turn: Option<u64>, kind: u16, ts_ms: i64, key: Option<&str>, body: &[u8]) -> NewItem {
     NewItem {
         turn,
         kind,
         ts_ms,
+        key: key.map(str::to_string),
         body: body.to_vec(),
     }
 }
@@ -86,7 +87,12 @@ fn same(read: &Item, seq: u64, wrote: &NewItem) {
     assert_eq!(read.turn, wrote.turn, "the turn of item {seq} survives");
     assert_eq!(read.kind, wrote.kind, "the kind of item {seq} survives");
     assert_eq!(read.ts_ms, wrote.ts_ms, "the time of item {seq} survives");
+    assert_eq!(read.key, wrote.key, "the key of item {seq} survives");
     assert!(read.body == wrote.body, "the body of item {seq} survives");
+}
+
+fn positions(items: &[Item]) -> Vec<u64> {
+    items.iter().map(|item| item.seq).collect()
 }
 
 /// What every [`LogEngine`] must do.
@@ -110,13 +116,13 @@ pub fn log_engine_conformance(
 
     let big = noise(300_000, 9);
     let first = vec![
-        item(None, 1, 1_000, b"hello"),
-        item(Some(1), 2, 1_001, b""),
-        item(Some(1), 3, 1_002, &big),
+        item(None, 1, 1_000, Some("greeting"), b"hello"),
+        item(Some(1), 2, 1_001, None, b""),
+        item(Some(1), 3, 1_002, None, &big),
     ];
     let second = vec![
-        item(Some(2), 2, 2_000, b"again"),
-        item(None, 9, 2_001, b"{\"k\":1}"),
+        item(Some(2), 2, 2_000, Some("greeting"), b"again"),
+        item(None, 9, 2_001, Some("other"), b"{\"k\":1}"),
     ];
 
     let mut log = engine
@@ -128,14 +134,20 @@ pub fn log_engine_conformance(
         "an empty log ends at 0"
     );
     assert!(
-        log.read_tail(10).expect("an empty log reads").is_empty(),
+        log.read_tail(Kinds::ALL, 10)
+            .expect("an empty log reads")
+            .is_empty(),
         "an empty log has no tail"
     );
     assert!(
-        log.read_after(0, 10)
+        log.read_after(0, Kinds::ALL, 10)
             .expect("an empty log reads")
             .is_empty(),
         "an empty log has nothing after 0"
+    );
+    assert!(
+        log.find("greeting").expect("an empty log finds").is_none(),
+        "an empty log holds no key"
     );
 
     assert_eq!(
@@ -150,39 +162,135 @@ pub fn log_engine_conformance(
     );
     assert_eq!(log.last_seq().expect("last position"), 3);
 
-    let all = log.read_after(0, 10).expect("read after 0");
+    let all = log.read_after(0, Kinds::ALL, 10).expect("read after 0");
     assert_eq!(all.len(), 3);
     for (i, wrote) in first.iter().enumerate() {
         same(&all[i], i as u64 + 1, wrote);
     }
-    let one = log.read_after(1, 1).expect("read after 1");
+    let one = log.read_after(1, Kinds::ALL, 1).expect("read after 1");
     assert_eq!(one.len(), 1, "the limit is honoured");
     same(&one[0], 2, &first[1]);
     assert!(
-        log.read_after(3, 10)
+        log.read_after(3, Kinds::ALL, 10)
             .expect("read after the end")
             .is_empty(),
         "nothing lies after the end"
     );
     assert!(
-        log.read_after(99, 10)
+        log.read_after(99, Kinds::ALL, 10)
             .expect("read after beyond the end")
             .is_empty()
     );
-    let tail = log.read_tail(2).expect("read tail");
+    let tail = log.read_tail(Kinds::ALL, 2).expect("read tail");
     assert_eq!(
-        tail.iter().map(|i| i.seq).collect::<Vec<_>>(),
+        positions(&tail),
         vec![2, 3],
         "a tail is the newest items, oldest first"
     );
-    assert!(log.read_tail(0).expect("an empty tail").is_empty());
+    assert!(
+        log.read_tail(Kinds::ALL, 0)
+            .expect("an empty tail")
+            .is_empty()
+    );
     assert_eq!(
-        log.read_tail(50).expect("a long tail").len(),
+        log.read_tail(Kinds::ALL, 50).expect("a long tail").len(),
         3,
         "a tail longer than the log is the whole log"
     );
+    same(
+        &log.find("greeting")
+            .expect("find a key")
+            .expect("the key is there"),
+        1,
+        &first[0],
+    );
 
     assert_eq!(log.append(&second).expect("a second append"), 5);
+
+    // Reads by kind skip the other kinds and still honour the limit and the direction.
+    let twos = log.read_after(0, Kinds::only(2), 10).expect("read a kind");
+    assert_eq!(
+        positions(&twos),
+        vec![2, 4],
+        "a read by kind returns that kind only"
+    );
+    assert_eq!(
+        positions(
+            &log.read_after(0, Kinds::range(2, 3), 2)
+                .expect("read a range of kinds")
+        ),
+        vec![2, 3],
+        "the limit counts the items returned, not the items passed over"
+    );
+    assert_eq!(
+        positions(
+            &log.read_after(2, Kinds::only(2), 10)
+                .expect("read a kind after a position")
+        ),
+        vec![4]
+    );
+    assert_eq!(
+        positions(
+            &log.read_before(4, Kinds::ALL, 2)
+                .expect("read before a position")
+        ),
+        vec![2, 3],
+        "before a position: the newest ones below it, oldest first"
+    );
+    assert_eq!(
+        positions(
+            &log.read_before(Seq::MAX, Kinds::only(2), 1)
+                .expect("read the newest of a kind")
+        ),
+        vec![4]
+    );
+    assert_eq!(
+        positions(
+            &log.read_before(5, Kinds::range(1, 2), 10)
+                .expect("read kinds before a position")
+        ),
+        vec![1, 2, 4]
+    );
+    assert!(
+        log.read_before(1, Kinds::ALL, 10)
+            .expect("read before the first")
+            .is_empty(),
+        "nothing lies before the first item"
+    );
+    assert!(
+        log.read_before(0, Kinds::ALL, 10)
+            .expect("read before 0")
+            .is_empty()
+    );
+    assert!(
+        log.read_after(0, Kinds::only(77), 10)
+            .expect("read a kind nobody wrote")
+            .is_empty()
+    );
+
+    // A key names the thing an item is a version of; the newest version is the one found.
+    same(
+        &log.find("greeting")
+            .expect("find a key")
+            .expect("the key is there"),
+        4,
+        &second[0],
+    );
+    same(
+        &log.find("other")
+            .expect("find a key")
+            .expect("the key is there"),
+        5,
+        &second[1],
+    );
+    assert!(
+        log.find("nobody").expect("find a missing key").is_none(),
+        "a key nobody wrote is not found"
+    );
+    assert!(
+        log.find("").expect("find the empty key").is_none(),
+        "an item without a key is not found under the empty key"
+    );
     drop(log);
 
     // Another agent's directory is another log.
@@ -193,6 +301,10 @@ pub fn log_engine_conformance(
         other.last_seq().expect("last position"),
         0,
         "one agent's items never appear in another's log"
+    );
+    assert!(
+        other.find("greeting").expect("find").is_none(),
+        "nor do its keys"
     );
     drop(other);
 
@@ -206,11 +318,19 @@ pub fn log_engine_conformance(
         "what was appended is there after reopening"
     );
     assert_eq!(
-        log.append(&[item(Some(3), 4, 3_000, b"after the switch")])
+        log.find("greeting")
+            .expect("find after reopening")
+            .expect("the key is there")
+            .seq,
+        4,
+        "keys survive reopening"
+    );
+    assert_eq!(
+        log.append(&[item(Some(3), 4, 3_000, None, b"after the switch")])
             .expect("append after the switch"),
         6
     );
-    let everything = log.read_after(0, 100).expect("read everything");
+    let everything = log.read_after(0, Kinds::ALL, 100).expect("read everything");
     assert_eq!(everything.len(), 6);
     for (i, wrote) in first.iter().chain(second.iter()).enumerate() {
         same(&everything[i], i as u64 + 1, wrote);
@@ -226,5 +346,5 @@ pub fn log_engine_conformance(
         .writing_with(codecs.write_tag())
         .expect("the switched set knows the first codec");
     let log = engine.open(dir_a, both).expect("a log opens a third time");
-    assert_eq!(log.read_tail(1).expect("read tail")[0].seq, 6);
+    assert_eq!(log.read_tail(Kinds::ALL, 1).expect("read tail")[0].seq, 6);
 }

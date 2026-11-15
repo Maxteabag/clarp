@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use clarp_ports::codec::{CodecSet, CodecTag};
-use clarp_ports::log::{AgentLog, Item, LogEngine, LogError, NewItem, Seq};
-use rusqlite::{Connection, params};
+use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
+use rusqlite::{Connection, Params, params};
 
 /// The name of the log file inside an agent's directory.
 pub const LOG_FILE: &str = "log.db";
@@ -22,10 +22,14 @@ CREATE TABLE IF NOT EXISTS item(
     turn  INTEGER,
     kind  INTEGER NOT NULL,
     ts    INTEGER NOT NULL,
+    key   TEXT,
     codec INTEGER NOT NULL,
     body  BLOB NOT NULL
 ) STRICT;
+CREATE INDEX IF NOT EXISTS item_key ON item(key, seq) WHERE key IS NOT NULL;
 ";
+
+const COLUMNS: &str = "seq, turn, kind, ts, key, codec, body";
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SqliteEngine;
@@ -80,6 +84,7 @@ struct Stored {
     turn: Option<i64>,
     kind: i64,
     ts_ms: i64,
+    key: Option<String>,
     codec: i64,
     body: Vec<u8>,
 }
@@ -97,21 +102,23 @@ impl SqliteLog {
                 LogError::Storage(format!("item {} has kind {}", row.seq, row.kind))
             })?,
             ts_ms: row.ts_ms,
+            key: row.key,
             body: self.codecs.decode(tag, &row.body)?,
         })
     }
 
-    fn select(&self, sql: &str, first: i64, second: i64) -> Result<Vec<Item>, LogError> {
+    fn select(&self, sql: &str, params: impl Params) -> Result<Vec<Item>, LogError> {
         let mut statement = self.conn.prepare_cached(sql).map_err(storage)?;
         let rows = statement
-            .query_map(params![first, second], |row| {
+            .query_map(params, |row| {
                 Ok(Stored {
                     seq: row.get(0)?,
                     turn: row.get(1)?,
                     kind: row.get(2)?,
                     ts_ms: row.get(3)?,
-                    codec: row.get(4)?,
-                    body: row.get(5)?,
+                    key: row.get(4)?,
+                    codec: row.get(5)?,
+                    body: row.get(6)?,
                 })
             })
             .map_err(storage)?;
@@ -127,6 +134,10 @@ fn as_limit(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)
 }
 
+fn as_position(seq: Seq) -> i64 {
+    i64::try_from(seq).unwrap_or(i64::MAX)
+}
+
 impl AgentLog for SqliteLog {
     fn append(&mut self, items: &[NewItem]) -> Result<Seq, LogError> {
         let transaction = self.conn.transaction().map_err(storage)?;
@@ -137,7 +148,7 @@ impl AgentLog for SqliteLog {
             .map_err(storage)?;
         {
             let mut insert = transaction
-                .prepare_cached("INSERT INTO item(seq, turn, kind, ts, codec, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+                .prepare_cached("INSERT INTO item(seq, turn, kind, ts, key, codec, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
                 .map_err(storage)?;
             for item in items {
                 seq += 1;
@@ -149,6 +160,7 @@ impl AgentLog for SqliteLog {
                         turn,
                         i64::from(item.kind),
                         item.ts_ms,
+                        item.key,
                         i64::from(tag.0),
                         stored
                     ])
@@ -169,17 +181,36 @@ impl AgentLog for SqliteLog {
         Ok(seq as Seq)
     }
 
-    fn read_after(&self, after: Seq, limit: usize) -> Result<Vec<Item>, LogError> {
-        let after = i64::try_from(after).unwrap_or(i64::MAX);
-        self.select("SELECT seq, turn, kind, ts, codec, body FROM item WHERE seq > ?1 ORDER BY seq LIMIT ?2", after, as_limit(limit))
+    fn read_after(&self, after: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
+        self.select(
+            &format!("SELECT {COLUMNS} FROM item WHERE seq > ?1 AND kind BETWEEN ?2 AND ?3 ORDER BY seq LIMIT ?4"),
+            params![
+                as_position(after),
+                i64::from(kinds.min),
+                i64::from(kinds.max),
+                as_limit(limit)
+            ],
+        )
     }
 
-    fn read_tail(&self, limit: usize) -> Result<Vec<Item>, LogError> {
+    fn read_before(&self, before: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
         // The newest `limit` by position, then oldest first: a range read at the end of the file.
         self.select(
-            "SELECT seq, turn, kind, ts, codec, body FROM (SELECT * FROM item ORDER BY seq DESC LIMIT ?1) WHERE ?2 = ?2 ORDER BY seq",
-            as_limit(limit),
-            0,
+            &format!("SELECT {COLUMNS} FROM (SELECT {COLUMNS} FROM item WHERE seq < ?1 AND kind BETWEEN ?2 AND ?3 ORDER BY seq DESC LIMIT ?4) ORDER BY seq"),
+            params![
+                as_position(before),
+                i64::from(kinds.min),
+                i64::from(kinds.max),
+                as_limit(limit)
+            ],
         )
+    }
+
+    fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+        let found = self.select(
+            &format!("SELECT {COLUMNS} FROM item WHERE key = ?1 ORDER BY seq DESC LIMIT 1"),
+            params![key],
+        )?;
+        Ok(found.into_iter().next())
     }
 }

@@ -75,14 +75,26 @@ pub struct SpoolWriter {
 }
 
 impl SpoolWriter {
+    /// Creates the spool of a new turn, with its directory. Fails with `AlreadyExists` when the
+    /// spool is there: a turn has one shim, and the shim that made the file is the one.
+    pub fn create(path: &Path) -> io::Result<Self> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let file = OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(path)?;
+        Ok(Self { file })
+    }
+
     /// Opens the spool for appending, creating it and its directory when they are not there.
     pub fn open(path: &Path) -> io::Result<Self> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        Ok(Self {
-            file: OpenOptions::new().create(true).append(true).open(path)?,
-        })
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        Ok(Self { file })
     }
 
     /// Appends one record as one line, in one write.
@@ -125,10 +137,25 @@ impl SpoolReader {
         Self { path: path.into() }
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Whether the spool is there at all: whether a shim ever took this turn.
+    pub fn exists(&self) -> bool {
+        self.path.exists()
+    }
+
     /// Reads the whole lines from `offset` on. A spool that does not exist yet is an empty one.
     pub fn read_from(&self, offset: u64) -> io::Result<Read1> {
+        self.read_window(offset, u64::MAX, usize::MAX)
+    }
+
+    /// Reads whole lines that start at or after `from` and before `until`, at most `max_lines`
+    /// of them. A long spool is read in windows, so that no read holds more than a window of it.
+    pub fn read_window(&self, from: u64, until: u64, max_lines: usize) -> io::Result<Read1> {
         let mut found = Read1 {
-            next_offset: offset,
+            next_offset: from,
             ..Read1::default()
         };
         let file = match File::open(&self.path) {
@@ -137,9 +164,10 @@ impl SpoolReader {
             Err(error) => return Err(error),
         };
         let mut reader = BufReader::new(file);
-        reader.seek(SeekFrom::Start(offset))?;
+        reader.seek(SeekFrom::Start(from))?;
         let mut line = Vec::new();
-        loop {
+        let mut lines = 0usize;
+        while found.next_offset < until && lines < max_lines {
             line.clear();
             let read = reader
                 .by_ref()
@@ -158,6 +186,7 @@ impl SpoolReader {
                 }),
             }
             found.next_offset += read as u64;
+            lines += 1;
         }
         Ok(found)
     }
@@ -303,5 +332,58 @@ mod tests {
             found.damaged[0].offset,
             serde_json::to_string(&out(1, "before")).unwrap().len() as u64 + 1
         );
+    }
+
+    #[test]
+    fn a_spool_is_read_in_windows_that_join_up() {
+        let path = scratch("windows");
+        let mut writer = SpoolWriter::open(&path).unwrap();
+        for n in 0..10 {
+            writer.append(&out(n, &format!("line {n}"))).unwrap();
+        }
+        let reader = SpoolReader::new(&path);
+        let whole = reader.read_from(0).unwrap();
+        let mut joined = Vec::new();
+        let mut offset = 0;
+        loop {
+            let window = reader.read_window(offset, u64::MAX, 3).unwrap();
+            if window.records.is_empty() {
+                break;
+            }
+            assert!(
+                window.records.len() <= 3,
+                "a window is no longer than asked"
+            );
+            offset = window.next_offset;
+            joined.extend(window.records);
+        }
+        assert_eq!(joined, whole.records, "the windows are the spool, once");
+        // Up to a known position and no further: how a restart rebuilds what it had read.
+        let third = reader.read_window(0, u64::MAX, 3).unwrap().next_offset;
+        let upto = reader.read_window(0, third, usize::MAX).unwrap();
+        assert_eq!(upto.records, whole.records[..3].to_vec());
+        assert_eq!(upto.next_offset, third);
+        assert!(
+            reader
+                .read_window(third, third, 10)
+                .unwrap()
+                .records
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_spool_of_a_turn_is_made_once() {
+        let path = scratch("once");
+        assert!(!SpoolReader::new(&path).exists());
+        let mut first = SpoolWriter::create(&path).unwrap();
+        first.append(&out(1, "mine")).unwrap();
+        let second = SpoolWriter::create(&path);
+        assert_eq!(
+            second.err().map(|error| error.kind()),
+            Some(io::ErrorKind::AlreadyExists),
+            "a second shim for the same turn is refused"
+        );
+        assert!(SpoolReader::new(&path).exists());
     }
 }

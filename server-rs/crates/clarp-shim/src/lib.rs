@@ -10,6 +10,12 @@ use serde_json::Value;
 /// The environment variable that tells a hook where its shim listens.
 pub const SOCKET_ENV: &str = "CLARP_SHIM_SOCKET";
 
+/// The exit code of a shim that found the turn's spool already there: another shim has the turn.
+pub const EXIT_TURN_TAKEN: u8 = 125;
+
+/// The exit code of a shim whose program could not be started.
+pub const EXIT_NOT_STARTED: u8 = 127;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Request {
@@ -28,6 +34,10 @@ pub enum Request {
         name: String,
         data: Value,
     },
+    /// Tell me when there is more in the spool. After the reply, this connection carries nothing
+    /// but a newline whenever the spool has grown, and it closes when the shim is gone. A newline
+    /// is a hint to read the spool, never the news itself.
+    Follow,
     Ping,
 }
 

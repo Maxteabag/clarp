@@ -1,0 +1,174 @@
+//! Backends: the tools that do an agent's work.
+//!
+//! A backend is two things and nothing else. It knows how to start its tool for one turn
+//! ([`Backend::launch`]), and it knows what the lines that tool prints mean ([`Interpreter`]).
+//! It never runs anything and never touches the server: the shim runs the tool and records what
+//! it prints, and an interpreter is a fold over that record. Given the same records it gives the
+//! same signals, however they are cut into reads and however often the server restarted in
+//! between. That is what lets a server that comes back in the middle of a turn read the turn's
+//! spool from its beginning and arrive exactly where the one before it was.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use clarp_kernel::conversation::{Notice, Reply, ToolCall};
+use clarp_kernel::turn::{Activity, RunOutcome};
+use clarp_spool::Record;
+
+pub mod claude;
+pub mod scripted;
+
+/// The environment variable that tells a tool, its hooks and its skills which agent they work for.
+/// The name is the Python Host's: every skill written for it reads this.
+pub const SESSION_ENV: &str = "CLAUDE_PWA_SESSION";
+
+/// What a backend needs to know to start one turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnSpec {
+    pub agent_id: String,
+    /// The agent's session name: what its tools know it by.
+    pub session: String,
+    pub turn: u64,
+    pub cwd: PathBuf,
+    /// The message this turn answers.
+    pub prompt: String,
+    /// The tool's own session to continue, when the agent has one.
+    pub backend_session: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// What the agent is told about who it is, on top of the tool's own instructions.
+    pub identity: Option<String>,
+}
+
+/// How to start the tool for one turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Launch {
+    pub program: String,
+    pub args: Vec<String>,
+    /// Set on top of the environment the tool inherits.
+    pub env: Vec<(String, String)>,
+    /// What the tool reads on its standard input, which is then closed.
+    pub stdin: Vec<u8>,
+}
+
+/// A reply while it is being written: shown to whoever is watching, never stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveReply {
+    /// The id the finished reply will have, so a client replaces one with the other.
+    pub id: String,
+    pub text: String,
+}
+
+/// What a stretch of a tool's output means.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Signal {
+    /// The tool named its own session.
+    Bound {
+        backend_session: String,
+    },
+    /// The tool is doing something else now.
+    Moved(Activity),
+    /// A whole message of the agent's.
+    Reply(Reply),
+    /// A tool call started, or ended.
+    Tool(ToolCall),
+    /// Something the user should be told that the agent did not say.
+    Notice(Notice),
+    Live(LiveReply),
+    /// The tool process is gone, and this is how the turn went.
+    Ended(RunOutcome),
+}
+
+/// What the lines of one turn mean. One interpreter reads one turn's spool, from its first record.
+pub trait Interpreter: Send {
+    /// Takes the next record. What it means is added to `out`, in order.
+    fn on_record(&mut self, record: &Record, out: &mut Vec<Signal>);
+}
+
+pub trait Backend: Send + Sync {
+    /// The name this backend has in configuration and on the wire.
+    fn id(&self) -> &'static str;
+
+    fn launch(&self, spec: &TurnSpec) -> Launch;
+
+    fn interpreter(&self, turn: u64) -> Box<dyn Interpreter>;
+}
+
+/// The backend with this name, as built in.
+pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
+    match id {
+        "claude" => Some(Arc::new(claude::Claude::new())),
+        "scripted" => Some(Arc::new(scripted::Scripted::echo())),
+        _ => None,
+    }
+}
+
+/// The first `max` characters of a text, with a mark when something was left out.
+pub(crate) fn shorten(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        None => text.to_string(),
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+    }
+}
+
+/// The last lines a tool wrote to its standard error: what there is to say when it fails.
+#[derive(Debug, Default)]
+pub(crate) struct ErrorTail {
+    lines: std::collections::VecDeque<String>,
+}
+
+impl ErrorTail {
+    const LINES: usize = 20;
+    const CHARS: usize = 600;
+
+    pub(crate) fn push(&mut self, line: &str) {
+        if line.trim().is_empty() {
+            return;
+        }
+        if self.lines.len() == Self::LINES {
+            self.lines.pop_front();
+        }
+        self.lines.push_back(line.to_string());
+    }
+
+    pub(crate) fn text(&self) -> Option<String> {
+        if self.lines.is_empty() {
+            return None;
+        }
+        let joined = self.lines.iter().cloned().collect::<Vec<_>>().join("\n");
+        Some(shorten(&joined, Self::CHARS))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_built_in_backends_are_found_by_name() {
+        assert_eq!(by_id("claude").unwrap().id(), "claude");
+        assert_eq!(by_id("scripted").unwrap().id(), "scripted");
+        assert!(by_id("nobody").is_none());
+    }
+
+    #[test]
+    fn a_text_is_shortened_at_a_character_not_in_the_middle_of_one() {
+        assert_eq!(shorten("hello", 5), "hello");
+        assert_eq!(shorten("hello", 4), "hell…");
+        assert_eq!(shorten("blåbær", 3), "blå…");
+        assert_eq!(shorten("", 0), "");
+    }
+
+    #[test]
+    fn the_error_tail_keeps_the_last_lines_only() {
+        let mut tail = ErrorTail::default();
+        assert_eq!(tail.text(), None);
+        tail.push("   ");
+        for n in 0..30 {
+            tail.push(&format!("line {n}"));
+        }
+        let text = tail.text().unwrap();
+        assert!(text.starts_with("line 10\n") && text.ends_with("line 29"));
+    }
+}

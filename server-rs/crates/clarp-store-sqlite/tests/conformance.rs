@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_codec::standard_set;
-use clarp_ports::log::{LogEngine, NewItem};
+use clarp_ports::log::{Kinds, LogEngine, NewItem};
 use clarp_ports::testkit::{log_engine_conformance, scratch_dir};
 use clarp_store_sqlite::{LOG_FILE, SqliteEngine};
 
@@ -47,6 +47,7 @@ fn an_agent_is_one_directory_with_one_log_file() {
         turn: None,
         kind: 1,
         ts_ms: 1,
+        key: None,
         body: b"hello".to_vec(),
     }])
     .unwrap();
@@ -63,7 +64,7 @@ fn an_agent_is_one_directory_with_one_log_file() {
     let log = SqliteEngine::new()
         .open(&moved, standard_set("zstd").unwrap())
         .unwrap();
-    assert_eq!(log.read_tail(1).unwrap()[0].body, b"hello");
+    assert_eq!(log.read_tail(Kinds::ALL, 1).unwrap()[0].body, b"hello");
     drop(log);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -100,12 +101,14 @@ fn a_failed_append_leaves_the_log_as_it_was() {
         turn: None,
         kind: 1,
         ts_ms: 1,
+        key: None,
         body: b"fine".to_vec(),
     };
     let bad = NewItem {
         turn: None,
         kind: 1,
         ts_ms: 2,
+        key: None,
         body: vec![1, 0, 1],
     };
     assert_eq!(log.append(std::slice::from_ref(&ok)).unwrap(), 1);

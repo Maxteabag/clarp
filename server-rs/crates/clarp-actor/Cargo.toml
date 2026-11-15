@@ -1,0 +1,20 @@
+[package]
+name = "clarp-actor"
+description = "One agent's actor: its mailbox, its live turn and its conversation, without the thread it runs on"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+clarp-backend.workspace = true
+clarp-kernel.workspace = true
+clarp-ports.workspace = true
+clarp-spool.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+clarp-codec.workspace = true
+clarp-store-mem.workspace = true
+
+[lints]
+workspace = true
