@@ -5,6 +5,7 @@
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -167,10 +168,55 @@ pub struct ToolOutcome {
     pub stderr: String,
 }
 
+/// The Host a `config.toml` names, as the installer writes one for the Rust Host: its
+/// address and the token it takes. `None` for any other file: a tool of this Host never
+/// speaks to a Host of another kind.
+fn host_in(config: &str) -> Option<(String, String)> {
+    let (mut ours, mut address, mut port, mut token) = (false, "", "", "");
+    let mut in_server = false;
+    for line in config.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_server = line == "[server]";
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"');
+        match (in_server, key.trim()) {
+            (true, "kind") => ours = value == "clarp-host",
+            (true, "bind_addr") => address = value,
+            (true, "port") => port = value,
+            (true, "auth_token") => token = value,
+            _ => {}
+        }
+    }
+    (ours && !address.is_empty() && !port.is_empty())
+        .then(|| (format!("{address}:{port}"), token.to_string()))
+}
+
+/// The Host this installation runs, for a tool that no turn told where its Host is: a worker
+/// an agent left running, which carries the agent's world but not the turn's own words. It is
+/// in the file the installer wrote, which that world names.
+fn installed_host() -> Option<(String, String)> {
+    let named = |variable: &str| std::env::var_os(variable).filter(|value| !value.is_empty());
+    let path = named("CLAUDE_PWA_CONFIG")
+        .map(PathBuf::from)
+        .or_else(|| named("CLARP_CONFIG_DIR").map(|dir| PathBuf::from(dir).join("config.toml")))
+        .or_else(|| {
+            let config = named("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .or_else(|| named("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+            Some(config.join("clarp-host").join("config.toml"))
+        })?;
+    host_in(&std::fs::read_to_string(path).ok()?)
+}
+
 /// `clarp-host tool NAME [ARGS...]`: one of an agent's own tools. It is a pipe: what it was
 /// called with goes to the Host the agent runs on, and what the Host answers is printed. The
-/// Host is found by what it told the turn (`CLARP_HOST_ADDR`); a tool that is called where no
-/// Host said so does nothing and says why.
+/// Host is found by what it told the turn (`CLARP_HOST_ADDR`), or, for a worker an agent left
+/// running, in the file the installer wrote for the agents of this Host. A tool that is
+/// called where neither says so does nothing and says why.
 pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome {
     let unavailable = |why: String| ToolOutcome {
         exit: 69,
@@ -184,12 +230,20 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             stderr: "usage: clarp-host tool NAME [ARGS...]\n".to_string(),
         };
     };
-    let Ok(address) = std::env::var(crate::TOOL_ADDR_ENV) else {
-        return unavailable(format!(
-            "{name}: this agent's Host is not known ({} is not set). Nothing was done.",
-            crate::TOOL_ADDR_ENV
-        ));
+    let (address, token) = match (std::env::var(crate::TOOL_ADDR_ENV), installed_host()) {
+        (Ok(address), _) => (address, token.to_string()),
+        // The token the caller has, when it has one; else the one in the file.
+        (Err(_), Some((address, kept))) if token.is_empty() => (address, kept),
+        (Err(_), Some((address, _))) => (address, token.to_string()),
+        (Err(_), None) => {
+            return unavailable(format!(
+                "{name}: this agent's Host is not known ({} is not set, and no file of an \
+                 installed Rust Host names one). Nothing was done.",
+                crate::TOOL_ADDR_ENV
+            ));
+        }
     };
+    let token = token.as_str();
     // What the Host may need to know of where the tool was called. Never a token.
     let env: std::collections::BTreeMap<String, String> = std::env::vars()
         .filter(|(key, _)| key.starts_with("CLARP_") || key.starts_with("CLAUDE_PWA_"))
@@ -347,6 +401,23 @@ pub fn pair(mut args: impl Iterator<Item = String>, token: &str) -> Result<Strin
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tool_finds_its_host_in_the_file_the_installer_wrote_and_in_no_other() {
+        let written = "# Written by install-host.\n[server]\nkind = \"clarp-host\"\n\
+                       bind_addr = \"127.0.0.1\"\nport = 7690\nauth_token = \"s3cret\"\n";
+        assert_eq!(
+            host_in(written),
+            Some(("127.0.0.1:7690".to_string(), "s3cret".to_string()))
+        );
+        // A Python Host's file has the same fields, and is not this Host's.
+        let python = "[server]\nbind_addr = \"127.0.0.1\"\nport = 7682\nauth_token = \"other\"\n";
+        assert_eq!(host_in(python), None);
+        // What stands under another heading is not the Host's address.
+        let elsewhere = "[server]\nkind = \"clarp-host\"\n[tts]\nbind_addr = \"x\"\nport = 1\n";
+        assert_eq!(host_in(elsewhere), None);
+        assert_eq!(host_in(""), None);
+    }
 
     fn words(text: &str) -> impl Iterator<Item = String> + use<> {
         text.split_whitespace()
