@@ -38,11 +38,17 @@ impl Place {
 
     /// Starts a Host that asks for this token (none when it is empty).
     fn start_with_token(&self, token: &str) -> Host {
+        self.start_with(token, &[])
+    }
+
+    /// Starts the Host with more on its command line.
+    fn start_with(&self, token: &str, more: &[&str]) -> Host {
         let mut process = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
             .args(["--data", self.root.join("data").to_str().unwrap()])
             .args(["--run", self.root.join("run").to_str().unwrap()])
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
+            .args(more)
             .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -525,6 +531,55 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
                         .is_some_and(|text| text.contains("spool-survived"))
             })
     });
+}
+
+/// A turn under the launcher a Host that runs as a systemd unit uses: the shim in a scope of its
+/// own. Runs only where there is a user session of systemd to ask, and only when asked:
+/// `CLARP_TEST_SYSTEMD=1 cargo test --test host -- --ignored a_turn_in_a_systemd_scope`.
+#[test]
+#[ignore = "starts transient systemd scopes: needs a systemd user session and CLARP_TEST_SYSTEMD=1"]
+fn a_turn_in_a_systemd_scope_gets_its_tool_unchanged_and_outlives_the_host() {
+    if std::env::var("CLARP_TEST_SYSTEMD").as_deref() != Ok("1") {
+        eprintln!("skipped: CLARP_TEST_SYSTEMD is not 1");
+        return;
+    }
+    let place = Place::new("systemd");
+    let host = place.start_with("", &["--launcher", "systemd"]);
+    let session = host.new_agent("Scoped");
+
+    // The scripted tool's own script has `${...}` in it. If systemd-run rewrote the tool's
+    // arguments, the sleep would be over at once.
+    let began = Instant::now();
+    host.send(&session, "sleep 3", "m1");
+    wait_for("the turn to run", || host.state(&session) == "thinking");
+    wait_for("the turn to end", || host.state(&session) == "done");
+    assert!(
+        began.elapsed() >= Duration::from_secs(3),
+        "the tool ran as it was written: it slept"
+    );
+    assert!(
+        host.conversation(&session)
+            .contains(&said("assistant", "sleep 3"))
+    );
+
+    // The Host goes away in the middle of a turn. The turn is in a scope of its own.
+    host.send(&session, "sleep 6", "m2");
+    wait_for("the second turn to run", || {
+        host.state(&session) == "thinking"
+    });
+    host.kill();
+    std::thread::sleep(Duration::from_secs(1));
+    let host = place.start_with("", &["--launcher", "systemd"]);
+    wait_for("the second turn to end", || host.state(&session) == "done");
+    let conversation = host.conversation(&session);
+    assert_eq!(
+        conversation
+            .iter()
+            .filter(|row| **row == said("assistant", "sleep 6"))
+            .count(),
+        1,
+        "answered once: {conversation:?}"
+    );
 }
 
 /// The same with a real Codex: `CLARP_TEST_CODEX=1 cargo test --test host -- --ignored`. Set

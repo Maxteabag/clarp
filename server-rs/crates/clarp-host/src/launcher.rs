@@ -87,6 +87,10 @@ impl Launcher {
                         "--scope",
                         "--quiet",
                         "--collect",
+                        // The tool's arguments are passed on as they are. Without this,
+                        // systemd-run reads `${...}` in them as its own variables and empties
+                        // them: a prompt or a script would arrive changed.
+                        "--expand-environment=no",
                         "--unit",
                         &unit,
                         "--",
@@ -256,22 +260,24 @@ mod tests {
         let first = words(&systemd.command(&order()));
         let second = words(&systemd.command(&order()));
         assert_eq!(
-            &first[..6],
+            &first[..7],
             [
                 "systemd-run",
                 "--user",
                 "--scope",
                 "--quiet",
                 "--collect",
+                "--expand-environment=no",
                 "--unit"
-            ]
+            ],
+            "and what the tool is given is not systemd's to rewrite"
         );
-        assert!(first[6].starts_with("clarp-turn-7-"));
+        assert!(first[7].starts_with("clarp-turn-7-"));
         assert_ne!(
-            first[6], second[6],
+            first[7], second[7],
             "two launches for one turn do not collide"
         );
-        assert_eq!(&first[7..9], ["--", "/bin/clarp-shim"]);
+        assert_eq!(&first[8..10], ["--", "/bin/clarp-shim"]);
         assert!(Launcher::by_name("docker", PathBuf::new()).is_none());
     }
 
