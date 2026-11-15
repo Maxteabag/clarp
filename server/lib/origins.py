@@ -58,6 +58,15 @@ SUPPRESSED_ORIGINS = (
 )
 
 
+# Origins by which a person addresses an agent: the user writing or speaking
+# to it, and the Oracle acting on the user's spoken words. Only these move the
+# user's focus (the agent an un-named hands-free message goes to). What the
+# Host sends on its own does not: a peer agent's message, a schedule, a goal
+# taken up again, a delivered answer, a watcher, a heartbeat. With several
+# agents working toward goals, the focus otherwise changed under the user.
+FOCUS_ORIGINS = frozenset({"user", "oracle"})
+
+
 # The automations' acknowledgement tokens (HEARTBEAT_OK, DREAMING_OK,
 # LEADER_NOOP) count only in their own automation's turns. In any other turn
 # a reply is kept verbatim, unless it is nothing but the token (AUT-07).
