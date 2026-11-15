@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use clarp_actor::conversation::Which;
 use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder};
 use clarp_backend::Backend;
 use clarp_backend::scripted::Scripted;
@@ -615,6 +616,92 @@ enum Event {
 }
 
 /// Two messages, the second sent while the first turn runs; a tool call; replies in pieces.
+#[test]
+fn a_chat_read_without_automation_is_counted_in_what_is_left() {
+    let mut world = World::new("folded");
+    let mut actor = world.open();
+    // Six turns: every second one is the Host's own routine, and its rows carry that.
+    for n in 1..=6u64 {
+        let origin = if n % 2 == 0 {
+            Origin::Trigger {
+                name: "heartbeat".to_string(),
+            }
+        } else {
+            Origin::User
+        };
+        let sent = Message {
+            origin,
+            ..message(&format!("u-{n}"), &format!("message {n}"))
+        };
+        let now = world.tick();
+        let (_, out) = actor.send(&sent, Admission::Queue, now).unwrap();
+        world.carry_out(&mut actor, out);
+        world.says(n, &format!("answer {n}"));
+        world.exits(n, Some(0), None);
+        world.hint(&mut actor);
+    }
+    let ids = |page: &clarp_actor::conversation::Page| {
+        page.entries
+            .iter()
+            .map(|version| version.entry.id().to_string())
+            .collect::<Vec<_>>()
+    };
+    let without = Which::WithoutAutomated;
+    assert_eq!(
+        ids(&actor.tail(100).unwrap()).len(),
+        12,
+        "everything is there"
+    );
+    let newest = actor.tail_of(4, without).unwrap();
+    assert_eq!(
+        ids(&newest),
+        vec!["u-3", "r-3-1", "u-5", "r-5-1"],
+        "a page is full of what is left, not thinned out"
+    );
+    assert!(newest.has_more);
+    let older = actor.before_of("u-3", 4, without).unwrap().unwrap();
+    assert_eq!(ids(&older), vec!["u-1", "r-1-1"]);
+    assert!(!older.has_more);
+    // Before a row that is itself left out: what is left before it.
+    let around = actor.before_of("u-4", 1, without).unwrap().unwrap();
+    assert_eq!(ids(&around), vec!["r-3-1"]);
+    assert!(around.has_more);
+
+    // Catching up gives what is left once, in order, and ends at the head: what is left out
+    // is passed over, not read again.
+    let mut cursor = 0;
+    let mut caught = Vec::new();
+    loop {
+        let page = actor.after_of(cursor, 2, without).unwrap();
+        caught.extend(ids(&page));
+        assert!(page.latest_revision >= cursor);
+        cursor = page.latest_revision;
+        if !page.has_more {
+            break;
+        }
+    }
+    let mut once = Vec::new();
+    for id in &caught {
+        if !once.contains(id) {
+            once.push(id.clone());
+        }
+    }
+    assert_eq!(
+        once,
+        vec!["u-1", "r-1-1", "u-3", "r-3-1", "u-5", "r-5-1"],
+        "{caught:?}"
+    );
+    assert_eq!(cursor, actor.head_revision());
+    // The rows of a routine turn say whose turn it was.
+    let all = actor.tail(100).unwrap();
+    let reply = all
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "r-2-1")
+        .unwrap();
+    assert_eq!(reply.entry.origin_name(), "heartbeat");
+}
+
 fn a_working_day() -> Vec<Event> {
     vec![
         Event::Send("u-1", "go"),

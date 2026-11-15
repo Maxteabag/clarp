@@ -12,7 +12,7 @@
 
 use clarp_kernel::conversation::{Entry, Reply, TurnEnd};
 use clarp_kernel::journal::kind;
-use clarp_kernel::turn::Origin;
+use clarp_kernel::turn::{Origin, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, Seq};
 
 use crate::ActorError;
@@ -20,6 +20,36 @@ use crate::ActorError;
 /// The room between the revisions of two neighbouring log items, for what changes without
 /// being stored.
 pub const REVISION_STEP: u64 = 1 << 20;
+
+/// Which things of a conversation a reader asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Which {
+    #[default]
+    All,
+    /// Without what a watcher or the Host's own routine began. The apps read a chat this way:
+    /// a page is counted in what is left, so a busy heartbeat cannot fill one and make a
+    /// chat look as if it ended days ago.
+    WithoutAutomated,
+}
+
+impl Which {
+    fn keeps(self, entry: &Entry) -> bool {
+        self == Self::All || !left_out_of_chats(entry.origin_name())
+    }
+
+    /// Whether a stored item is one this reader gets. An item that is no thing of a
+    /// conversation is passed on: what reads the items leaves it out itself.
+    fn keeps_item(self, item: &Item) -> Result<bool, ActorError> {
+        if self == Self::All {
+            return Ok(true);
+        }
+        let entry = Entry::from_item(item).map_err(|error| corrupt(item, error))?;
+        Ok(entry.is_none_or(|entry| self.keeps(&entry)))
+    }
+}
+
+/// How many items are read at a time when some of them are left out.
+const CHUNK: usize = 256;
 
 /// A thing of a conversation as it is now.
 #[derive(Debug, Clone, PartialEq)]
@@ -115,7 +145,12 @@ fn close(row: &mut Versioned, end: TurnEnd, end_revision: u64) {
 
 /// The rows among these items, which are oldest first: the newest version of each thing, with
 /// the turns' ends on the rows that closed them.
-fn rows(log: &dyn AgentLog, items: &[Item], place: Place) -> Result<Vec<Versioned>, ActorError> {
+fn rows(
+    log: &dyn AgentLog,
+    items: &[Item],
+    place: Place,
+    which: Which,
+) -> Result<Vec<Versioned>, ActorError> {
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
         let Some(entry) = Entry::from_item(item).map_err(|error| corrupt(item, error))? else {
@@ -123,6 +158,7 @@ fn rows(log: &dyn AgentLog, items: &[Item], place: Place) -> Result<Vec<Versione
         };
         let end = match entry {
             Entry::TurnEnd(end) => end,
+            entry if !which.keeps(&entry) => continue,
             entry => {
                 let version = row(item, entry);
                 match found
@@ -166,7 +202,7 @@ fn rows(log: &dyn AgentLog, items: &[Item], place: Place) -> Result<Vec<Versione
                 if let Some(stored) = log.find(&end.closes)? {
                     let entry =
                         Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?;
-                    if let Some(entry) = entry {
+                    if let Some(entry) = entry.filter(|entry| which.keeps(entry)) {
                         let mut closed = row(&stored, entry);
                         close(&mut closed, end, end_revision);
                         found.push(closed);
@@ -218,7 +254,9 @@ pub(crate) fn one(log: &dyn AgentLog, id: &str) -> Result<Option<Versioned>, Act
     if !kind::ROWS.has(stored.kind) {
         return Ok(None); // a message that still waits outside the conversation
     }
-    Ok(rows(log, &[stored], Place::First)?.into_iter().next())
+    Ok(rows(log, &[stored], Place::First, Which::All)?
+        .into_iter()
+        .next())
 }
 
 /// The newest `limit` things, in the order a chat shows them, with the replies being written.
@@ -227,8 +265,50 @@ pub(crate) fn tail(
     drafts: &[Draft],
     head_revision: u64,
     limit: usize,
+    which: Which,
 ) -> Result<Page, ActorError> {
-    older(log, Seq::MAX, drafts, head_revision, limit)
+    older(log, Seq::MAX, drafts, head_revision, limit, which)
+}
+
+/// The newest `limit` items of rows before `before` that this reader gets, oldest first, and
+/// whether there are more before them.
+fn items_before(
+    log: &dyn AgentLog,
+    before: Seq,
+    limit: usize,
+    which: Which,
+) -> Result<(Vec<Item>, bool), ActorError> {
+    if which == Which::All {
+        let mut items = log.read_before(before, kind::ROWS, limit.saturating_add(1))?;
+        let has_more = items.len() > limit;
+        if has_more {
+            items.remove(0);
+        }
+        return Ok((items, has_more));
+    }
+    // Some are left out: read back until the page is full, or there is nothing older.
+    let mut kept: Vec<Item> = Vec::new(); // the newest first
+    let mut cursor = before;
+    loop {
+        let chunk = log.read_before(cursor, kind::ROWS, CHUNK)?;
+        let Some(oldest) = chunk.first() else {
+            break;
+        };
+        cursor = oldest.seq;
+        let whole = chunk.len() == CHUNK;
+        for item in chunk.into_iter().rev() {
+            if kept.len() <= limit && which.keeps_item(&item)? {
+                kept.push(item);
+            }
+        }
+        if kept.len() > limit || !whole {
+            break;
+        }
+    }
+    let has_more = kept.len() > limit;
+    kept.truncate(limit);
+    kept.reverse();
+    Ok((kept, has_more))
 }
 
 /// The `limit` things before position `before`, in the order a chat shows them.
@@ -238,18 +318,16 @@ pub(crate) fn older(
     drafts: &[Draft],
     head_revision: u64,
     limit: usize,
+    which: Which,
 ) -> Result<Page, ActorError> {
     // A page is counted in rows. How the turns ended is looked up for the rows that are in it.
-    let mut items = log.read_before(before, kind::ROWS, limit.saturating_add(1))?;
-    let has_more = items.len() > limit;
-    if has_more {
-        items.remove(0);
-    }
-    let mut entries = rows(log, &items, Place::First)?;
+    let (items, has_more) = items_before(log, before, limit, which)?;
+    let mut entries = rows(log, &items, Place::First, which)?;
     // A reply being written is shown where its finished version will be: at the end.
     for draft in drafts {
-        if !entries.iter().any(|known| known.entry.id() == draft.id) {
-            entries.push(draft.versioned());
+        let shown = draft.versioned();
+        if which.keeps(&shown.entry) && !entries.iter().any(|known| known.entry.id() == draft.id) {
+            entries.push(shown);
         }
     }
     Ok(Page {
@@ -267,23 +345,48 @@ pub(crate) fn after(
     drafts: &[Draft],
     head_revision: u64,
     limit: usize,
+    which: Which,
 ) -> Result<Page, ActorError> {
-    let mut items = log.read_after(
-        revision / REVISION_STEP,
-        kind::CONVERSATION,
-        limit.saturating_add(1),
-    )?;
-    let has_more = items.len() > limit;
-    items.truncate(limit);
-    let cursor = items.last().map(|last| last.seq * REVISION_STEP);
-    let mut entries = rows(log, &items, Place::Newest)?;
+    // Read on until the page is full or the log ends. What this reader does not get is
+    // passed over, and the cursor passes over it too: it is not read again.
+    let mut items: Vec<Item> = Vec::new();
+    let mut from = revision / REVISION_STEP;
+    let mut cursor = None;
+    let mut has_more = false;
+    let at_a_time = if which == Which::All {
+        limit.saturating_add(1)
+    } else {
+        CHUNK.max(limit.saturating_add(1))
+    };
+    'reading: loop {
+        let chunk = log.read_after(from, kind::CONVERSATION, at_a_time)?;
+        let whole = chunk.len() == at_a_time;
+        for item in chunk {
+            from = item.seq;
+            if which.keeps_item(&item)? {
+                if items.len() == limit {
+                    has_more = true;
+                    break 'reading;
+                }
+                cursor = Some(item.seq * REVISION_STEP);
+                items.push(item);
+            } else {
+                cursor = Some(item.seq * REVISION_STEP);
+            }
+        }
+        if !whole {
+            break;
+        }
+    }
+    let mut entries = rows(log, &items, Place::Newest, which)?;
     let latest_revision = if has_more {
         // There is more in the log than this page: the cursor stops at what was read.
         cursor.unwrap_or(revision)
     } else {
         for draft in drafts {
-            if draft.revision > revision {
-                entries.push(draft.versioned());
+            let shown = draft.versioned();
+            if draft.revision > revision && which.keeps(&shown.entry) {
+                entries.push(shown);
             }
         }
         head_revision.max(revision)

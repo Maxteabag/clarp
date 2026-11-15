@@ -45,7 +45,7 @@ use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
 pub mod conversation;
 
-use conversation::{Draft, Page, REVISION_STEP, Versioned};
+use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
 /// How many lines of a spool are read, understood and written to the log at a time.
 const WINDOW: usize = 2_000;
@@ -711,22 +711,34 @@ impl Actor {
 
     /// The newest `limit` things of the conversation, as a chat opens.
     pub fn tail(&self, limit: usize) -> Result<Page, ActorError> {
+        self.tail_of(limit, Which::All)
+    }
+
+    /// The newest `limit` things a reader asks for.
+    pub fn tail_of(&self, limit: usize, which: Which) -> Result<Page, ActorError> {
         conversation::tail(
             self.recorder.log(),
             self.drafts(),
             self.head_revision(),
             limit,
+            which,
         )
     }
 
     /// Up to `limit` things that are newer than `revision`, as a client catches up.
     pub fn after(&self, revision: u64, limit: usize) -> Result<Page, ActorError> {
+        self.after_of(revision, limit, Which::All)
+    }
+
+    /// Up to `limit` things a reader asks for that are newer than `revision`.
+    pub fn after_of(&self, revision: u64, limit: usize, which: Which) -> Result<Page, ActorError> {
         conversation::after(
             self.recorder.log(),
             revision,
             self.drafts(),
             self.head_revision(),
             limit,
+            which,
         )
     }
 
@@ -871,6 +883,16 @@ impl Actor {
     /// The `limit` things before the one with this id, as a chat scrolls back. `None` when the
     /// conversation has no such thing.
     pub fn before(&self, id: &str, limit: usize) -> Result<Option<Page>, ActorError> {
+        self.before_of(id, limit, Which::All)
+    }
+
+    /// The `limit` things a reader asks for before the one with this id.
+    pub fn before_of(
+        &self,
+        id: &str,
+        limit: usize,
+        which: Which,
+    ) -> Result<Option<Page>, ActorError> {
         let Some(item) = self.recorder.log().find(id)? else {
             return Ok(None);
         };
@@ -880,6 +902,7 @@ impl Actor {
             &[],
             self.head_revision(),
             limit,
+            which,
         )
         .map(Some)
     }

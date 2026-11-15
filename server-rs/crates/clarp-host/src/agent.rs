@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use clarp_actor::conversation::{Page, Versioned};
+use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
     Action, Actor, ActorError, Changed, ImportedRow, Kept, Outputs, Profile, QueueState, Sent,
     Status, Waiting,
@@ -110,16 +110,19 @@ pub enum Ask {
     },
     Tail {
         limit: usize,
+        which: Which,
         answer: Answer<Page>,
     },
     After {
         revision: u64,
         limit: usize,
+        which: Which,
         answer: Answer<Page>,
     },
     Before {
         id: String,
         limit: usize,
+        which: Which,
         answer: Answer<Option<Page>>,
     },
     /// The agent's own label for what it is busy with beyond its turns. Empty takes it back.
@@ -256,21 +259,43 @@ impl AgentHandle {
         self.ask(|answer| Ask::Withdraw { turn, by, answer }).await
     }
 
-    pub async fn tail(&self, limit: usize) -> Result<Page, Unavailable> {
-        self.ask(|answer| Ask::Tail { limit, answer }).await
-    }
-
-    pub async fn after(&self, revision: u64, limit: usize) -> Result<Page, Unavailable> {
-        self.ask(|answer| Ask::After {
-            revision,
+    pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
+        self.ask(|answer| Ask::Tail {
             limit,
+            which,
             answer,
         })
         .await
     }
 
-    pub async fn before(&self, id: String, limit: usize) -> Result<Option<Page>, Unavailable> {
-        self.ask(|answer| Ask::Before { id, limit, answer }).await
+    pub async fn after(
+        &self,
+        revision: u64,
+        limit: usize,
+        which: Which,
+    ) -> Result<Page, Unavailable> {
+        self.ask(|answer| Ask::After {
+            revision,
+            limit,
+            which,
+            answer,
+        })
+        .await
+    }
+
+    pub async fn before(
+        &self,
+        id: String,
+        limit: usize,
+        which: Which,
+    ) -> Result<Option<Page>, Unavailable> {
+        self.ask(|answer| Ask::Before {
+            id,
+            limit,
+            which,
+            answer,
+        })
+        .await
     }
 
     /// Sets the agent's own label for what it is busy with beyond its turns.
@@ -747,9 +772,52 @@ impl Worker {
         }
     }
 
+    /// The goal tool, or an app for its user, asks something of the agent's goals. What the
+    /// tool prints of a change is true once the change is written, and it is published
+    /// before the one who asked is answered: the plan it reads next, from the routes or in
+    /// the library, is the plan it was told.
+    fn handle_goal(
+        &mut self,
+        ask: &goaltool::Ask,
+        answer: Answer<ToolAnswer>,
+    ) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let owner = Owner {
+            agent_id: &self.setup.record.agent_id,
+            session: &self.setup.record.session,
+        };
+        let (said, change) = with_goals(actor, now, |book, world| {
+            goaltool::answer(book, owner, ask, world)
+        });
+        // A plan that is made is shown under the title it was given.
+        let title = match ask {
+            goaltool::Ask::Create { title, .. } => Some(title.trim()),
+            _ => None,
+        };
+        let written = match &change {
+            Some(change) => keep_goal(actor, &self.setup.record, change, title, now),
+            None => Ok(Outputs::default()),
+        };
+        match written {
+            Ok(out) => {
+                self.after(out);
+                let _ = answer.send(Ok(said));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = answer.send(Err(unavailable(&error)));
+                Err(error)
+            }
+        }
+    }
+
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
+            Ask::Goal { ask, answer } => return self.handle_goal(&ask, answer),
             other => other,
         };
         let now = self.now_ms();
@@ -805,13 +873,23 @@ impl Worker {
                 answer,
             } => answered(actor.import(&from, backend_session, rows, now), answer)?,
             Ask::Withdraw { turn, by, answer } => answered(actor.withdraw(turn, &by, now), answer)?,
-            Ask::Tail { limit, answer } => return read(actor.tail(limit), answer),
+            Ask::Tail {
+                limit,
+                which,
+                answer,
+            } => return read(actor.tail_of(limit, which), answer),
             Ask::After {
                 revision,
                 limit,
+                which,
                 answer,
-            } => return read(actor.after(revision, limit), answer),
-            Ask::Before { id, limit, answer } => return read(actor.before(&id, limit), answer),
+            } => return read(actor.after_of(revision, limit, which), answer),
+            Ask::Before {
+                id,
+                limit,
+                which,
+                answer,
+            } => return read(actor.before_of(&id, limit, which), answer),
             Ask::Label { text, answer } => {
                 answered(actor.label(&text, now).map(|out| ((), out)), answer)?
             }
@@ -822,28 +900,8 @@ impl Worker {
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
-            Ask::Goal { ask, answer } => {
-                let owner = Owner {
-                    agent_id: &self.setup.record.agent_id,
-                    session: &self.setup.record.session,
-                };
-                let (said, change) = with_goals(actor, now, |book, world| {
-                    goaltool::answer(book, owner, &ask, world)
-                });
-                // A plan that is made is shown under the title it was given.
-                let title = match &ask {
-                    goaltool::Ask::Create { title, .. } => Some(title.trim()),
-                    _ => None,
-                };
-                // What the tool prints of a change is true once the change is written.
-                let written = match &change {
-                    Some(change) => keep_goal(actor, &self.setup.record, change, title, now),
-                    None => Ok(Outputs::default()),
-                };
-                answered(written.map(|out| (said, out)), answer)?
-            }
-            // Answered above, where what it changes is published first.
-            Ask::Artifact { .. } => return Ok(()),
+            // Answered above, where what they change is published first.
+            Ask::Artifact { .. } | Ask::Goal { .. } => return Ok(()),
             Ask::SpoolChanged => actor.spool_changed(now)?,
             Ask::ShimGone { turn } => actor.shim_gone(turn, now)?,
             Ask::LaunchFailed { turn, reason } => actor.launch_failed(turn, &reason, now)?,
@@ -1029,10 +1087,18 @@ impl Worker {
         Ok(())
     }
 
-    /// The newest row of the conversation, as the actor has it now.
+    /// The newest row of the conversation that a list of chats shows, as the actor has it
+    /// now: the newest thing someone said, not a tool call and nothing automated.
     fn newest_row(&self) -> Option<Versioned> {
-        let page = self.actor.as_ref()?.tail(1).ok()?;
-        page.entries.into_iter().last()
+        let actor = self.actor.as_ref()?;
+        // Nearly always it is the newest row itself. Otherwise look back, as far as the
+        // Python Host does.
+        let newest = actor.tail(1).ok()?.entries.into_iter().last()?;
+        if wire::previewed(&newest) {
+            return Some(newest);
+        }
+        let back = actor.tail(50).ok()?.entries;
+        back.into_iter().rev().find(wire::previewed)
     }
 
     /// How the last turn ended, as the log has it.

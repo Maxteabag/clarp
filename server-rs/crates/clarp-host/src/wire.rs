@@ -11,7 +11,7 @@ use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::notify;
-use clarp_kernel::turn::{Activity, Outcome};
+use clarp_kernel::turn::{Activity, Outcome, automation_kind};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Value, json};
@@ -624,6 +624,49 @@ fn turn_end(end: &TurnEnd) -> Value {
     })
 }
 
+/// What a chat shows in place of the prompt of an automated turn: the prompt is the Host's
+/// or a watcher's own business.
+fn automated_prompt(kind: &str) -> Option<&'static str> {
+    match kind {
+        "heartbeat" => Some("Automated heartbeat check"),
+        "leader_tick" => Some("Automated leader check"),
+        "dreaming" => Some("Automated dreaming run"),
+        "watcher" => Some("Automated watcher event"),
+        _ => None,
+    }
+}
+
+/// What a chat shows in place of an automated turn's reply that only says there was nothing
+/// to do.
+fn automated_reply(kind: &str, said: &str) -> Option<&'static str> {
+    match kind {
+        "heartbeat" if said.contains("HEARTBEAT_OK") => Some("Heartbeat check: no action needed."),
+        "leader_tick" if said.contains("LEADER_NOOP") => Some("Leader check: no action needed."),
+        "dreaming" if said.contains("DREAMING_OK") => Some("Dreaming check: no action needed."),
+        _ => None,
+    }
+}
+
+/// Whether a row is what a list of chats shows as the last thing said in one: something
+/// someone said, not a tool call, and nothing automated.
+pub fn previewed(version: &Versioned) -> bool {
+    let by_hand = automation_kind(version.entry.origin_name()).is_empty();
+    match &version.entry {
+        Entry::Message(message) => by_hand && !message.text.is_empty(),
+        Entry::Reply(reply) => by_hand && !reply.text.is_empty(),
+        Entry::Notice(notice) => !notice.text.is_empty(),
+        Entry::Imported(imported) => {
+            let row = &imported.row;
+            let said = row["text"].as_str().is_some_and(|text| !text.is_empty());
+            let tool = row["tool_name"]
+                .as_str()
+                .is_some_and(|name| !name.is_empty());
+            by_hand && said && !tool
+        }
+        Entry::Tool(_) | Entry::TurnEnd(_) => false,
+    }
+}
+
 /// One thing of a conversation as the contract's "turn": a row, with every field of a row.
 pub fn row(version: &Versioned) -> Value {
     if let Entry::Imported(imported) = &version.entry {
@@ -657,10 +700,17 @@ pub fn row(version: &Versioned) -> Value {
         "reply_to_name": "",
         "reply_to_session": "",
     });
+    // What a watcher or the Host's own routine began is marked, for an app to fold away.
+    let kind = automation_kind(version.entry.origin_name());
+    row["automated"] = json!(!kind.is_empty());
+    row["automation_kind"] = json!(kind);
     match &version.entry {
         Entry::Message(message) => {
             row["role"] = json!("user");
-            row["text"] = json!(message.text);
+            row["text"] = match automated_prompt(kind) {
+                Some(shown) => json!(shown),
+                None => json!(markup::strip_hidden_blocks(&message.text)),
+            };
             row["trace_id"] = json!(message.trace_id.clone().unwrap_or_default());
             row["origin"] = json!(message.origin.name());
             if let Some(sender) = &message.sender {
@@ -672,7 +722,11 @@ pub fn row(version: &Versioned) -> Value {
         Entry::Reply(reply) => {
             // What is metadata and never conversation does not leave the Host. The voice
             // markup does: an app hides it itself, and speaks from it.
-            row["text"] = json!(markup::strip_hidden_blocks(&reply.text));
+            let said = markup::strip_hidden_blocks(&reply.text);
+            row["text"] = match automated_reply(kind, &said) {
+                Some(shown) => json!(shown),
+                None => json!(said),
+            };
             row["trace_id"] = json!(reply.trace_id.clone().unwrap_or_default());
             row["origin"] = json!(reply.origin.name());
         }
@@ -1710,6 +1764,80 @@ mod tests {
             (&told["origin"], &told["push"]),
             (&json!("automation"), &json!(true))
         );
+    }
+
+    #[test]
+    fn what_a_watcher_or_the_hosts_routine_began_is_marked_and_shown_as_such() {
+        let from = |name: &str| Origin::Trigger {
+            name: name.to_string(),
+        };
+        let asked = |origin: Origin, text: &str| {
+            version(
+                Entry::Message(Message {
+                    id: "u-1".to_string(),
+                    text: text.to_string(),
+                    origin,
+                    trace_id: None,
+                    sender: None,
+                    client: None,
+                }),
+                1,
+                None,
+            )
+        };
+        let said = |origin: Origin, text: &str| {
+            version(
+                Entry::Reply(Reply {
+                    origin,
+                    id: "r-1".to_string(),
+                    turn: 1,
+                    text: text.to_string(),
+                    trace_id: None,
+                }),
+                2,
+                None,
+            )
+        };
+        let event = row(&asked(from("watcher"), "poll the synthetic queue"));
+        assert_eq!(
+            (
+                &event["text"],
+                &event["automated"],
+                &event["automation_kind"]
+            ),
+            (
+                &json!("Automated watcher event"),
+                &json!(true),
+                &json!("watcher")
+            )
+        );
+        let nothing = row(&said(from("heartbeat"), "HEARTBEAT_OK"));
+        assert_eq!(nothing["text"], "Heartbeat check: no action needed.");
+        let something = row(&said(from("heartbeat"), "The disk is full."));
+        assert_eq!(
+            (&something["text"], &something["automated"]),
+            (&json!("The disk is full."), &json!(true))
+        );
+        // What the Host brings an agent for its user is no routine: shown as it is.
+        let brought = row(&asked(from("automation"), "[Clarp decision resolved]"));
+        assert_eq!(
+            (
+                &brought["text"],
+                &brought["automated"],
+                &brought["automation_kind"]
+            ),
+            (
+                &json!("[Clarp decision resolved]"),
+                &json!(false),
+                &json!("")
+            )
+        );
+        // A list of chats shows the last thing someone said, and nothing automated.
+        assert!(!previewed(&said(from("heartbeat"), "The disk is full.")));
+        assert!(!previewed(&asked(from("watcher"), "poll")));
+        assert!(previewed(&asked(from("automation"), "The answer is yes.")));
+        assert!(previewed(&said(Origin::User, "Done.")));
+        assert!(!previewed(&said(Origin::User, "")));
     }
 
     #[test]

@@ -46,6 +46,26 @@ impl Origin {
             Self::Trigger { name } => name,
         }
     }
+
+    /// What kind of automated activity a turn is that began this way: an event of a watcher
+    /// outside, or the Host's own routine. The apps fold such turns away. Empty: none.
+    pub fn automation_kind(&self) -> &str {
+        automation_kind(self.name())
+    }
+}
+
+/// [`Origin::automation_kind`] for an origin by its name.
+pub fn automation_kind(origin: &str) -> &str {
+    match origin {
+        "watcher" | "heartbeat" | "leader_tick" | "dreaming" | "janitor" => origin,
+        _ => "",
+    }
+}
+
+/// Whether the turns of an origin are left out of a chat that is read without automation.
+/// A janitor's are automated and stay: it works in a chat of its own.
+pub fn left_out_of_chats(origin: &str) -> bool {
+    matches!(origin, "watcher" | "heartbeat" | "leader_tick" | "dreaming")
 }
 
 /// How a message enters the mailbox.
