@@ -2108,6 +2108,16 @@ fn pair(host: &Host, name: &str, scope: &str) -> (String, String) {
 fn a_phone_registers_its_push_token_and_a_revoked_phone_is_sent_nothing() {
     let place = Place::new("push-register");
     let host = place.start_with_token("the-administrators-token");
+    // The Host says that it takes a phone's grant and lets a phone take its token back:
+    // an app registers this way only with a Host that says so.
+    let info = host.get("/server-info");
+    let features = info["capabilities"]["features"].as_array().unwrap();
+    assert!(features.contains(&json!("push_grants")) && features.contains(&json!("pairing")));
+    assert_eq!(info["contract"]["features"]["push_unregister"], 93);
+    assert!(
+        !features.contains(&json!("push_fcm")),
+        "what is not built is not said to be there"
+    );
     let (phone, phone_id) = pair(&host, "Phone", "full");
     let (tablet, _) = pair(&host, "Tablet", "full");
     let (reader, _) = pair(&host, "Reader", "limited");
