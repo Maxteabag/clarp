@@ -274,8 +274,13 @@ def test_however_the_file_moves_the_tails_hashes_are_a_reads(tmp_path, backend, 
     # that part was read before the change: the tail goes on, and the change
     # waits for the audit. With the switch the part is compared after the
     # parse, and this tail is the full import.
+    # (Not in a process's first tail when the file grew: that tail has read
+    # every imported byte, the proof that lets it keep its frontier reads them
+    # all again, and it finds the byte itself, with the switch or without.)
+    first_tail = World.state == "after a Host start"
     found_now = how.startswith("rewrite an earlier record") and when != "store" and (
-        how.endswith("the mtime put back") or (keep and when == "before_parse"))
+        how.endswith("the mtime put back")
+        or (keep and when == "before_parse" and not first_tail))
     if found_now:
         assert off["decision"] in ("tail_applied", "deferred_tail_source_changed")
         assert off["published"] and on["decision"] == "full_tail_rewritten"
