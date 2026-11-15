@@ -6517,7 +6517,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 9,
+      "head_revision": 10,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -6528,7 +6528,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "You: [qa-slow] synthetic timed oscar",
+      "last_completed_message": "Claude replay reply: [qa-slow] synthetic timed oscar",
       "last_message": "Claude replay reply: [qa-slow] synthetic timed oscar",
       "last_message_id": "live-<id:5>",
       "last_turn_end": "<time>",
@@ -8094,7 +8094,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 9,
+    "latest_revision": 10,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -8189,11 +8189,11 @@
       "id": "live-<id:5>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 9,
+      "revision": 10,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -8286,6 +8286,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "oscar",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -8326,21 +8341,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "oscar",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
   },
   {
    "data": {
@@ -8440,28 +8440,6 @@
   },
   {
    "data": {
-    "agent_id": "<id:1>",
-    "badge": true,
-    "cause_message_id": "u-november",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:8>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic timed november",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "live-<id:6>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
     "action": "thinking",
     "agent_id": "<id:1>",
     "call_id": null,
@@ -8482,6 +8460,28 @@
    },
    "event": null,
    "id": "<eid:agent-activity#6@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "badge": true,
+    "cause_message_id": "u-november",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic timed november",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "live-<id:6>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {
