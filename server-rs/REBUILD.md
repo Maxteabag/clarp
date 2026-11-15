@@ -214,9 +214,9 @@ one ends; the inbox in the order the apps show it. An agent keeps its artifacts 
 serves them as the Python Host does (`library.rs`: `/artifacts`, `/pinned-artifacts`, `/decisions`,
 `/attention`, the events `artifact-updated` and `attention-updated`), tells an agent its answer as a message
 written in one append with the mark that it was told, and gives the agent its tool (`clarp-agent-artifacts`,
-`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: HTML reports
-and forms, countdowns, podcast episodes (each says it is not available on this Host yet), and
-`/attention/inbox`. Recordings, films and files came with what an agent publishes, below.
+`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: forms that take
+answers, countdowns, podcast episodes (each says it is not available on this Host yet), and
+`/attention/inbox`. Recordings, films, files and reports came later, below.
 
 **The user is told, also when the phone is in a pocket** (15 Nov 2026). Who is told when a turn ends is the
 Python Host's rule (`clarp-kernel/src/notify.rs`, 86,016 recorded combinations): a reply for the user tells
@@ -354,8 +354,27 @@ published file, which is what the skills for audio, video and files make after t
 must name one of its agent's own files, where this Host serves it, as the kind and under the name the file
 has (`artifacts.rs`, the Python Host's rule and words, 45 recorded calls with the files published through the
 Python store itself). The rule reads the agent's own book of published files, on the agent's thread: nothing
-is asked of another agent, and another agent's file is not found. Not there yet: HTML reports and forms,
-countdowns and podcast episodes.
+is asked of another agent, and another agent's file is not found.
+
+**An agent hands its user a report** (15 Nov 2026). The largest kind of artifact that was missing: on the live
+Host, of the last week's 34 artifacts of the kind `html_form`, 30 were reports (a page of HTML that takes no
+answers) and 4 were forms. A report is published with `POST /artifacts`; under the id it has it is revised and
+must say the version it follows, and what it was stays on record under its version
+(`server/lib/html_forms.py`, `html_report_revisions.py`; in the kernel `artifacts/reports.rs`, held by 116
+vectors of the pure rules and 71 recorded calls of a report's whole life). What a page may reach is a list of
+exact HTTPS origins, read strictly, which becomes the policy a browser is given; nothing the page says can
+widen it. The page itself is 136 KB on average and the same from one change of its artifact to the next, so it
+is not in what the log keeps of the artifact and not held in memory: it is kept in the store of files under its
+digest, before the artifact is written, and the artifact names it. The rules see a page when it comes in;
+afterwards they compare pages by their names. What the Host answers has the page put back; a summary names it
+instead, with the Python Host's marker, which is exactly that digest and length. Served:
+`GET /artifacts/<id>/html` (the page behind its policy; not for a device that may only read, and not with a
+token in the address, which the page's own scripts could read) and `GET /artifacts/<id>/revisions`. The
+agent's tool has its verbs: `clarp-agent-artifacts create-report` (the Host reads the page where the tool was
+called; published again under its id, the tool finds the version the new one follows) and `report-history`.
+Held end to end (`tests/host.rs`, an agent hands its user a report) and by the scenario `reports`. Not there
+yet: forms that take answers (their answers are held to a JSON Schema the agent writes, which this Host
+cannot read yet; asking for one says so), countdowns and podcast episodes.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
@@ -375,7 +394,8 @@ Host's sentence for it under the message; nothing was lost. That build did not w
 installed since does. At 20:40 the Host was updated to `87818123` with three turns running (the ninth
 exercise: held), and two minutes later an agent there published an image in a real turn with its own tool,
 through the door for tools: its reply is the Markdown that shows the image, and the id in it fetches the
-image. Open: the week.
+image. At 21:03 the Host was updated to `fedf357e` with three turns running (the tenth exercise: held).
+Open: the week.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the core contract and what
