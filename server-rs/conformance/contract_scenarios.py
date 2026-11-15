@@ -636,7 +636,12 @@ SCENARIOS = [
 SCENARIOS.append({
     'id': 'retried-turns',
     'what': 'a connection that drops under a turn: the turn is tried again, and what a client is '
-            'shown while it is, when it then works, and when it never does',
+            'shown while it is and when it then works',
+    # A turn whose connection drops every time is not here. The reference did not end such a turn
+    # within the fifteen seconds the harness waits, in four recordings of four (runs 43741865162
+    # and 43744222881: one "reconnecting", then nothing), and a scenario the reference does not
+    # finish makes the whole run untrustworthy. What the Rust Host does then (three attempts,
+    # then the turn says so) is held by its own test (`tests/host.rs`, a connection that drops).
     'steps': [
         # It drops once. The second process answers.
         send('[qa-drops:1] synthetic work quebec', 'quebec'),
@@ -644,14 +649,6 @@ SCENARIOS.append({
         {'op': 'quiesce'},
         {**LOG, 'name': 'log after a turn that was tried twice'},
         {**SNAPSHOT, 'name': 'snapshot after a turn that was tried twice'},
-        # It drops every time: the turn gives up. (Nothing slows the tool down here: the
-        # turn is busy for the three seconds between its attempts.)
-        send('[qa-drops:9] synthetic work romeo', 'romeo'),
-        {'op': 'wait_busy', 'busy': True},
-        {'op': 'wait_busy', 'busy': False},
-        {'op': 'quiesce'},
-        {**LOG, 'name': 'log after a turn that gave up'},
-        {**SNAPSHOT, 'name': 'snapshot after a turn that gave up'},
         # And the agent works on.
         send('synthetic greeting sierra', 'sierra'),
         {'op': 'wait_reply', 'after': 'u-sierra'},
