@@ -824,7 +824,7 @@ impl Worker {
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
-        let out = match ask {
+        let (out, owed) = match ask {
             Ask::Send {
                 message,
                 admission,
@@ -902,12 +902,16 @@ impl Worker {
             }
             // Answered above, where what they change is published first.
             Ask::Artifact { .. } | Ask::Goal { .. } => return Ok(()),
-            Ask::SpoolChanged => actor.spool_changed(now)?,
-            Ask::ShimGone { turn } => actor.shim_gone(turn, now)?,
-            Ask::LaunchFailed { turn, reason } => actor.launch_failed(turn, &reason, now)?,
+            Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
+            Ask::ShimGone { turn } => (actor.shim_gone(turn, now)?, nobody()),
+            Ask::LaunchFailed { turn, reason } => {
+                (actor.launch_failed(turn, &reason, now)?, nobody())
+            }
             Ask::Close => return Ok(()),
         };
+        // What follows from a command is done and published before its answer is given.
         self.after(out);
+        owed();
         Ok(())
     }
 
@@ -1321,15 +1325,27 @@ fn tell(tx: &mpsc::Sender<Ask>, turn: TurnId, told: Told) {
     let _ = tx.send(ask);
 }
 
-/// Answers a command: the asker gets the result, the thread goes on with what follows from it.
-fn answered<T>(
+/// The answer that is owed to whoever asked for a command, to be given once what follows
+/// from the command is done and published: what they read next is what they were told.
+type Owed = Box<dyn FnOnce() + Send>;
+
+/// Nobody asked: nothing is owed.
+fn nobody() -> Owed {
+    Box::new(|| {})
+}
+
+/// The result of a command, for the thread to go on with what follows from it, and the
+/// answer that is owed for it. A command that failed is answered at once.
+fn answered<T: Send + 'static>(
     result: Result<(T, Outputs), ActorError>,
     answer: Answer<T>,
-) -> Result<Outputs, ActorError> {
+) -> Result<(Outputs, Owed), ActorError> {
     match result {
         Ok((value, out)) => {
-            let _ = answer.send(Ok(value));
-            Ok(out)
+            let owed: Owed = Box::new(move || {
+                let _ = answer.send(Ok(value));
+            });
+            Ok((out, owed))
         }
         Err(error) => {
             let _ = answer.send(Err(unavailable(&error)));
