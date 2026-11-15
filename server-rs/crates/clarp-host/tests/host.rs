@@ -6945,6 +6945,36 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     assert_eq!((status, &said), (200, &json!({ "ok": true })));
     assert_eq!(focus(&host), agent_id(&host, &second));
 
+    // The lines of an app's own log are taken, one or several, and kept under the data
+    // directory, a line for each: what a phone could not do is read there.
+    let (status, said) = host.ask(
+        "POST",
+        "/clog",
+        Some(&json!({ "event": "synthetic-event", "detail": "a line\nbroken in two" })),
+    );
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    let several = json!({ "events": [
+        { "event": "synthetic-one", "detail": { "k": 1 } }, { "event": "synthetic-two" },
+    ] });
+    let (status, said) = host.ask_as(&limited, "POST", "/clog", Some(&several));
+    assert_eq!(
+        (status, &said),
+        (200, &json!({ "ok": true })),
+        "any device hands over its lines"
+    );
+    let raw = fetch(&host, token, "POST", "/clog", &[], b"[1]");
+    assert_eq!(raw.status, 400);
+    let log =
+        std::fs::read_to_string(place.root.join("data").join("logs").join("apps.log")).unwrap();
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines.len(), 3, "{log}");
+    assert!(
+        lines[0].ends_with(" app synthetic-event a line broken in two"),
+        "{log}"
+    );
+    assert!(lines[1].ends_with(" app synthetic-one {\"k\":1}"), "{log}");
+    assert!(lines[2].ends_with(" app synthetic-two "), "{log}");
+
     // On a Host that asks for no token, nobody is known to be a person.
     let open_place = Place::new("apps-open");
     let open = open_place.start();
