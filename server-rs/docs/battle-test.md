@@ -33,8 +33,10 @@ which is this Host's.
 A turn is given the address of its Host and a token for its agent's tools, which opens the tools and nothing
 else. The administrator's token (`~/.config/clarp-host/env`) is not in a turn's environment.
 
-Both Hosts run their turns with the same logins of Claude Code and Codex. While the Rust Host has no
-account recovery of its own, a turn there that meets a usage limit ends as failed, and says so.
+Both Hosts run their turns with the same logins of Claude Code and Codex. The Python Host puts another
+account in place when one is out; the Rust Host is installed to follow it (`--accounts follow`, chosen by
+the installer when the Python Host has a selector): a turn there that meets a usage limit waits, is taken
+up when the login has changed, and ends after half an hour if none comes. It never changes a login itself.
 
 The Host is on the loopback. A phone reaches it only once something is put in front of it (a Tailscale
 serve entry) and the phone is paired (`clarp-host pair`): neither is done by the installer. While no phone is

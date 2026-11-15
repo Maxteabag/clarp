@@ -292,7 +292,25 @@ session the tool named before. The wait is in the log: a Host that is killed whi
 wait up, and a crash at any step of it leaves the agent where it was (`journal.rs`, the crash script). While
 it waits the apps are told that the turn reconnects, as busy as before; when the last attempt fails too, the
 turn ends on that failure and says after how many attempts. Held to the Python Host by the scenario
-`retried-turns`. Not there yet: waiting for an account. A turn whose account is out still ends, and says so.
+`retried-turns`.
+
+**A turn whose account is out waits, where someone else changes the login** (15 Nov 2026). Two Hosts on one
+machine run their tools with the same logins. The Python Host's selector puts another account in place when
+one is out, and stops its own running turns before it does. A second Host that did the same would change the
+login under the first one's turns. So the Rust Host has a mode for a machine it shares (`--accounts follow`,
+which `tools/install-host` chooses when the Python Host there has a selector): it never changes a login and
+never stops a turn for another turn's account. A turn that fails on a limit that was reached or a sign-in
+that ran out waits (`Wait::Account` in the kernel, the same `Parked` state): it keeps its place, and the
+apps are told what it waits for in the Python Host's words. It is tried again when the tool's login has
+changed (`logins.rs` looks at the file each tool keeps its login in, keeps a digest of it in memory and
+nothing else), and now and then meanwhile: after a minute, then twice as long each time, eight minutes at
+most. After half an hour in all it ends, and says that the account is out. The tool, which has the turn in
+its own session, is not given the message again: it is told that the turn is taken up, in the Python Host's
+words and envelope. Without the mode (`--accounts none`, a Host whose tools have one login) a turn whose
+account is out ends at once and says so, which is what the Python Host does without a selector and what
+the scenario `failed-turns` holds. Not there: a selector of this Host's own, for a machine where it is the
+only Host. Not held by a scenario: what the apps are told while a turn waits for an account is read from
+the Python Host's code (`activity.py`, `live_core.py`, `turn_launcher._pause_for_account`), not recorded.
 
 **Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
 Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token

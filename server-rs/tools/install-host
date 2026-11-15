@@ -21,6 +21,11 @@
 #                  Host needs a credential of its own at the relay: put
 #                  CLARP_PUSH_CREDENTIAL=... into ~/.config/clarp-host/env yourself. This script
 #                  never copies one from another Host
+#   --accounts     whether a turn whose account is out waits for another one: `follow` where
+#                  someone else on this machine puts another login in place (a Python Host
+#                  with an account selector: this Host never changes a login itself), `none`
+#                  where nobody does and the turn ends and says so. Default: `follow` when the
+#                  Python Host on this machine has a selector, else `none`
 #   --start        enable the unit and start it, or restart it when it runs (turns that are running
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
@@ -48,10 +53,10 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--push-relay) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--push-relay|--accounts) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--accounts follow|none] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -66,7 +71,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|push-relay) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|push-relay|accounts) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -97,6 +102,16 @@ python_unit() {
     [ "$(systemctl --user show clarp-runtime.service -p LoadState --value 2>/dev/null)" = loaded ] || return 0
     systemctl --user show clarp-runtime.service -p "$1" --value 2>/dev/null
 }
+# Whether a turn whose account is out waits for another one. It does where a Python Host on
+# this machine has an account selector: that Host puts another login in place, and this one
+# follows. (The file is only asked whether it names a selector; nothing of it is read out.)
+python_config="$(python_unit Environment | tr ' ' '\n' | sed -n 's/^CLARP_CONFIG_DIR=//p' | head -1)"
+python_config="${python_config:-${XDG_CONFIG_HOME:-$HOME/.config}/clarp}/config.toml"
+accounts="${chosen[accounts]:-}"
+if [ -z "$accounts" ]; then
+    if grep -q '^[a-z]*_account_switch_command' "$python_config" 2>/dev/null; then accounts=follow; else accounts=none; fi
+fi
+case "$accounts" in follow|none) ;; *) echo "install-host: --accounts $accounts: follow or none" >&2; exit 2 ;; esac
 open_files="$(python_unit LimitNOFILE)"
 case "$open_files" in ''|*[!0-9]*) open_files=65536 ;; esac
 arenas="$(python_unit Environment | tr ' ' '\n' | sed -n 's/^MALLOC_ARENA_MAX=//p' | head -1)"
@@ -208,7 +223,7 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name"${push_relay:+ --push-relay $push_relay}
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${push_relay:+ --push-relay $push_relay}
 Restart=on-failure
 RestartSec=2
 
@@ -219,6 +234,11 @@ EOF
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
 if [ -n "$push_relay" ]; then pushes="through $push_relay"; else pushes="nowhere (the relay is off)"; fi
 echo "it listens on $listen as \"$name\"; pushes go $pushes"
+if [ "$accounts" = follow ]; then
+    echo "a turn whose account is out waits for another login (the other Host's selector puts it in place)"
+else
+    echo "a turn whose account is out ends and says so (nobody on this machine changes logins)"
+fi
 [ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
 echo "the agents' own tools: $tools names in $share/tools"

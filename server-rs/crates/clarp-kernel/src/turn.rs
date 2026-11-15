@@ -218,8 +218,31 @@ pub enum Wait {
     /// connection that dropped, a tool that stalled). The next begins at `until_ms`.
     Retry { until_ms: i64 },
     /// An account that serves the turn: the attempt failed on its account (a limit that was
-    /// reached, a sign-in that ran out, a plan without the model).
-    Account,
+    /// reached, a sign-in that ran out). The turn is tried when the tool's login has changed,
+    /// and at `until_ms` at the latest, on whatever account is there then.
+    Account { until_ms: i64 },
+}
+
+impl Wait {
+    /// When the wait is over at the latest.
+    pub fn until_ms(&self) -> i64 {
+        match self {
+            Self::Retry { until_ms } | Self::Account { until_ms } => *until_ms,
+        }
+    }
+
+    pub fn is_for_an_account(&self) -> bool {
+        matches!(self, Self::Account { .. })
+    }
+}
+
+/// What a turn's waits for an account have been so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AccountWaits {
+    /// How many of the turn's waits were for an account.
+    pub count: u32,
+    /// Since when the turn has waited for one, when it has: the time that bounds them all.
+    pub since_ms: Option<i64>,
 }
 
 /// A turn that was accepted and waits in the agent's mailbox.
@@ -248,6 +271,10 @@ pub struct Starting {
     /// What the attempts before left: the tool's session, and how many tools ran.
     pub backend_session: Option<String>,
     pub tool_count: u32,
+    pub account: AccountWaits,
+    /// The turn waited for an account before this attempt: the tool is told that it is
+    /// taken up again, not given the message as if for the first time.
+    pub recovering: bool,
 }
 
 /// A turn whose tool process is working.
@@ -262,6 +289,7 @@ pub struct Running {
     pub backend_session: Option<String>,
     pub activity: Activity,
     pub tool_count: u32,
+    pub account: AccountWaits,
 }
 
 /// A turn between two attempts. It holds the agent like a turn that runs, and has no tool
@@ -283,6 +311,8 @@ pub struct Parked {
     pub kind: String,
     pub reason: String,
     pub since_ms: i64,
+    /// The waits for an account, this one included when it is one.
+    pub account: AccountWaits,
 }
 
 /// A turn that is over. Nothing moves it again.
@@ -298,6 +328,8 @@ pub struct Settled {
     pub tool_count: u32,
     /// How many attempts the turn had. None for a turn that was taken back before it started.
     pub attempts: u32,
+    /// How many of them followed a wait for an account.
+    pub account_waits: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -368,6 +400,8 @@ impl Queued {
             attempt: 1,
             backend_session: None,
             tool_count: 0,
+            account: AccountWaits::default(),
+            recovering: false,
         };
         (next, TurnEvent::Started { at_ms })
     }
@@ -384,6 +418,7 @@ impl Queued {
             ended_at_ms: at_ms,
             tool_count: 0,
             attempts: 0,
+            account_waits: 0,
         };
         (next, TurnEvent::Settled { outcome, at_ms })
     }
@@ -402,6 +437,7 @@ impl Starting {
             backend_session: self.backend_session,
             activity: Activity::Thinking,
             tool_count: self.tool_count,
+            account: self.account,
         };
         (
             next,
@@ -433,6 +469,7 @@ impl Starting {
             ended_at_ms: at_ms,
             tool_count: self.tool_count,
             attempts: self.attempt,
+            account_waits: self.account.count,
         }
     }
 }
@@ -509,6 +546,7 @@ impl Running {
             ended_at_ms: at_ms,
             tool_count: self.tool_count,
             attempts: self.attempt,
+            account_waits: self.account.count,
         }
     }
 
@@ -519,6 +557,15 @@ impl Running {
             kind: kind.clone(),
             reason: reason.clone(),
             at_ms,
+        };
+        // A wait for an account is counted, and all of them are bounded from the first.
+        let account = if wait.is_for_an_account() {
+            AccountWaits {
+                count: self.account.count + 1,
+                since_ms: self.account.since_ms.or(Some(at_ms)),
+            }
+        } else {
+            self.account
         };
         let next = Parked {
             id: self.id,
@@ -533,6 +580,7 @@ impl Running {
             kind,
             reason,
             since_ms: at_ms,
+            account,
         };
         (next, event)
     }
@@ -550,6 +598,8 @@ impl Parked {
             attempt: self.attempts + 1,
             backend_session: self.backend_session,
             tool_count: self.tool_count,
+            account: self.account,
+            recovering: self.wait.is_for_an_account(),
         };
         (next, TurnEvent::Retried { at_ms })
     }
@@ -586,6 +636,7 @@ impl Parked {
             ended_at_ms: at_ms,
             tool_count: self.tool_count,
             attempts: self.attempts,
+            account_waits: self.account.count,
         }
     }
 }
@@ -629,6 +680,16 @@ impl Turn {
     /// waits for its next attempt is still that turn.
     pub fn is_live(&self) -> bool {
         matches!(self, Self::Starting(_) | Self::Running(_) | Self::Parked(_))
+    }
+
+    /// What the turn's waits for an account have been so far.
+    pub fn account_waits(&self) -> AccountWaits {
+        match self {
+            Self::Starting(t) => t.account,
+            Self::Running(t) => t.account,
+            Self::Parked(t) => t.account,
+            Self::Queued(_) | Self::Settled(_) => AccountWaits::default(),
+        }
     }
 
     /// Whether a tool process works for the turn, or is being started for it. A turn between

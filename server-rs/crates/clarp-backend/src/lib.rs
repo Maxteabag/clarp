@@ -8,7 +8,7 @@
 //! between. That is what lets a server that comes back in the middle of a turn read the turn's
 //! spool from its beginning and arrive exactly where the one before it was.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_kernel::conversation::{Notice, Reply, ToolCall};
@@ -119,6 +119,13 @@ pub trait Backend: Send + Sync {
     /// Empty for a tool that takes none.
     fn efforts(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// The file this tool keeps its login in, for a user whose home is `home`: the file
+    /// that is another one after someone has put another account in place. `None` for a
+    /// tool that has no login.
+    fn login_file(&self, _home: &Path) -> Option<PathBuf> {
+        None
     }
 }
 

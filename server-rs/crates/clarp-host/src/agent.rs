@@ -178,6 +178,9 @@ pub enum Ask {
         record: Box<AgentRecord>,
         taken: oneshot::Sender<()>,
     },
+    /// The login of the agent's tool has changed: a turn that waits for an account is tried
+    /// on the one that is there now.
+    LoginChanged,
     /// The agent was removed: the thread ends.
     Close,
 }
@@ -364,6 +367,11 @@ impl AgentHandle {
             record: Box::new(record),
             taken,
         });
+    }
+
+    /// Tells the agent's thread that the login of its tool has changed. Does not wait.
+    pub fn login_changed(&self) {
+        let _ = self.tx.send(Ask::LoginChanged);
     }
 
     /// Ends the agent's thread. Its turn, if one runs, is not touched.
@@ -974,6 +982,7 @@ impl Worker {
             // Answered above, where what they change is published first.
             Ask::Artifact { .. } | Ask::Goal { .. } | Ask::Amended { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
+            Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::ShimGone { turn, attempt } => (actor.shim_gone(turn, attempt, now)?, nobody()),
             Ask::LaunchFailed {
                 turn,
@@ -1502,7 +1511,12 @@ fn refuse_for(
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
-            Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}
+            Ok(
+                Ask::SpoolChanged
+                | Ask::ShimGone { .. }
+                | Ask::LaunchFailed { .. }
+                | Ask::LoginChanged,
+            ) => {}
             // Who the agent is can be changed while it cannot be opened.
             Ok(Ask::Amended { record, taken }) => {
                 amended(*record);

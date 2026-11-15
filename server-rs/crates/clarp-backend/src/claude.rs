@@ -6,6 +6,7 @@
 //! end a result. Everything this file knows is what those lines mean.
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::turn::{Activity, RunOutcome};
@@ -109,6 +110,15 @@ impl Backend for Claude {
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
             stdin,
         }
+    }
+
+    /// Claude Code's own directory (`CLAUDE_CONFIG_DIR`, else `.claude` at home) holds the
+    /// login it runs with.
+    fn login_file(&self, home: &Path) -> Option<PathBuf> {
+        let dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|dir| !dir.is_empty())
+            .map_or_else(|| home.join(".claude"), PathBuf::from);
+        Some(dir.join(".credentials.json"))
     }
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {

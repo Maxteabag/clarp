@@ -28,6 +28,12 @@ pub struct Config {
     /// Where a new agent works when nobody says.
     pub default_cwd: PathBuf,
     pub keep_spools: bool,
+    /// Whether a turn whose account is out waits for one: `none`, or `follow` beside a Host
+    /// that puts another login in place.
+    pub accounts: clarp_kernel::recovery::Accounts,
+    /// How often the logins of the agents' tools are looked at, where turns wait for an
+    /// account.
+    pub logins_checked_every_ms: u64,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
     /// How often the fleet looks after the helpers nobody speaks of any more.
@@ -51,6 +57,7 @@ pub struct Config {
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
 [--engine sqlite|memory] [--codec zstd|none] [--launcher direct|systemd] [--shim PATH] \
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
+[--accounts none|follow] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N]
 The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
 the push relay, when it has one, from CLARP_PUSH_CREDENTIAL.";
@@ -79,6 +86,8 @@ impl Config {
             .unwrap_or_else(|| "Clarp Host".to_string());
         let mut default_cwd = home();
         let mut keep_spools = false;
+        let mut accounts = clarp_kernel::recovery::Accounts::None;
+        let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
         let mut helpers_checked_every_ms = 60_000;
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
@@ -97,6 +106,11 @@ impl Config {
                 "--name" => name = value("a name")?,
                 "--cwd" => default_cwd = PathBuf::from(value("a directory")?),
                 "--keep-spools" => keep_spools = true,
+                "--accounts" => {
+                    let named = value("none or follow")?;
+                    accounts = clarp_kernel::recovery::Accounts::by_name(&named)
+                        .ok_or(format!("--accounts {named}: none or follow"))?;
+                }
                 "--push-relay" => {
                     push_relay = value("an address")?.trim_end_matches('/').to_string();
                     // What a phone is told goes over TLS, or stays on this machine.
@@ -106,6 +120,11 @@ impl Config {
                     if !safe {
                         return Err(format!("--push-relay {push_relay}: an https address"));
                     }
+                }
+                "--logins-checked-every-ms" => {
+                    logins_checked_every_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--logins-checked-every-ms needs a number".to_string())?;
                 }
                 "--jobs-checked-every-ms" => {
                     jobs_checked_every_ms = value("a number of milliseconds")?
@@ -154,6 +173,8 @@ impl Config {
             name,
             default_cwd,
             keep_spools,
+            accounts,
+            logins_checked_every_ms,
             jobs_checked_every_ms,
             helpers_checked_every_ms,
             helper_idle_after_ms,
