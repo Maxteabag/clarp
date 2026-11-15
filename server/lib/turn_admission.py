@@ -7,7 +7,7 @@ import contextlib
 from dataclasses import replace
 from . import agents as agents_db
 from . import backends, db, error_classify, eventlog
-from . import message_store, team_store, turn_queue
+from . import message_store, origins, team_store, turn_queue
 from . import launch_receipts, turn_lifecycle
 from . import events
 from .policies import admission as admission_policy
@@ -180,8 +180,11 @@ class AdmissionMixin:
             self._notify_herald(session)
         # Sticky focus: addressing an agent by name makes them the new default,
         # so subsequent un-named messages keep going to them (hands-free, you
-        # don't want to re-say the name every turn).
-        if not janitor_run_id and (target.routed_by_name or routed_by_orchestrator):
+        # don't want to re-say the name every turn). Only a person addresses an
+        # agent in that sense (origins.FOCUS_ORIGINS): every automatic sender
+        # names its session too, and each of them used to take the focus.
+        if (not janitor_run_id and origin in origins.FOCUS_ORIGINS
+                and (target.routed_by_name or routed_by_orchestrator)):
             try:
                 agents_db.set_focus(agent_id)
             except Exception as e:
