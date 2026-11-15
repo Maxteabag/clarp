@@ -749,7 +749,7 @@
       "id": "<row:5>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -915,7 +915,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "You: synthetic routine foxtrot",
+      "last_completed_message": "Claude replay reply: synthetic routine foxtrot",
       "last_message": "Claude replay reply: synthetic routine foxtrot",
       "last_message_id": "<row:5>",
       "last_turn_end": "<time>",
@@ -1003,6 +1003,21 @@
    },
    "event": null,
    "id": "<eid:transcript-updated#1@45bbad>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "alfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -1114,21 +1129,6 @@
    },
    "event": null,
    "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:6>",
-    "client_msg_id": "alfa",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
