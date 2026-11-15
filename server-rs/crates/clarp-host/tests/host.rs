@@ -5250,3 +5250,423 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     assert_eq!(lineage("counter")["helper_state"], "running");
     assert_eq!(row(&maker)["child_count"], 1);
 }
+
+/// One answer as it came: its status, its headers under their names in small letters, its
+/// bytes.
+struct Fetched {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+impl Fetched {
+    fn header(&self, name: &str) -> &str {
+        let named = self.headers.iter().find(|(key, _)| key == name);
+        named.map_or("", |(_, value)| value.as_str())
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.body).into_owned()
+    }
+}
+
+/// One request with headers of its own and a body of bytes, answered in bytes.
+fn fetch(
+    host: &Host,
+    token: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Fetched {
+    let mut stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).unwrap();
+    let end = answer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap_or(answer.len());
+    let head = String::from_utf8_lossy(&answer[..end]).into_owned();
+    let mut lines = head.lines();
+    let status = lines
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no status in: {head}"));
+    let headers = lines
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_lowercase(), value.trim().to_string()))
+        .collect();
+    Fetched {
+        status,
+        headers,
+        body: answer.get(end + 4..).unwrap_or_default().to_vec(),
+    }
+}
+
+/// How many files lie under a directory, however deep.
+fn files_under(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            if entry.path().is_dir() {
+                files_under(&entry.path())
+            } else {
+                1
+            }
+        })
+        .sum()
+}
+
+#[test]
+fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
+    // `clarp-media-publish` is the repository's own program (scripts/): it reads a file and
+    // sends its bytes to the Host. Here it runs as an installation runs it for a turn: told
+    // where the Host's door for tools is, with the token of the agent's tools.
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../scripts/clarp-media-publish.py"
+    );
+    assert!(
+        std::path::Path::new(script).is_file(),
+        "the program is not beside server-rs: {script}"
+    );
+    let python = on_path("python3").expect("the program needs python3");
+    let place = Place::new("media");
+    let token = "media-token";
+    let host = place.start_with_token(token);
+    let maker = host.new_agent("Maker");
+    let other = host.new_agent("Other");
+    let tools = clarp_host::tool_token(token);
+
+    // What an agent made: an image, notes, and a program.
+    let work = place.root.join("work");
+    let png: Vec<u8> = [
+        &b"\x89PNG\r\n\x1a\n"[..],
+        &13u32.to_be_bytes(),
+        b"IHDR",
+        &640u32.to_be_bytes(),
+        &480u32.to_be_bytes(),
+        &[8, 6, 0, 0, 0],
+    ]
+    .concat();
+    std::fs::write(work.join("My chart.png"), &png).unwrap();
+    std::fs::write(work.join("notes.md"), "# Notes\n\nSome *text*.\n").unwrap();
+    std::fs::write(work.join("run.sh"), "#!/bin/sh\necho hello\n").unwrap();
+    let door = format!("http://{}/tools", host.address);
+    let run = |world: &[(String, String)], args: &[&str]| -> (i32, String, String) {
+        let out = Command::new(&python)
+            .arg(script)
+            .args(args)
+            .current_dir(&work)
+            .env_clear()
+            .env("HOME", &place.root)
+            .envs(world.iter().map(|(name, value)| (name, value)))
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    // What an installation's wrapper gives the program in a turn of this agent.
+    let in_a_turn = |session: &str| -> [(String, String); 3] {
+        [
+            ("CLAUDE_PWA_SESSION".to_string(), session.to_string()),
+            ("CLAUDE_PWA_BASE_URL".to_string(), door.clone()),
+            ("CLAUDE_PWA_TOKEN".to_string(), tools.clone()),
+        ]
+    };
+
+    // An image is answered with what the agent writes into its reply to show it.
+    let (code, out, err) = run(
+        &in_a_turn(&maker),
+        &["My chart.png", "--caption", "A chart [one]"],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    let id = out
+        .trim()
+        .strip_prefix("![A chart \\[one\\]](clarp-media://asset/")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or_else(|| panic!("not the Markdown of an image: {out}"))
+        .to_string();
+    assert!(id.starts_with("asset_") && id.len() == 30, "{id}");
+
+    // With --json it prints the whole answer: what the skills for audio, video and files
+    // read. A file that is no image is linked, not shown.
+    let (code, out, err) = run(&in_a_turn(&maker), &["--json", "notes.md"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let notes: Value = serde_json::from_str(&out).unwrap();
+    let notes_id = notes["asset_id"].as_str().unwrap().to_string();
+    assert_eq!(notes["ok"], true);
+    assert_eq!(notes["asset"]["asset_id"], notes_id.as_str());
+    assert_eq!(
+        (&notes["mime_type"], &notes["file_name"], &notes["bytes"]),
+        (&json!("text/markdown"), &json!("notes.md"), &json!(22))
+    );
+    assert_eq!(notes["markdown"], "");
+    assert_eq!(notes["url"], format!("/media/{notes_id}"));
+    assert_eq!(notes["uri"], format!("clarp-media://asset/{notes_id}"));
+    assert_eq!(
+        (&notes["width"], &notes["height"]),
+        (&Value::Null, &Value::Null)
+    );
+    assert_eq!(notes["created_by"], "agent");
+    assert_eq!(notes["session"], maker.as_str());
+
+    // A program is not taken, and the tool says what the Host said. Nor is anything taken
+    // for an agent the Host does not have.
+    let (code, _, err) = run(&in_a_turn(&maker), &["run.sh"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("server returned 400") && err.contains("unsupported media type"),
+        "{err}"
+    );
+    let (code, _, err) = run(&in_a_turn("nobody"), &["My chart.png"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("server returned 404") && err.contains("unknown session"),
+        "{err}"
+    );
+
+    // The token of an agent's tools opens the door for tools, and not the one beside it.
+    let said = [("X-Session", maker.as_str()), ("Content-Type", "image/png")];
+    let beside = fetch(&host, &tools, "POST", "/media", &said, &png);
+    assert_eq!(beside.status, 403, "{}", beside.text());
+    // Nothing at all is no file, at either door.
+    let nothing = fetch(&host, token, "POST", "/media", &said, b"");
+    assert_eq!(
+        (nothing.status, nothing.text().contains("bad size")),
+        (400, true)
+    );
+    let nobody = fetch(
+        &host,
+        token,
+        "POST",
+        "/media",
+        &[("Content-Type", "image/png")],
+        &png,
+    );
+    assert_eq!(
+        (nobody.status, nobody.text().contains("session required")),
+        (400, true)
+    );
+
+    // A worker an agent left running was told nothing by a turn: it finds its Host in the
+    // file an installation wrote, and publishes with what stands there. The same image, for
+    // another agent.
+    let config = place.root.join("config.toml");
+    let (address, port) = host.address.rsplit_once(':').unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            "[server]\nkind = \"clarp-host\"\nbind_addr = \"{address}\"\nport = {port}\nauth_token = \"{token}\"\n"
+        ),
+    )
+    .unwrap();
+    let left_running = [
+        ("CLAUDE_PWA_SESSION".to_string(), other.clone()),
+        (
+            "CLAUDE_PWA_CONFIG".to_string(),
+            config.to_str().unwrap().to_string(),
+        ),
+    ];
+    let (code, out, err) = run(&left_running, &["--json", "My chart.png"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let again: Value = serde_json::from_str(&out).unwrap();
+    assert_ne!(again["asset_id"], id.as_str());
+    assert_eq!(again["session"], other.as_str());
+    assert_eq!(
+        again["markdown"],
+        format!(
+            "![My_chart.png](clarp-media://asset/{})",
+            again["asset_id"].as_str().unwrap()
+        )
+    );
+    // The same bytes published twice are kept once: the image and the notes are two files.
+    assert_eq!(files_under(&place.root.join("data").join("media")), 2);
+
+    // What the apps read. An agent's gallery is its images, the newest first: the notes are
+    // not in it, and neither is the other agent's image.
+    let gallery = |host: &Host, session: &str| -> Vec<Value> {
+        let listed = host.get(&format!("/media?session={session}"));
+        assert_eq!(listed["session"], session);
+        listed["assets"].as_array().unwrap().clone()
+    };
+    let shown = gallery(&host, &maker);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(shown[0]["asset_id"], id.as_str());
+    assert_eq!(
+        (
+            &shown[0]["source_name"],
+            &shown[0]["mime_type"],
+            &shown[0]["caption"]
+        ),
+        (
+            &json!("My_chart.png"),
+            &json!("image/png"),
+            &json!("A chart [one]")
+        )
+    );
+    assert_eq!(
+        (&shown[0]["width"], &shown[0]["height"]),
+        (&json!(640), &json!(480))
+    );
+    assert_eq!(shown[0]["bytes"], png.len());
+    assert_eq!(gallery(&host, &other).len(), 1);
+    assert!(gallery(&host, "nobody").is_empty());
+
+    // The bytes as they were handed in, with what keeps a browser from running anything
+    // in them.
+    let whole = fetch(&host, token, "GET", &format!("/media/{id}"), &[], b"");
+    assert_eq!(whole.status, 200);
+    assert!(whole.body == png, "the image came back as it was published");
+    assert_eq!(whole.header("content-type"), "image/png");
+    assert_eq!(whole.header("content-length"), png.len().to_string());
+    assert_eq!(whole.header("accept-ranges"), "bytes");
+    assert_eq!(whole.header("x-content-type-options"), "nosniff");
+    assert_eq!(
+        whole.header("content-security-policy"),
+        "sandbox; default-src 'none'"
+    );
+    assert_eq!(whole.header("cache-control"), "no-store");
+    let text = fetch(&host, token, "GET", &format!("/media/{notes_id}"), &[], b"");
+    assert_eq!(
+        (
+            text.status,
+            text.header("content-type"),
+            text.text().as_str()
+        ),
+        (200, "text/markdown", "# Notes\n\nSome *text*.\n")
+    );
+
+    // A player asks for a part, for the end, and for what is not there.
+    let total = png.len();
+    let part = fetch(
+        &host,
+        token,
+        "GET",
+        &format!("/media/{id}"),
+        &[("Range", "bytes=1-3")],
+        b"",
+    );
+    assert_eq!(part.status, 206);
+    assert_eq!(part.body, &png[1..=3]);
+    assert_eq!(part.header("content-range"), format!("bytes 1-3/{total}"));
+    assert_eq!(part.header("content-length"), "3");
+    assert_eq!(part.header("accept-ranges"), "bytes");
+    let end = fetch(
+        &host,
+        token,
+        "GET",
+        &format!("/media/{id}"),
+        &[("Range", "bytes=-4")],
+        b"",
+    );
+    assert_eq!(end.status, 206);
+    assert_eq!(end.body, &png[total - 4..]);
+    assert_eq!(
+        end.header("content-range"),
+        format!("bytes {}-{}/{total}", total - 4, total - 1)
+    );
+    let past = fetch(
+        &host,
+        token,
+        "GET",
+        &format!("/media/{id}"),
+        &[("Range", "bytes=5000-")],
+        b"",
+    );
+    assert_eq!(past.status, 416);
+    assert_eq!(past.header("content-range"), format!("bytes */{total}"));
+    assert_eq!(past.header("x-content-type-options"), "nosniff");
+    assert!(past.body.is_empty());
+    // A range nobody can read is no range.
+    let odd = fetch(
+        &host,
+        token,
+        "GET",
+        &format!("/media/{id}"),
+        &[("Range", "bytes=3-1")],
+        b"",
+    );
+    assert_eq!((odd.status, odd.body.len()), (200, total));
+
+    // What is not there, and what is no id.
+    let missing = fetch(&host, token, "GET", "/media/asset_nothing", &[], b"");
+    assert_eq!(
+        (
+            missing.status,
+            missing.header("content-type"),
+            missing.text().as_str()
+        ),
+        (404, "text/plain", "not found")
+    );
+    for no_id in ["/media/", "/media/a/b"] {
+        let refused = fetch(&host, token, "GET", no_id, &[], b"");
+        assert_eq!(
+            (refused.status, refused.text().as_str()),
+            (400, "bad asset id"),
+            "{no_id}"
+        );
+    }
+
+    // A phone that may only read fetches a file and lists a gallery, and publishes nothing.
+    let (phone, _) = pair(&host, "phone", "limited");
+    let read = fetch(&host, &phone, "GET", &format!("/media/{id}"), &[], b"");
+    assert_eq!((read.status, read.body.len()), (200, total));
+    let listed = fetch(
+        &host,
+        &phone,
+        "GET",
+        &format!("/media?session={maker}"),
+        &[],
+        b"",
+    );
+    assert_eq!(listed.status, 200);
+    let refused = fetch(&host, &phone, "POST", "/media", &said, &png);
+    assert_eq!(refused.status, 403, "{}", refused.text());
+    // And nobody without a token reads anything.
+    let unknown = fetch(
+        &host,
+        "not-a-token",
+        "GET",
+        &format!("/media/{id}"),
+        &[],
+        b"",
+    );
+    assert_eq!(unknown.status, 401);
+
+    // The Host is killed. What was published is there when it is back: what is known of
+    // it from the agent's log, its bytes from the disk.
+    host.kill();
+    let host = place.start_with_token(token);
+    let shown = gallery(&host, &maker);
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0]["asset_id"], id.as_str());
+    let whole = fetch(&host, token, "GET", &format!("/media/{id}"), &[], b"");
+    assert_eq!(whole.status, 200);
+    assert!(
+        whole.body == png,
+        "the image is the same after the Host was killed"
+    );
+    let text = fetch(&host, token, "GET", &format!("/media/{notes_id}"), &[], b"");
+    assert_eq!(text.text(), "# Notes\n\nSome *text*.\n");
+}

@@ -26,6 +26,7 @@ pub mod joblog;
 pub mod launcher;
 pub mod library;
 pub mod logins;
+pub mod media;
 pub mod pairing;
 pub mod peers;
 pub mod plans;

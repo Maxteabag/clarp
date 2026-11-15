@@ -1,8 +1,8 @@
 //! What a Host is told when it starts.
 //!
 //! Every part that has more than one implementation is chosen here by name: the engine that
-//! stores the logs, the compressor, the way shims are started. Changing one is a restart with a
-//! different word, not a change of code.
+//! stores the logs, the compressor, the store of the files agents publish, the way shims are
+//! started. Changing one is a restart with a different word, not a change of code.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -18,6 +18,10 @@ pub struct Config {
     pub engine: String,
     /// The compressor new log items are written with: `zstd` or `none`.
     pub codec: String,
+    /// The store of the files agents publish: `files` (under `media/` in the data directory)
+    /// or `memory`. Unless it is named, it goes with the engine: what keeps its logs in memory
+    /// keeps its files there too.
+    pub blobs: String,
     /// How a shim is started: `direct`, or `systemd` for a scope of its own.
     pub launcher: String,
     pub shim: PathBuf,
@@ -55,7 +59,8 @@ pub struct Config {
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
-[--engine sqlite|memory] [--codec zstd|none] [--launcher direct|systemd] [--shim PATH] \
+[--engine sqlite|memory] [--codec zstd|none] [--blobs files|memory] \
+[--launcher direct|systemd] [--shim PATH] \
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--accounts none|follow] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N]
@@ -76,6 +81,7 @@ impl Config {
         let mut listen = "127.0.0.1:7690".to_string();
         let mut engine = "sqlite".to_string();
         let mut codec = "zstd".to_string();
+        let mut blobs = None;
         let mut launcher = "direct".to_string();
         let mut shim = None;
         // A Host is called what its machine is called, unless it is told otherwise.
@@ -101,6 +107,7 @@ impl Config {
                 "--listen" => listen = value("an address")?,
                 "--engine" => engine = value("a name")?,
                 "--codec" => codec = value("a name")?,
+                "--blobs" => blobs = Some(value("a name")?),
                 "--launcher" => launcher = value("a name")?,
                 "--shim" => shim = Some(PathBuf::from(value("a path")?)),
                 "--name" => name = value("a name")?,
@@ -165,6 +172,14 @@ impl Config {
             listen: listen
                 .parse()
                 .map_err(|error| format!("--listen {listen}: {error}"))?,
+            blobs: blobs.unwrap_or_else(|| {
+                let with_the_engine = if engine == "memory" {
+                    "memory"
+                } else {
+                    "files"
+                };
+                with_the_engine.to_string()
+            }),
             engine,
             codec,
             launcher,
@@ -207,6 +222,7 @@ mod tests {
             ("sqlite", "zstd")
         );
         assert_eq!(config.launcher, "direct");
+        assert_eq!(config.blobs, "files");
         assert!(config.data_dir.ends_with("clarp-host"));
         assert!(config.shim.ends_with("clarp-shim"));
     }
@@ -244,6 +260,15 @@ mod tests {
         );
         assert_eq!(config.launcher, "systemd");
         assert_eq!(config.shim, PathBuf::from("/s"));
+        // What keeps its logs in memory keeps its files there, unless it is told otherwise.
+        assert_eq!(config.blobs, "memory");
+        assert_eq!(
+            parse(&["--engine", "memory", "--blobs", "files"])
+                .unwrap()
+                .blobs,
+            "files"
+        );
+        assert_eq!(parse(&["--blobs", "memory"]).unwrap().blobs, "memory");
         assert!(config.keep_spools);
         assert!(parse(&["--what"]).is_err());
         assert!(parse(&["--data"]).is_err());

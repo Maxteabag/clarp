@@ -134,10 +134,12 @@ server-rs/
   REBUILD.md            this brief (lead only)
   docs/design.md        the design (from the report of 14 Nov 2026)
   crates/
-    clarp-ports/        the traits and their conformance suites: log engine, key-value store, compressor, clock
+    clarp-ports/        the traits and their conformance suites: log engine, key-value store, compressor,
+                        whole files, clock
     clarp-codec/        compressors: none, zstd, zstd with a dictionary
-    clarp-store-mem/    in-memory log engine and tables (tests, the simulator)
+    clarp-store-mem/    in-memory log engine, tables and whole files (tests, the simulator)
     clarp-store-sqlite/ SQLite log engine (`agents/<id>/log.db`) and tables (`fleet.db`)
+    clarp-store-files/  whole files on disk (`media/<first two signs>/<name>`): what agents publish
     clarp-protocol/     the client contract as types: events, log, snapshot, server-info, requests, responses
     clarp-kernel/       turn state machine, the agent's pure core, the journal (write first, then change),
                         the conversation's items
@@ -327,6 +329,29 @@ not a wall between an agent and the administrator, who are the same user of the 
 writes for a worker that no turn told where its Host is (`~/.config/clarp-host/config.toml`) holds the
 administrator's token, as the Python Host's file does.
 
+**What an agent publishes is there** (15 Nov 2026). An agent shows its user an image, or hands over a
+recording or a document, by publishing a file: its tool sends the bytes, the Host decides what they are by
+their first bytes and not by what the agent calls them, and takes only what a phone can show or play. The rules
+are the Python Host's (`server/lib/media_store.py`), in `clarp_kernel::media`, held by 1,550 readings of made-up
+files, 240 of `Range` headers and 33 of names written with `%XX`. A published file is two things, kept in this
+order. Its bytes are kept whole under a name made of what they are (their SHA-256 and the extension of their
+kind), so the same file published twice is kept once; that is a new port, `clarp_ports::blobs`, with one suite
+and two stores that pass it (files on disk, memory), chosen with `--blobs`. What is known of it is one record
+in the log of the agent that published it (kind 600): the agent's history is its log, a gallery is read off the
+agent's own book, and what moves with an agent later is its log and the files its log names. A record never
+names bytes that are not there; bytes without a record are in nobody's way. The routes answer as the Python
+Host's do: `POST /media` (the file as the body, what it is called in the headers), `GET /media?session=` (the
+agent's images, the newest first), `GET /media/<id>` (the bytes, whole or the part a `Range` asks for, since a
+player asks for a recording in parts, with the headers that keep a browser from running anything in them),
+read and sent a quarter of a megabyte at a time whatever the file's size. Publishing has a second door,
+`POST /tools/media`, which the token of an agent's tools opens; `/media` stays the administrator's. The tool
+is the repository's own `scripts/clarp-media-publish.py`, the program the skills were written against,
+installed beside the Host: in a turn it is told where the door for tools is and given that token; a worker an
+agent left running finds its Host in the file the installer wrote. It is not rewritten as a pipe of words
+because a pipe of words does not carry a file. Held end to end with that program (`tests/host.rs`, an agent
+publishes a file) and by the scenario `media`. Not there yet: artifacts of the kinds audio, video and file,
+which name a published file, and HTML reports and forms.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
@@ -338,7 +363,11 @@ here. Two of that proof's three parts have their first evidence (`tools/soak res
 command of 45 seconds: it answered again after 102 ms with all ten, and all ten ended completed, each message
 once, each command run once. And the Host was killed (`SIGKILL`, started again by systemd) with turns in their
 commands, with messages just accepted, and with turns at the steps of their ends, two of which finished their
-command while the Host was down: eighteen turns, all held. Open: the week.
+command while the Host was down: eighteen turns, all held. At 20:02 the installer updated the Host to the build
+of `61194d0c` with three turns in their commands, the eighth exercise: held. One soak round of the first
+thirteen did not complete: at 19:31 the Claude account was out, and the turn ended after three seconds with the
+Host's sentence for it under the message; nothing was lost. That build did not wait for an account; the one
+installed since does. Open: the week.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the core contract and what

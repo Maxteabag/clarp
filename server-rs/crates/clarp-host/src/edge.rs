@@ -24,6 +24,7 @@ use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::turn::{Admission, Origin};
+use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
 use clarp_protocol::responses::{SelectResponse, SendResponse, StopResponse};
@@ -44,7 +45,7 @@ use crate::pairing::{self, Device, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
-use crate::{ids, joblog, library, peers, plans, push, roster, wire};
+use crate::{ids, joblog, library, media, peers, plans, push, roster, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -60,6 +61,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("artifact_summary_v1", 73),
     ("flat_artifact_responses", 1),
     ("artifacts", 1),
+    // What an agent publishes: `POST /media`, an agent's gallery, a file fetched whole and
+    // in parts.
+    ("media", 1),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
     // Pairing codes and devices with tokens of their own.
@@ -106,6 +110,8 @@ pub struct App {
     pub pusher: Pusher,
     /// The desks that have said their user sits at them: no phone is paged meanwhile.
     pub desks: Arc<Mutex<Presence>>,
+    /// The bytes of the files agents publish.
+    pub blobs: Arc<dyn Blobs>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -198,6 +204,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/tools/run", post(run_tool))
         .merge(library::routes())
+        .merge(media::routes())
         .merge(plans::routes())
         .merge(push::routes())
         .merge(peers::routes())

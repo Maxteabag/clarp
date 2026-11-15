@@ -77,7 +77,11 @@ directories. Agents that were moved there are still on the Python Host, put away
   for an answer to another message.
 
 A turn that ends without completing is counted under the Host's own word for it (`turn_failed`,
-`turn_interrupted`): it is not a lost message. Every twelfth round the whole conversation is read again,
+`turn_interrupted`), with the sentence the Host put under the message for why: it is not a lost message. A
+turn that has not ended when its round stops waiting, which a turn that waits for an account may not have
+for half an hour, is written down as that (`waiting_for_account`, or `no_end_in_time` with what the Host
+says the agent is doing), and looked at again after every later round until it has ended; how it ended is
+a line of its own (`late_end`). Every twelfth round the whole conversation is read again,
 page by page, for a message that came twice later. Each round is one line in
 `~/.local/share/clarp-host/soak/evidence.jsonl`, with the build the Host ran and since when its service
 was up: an update or a restart between or during turns is on record.
@@ -129,11 +133,25 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 17:37 | the Host killed | 8 | one turn just ended, two whose command ended while the Host was down (one had answered too before it was back), five in their commands | held |
 | 17:55 | the Host updated by the installer, `d9868bea` to `2e935ef7` | 3 | every turn in its command (`sleep 40`) | held: the new build had all three |
 | 17:57 | the service restarted, on the new build | 2 | every turn in its command | held |
+| 20:02 | the Host updated by the installer, `2e935ef7` to `61194d0c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered 1 ms after the restart was done, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Thirty-five turns, none interrupted,
+completed, answered with its word, and its command ran exactly once. Thirty-eight turns, none interrupted,
 lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no
 more.
+
+The update of 20:02 was installed from a release built out of a clean checkout of the commit that had just
+landed, not out of the working tree: what runs is what is on main.
+
+## The soak so far
+
+Rounds 1 to 13 (15 Nov, 17:15 to 20:01): twelve completed and answered with their word; none lost, none
+doubled. Round 11, at 19:31 on the build of `2e935ef7`, did not complete: the Claude account the machine's
+agents share was out at that moment (the same minute ended a turn of the lead's own agent on the Python
+Host). The turn ended after three seconds, and the Host said why under the message: "Claude usage limit
+reached". The message is in the conversation once, with one turn end. That build ended such a turn; the
+build installed at 20:02 runs with `--accounts follow` and lets it wait for the login to change. The next
+time the account runs out during a round, the soak shows whether the turn waits and is taken up.
 
 ## What a round does not prove
 

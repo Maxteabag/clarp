@@ -565,8 +565,14 @@ pub struct Asset {
 }
 
 /// The name a file's bytes are kept under: what they are, and the extension of their kind.
+/// The extension is for a person who looks at the disk; one that is not plain letters and
+/// digits is left off, since a store takes plain names only.
 pub fn blob_name(sha256: &str, extension: &str) -> String {
-    format!("{sha256}{extension}")
+    if extension.is_ascii() {
+        format!("{sha256}{extension}")
+    } else {
+        sha256.to_string()
+    }
 }
 
 impl Asset {
@@ -722,6 +728,9 @@ mod tests {
             published
         );
         assert_eq!(published.blob(), format!("{}.png", "ab".repeat(32)));
+        // An extension in another script is the file's own, and no part of a plain name.
+        assert_eq!(blob_name("abc", ".jpég"), "abc");
+        assert_eq!(blob_name("abc", ""), "abc");
     }
 
     #[test]

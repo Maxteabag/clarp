@@ -137,7 +137,7 @@ done
 # Host does not have yet it says so itself, and does nothing.
 tools=0
 for tool in $( { printf '%s\n' clarp-agent-bg clarp-admin clarp-goal clarp-agent-artifacts; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
-    [ "$tool" = clarp-sub-agent ] && continue
+    case "$tool" in clarp-sub-agent|clarp-media-publish) continue ;; esac
     cat > "$share/tools/.$tool.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
@@ -173,6 +173,37 @@ EOF
 fi
 chmod 755 "$share/tools/.clarp-sub-agent.new"
 mv -f "$share/tools/.clarp-sub-agent.new" "$share/tools/clarp-sub-agent"
+tools=$((tools + 1))
+# Another is a program of its own as well: clarp-media-publish, with which an agent publishes
+# an image or a file for its user. It reads the file and sends its bytes to the Host, which a
+# pipe of words cannot carry. It is the repository's own program (scripts/), the one the skills
+# were written against. A turn tells it where its Host is and gives it the token of the agent's
+# tools, which opens the door for tools and nothing else; a worker an agent left running finds
+# its Host in the file written below.
+media_publish="$here/../scripts/clarp-media-publish.py"
+if [ -f "$media_publish" ]; then
+    install -m 644 "$media_publish" "$share/libexec/.clarp-media-publish.py.new"
+    mv -f "$share/libexec/.clarp-media-publish.py.new" "$share/libexec/clarp-media-publish.py"
+    cat > "$share/tools/.clarp-media-publish.new" <<EOF
+#!/bin/sh
+# Written by install-host: the program an agent on the Rust Host publishes an image or a file with.
+if [ -n "\${CLARP_HOST_ADDR:-}" ] && [ -n "\${CLARP_TOOL_TOKEN:-}" ]; then
+    CLAUDE_PWA_BASE_URL="http://\$CLARP_HOST_ADDR/tools"; CLAUDE_PWA_TOKEN="\$CLARP_TOOL_TOKEN"
+    export CLAUDE_PWA_BASE_URL CLAUDE_PWA_TOKEN
+else
+    CLAUDE_PWA_CONFIG="\${CLAUDE_PWA_CONFIG:-$config/config.toml}"; export CLAUDE_PWA_CONFIG
+fi
+exec python3 "$share/libexec/clarp-media-publish.py" "\$@"
+EOF
+else
+    cat > "$share/tools/.clarp-media-publish.new" <<EOF
+#!/bin/sh
+# Written by install-host: one of an agent's own tools on the Rust Host.
+exec "$share/bin/clarp-host" tool clarp-media-publish "\$@"
+EOF
+fi
+chmod 755 "$share/tools/.clarp-media-publish.new"
+mv -f "$share/tools/.clarp-media-publish.new" "$share/tools/clarp-media-publish"
 tools=$((tools + 1))
 # The battle test's own program (docs/battle-test.md), so that a run of a week does not depend
 # on the checkout it was installed from.
