@@ -28,3 +28,13 @@ a46e99cc9bde  turn-timer-after-stop: turn_started_at while the next turn runs
 # After a turn that had waited in the queue, the last completed message is the agent's answer
 # (the Python Host still shows the user's message there: reference defect R12).
 d4b9221921eb  turn-timer: last_completed_message at rest, after the second turn
+
+# What the Host sends an agent by itself (an answer that is delivered, a goal that is taken
+# up again) does not move the user's focus to that agent (the Python Host moves it: reference
+# defect R14).
+18ab05fa986e  approval: the agent's row says it is the open one after its answer was delivered
+661f8028e8eb  approval: the snapshot's focus, the same
+
+# The answer to a discard says the artifact is not pinned (the Python Host says pinned true
+# beside pinned_at null: reference defect R15).
+23ad255cb543  library: pinned in the answer to the discard of a pinned artifact

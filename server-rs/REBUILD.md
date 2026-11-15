@@ -197,10 +197,24 @@ with the Python Host's rules and words (`crates/clarp-kernel/src/goals.rs`, held
 `scripts/agent_tasks.py` by 75 recorded steps), kept in the agent's own log as what each change set, and the
 wakes (`goals/wake.rs`): a goal that is due wakes its owner when the owner rests, a goal that waits for a job
 is woken when the job ends, a wake no checkpoint follows is tried again later each time, a Stop pauses the
-agent's goals. The message is the Python Host's word for word (41 recorded cases). Not there of goals: the
-ledger, subgoals and the Goal keeper's verbs (`ledger`, `subgoal`, `receipts`, `bookkeeping` answer that they
-are not here yet), what an account's usage limit does to a wake (accounts come later), and the apps' view of a
-plan, which the Python Host serves as an artifact.
+agent's goals. The message is the Python Host's word for word (55 recorded cases). The apps have their side of
+it (`plans.rs`): the plan a session works, its plans, a goal's documents, and what the user does to a goal,
+which is what its owner may do and one thing more, setting a criterion aside (101 recorded steps in all, 13
+of them the user's). Not there of goals: the ledger, subgoals and the Goal keeper's verbs (`ledger`,
+`subgoal`, `receipts`, `bookkeeping` answer that they are not here yet), and what an account's usage limit
+does to a wake (accounts come later).
+
+**What agents make and ask is there, for the plain kinds** (15 Nov 2026). The rules of `server/lib/artifacts.py`
+are in the kernel (`artifacts.rs`, `artifacts/decisions.rs`, held to the Python module by 264 recorded calls,
+123 of them refusals): documents, research, data, code changes, releases, directories and workflow runs; a
+plan as an artifact that follows its plan; requests to the user (an approval, a choice, a text) and every way
+one ends; the inbox in the order the apps show it. An agent keeps its artifacts in its own log. The Host
+serves them as the Python Host does (`library.rs`: `/artifacts`, `/pinned-artifacts`, `/decisions`,
+`/attention`, the events `artifact-updated` and `attention-updated`), tells an agent its answer as a message
+written in one append with the mark that it was told, and gives the agent its tool (`clarp-agent-artifacts`,
+`artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: HTML reports
+and forms, the media store with audio, video and file artifacts, countdowns (each says it is not available on
+this Host yet), and `/attention/inbox`.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every

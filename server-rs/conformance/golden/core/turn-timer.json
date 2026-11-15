@@ -769,21 +769,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "oscar",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -824,6 +809,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "oscar",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
   },
   {
    "data": {
@@ -923,6 +923,28 @@
   },
   {
    "data": {
+    "agent_id": "<id:1>",
+    "badge": true,
+    "cause_message_id": "u-november",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:5>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic timed november",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
     "action": "thinking",
     "agent_id": "<id:1>",
     "call_id": null,
@@ -943,28 +965,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#6@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "badge": true,
-    "cause_message_id": "u-november",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:5>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic timed november",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:1>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {
