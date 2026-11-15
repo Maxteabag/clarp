@@ -192,8 +192,10 @@ scheme word for word.
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
-evening of 15 Nov an agent brings more than its conversation: the files it published, under the ids its
-conversation names them by, so that an image in an old reply still shows; its library, each artifact as it was
+evening of 15 Nov an agent brings more than its conversation: the files it published, under the ids that name
+them (its gallery, and the files its recordings, films and documents are made of, as its own; a picture of
+another agent that it shows comes along without becoming its own), so that an image in an old reply still
+shows and a film in its library still plays; its library, each artifact as it was
 shown, a report with every version it had, a request to the user as open or as answered as it was; and its
 plans and goals, each as it stood, at its revision, with its steps, its history, how its work goes on and the
 newest of its documents (most of the owner's agents work toward a goal: 88 plans in the week that was

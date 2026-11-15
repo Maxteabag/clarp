@@ -207,6 +207,7 @@ fn a_published_file_is_told_as_the_python_host_tells_it() {
             caption: text("caption"),
             created_by: text("created_by"),
             created_at: row["created_at"].as_i64().unwrap(),
+            named_only: false,
         };
         assert_eq!(asset.public(), vector["public"], "{row}");
     }

@@ -562,6 +562,18 @@ pub struct Asset {
     pub caption: String,
     pub created_by: String,
     pub created_at: i64,
+    /// It came along with an agent that moved here, because the agent's conversation or
+    /// library names it, and the Host it came from did not say it is the agent's own: a
+    /// picture another agent published, most often. It is kept and served under its id like
+    /// any other. It is not in the agent's gallery, and no artifact of the agent's is made
+    /// of it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub named_only: bool,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(truth: &bool) -> bool {
+    !*truth
 }
 
 /// The name a file's bytes are kept under: what they are, and the extension of their kind.
@@ -641,16 +653,22 @@ impl MediaBook {
         }
     }
 
+    /// A file the book has under this id, the agent's own or one that came along with it.
     pub fn get(&self, asset_id: &str) -> Option<&Asset> {
         self.places.get(asset_id).map(|&place| &self.assets[place])
     }
 
-    /// The images among them, the newest first, `limit` at most: an agent's gallery.
+    /// A file the agent published itself: what an artifact of its may be made of.
+    pub fn own(&self, asset_id: &str) -> Option<&Asset> {
+        self.get(asset_id).filter(|asset| !asset.named_only)
+    }
+
+    /// The agent's own images, the newest first, `limit` at most: its gallery.
     pub fn images(&self, limit: usize) -> Vec<&Asset> {
         let mut images: Vec<&Asset> = self
             .assets
             .iter()
-            .filter(|asset| is_image(&asset.mime_type))
+            .filter(|asset| is_image(&asset.mime_type) && !asset.named_only)
             .collect();
         // Of two published in the same instant, the one published first comes first.
         images.sort_by_key(|asset| std::cmp::Reverse(asset.created_at));
@@ -686,6 +704,7 @@ mod tests {
             caption: String::new(),
             created_by: "agent".to_string(),
             created_at: at,
+            named_only: false,
         }
     }
 
@@ -717,6 +736,41 @@ mod tests {
         book.apply(&asset("one", "image/png", 40));
         assert_eq!(ids(&book, 1), ["one"]);
         assert_eq!(book.len(), 5);
+    }
+
+    #[test]
+    fn a_file_that_came_along_is_kept_and_is_not_the_agents_own() {
+        let mut book = MediaBook::new();
+        book.apply(&asset("mine", "image/png", 10));
+        let came = Asset {
+            named_only: true,
+            ..asset("theirs", "image/png", 20)
+        };
+        book.apply(&came);
+        // It is there under its id, for whoever fetches it.
+        assert_eq!(book.get("theirs"), Some(&came));
+        assert_eq!(book.len(), 2);
+        // It is not in the gallery, and nothing of the agent's is made of it.
+        let gallery: Vec<&str> = book
+            .images(500)
+            .iter()
+            .map(|asset| asset.asset_id.as_str())
+            .collect();
+        assert_eq!(gallery, ["mine"]);
+        assert!(book.own("theirs").is_none());
+        assert!(book.own("mine").is_some());
+        // The log says it of the files it is true of, and of no other: what was written
+        // before the Host knew of such files reads as the agent's own.
+        let written = serde_json::to_value(&came).unwrap();
+        assert_eq!(written["named_only"], true);
+        let own = serde_json::to_value(asset("mine", "image/png", 10)).unwrap();
+        assert!(own.get("named_only").is_none());
+        let read: Asset = serde_json::from_value(own).unwrap();
+        assert!(!read.named_only);
+        // When the agent is found to have published it itself, it is its own from then on.
+        book.apply(&asset("theirs", "image/png", 20));
+        assert!(book.own("theirs").is_some());
+        assert_eq!(book.images(500).len(), 2);
     }
 
     #[test]

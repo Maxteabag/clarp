@@ -606,7 +606,7 @@ fn require_published(
             "{kind} artifact url must be a same-origin media path"
         ));
     };
-    let Some(asset) = published.get(asset_id) else {
+    let Some(asset) = published.own(asset_id) else {
         return refuse(format!(
             "{kind} artifact media asset not found for this session"
         ));

@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::edge::{ApiError, App, Principal};
+use crate::fleet::Member;
 use crate::ids;
 
 /// How much of a file is read and sent at a time: what a response holds in memory, however
@@ -69,11 +70,14 @@ async fn publish(
 ) -> Result<Json<Value>, ApiError> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
-    // A file that comes with an agent that moves here says which id it had.
+    // A file that comes with an agent that moves here says which id it had, and whether it
+    // only comes along because the agent names it: a file the Host it was on does not say
+    // is the agent's own.
     let (moved_id, moved_at) = (
         header_text(headers, "x-asset-id"),
         header_text(headers, "x-created-at"),
     );
+    let named_only = !moved_id.is_empty() && header_text(headers, "x-named-only") == "1";
     if !moved_id.is_empty() {
         if principal != Principal::Administrator {
             return Err(ApiError::new(
@@ -140,18 +144,26 @@ async fn publish(
             ));
         }
     };
-    if !moved_id.is_empty()
-        && let Some(known) = published(&app, &moved_id)
-    {
-        // It came before: the same file for the same agent is answered again, and nothing
-        // is written. Anything else under this id is another file.
-        if known.sha256 == sha256 && known.session == session {
-            return Ok(Json(answered(&known)));
+    if !moved_id.is_empty() {
+        // An id stands for one file on this Host, whichever agents show it.
+        if kept_under(&app, &moved_id)
+            .iter()
+            .any(|known| known.sha256 != sha256)
+        {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "another file has this id",
+            ));
         }
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "another file has this id",
-        ));
+        // The agent has it already: it is answered again and nothing is written, unless it
+        // only came along before and is now said to be the agent's own. That another agent
+        // has it too does not make it this one's: each has what it brought.
+        let view = member.agent.view();
+        if let Some(known) = view.books.media.get(&moved_id)
+            && (named_only || !known.named_only)
+        {
+            return Ok(Json(answered(known)));
+        }
     }
     // Then what is known of it, in the log of the agent it is for.
     let asset = Asset {
@@ -175,6 +187,7 @@ async fn publish(
             .ok()
             .filter(|at| *at > 0)
             .unwrap_or_else(|| app.clock.now_ms()),
+        named_only,
     };
     member.agent.publish(asset.clone()).await?;
     Ok(Json(answered(&asset)))
@@ -211,12 +224,19 @@ async fn list(State(app): State<App>, Query(query): Query<ListQuery>) -> Json<Va
 }
 
 /// The published file with this id, whichever agent published it.
-fn published(app: &App, asset_id: &str) -> Option<Asset> {
+/// What the agents of this Host have under an id: the agent that published the file, and
+/// each agent that brought it along because it names it.
+fn kept_under(app: &App, asset_id: &str) -> Vec<Asset> {
     let directory = app.fleet.directory();
-    directory
-        .members
-        .iter()
-        .find_map(|member| member.agent.view().books.media.get(asset_id).cloned())
+    let of = |member: &Arc<Member>| member.agent.view().books.media.get(asset_id).cloned();
+    directory.members.iter().filter_map(of).collect()
+}
+
+/// The file under an id, as the agent that published it has it when that agent is here.
+fn published(app: &App, asset_id: &str) -> Option<Asset> {
+    let kept = kept_under(app, asset_id);
+    let own = kept.iter().find(|asset| !asset.named_only).cloned();
+    own.or_else(|| kept.into_iter().next())
 }
 
 fn not_found() -> Response {
