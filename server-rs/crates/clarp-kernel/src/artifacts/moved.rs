@@ -171,6 +171,9 @@ impl ArtifactBook {
             decision,
             page,
             revisions: was,
+            // What users answered where it was is in its conversation; a form that arrives
+            // takes answers anew.
+            submissions: Vec::new(),
         };
         // A report that came without what it was is at least what it is.
         if reports::is_report(&artifact) {

@@ -137,7 +137,8 @@ class World:
             'cancel_for_agent': artifacts.cancel_for_agent,
             'plan_create': task_plans.create, 'plan_step': self.plan_step, 'plan_act': self.plan_act,
             'plan_finish': task_plans.finish, 'publish': self.publish, 'revisions': self.revisions,
-            'represent': self.represent,
+            'represent': self.represent, 'submit': self.submit, 'pending_submissions': self.pending_submissions,
+            'mark_submission_delivered': self.mark_submission_delivered,
         }[name]
         entry = {'call': name, 'args': args, 'at': self.now}
         ids_before = self.ids
@@ -155,6 +156,22 @@ class World:
             entry['note'] = note
         self.calls.append(entry)
         return entry.get('result')
+
+    def submit(self, artifact_id: str, data: dict):
+        """A user sends answers to a form (`html_forms.submit`)."""
+        from lib import html_forms
+        return html_forms.submit(artifact_id, data)
+
+    def pending_submissions(self):
+        """The answers that wait to be told to their forms' agents, each with what is told."""
+        from lib import html_forms
+        return [{'submission_id': row['submission_id'], 'artifact_id': row['artifact_id'], 'version': row['version'],
+                 'session': row['session'], 'prompt': row['prompt'], 'created_at': row['created_at'],
+                 'synthesize_audio': bool(row['synthesize_audio'])} for row in html_forms.pending()]
+
+    def mark_submission_delivered(self, submission_id: str):
+        from lib import html_forms
+        html_forms.mark_delivered(submission_id)
 
     def pending_deliveries(self):
         """What waits to be told to an agent, each with the message it is told with."""
@@ -696,10 +713,113 @@ def a_report_and_its_revisions(w: World) -> None:
     w.call('get', artifact_id='report-1')
 
 
+def a_form_and_its_answers(w: World) -> None:
+    """A form is a page with a schema of its answers. It is made once. A user sends answers under an
+    id of their own choosing; they are held to the schema, kept once, and told to the form's agent."""
+    schema = {'type': 'object', 'properties': {
+        'when': {'type': 'string', 'enum': ['now', 'later']}, 'budget': {'type': 'number', 'minimum': 0},
+        'notes': {'type': 'string', 'maxLength': 40},
+        'steps': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 3}},
+        'required': ['when'], 'additionalProperties': False}
+
+    def form(session, artifact_id, title='A plan to fill in', note='', **more):
+        payload = {'content': '<form><input name="when"></form>', 'version': '1', 'answer_schema': schema, **more}
+        return w.call('create', note=note, session=session, type='html_form', title=title, artifact_id=artifact_id,
+                      summary='What it asks', payload=payload)
+
+    def answers(artifact_id, submission_id, given, note='', **more):
+        return w.call('submit', note=note, artifact_id=artifact_id,
+                      data={'submission_id': submission_id, 'version': '1', 'answers': given, **more})
+
+    form(w.vera, 'form-1', title='Plan: it\'s "here"')
+    form(w.vera, 'form-1', note='a form is made once: its id is taken')
+    form(w.omar, 'form-1', note='and by nobody else')
+    w.call('get', artifact_id='form-1')
+    w.call('represent', artifact_id='form-1', representation='summary-v1')
+    w.call('represent', artifact_id='form-1', representation='flat-v1')
+    w.call('list', session=w.vera, type='html_form')
+    # A form is never changed; what is said of it may be.
+    w.call('update', artifact_id='form-1', data={'payload': {'content': '<p>other</p>', 'version': '2', 'answer_schema': schema}})
+    w.call('update', artifact_id='form-1', data={'payload_patch': {'version': '2'}})
+    w.call('update', artifact_id='form-1', data={'payload_patch': {}})
+    w.call('update', artifact_id='form-1', data={'summary': 'What it asks, said better'})
+    w.call('revisions', artifact_id='form-1', note='a form has no history')
+    # What is no submission.
+    w.call('submit', artifact_id='form-1', data={})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'short', 'version': '1', 'answers': {}})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'not_plain_signs-0001', 'version': '1', 'answers': {}})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'x' * 81, 'version': '1', 'answers': {}})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 7, 'version': '1', 'answers': {}})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'sub-0000-0000-0001', 'version': '1'})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'sub-0000-0000-0001', 'version': '1', 'answers': ['now']})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now'}, synthesize_audio='yes')
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now'}, synthesize_audio=None)
+    answers('form-1', 'sub-0000-0000-0001', {'notes': 'x' * 131072}, note='more than is taken, before it is asked what it is for')
+    # What a form does not take.
+    answers('nothing-there', 'sub-0000-0000-0001', {'when': 'now'})
+    w.call('create', session=w.vera, type='document', title='Notes', artifact_id='notes-1', payload={'content': 'x'})
+    answers('notes-1', 'sub-0000-0000-0001', {'when': 'now'}, note='what is no form')
+    w.call('create', session=w.vera, type='html_form', title='A report', artifact_id='report-1',
+           payload={'content': '<p>Read me.</p>', 'version': '1', 'read_only': True})
+    answers('report-1', 'sub-0000-0000-0001', {}, note='a report takes no answers')
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'sub-0000-0000-0001', 'version': '2', 'answers': {'when': 'now'}})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'sub-0000-0000-0001', 'version': 1, 'answers': {'when': 'now'}})
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'sub-0000-0000-0001', 'answers': {'when': 'now'}})
+    answers('form-1', 'sub-0000-0000-0001', {})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'soon'})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': -1})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': '10'})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'notes': 'n' * 41})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'steps': ['a', 'b', 'c', 'd']})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'steps': ['a', 2]})
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'colour': 'red', 'also': 1})
+    answers('form-1', 'sub-0000-0000-0001', {'budget': 'x', 'when': 5}, note='the first thing the schema asks is said')
+    w.call('pending_submissions', note='nothing was taken yet')
+    # Answers that fit: kept once, however often they are sent.
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']})
+    w.call('pending_submissions')
+    answers('form-1', 'sub-0000-0000-0001', {'steps': ['a', 'b'], 'notes': 'blåbær, "quoted" 🎉', 'budget': 12.5, 'when': 'now'},
+            note='the same answers in another order are the same answers')
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']},
+            synthesize_audio=True, note='and said to be spoken, as they are when nothing is said')
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']},
+            synthesize_audio=False, note='another wish for the same answers')
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'later'}, note='other answers under a used id')
+    w.call('submit', artifact_id='form-1', data={'submission_id': 'sub-0000-0000-0001', 'version': '2', 'answers': {'when': 'now'}},
+           note='a used id, for another version')
+    answers('nothing-there', 'sub-0000-0000-0001', {'when': 'now'}, note='a used id, for a form that is not there')
+    w.call('mark_submission_delivered', submission_id='sub-0000-0000-0001')
+    w.call('pending_submissions')
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']},
+            note='sent again after its agent was told')
+    w.call('mark_submission_delivered', submission_id='sub-0000-0000-0001', note='told once')
+    w.call('mark_submission_delivered', submission_id='nothing-of-the-kind')
+    # A second answer to the same form, not to be spoken; and one to another agent's form.
+    answers('form-1', 'sub-0000-0000-0002', {'when': 'later', 'budget': 1e16, 'steps': []}, synthesize_audio=False)
+    form(w.omar, 'form-2', title='Omar asks')
+    answers('form-2', 'sub-0000-0000-0001', {'when': 'now'}, note='an id is used once on the whole Host')
+    answers('form-2', 'sub-0000-0000-0003', {'when': 'now', 'budget': 0})
+    w.call('pending_submissions', note='the oldest first')
+    w.call('mark_submission_delivered', submission_id='sub-0000-0000-0003')
+    w.call('pending_submissions')
+    # Put away, a form still takes answers; over, it does not; thrown away, it is not there.
+    w.call('archive', artifact_id='form-1', archived=True, expected_updated_at=w.kept_updated_at('form-1'))
+    answers('form-1', 'sub-0000-0000-0004', {'when': 'now'}, note='put away')
+    w.call('update', artifact_id='form-1', data={'status': 'active'})
+    answers('form-1', 'sub-0000-0000-0005', {'when': 'now'}, note='in progress')
+    w.call('update', artifact_id='form-1', data={'status': 'completed'})
+    answers('form-1', 'sub-0000-0000-0006', {'when': 'now'}, note='over')
+    answers('form-1', 'sub-0000-0000-0005', {'when': 'now'}, note='what was taken before it was over is still answered')
+    w.call('discard', artifact_id='form-2', expected_updated_at=w.kept_updated_at('form-2'))
+    answers('form-2', 'sub-0000-0000-0007', {'when': 'now'}, note='thrown away')
+    answers('form-2', 'sub-0000-0000-0003', {'when': 'now', 'budget': 0}, note='what it took before is still answered')
+    w.call('get', artifact_id='form-1')
+
+
 SCENARIOS = [plain_kinds, what_an_artifact_refuses, a_plan_is_an_artifact, an_approval_is_asked_and_answered,
              a_question_with_options_and_typed_answers, what_becomes_of_a_request_nobody_answers,
              the_inbox_and_what_a_user_does_with_an_artifact, what_names_a_published_file,
-             a_report_and_its_revisions]
+             a_report_and_its_revisions, a_form_and_its_answers]
 
 
 def main(argv: list[str]) -> int:

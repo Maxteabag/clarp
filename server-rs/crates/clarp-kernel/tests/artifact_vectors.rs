@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
+use clarp_kernel::artifacts::forms;
 use clarp_kernel::artifacts::reports::{self, Revisions};
 use clarp_kernel::artifacts::{
     self, Artifact, ArtifactBook, Ctx, Listing, Made, Maker, New, Refused, Shelf, Why,
@@ -573,6 +574,56 @@ impl Fleet {
                 );
                 Ok(json!(items))
             }
+            // A user's answers to a form: an id that was used is looked for on the whole
+            // Host before the form is.
+            "submit" => {
+                let id = text(args, "artifact_id");
+                let sent = forms::sent(&id, args["data"].as_object().unwrap())?;
+                let before = self
+                    .agents
+                    .iter()
+                    .find_map(|agent| agent.artifacts.submission(&sent.submission_id));
+                if let Some((form, previous)) = before {
+                    return previous.again(&form.artifact_id, &sent);
+                }
+                let Some(at) = self.holding(&id) else {
+                    return refused(Why::Value, "HTML form not found");
+                };
+                let (form, receipt) = self.agents[at].artifacts.submitted(&id, &sent, now)?;
+                self.agents[at].keep(&form, now);
+                Ok(receipt)
+            }
+            "pending_submissions" => {
+                let mut rows: Vec<(i64, Value)> = Vec::new();
+                for agent in &self.agents {
+                    for (artifact_id, submission_id) in agent.artifacts.untold() {
+                        let (_, kept) = agent.artifacts.submission(&submission_id).unwrap();
+                        let row = json!({
+                            "submission_id": submission_id, "artifact_id": artifact_id,
+                            "version": kept.version, "session": agent.session,
+                            "prompt": kept.prompt, "created_at": kept.created_at,
+                            "synthesize_audio": kept.synthesize_audio,
+                        });
+                        rows.push((kept.created_at, row));
+                    }
+                }
+                rows.sort_by_key(|(at, _)| *at);
+                let rows: Vec<Value> = rows.into_iter().map(|(_, row)| row).collect();
+                Ok(json!(rows))
+            }
+            "mark_submission_delivered" => {
+                let id = text(args, "submission_id");
+                for agent in &mut self.agents {
+                    let form = agent.artifacts.submission(&id);
+                    let form = form.map(|(form, _)| form.artifact_id.clone());
+                    if let Some(form) = form
+                        && let Some((form, _, _)) = agent.artifacts.told(&form, &id, now)
+                    {
+                        agent.keep(&form, now);
+                    }
+                }
+                Ok(Value::Null)
+            }
             "pending_deliveries" => {
                 let shelves = self.shelves();
                 let rows: Vec<Value> = decisions::pending_deliveries(&shelves)
@@ -737,6 +788,8 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
                     let kind = match ours.why {
                         // What the store of published files refuses has a name of its own.
                         Why::Value if what == "publish" => "MediaError",
+                        // And so has a report that is sent answers.
+                        Why::Value if ours.message == forms::READ_ONLY => "ReadOnlyForm",
                         Why::Value => "ValueError",
                         Why::Permission => "PermissionError",
                         Why::Integrity => "IntegrityError",
@@ -781,5 +834,5 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
         wrong.len(),
         shown.join("\n")
     );
-    assert!(compared >= 380, "only {compared} calls were compared");
+    assert!(compared >= 450, "only {compared} calls were compared");
 }
