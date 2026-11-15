@@ -883,9 +883,12 @@ pub(crate) async fn send_message(
             "unknown forced agent",
         ));
     };
-    // Who it comes from, as the Python Host reads a send: the origin it names, when that is
-    // one a sender may name; otherwise another agent, when it names its sender; otherwise
-    // the user. What the Host stamps itself (a janitor, a leader's tick) nobody may claim.
+    // Who it comes from. A message that names its sender is that agent's, whatever else it
+    // says of itself: on the Python Host a client that names a sender may still say the
+    // message is the user's, and the focus and the queue then treat an agent as a person
+    // (issue 360 of the repository). Without a sender: the origin it names, when that is one
+    // a client may name; otherwise the user. What the Host stamps itself (a janitor, a
+    // leader's tick) nobody may claim.
     let sender = sender(app, request.sender.as_ref());
     let from_agent = || Origin::Agent {
         agent_id: sender
@@ -905,16 +908,18 @@ pub(crate) async fn send_message(
             "Heartbeats are disabled on this Host",
         ));
     }
-    let origin = match named.as_str() {
-        "user" => Origin::User,
-        "agent" => from_agent(),
-        "oracle" | "schedule" | "automation" | "watcher" | "dreaming" => Origin::Trigger {
+    let origin = match (sender.is_some(), named.as_str()) {
+        (true, _) | (false, "agent") => from_agent(),
+        (false, "oracle" | "schedule" | "automation" | "watcher" | "dreaming") => Origin::Trigger {
             name: named.clone(),
         },
-        _ if sender.is_some() => from_agent(),
-        _ => Origin::User,
+        (false, _) => Origin::User,
     };
     let origin_is_user = origin == Origin::User;
+    // Only a person moves the focus: the user, and the Oracle acting on what the user said
+    // (the Python Host's `origins.FOCUS_ORIGINS`).
+    let by_a_person =
+        origin_is_user || matches!(&origin, Origin::Trigger { name } if name == "oracle");
     // A message to an agent that is busy waits its turn, as on the Python Host. What differs
     // is where it waits. A plain message is said: it is in the conversation at once. One sent
     // with `queue_if_busy` was left for later: it is in the queue until its turn starts, and
@@ -952,7 +957,7 @@ pub(crate) async fn send_message(
             .noted(writer, member.record.agent_id.clone())
             .await?;
     }
-    if origin_is_user {
+    if by_a_person {
         // Writing to an agent makes it the open one, without a word about it.
         let _ = app.fleet.open(member.record.session.clone()).await;
     }
