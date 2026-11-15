@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Run the repository's two gates (make test-critical, make test-guards) on the build machine.
+#
+#   server-rs/tools/repo-gates        prints critical_exit=N and guards_exit=N; exit 0 only if both are 0
+#
+# For when elitebook is too loaded to run them: under load 30 the critical gate died there with a
+# pytest segfault (15 Nov 2026). It copies this checkout without .git, .venv, node_modules and
+# build output, waits for the one build slot (the same lock as tools/build) and runs both gates
+# at lowest priority. The remote .venv is kept between runs. Read the two exit lines and grep the
+# output for ^FAILED: a wrapper's own exit code says nothing about the tests.
+set -uo pipefail
+
+HOST="${CLARP_BUILD_HOST:-xps15}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+remote="/var/tmp/clarp-build/$(basename "$root")-repo"
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
+
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote" || exit 3
+rsync -a --delete --exclude .git --exclude .venv --exclude node_modules --exclude target/ --exclude __pycache__ \
+    --exclude .pytest_cache --exclude 'desktop-rs/target' -e "ssh ${ssh_opts[*]}" "$root/" "$HOST:$remote/" || exit 3
+who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $(basename "$root") repo-gates"
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote && exec flock /var/tmp/clarp-build/lock bash -c 'echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder; nice -n 19 ionice -c3 make test-critical; c=\$?; echo critical_exit=\$c; nice -n 19 ionice -c3 make test-guards; g=\$?; echo guards_exit=\$g; : > /var/tmp/clarp-build/holder; [ \$c -eq 0 ] && [ \$g -eq 0 ]'"
