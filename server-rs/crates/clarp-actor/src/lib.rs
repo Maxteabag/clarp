@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
-use clarp_kernel::agent::{Command, Effect};
+use clarp_kernel::agent::{Command, Effect, Rest};
 use clarp_kernel::conversation::{Entry, Imported, Message, Notice, Reply, TurnEnd};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
@@ -248,6 +248,10 @@ pub struct Status {
     pub head_revision: u64,
     /// The tool's own session, where the next turn continues.
     pub backend_session: Option<String>,
+    /// What the agent says it is busy with beyond its turns. Empty: nothing.
+    pub label: String,
+    /// What the agent rests in since it last said so, until its next turn starts.
+    pub resting: Option<Rest>,
 }
 
 /// The turn that holds the agent, as the actor follows it.
@@ -475,6 +479,8 @@ impl Actor {
             queue_revision: agent.queue_revision(),
             head_revision: self.head_revision(),
             backend_session: agent.backend_session().map(str::to_string),
+            label: agent.label().to_string(),
+            resting: agent.resting(),
         }
     }
 
@@ -781,6 +787,22 @@ impl Actor {
         };
         self.carry_out(effects, &mut out)?;
         Ok((u32::try_from(told).unwrap_or(u32::MAX), out))
+    }
+
+    /// The agent says what it is busy with beyond its turns, or with an empty label, that it
+    /// no longer is.
+    pub fn label(&mut self, text: &str, now_ms: i64) -> Result<Outputs, ActorError> {
+        let command = Command::Label {
+            text: text.to_string(),
+        };
+        self.recorder.handle(command, now_ms)?;
+        Ok(Outputs {
+            changed: Changed {
+                status: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        })
     }
 
     /// Lets a held mailbox run again. Returns whether it was held.

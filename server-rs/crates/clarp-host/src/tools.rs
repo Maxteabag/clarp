@@ -118,6 +118,31 @@ fn worker_of(call: &ToolCall) -> Worker {
     }
 }
 
+/// The longest status label, and the most words it has: it sits in a header.
+const LABEL_MAX_CHARS: usize = 20;
+const LABEL_MAX_WORDS: usize = 3;
+
+/// A status label that fits a header, and whether it had to be cut for that.
+fn shorten_label(label: &str) -> (String, bool) {
+    let words: Vec<&str> = label.split_whitespace().collect();
+    let original = words.join(" ");
+    let fits = |text: &str| text.chars().count() <= LABEL_MAX_CHARS;
+    if words.is_empty() {
+        return (String::new(), false);
+    }
+    if fits(&original) && words.len() <= LABEL_MAX_WORDS {
+        return (original, false);
+    }
+    for count in (1..=words.len().min(LABEL_MAX_WORDS)).rev() {
+        let candidate = words[..count].join(" ");
+        if fits(&candidate) {
+            return (candidate, true);
+        }
+    }
+    let cut: String = words[0].chars().take(LABEL_MAX_CHARS).collect();
+    (cut.trim_end().to_string(), true)
+}
+
 /// A text as the Python tools show it inside a message.
 fn quoted(text: &str) -> String {
     format!("'{text}'")
@@ -398,10 +423,81 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                 _ => ToolAnswer::code(1),
             }
         }
-        ("on" | "off", _) => ToolAnswer::said(
-            NOT_HERE,
-            "agent_bg: a status label is not available on this Host yet (the Rust Host). Nothing was done.",
-        ),
+        ("on" | "off", _) => {
+            // The agent's own word for what it left running: shown with it while it rests,
+            // and through its turns, until it takes the word back.
+            let Some(member) = app.member(session) else {
+                return ToolAnswer::said(
+                    1,
+                    format!("agent_bg: no agent for session {}", quoted(session)),
+                );
+            };
+            let (label, shortened) = if verb == "on" {
+                shorten_label(argv.get(2).copied().unwrap_or(""))
+            } else {
+                (String::new(), false)
+            };
+            if let Err(error) = member.agent.label(label.clone()).await {
+                return could_not(&error);
+            }
+            if verb == "on" {
+                // A worker that says it is at work is alive: the jobs it registered hear it.
+                let worker = worker_of(call);
+                if worker.pid != 0 && !worker.start_token.is_empty() {
+                    let jobs = member.agent.view().jobs.clone();
+                    for job in jobs.iter().filter(|job| {
+                        job.status.is_active()
+                            && job.worker.pid == worker.pid
+                            && job.worker.start_token == worker.start_token
+                    }) {
+                        let command = JobCommand::Heartbeat {
+                            id: job.id.clone(),
+                            generation: None,
+                            worker: worker.clone(),
+                            source: "worker_status".to_string(),
+                        };
+                        let _ = member.agent.job(command).await;
+                    }
+                }
+            }
+            if shortened {
+                ToolAnswer::said(
+                    0,
+                    format!("agent_bg: shortened status to {}", quoted(&label)),
+                )
+            } else {
+                ToolAnswer::code(0)
+            }
+        }
         _ => ToolAnswer::said(2, BG_USAGE),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_status_label_is_a_few_words_that_fit_a_header() {
+        assert_eq!(shorten_label("Building"), ("Building".to_string(), false));
+        assert_eq!(
+            shorten_label("  Awaiting   Domi "),
+            ("Awaiting Domi".to_string(), false)
+        );
+        assert_eq!(shorten_label(""), (String::new(), false));
+        assert_eq!(
+            shorten_label("Running the whole test suite again"),
+            ("Running the whole".to_string(), true),
+            "three words at most"
+        );
+        assert_eq!(
+            shorten_label("Reconciling conformance differences"),
+            ("Reconciling".to_string(), true),
+            "and twenty characters"
+        );
+        assert_eq!(
+            shorten_label("Supercalifragilisticexpialidocious"),
+            ("Supercalifragilistic".to_string(), true)
+        );
     }
 }
