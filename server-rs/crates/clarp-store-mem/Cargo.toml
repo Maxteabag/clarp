@@ -1,0 +1,15 @@
+[package]
+name = "clarp-store-mem"
+description = "An in-memory log engine: the simulator's disk, and the second implementation that keeps the port honest"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+clarp-ports.workspace = true
+
+[dev-dependencies]
+clarp-codec.workspace = true
+
+[lints]
+workspace = true

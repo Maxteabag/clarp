@@ -1,0 +1,9 @@
+[package]
+name = "clarp-ports"
+description = "The ports of the Clarp Host: traits with more than one implementation, and the suites every implementation must pass"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

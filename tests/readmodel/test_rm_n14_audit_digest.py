@@ -254,6 +254,37 @@ def test_a_full_import_for_another_reason_starts_the_count_again(tmp_path, backe
         (10, TAIL, False, 2), (11, FULL, False, None)]
 
 
+@BACKENDS
+def test_with_the_other_switches_on_the_audits_are_the_same(tmp_path, backend):
+    """The switches a Host can run with beside this one: the full import
+    that digests while it parses, the live rows, a turn's end as a tail, the
+    yield after the first write. The audits fall where they fall without
+    them, each import leaves what the full replay leaves (``_ticks`` compares
+    every one), and the full import that every third audit still is reads
+    its file once."""
+    alone = _how(True, audit_every=1, audit_full_every=3)
+    others = {"full_digest_while_parsing": True, "carry_live_rows": True,
+              "carry_settled_turns": True, "tail_yield_after_first_write": True}
+    together = {"settings": {**alone["settings"], **others}}
+    where = [tmp_path / "alone", tmp_path / "together"]
+    for directory in where:
+        directory.mkdir()
+    assert _ticks(where[0], backend, alone, 7) == _ticks(where[1], backend, together, 7) == [
+        (1, TAIL, False, None), (2, TAIL, True, 1), (3, TAIL, False, 1), (4, TAIL, True, 2),
+        (5, TAIL, False, 2), (6, FULL, False, None), (7, TAIL, False, None)]
+    reference, candidate, transcript = _world(tmp_path, backend, records=40)
+    with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+        actual.tick(0, faults=together)
+        said = []
+        for tick in range(1, 7):
+            _append(transcript, backend, 40 + tick)
+            report = actual.tick(tick, faults=together)
+            said.append((_decision(report), report["digest_reads"], report["second_read"]))
+    assert said == [
+        (TAIL, ["added"], []), (TAIL, ["all"], []), (TAIL, ["added"], []), (TAIL, ["all"], []),
+        (TAIL, ["added"], []), (FULL, [], ["saved"])]
+
+
 def test_the_switch_is_off_until_switched_on():
     from lib import transcript_incremental as inc
     assert inc._DEFAULTS["audit_grown_by_digest"] is False

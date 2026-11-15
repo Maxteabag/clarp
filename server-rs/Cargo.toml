@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/clarp-ports",
+    "crates/clarp-codec",
+    "crates/clarp-store-mem",
+    "crates/clarp-store-sqlite",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+clarp-ports = { path = "crates/clarp-ports" }
+clarp-codec = { path = "crates/clarp-codec" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+zstd = "0.13"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
