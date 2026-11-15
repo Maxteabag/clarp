@@ -84,6 +84,65 @@ async fn activity(
     }
 }
 
+/// The most the log of the apps' own lines may weigh before the older half of it is put
+/// aside (`apps.log.1`, which the next time replaces).
+const APP_LOG_MAX: u64 = 16 * 1024 * 1024;
+
+/// One line at a time is written to the log of the apps.
+static APP_LOG: Mutex<()> = Mutex::new(());
+
+/// Writes lines to the log of the apps, under the data directory.
+fn logged(directory: &Path, lines: &str) -> std::io::Result<()> {
+    let _one_at_a_time = APP_LOG.lock();
+    std::fs::create_dir_all(directory)?;
+    let path = directory.join("apps.log");
+    if std::fs::metadata(&path).is_ok_and(|kept| kept.len() > APP_LOG_MAX) {
+        std::fs::rename(&path, directory.join("apps.log.1"))?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    file.write_all(lines.as_bytes())
+}
+
+/// `POST /clog`: an app hands over lines of its own log, one (`{event, detail, ...}`) or
+/// several (`{events: [...]}`). They are what says why something did not work on a phone,
+/// so they are kept: in one file under the data directory, which does not grow without end.
+/// An app keeps its lines and sends them again until a Host has taken them.
+async fn app_log(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
+    let Ok(said @ Value::Object(_)) = serde_json::from_slice::<Value>(&body) else {
+        return Err(bad("bad json"));
+    };
+    let several = said.get("events").and_then(Value::as_array);
+    let events: Vec<&Value> = match several {
+        Some(events) => events.iter().collect(),
+        None => vec![&said],
+    };
+    let at = crate::wire::iso(app.clock.now_ms());
+    let mut lines = String::new();
+    for event in events {
+        let name = event.get("event").and_then(Value::as_str).unwrap_or("?");
+        let name: String = name.chars().take(64).collect();
+        let detail = match event.get("detail") {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+        };
+        // One event, one line: what an app says is not let break it.
+        let line = format!("{at} app {name} {detail}");
+        lines.push_str(&line.replace(['\n', '\r'], " "));
+        lines.push('\n');
+    }
+    let directory = app.config.data_dir.join("logs");
+    let kept = tokio::task::spawn_blocking(move || logged(&directory, &lines)).await;
+    match kept {
+        Ok(Ok(())) => Ok(Json(json!({ "ok": true }))),
+        // Not kept: said so, and the app keeps its lines.
+        _ => Ok(Json(json!({ "ok": true, "captured": false }))),
+    }
+}
+
 /// The most a file a user attaches may weigh.
 const UPLOAD_MAX: usize = 50 * 1024 * 1024;
 
@@ -291,4 +350,5 @@ pub fn routes() -> Router<App> {
         .route("/focus", post(focus))
         .route("/application-activity", post(activity))
         .route("/upload", post(upload))
+        .route("/clog", post(app_log))
 }
