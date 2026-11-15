@@ -556,7 +556,7 @@
        "turn_started_ms": null
       },
       "mcp_servers": [],
-      "model": "replay-fake",
+      "model": "",
       "model_avatar_url": "",
       "muted": false,
       "parent_agent_id": null,
