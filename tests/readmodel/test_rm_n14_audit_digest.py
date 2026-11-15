@@ -182,7 +182,80 @@ def test_an_unchanged_file_is_not_this_switchs_business(tmp_path, backend):
         harness.assert_product_equal(reference, candidate)
 
 
+# ---- every Nth audit is still the full import (audit_full_every) ----------------------
+
+def _by_digest(database):
+    """The checkpoint's count of audits by digest since its last full import."""
+    with sqlite3.connect(database) as connection:
+        [(count,)] = connection.execute(
+            "SELECT json_extract(store_carry_json, '$.audits_by_digest') "
+            "FROM transcript_import_checkpoints")
+    return count
+
+
+def _ticks(tmp_path, backend, how, last, *, other=None):
+    """Imports 1 to ``last`` of a transcript that grows by a record each
+    time, the audit due at every second one. [(tick, decision, said in the
+    journal, the count)]. ``other``: {tick: settings for that one import}."""
+    reference, candidate, transcript = _world(tmp_path, backend, records=40)
+    seen = []
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0, faults=how)
+            for tick in range(1, last + 1):
+                _append(transcript, backend, 40 + tick)
+                full.tick(tick)
+                faults = how if tick not in (other or {}) else {
+                    "settings": {**how["settings"], **other[tick]}}
+                report = actual.tick(tick, faults=faults)
+                harness.assert_product_equal(reference, candidate)
+                seen.append((tick, _decision(report), "audited_by_digest" in _retentions(report),
+                             _by_digest(candidate)))
+    return seen
+
+
+TAIL, FULL = "tail_applied", "full_audit"
+
+
+@pytest.mark.parametrize("every", [1, 2, 3])
+@BACKENDS
+def test_every_nth_due_audit_is_still_the_full_import(tmp_path, backend, every):
+    """A full import replays every turn and so puts right what a tail left
+    wrong; the audit by digest checks only the bytes. So one audit in
+    ``audit_full_every`` stays what it was. With 1 every audit is the full
+    import, which is how it is without the switch."""
+    seen = _ticks(tmp_path, backend, _how(True, audit_every=1, audit_full_every=every), 12)
+    wanted, since = [], 0
+    for tick in range(1, 13):
+        if tick % 2:
+            wanted.append((tick, TAIL, False, since or None))        # not due
+        elif since + 1 < every:
+            since += 1
+            wanted.append((tick, TAIL, True, since))                 # the audit, by digest
+        else:
+            since = 0
+            wanted.append((tick, FULL, False, None))                 # the Nth: a full import
+    assert seen == wanted
+    assert [decision for _tick, decision, _said, _count in seen].count(FULL) == 6 // every
+
+
+@BACKENDS
+def test_a_full_import_for_another_reason_starts_the_count_again(tmp_path, backend):
+    """Two audits by digest, then a full import that is no audit (the tail
+    had grown past what a tail may hold). It replayed every turn too, so the
+    next two audits are by digest again, and the one after is full."""
+    how = _how(True, audit_every=1, audit_full_every=3)
+    seen = _ticks(tmp_path, backend, how, 11, other={5: {"max_tail_bytes": 4096}})
+    assert seen == [
+        (1, TAIL, False, None), (2, TAIL, True, 1), (3, TAIL, False, 1), (4, TAIL, True, 2),
+        (5, "full_tail_too_large", False, None),
+        (6, TAIL, False, None), (7, TAIL, True, 1), (8, TAIL, False, 1), (9, TAIL, True, 2),
+        (10, TAIL, False, 2), (11, FULL, False, None)]
+
+
 def test_the_switch_is_off_until_switched_on():
     from lib import transcript_incremental as inc
     assert inc._DEFAULTS["audit_grown_by_digest"] is False
     assert inc._DEFAULTS["audit_unchanged_by_digest"] is True
+    assert inc._DEFAULTS["audit_full_every"] == 8

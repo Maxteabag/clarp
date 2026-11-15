@@ -690,6 +690,11 @@ _DEFAULTS = {
     # then imported as a tail, which starts the audit's clock again. False:
     # it is imported in full, as before.
     "audit_grown_by_digest": False,
+    # With audit_grown_by_digest: every Nth due audit of a conversation is
+    # still the full import, and the others are by digest. A full import
+    # replays every turn, so it puts right a row a tail left wrong; by
+    # digest only the bytes are checked. 1: every audit is a full import.
+    "audit_full_every": 8,
     # True: an UNCHANGED file whose audit is due (after a Host start) has its
     # bytes read once and compared with the stored digest. False: it is
     # imported in full, as a grown file whose audit is due always is.
@@ -715,6 +720,12 @@ _DEFAULTS = {
     # False: it loses its frontier and the next import is full.
     "tail_keeps_frontier_when_grown": False,
 }
+
+
+# A checkpoint's count of audits by digest since its last full import, a key
+# of its store carry (the store never reads it; no column of its own, which
+# would be a schema step).
+_AUDITS_BY_DIGEST = "audits_by_digest"
 
 
 def carry_rules(conf) -> frozenset:
@@ -1465,7 +1476,14 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             state = replace(state, hasher=hasher)
             audited = True
     audit_by_digest = False
-    if reason == "audit" and not unchanged and bool(conf.get("audit_grown_by_digest")):
+    # How many audits of this conversation were by digest since its last full
+    # import. It is kept in the checkpoint, beside the store's carry, and a
+    # tail hands it on; a full import writes a new carry without it, so a full
+    # import for any reason starts the count again. Every
+    # ``audit_full_every``-th due audit stays the full import.
+    audits_by_digest = int((cp.store_carry or {}).get(_AUDITS_BY_DIGEST) or 0)
+    if reason == "audit" and not unchanged and bool(conf.get("audit_grown_by_digest")) \
+            and audits_by_digest + 1 < max(1, int(conf.get("audit_full_every") or 1)):
         # A grown file whose audit is due. What the audit is for is the bytes
         # a tail does not read again: are they still what was imported? That
         # is one read of the file and a comparison; replaying every turn to
@@ -1554,6 +1572,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                       tail_hash=tail_hash,
                       imports_since_audit=0 if audit_by_digest else cp.imports_since_audit + 1,
                       audited_at=db.now_ms() if audit_by_digest else cp.audited_at,
+                      store_carry={**cp.store_carry, _AUDITS_BY_DIGEST: audits_by_digest + 1}
+                      if audit_by_digest else cp.store_carry,
                       updated_at=db.now_ms())
     recorded = None
     checkpoint_status = {}
