@@ -114,6 +114,12 @@ pub trait Backend: Send + Sync {
     fn context_window(&self) -> Option<u64> {
         None
     }
+
+    /// How hard this tool can be told to think: the efforts an agent of it may be set to.
+    /// Empty for a tool that takes none.
+    fn efforts(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// The environment variable that names Claude Code's program, when it is not `claude` on the path.
@@ -147,6 +153,11 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
 /// The context window of the backend with this name, when it declares one.
 pub fn context_window(id: &str) -> Option<u64> {
     by_id(id).and_then(|backend| backend.context_window())
+}
+
+/// The efforts an agent of the backend with this name may be set to.
+pub fn efforts(id: &str) -> &'static [&'static str] {
+    by_id(id).map_or(&[], |backend| backend.efforts())
 }
 
 /// The first `max` characters of a text, with a mark when something was left out.

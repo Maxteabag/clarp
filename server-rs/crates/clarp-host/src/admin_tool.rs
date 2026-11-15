@@ -9,18 +9,23 @@
 //! With `--server NAME` the message goes to an agent of another Host the owner named
 //! ([`crate::peers`]): the Python Host beside this one, while agents move over one by one.
 //!
+//! Two more commands are an agent's: `clarp-admin sessions` lists the agents it can write
+//! to, and `clarp-admin model` shows or sets which model an agent runs (the skill
+//! `clarp-sessions`).
+//!
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
+use clarp_backend::SESSION_ENV;
 use clarp_protocol::requests::SendRequest;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::artifact_tool::parse;
 use crate::edge::{self, App};
 use crate::ids;
 use crate::peers::{self, Failed};
-use crate::request_tool;
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
+use crate::{request_tool, roster};
 
 /// What argparse says of a command line it cannot read, and exits 2 with.
 fn usage(why: &str) -> ToolAnswer {
@@ -149,10 +154,112 @@ async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// A value as the Python tool prints it: on lines of its own, two spaces in.
+fn shown(value: &Value) -> ToolAnswer {
+    match serde_json::to_string_pretty(value) {
+        Ok(shown) => ToolAnswer::printed(0, shown),
+        Err(error) => ToolAnswer::said(1, format!("clarp-admin: {error}")),
+    }
+}
+
+/// `clarp-admin sessions`: the agents of this Host, by their names: what an agent reads
+/// before it writes to another.
+fn sessions(app: &App) -> ToolAnswer {
+    let directory = app.fleet.directory();
+    let mut records: Vec<_> = directory
+        .members
+        .iter()
+        .map(|member| &member.record)
+        .collect();
+    records.sort_by(|a, b| (&a.persona, &a.session).cmp(&(&b.persona, &b.session)));
+    let listed: Vec<Value> = records
+        .into_iter()
+        .map(|record| {
+            json!({
+                "session": record.session,
+                "agent_id": record.agent_id,
+                "persona": record.persona,
+                "backend": record.backend,
+                "cwd": record.cwd,
+            })
+        })
+        .collect();
+    shown(&json!(listed))
+}
+
+/// `clarp-admin model [MODEL] [--effort EFFORT] [--session SESSION]`: shows or sets an
+/// agent's model and effort; with no session, those of the agent that calls. `default`
+/// clears one back to the tool's own choice. A change holds from the agent's next turn:
+/// the turn that runs the command keeps what it was started with.
+async fn model(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let parsed = match parse(args, &["--effort", "--session"], &[], &["[model]"]) {
+        Ok(parsed) => parsed,
+        Err(why) => {
+            return ToolAnswer::said(
+                2,
+                format!(
+                    "usage: clarp-admin model [-h] [--effort EFFORT] [--session SESSION] [model]\n\
+                     clarp-admin model: error: {why}"
+                ),
+            );
+        }
+    };
+    let own = call.env.get(SESSION_ENV).map_or("", String::as_str);
+    let session = parsed.option("--session").unwrap_or(own).trim().to_string();
+    if session.is_empty() {
+        return ToolAnswer::said(
+            1,
+            "no session: pass --session (CLAUDE_PWA_SESSION is unset)",
+        );
+    }
+    let Some(member) = app.member(&session) else {
+        return ToolAnswer::said(1, format!("no such agent session: {session}"));
+    };
+    let cleared = |said: &str| {
+        if said == "default" {
+            String::new()
+        } else {
+            said.to_string()
+        }
+    };
+    let mut asked = roster::Fields::new();
+    asked.insert("session".to_string(), json!(session));
+    if let Some(model) = parsed.positional.first() {
+        asked.insert("model".to_string(), json!(cleared(model)));
+    }
+    if let Some(effort) = parsed.option("--effort") {
+        asked.insert("effort".to_string(), json!(cleared(effort)));
+    }
+    if asked.len() == 1 {
+        // Which models a tool offers, this Host does not know yet: it lists none, and
+        // takes the name it is given.
+        return shown(&json!({
+            "session": session,
+            "backend": member.record.backend,
+            "model": member.record.model,
+            "effort": member.record.effort,
+            "available": [],
+        }));
+    }
+    match roster::tune(app, &asked).await {
+        Ok(mut result) => {
+            result["session"] = json!(session);
+            result["applies"] = json!("next turn");
+            shown(&result)
+        }
+        Err(refused) => {
+            let (status, detail) = refused.answered();
+            ToolAnswer::said(1, format!("model change refused (HTTP {status}): {detail}"))
+        }
+    }
+}
+
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "prompt" => prompt(app, rest).await,
+        Some((command, _)) if command == "sessions" => sessions(app),
+        Some((command, rest)) if command == "model" => model(app, call, rest).await,
         Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,
         Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
         Some((command, _)) => not_here(command),

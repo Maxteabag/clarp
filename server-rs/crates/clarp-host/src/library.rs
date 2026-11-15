@@ -667,6 +667,17 @@ fn push_request(app: &App, artifact: &Value) {
     if decision_id.is_empty() || decision["status"].as_str().unwrap_or("pending") != "pending" {
         return;
     }
+    // An agent the user muted pages nobody, also when it asks. The request waits in the
+    // inbox like any other.
+    let directory = app.fleet.directory();
+    let asker = artifact["agent_id"].as_str().unwrap_or("");
+    let muted = directory
+        .members
+        .iter()
+        .any(|member| member.record.agent_id == asker && member.record.muted);
+    if muted {
+        return;
+    }
     let or = |said: String, otherwise: String| if said.is_empty() { otherwise } else { said };
     app.pusher.requested(Requested {
         session: text(&artifact["session"]),

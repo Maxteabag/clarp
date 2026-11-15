@@ -555,6 +555,13 @@ impl Actor {
         &self.profile
     }
 
+    /// Sets which model the agent's next turn runs with, and how much effort. A turn that
+    /// runs keeps what it was started with. `None` is the tool's own choice.
+    pub fn retune(&mut self, model: Option<String>, effort: Option<String>) {
+        self.profile.model = model;
+        self.profile.effort = effort;
+    }
+
     /// The name of the backend that runs this agent's turns.
     pub fn backend_id(&self) -> &'static str {
         self.backend.id()

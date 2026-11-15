@@ -39,15 +39,20 @@ fn who(member: &Member) -> Who<'_> {
 }
 
 /// The agent with this session name, or why there is none, as the Python tool says it.
+/// An agent that is put away neither asks nor is asked.
 fn agent(app: &App, session: &str, role: &str) -> Result<Arc<Member>, String> {
-    app.member(session).ok_or_else(|| {
+    let member = app.member(session).ok_or_else(|| {
         let named = if session.is_empty() {
             "(empty)"
         } else {
             session
         };
         format!("no such {role} session: {named}")
-    })
+    })?;
+    if member.record.archived_at_ms.is_some() {
+        return Err(format!("{} ({session}) is archived", member.record.persona));
+    }
+    Ok(member)
 }
 
 /// A plan as anyone may read it, with the agent it belongs to.
@@ -412,6 +417,12 @@ async fn plan_reply(
             "the agent that sent request {request_id} no longer exists"
         ));
     };
+    if requester.record.archived_at_ms.is_some() {
+        return Err(format!(
+            "{}, who sent request {request_id}, is archived",
+            requester.record.persona
+        ));
+    }
     // The asker's goal that names this request, whatever its state: the last changed one.
     let key = requests::dependency_key(request_id);
     let plans = requester.agent.view().books.goals.list(app.clock.now_ms());

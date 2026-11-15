@@ -68,6 +68,10 @@ impl Backend for Codex {
         "codex"
     }
 
+    fn efforts(&self) -> &'static [&'static str] {
+        &["low", "medium", "high", "xhigh", "max", "ultra"]
+    }
+
     fn launch(&self, spec: &TurnSpec) -> Launch {
         let mut args: Vec<String> = [
             "exec",

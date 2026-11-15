@@ -29,7 +29,7 @@ use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
 use tokio::sync::{oneshot, watch};
 
-use crate::fleet::AgentRecord;
+use crate::fleet::{AgentRecord, non_empty};
 use crate::goaltool;
 use crate::hub::Hub;
 use crate::ids;
@@ -169,6 +169,12 @@ pub enum Ask {
     LaunchFailed {
         turn: TurnId,
         reason: String,
+    },
+    /// From the fleet: the user changed something about the agent. This is the agent as it
+    /// now is. Nobody is refused: `taken` is done when the thread has it.
+    Amended {
+        record: Box<AgentRecord>,
+        taken: oneshot::Sender<()>,
     },
     /// The agent was removed: the thread ends.
     Close,
@@ -347,6 +353,15 @@ impl AgentHandle {
 
     pub fn view(&self) -> Arc<View> {
         self.view.borrow().clone()
+    }
+
+    /// Tells the agent's thread what the agent now is: its name, whether it is muted or put
+    /// away, its model. Does not wait; `taken` is done when the thread has it.
+    pub fn amended(&self, record: AgentRecord, taken: oneshot::Sender<()>) {
+        let _ = self.tx.send(Ask::Amended {
+            record: Box::new(record),
+            taken,
+        });
     }
 
     /// Ends the agent's thread. Its turn, if one runs, is not touched.
@@ -564,7 +579,7 @@ impl Worker {
                             self.setup.record.session
                         );
                         self.show_broken(&why);
-                        if !refuse_for(rx, wait, &why) {
+                        if !refuse_for(rx, wait, &why, &mut |record| self.amended(record)) {
                             return;
                         }
                         wait = (wait * 2).min(REOPEN_MOST);
@@ -652,6 +667,18 @@ impl Worker {
 
     fn now_ms(&self) -> i64 {
         self.setup.clock.now_ms()
+    }
+
+    /// Takes the agent as the fleet now has it. Its next turn runs with the model and the
+    /// effort it now has; a turn that runs keeps what it was started with.
+    fn amended(&mut self, record: AgentRecord) {
+        let (model, effort) = (non_empty(&record.model), non_empty(&record.effort));
+        self.setup.profile.model.clone_from(&model);
+        self.setup.profile.effort.clone_from(&effort);
+        if let Some(actor) = self.actor.as_mut() {
+            actor.retune(model, effort);
+        }
+        self.setup.record = record;
     }
 
     fn open(&mut self) -> Result<(), String> {
@@ -831,6 +858,11 @@ impl Worker {
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::Goal { ask, answer } => return self.handle_goal(&ask, answer),
+            Ask::Amended { record, taken } => {
+                self.amended(*record);
+                let _ = taken.send(());
+                return Ok(());
+            }
             other => other,
         };
         let now = self.now_ms();
@@ -915,7 +947,7 @@ impl Worker {
             }
             Ask::Row { id, answer } => return read(actor.row(&id), answer),
             // Answered above, where what they change is published first.
-            Ask::Artifact { .. } | Ask::Goal { .. } => return Ok(()),
+            Ask::Artifact { .. } | Ask::Goal { .. } | Ask::Amended { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::ShimGone { turn } => (actor.shim_gone(turn, now)?, nobody()),
             Ask::LaunchFailed { turn, reason } => {
@@ -1395,7 +1427,12 @@ fn read<T>(result: Result<T, ActorError>, answer: Answer<T>) -> Result<(), Actor
 
 /// While an agent cannot be opened, whoever asks is told why instead of being left waiting.
 /// Returns false when the agent was closed meanwhile.
-fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
+fn refuse_for(
+    rx: &mpsc::Receiver<Ask>,
+    wait: Duration,
+    why: &str,
+    amended: &mut dyn FnMut(AgentRecord),
+) -> bool {
     let until = Instant::now() + wait;
     loop {
         let refusal = || Unavailable(format!("the agent cannot be opened: {why}"));
@@ -1417,6 +1454,11 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}
+            // Who the agent is can be changed while it cannot be opened.
+            Ok(Ask::Amended { record, taken }) => {
+                amended(*record);
+                let _ = taken.send(());
+            }
             Ok(Ask::Close) | Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,
         }
