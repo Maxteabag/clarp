@@ -683,6 +683,16 @@ _DEFAULTS = {
     # import, as before. False: at the first tail after a Host start, at
     # every audit, and whenever the file looks touched (see _try_tail).
     "digest_every_tail": False,
+    # Off unless switched on: a GROWN file whose audit is due has its
+    # imported bytes read once and compared with the stored digest, and is
+    # then imported as a tail, which starts the audit's clock again. False:
+    # it is imported in full, as before.
+    "audit_grown_by_digest": False,
+    # With audit_grown_by_digest: every Nth due audit of a conversation is
+    # still the full import, and the others are by digest. A full import
+    # replays every turn, so it puts right a row a tail left wrong; by
+    # digest only the bytes are checked. 1: every audit is a full import.
+    "audit_full_every": 8,
     # True: an UNCHANGED file whose audit is due (after a Host start) has its
     # bytes read once and compared with the stored digest. False: it is
     # imported in full, as a grown file whose audit is due always is.
@@ -711,6 +721,12 @@ _DEFAULTS = {
     # before its first row.
     "tail_yield_after_first_write": False,
 }
+
+
+# A checkpoint's count of audits by digest since its last full import, a key
+# of its store carry (the store never reads it; no column of its own, which
+# would be a schema step).
+_AUDITS_BY_DIGEST = "audits_by_digest"
 
 
 def carry_rules(conf) -> frozenset:
@@ -1453,6 +1469,27 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                 return refuse("prefix_content_changed")
             state = replace(state, hasher=hasher)
             audited = True
+    audit_by_digest = False
+    # How many audits of this conversation were by digest since its last full
+    # import. It is kept in the checkpoint, beside the store's carry, and a
+    # tail hands it on; a full import writes a new carry without it, so a full
+    # import for any reason starts the count again. Every
+    # ``audit_full_every``-th due audit stays the full import.
+    audits_by_digest = int((cp.store_carry or {}).get(_AUDITS_BY_DIGEST) or 0)
+    if reason == "audit" and not unchanged and bool(conf.get("audit_grown_by_digest")) \
+            and audits_by_digest + 1 < max(1, int(conf.get("audit_full_every") or 1)):
+        # A grown file whose audit is due. What the audit is for is the bytes
+        # a tail does not read again: are they still what was imported? That
+        # is one read of the file and a comparison; replaying every turn to
+        # find it out cost a parse of the whole file and every row of the
+        # session. The tail's other checks first (a tail too large, a
+        # rewritten head or sample, a reference outside the tail are still
+        # full imports); then every imported byte is read below, a mismatch
+        # is a full import as it always was, and the tail starts the audit's
+        # clock again.
+        reason = decide(cp, backend, path, before, audit_every=sys.maxsize,
+                        audit_seconds=float("inf"), **checks)
+        audit_by_digest = not reason
     if reason:
         if reason in ("inode", "shrink", "mtime_backwards", "prefix_rewritten", "tail_rewritten"):
             _prefix_changed(path, reason, cp)
@@ -1484,7 +1521,7 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     # mtime, the head, the samples, the bytes after the boundary) stand for
     # the rest until the next audit, which is a full import.
     touched = before.size == cp.size and before.mtime_ns != cp.mtime_ns
-    if bool(conf.get("digest_every_tail")) or state.hasher is None or touched:
+    if bool(conf.get("digest_every_tail")) or state.hasher is None or touched or audit_by_digest:
         previous_hash, current_hash, hasher = _read_digest(path, cp.complete_size, before.size)
         if previous_hash != state.file_hash:
             _prefix_changed(path, "imported_bytes", cp)
@@ -1501,7 +1538,11 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
     next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
                       complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
                       tail_hash=range_hash(path, cp.boundary_offset, before.size),
-                      imports_since_audit=cp.imports_since_audit + 1, updated_at=db.now_ms())
+                      imports_since_audit=0 if audit_by_digest else cp.imports_since_audit + 1,
+                      audited_at=db.now_ms() if audit_by_digest else cp.audited_at,
+                      store_carry={**cp.store_carry, _AUDITS_BY_DIGEST: audits_by_digest + 1}
+                      if audit_by_digest else cp.store_carry,
+                      updated_at=db.now_ms())
     recorded = None
     checkpoint_status = {}
     source_invalidated = False
@@ -1560,6 +1601,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
         _tail_log("deferred_tail_source_changed", backend=backend, size=size)
         result.update(apply_mode="deferred", _clarp_transcript_completion_v1="deferred")
     else:
+        if audit_by_digest and not _checkpoint_refused(checkpoint_status):
+            _tail_log("audited_by_digest", retention=True)
         _tail_log("tail_applied", backend=backend, size=size)
     return result
 
@@ -1580,9 +1623,11 @@ def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
     not change while it was read: the same file, the same size, the same
     modification and change times as when it was opened. Size or mtime alone
     would let a rewrite in place that restores the mtime through; the change
-    time cannot be set back. A file that grew or was touched meanwhile is
-    read again, as it always was: growth cannot be told from a rewrite
-    without reading."""
+    time cannot be set back. (A store through a memory map into a page that
+    is already dirty moves neither time and is not seen here; the audit finds
+    it, as it finds a rewrite that lands just after an import.) A file that
+    grew or was touched meanwhile is read again, as it always was: growth
+    cannot be told from a rewrite without reading."""
     if parsed_read is None or parsed_evidence is None or parsed_read.get("stat") is None:
         return None, "not_observed"
     try:
