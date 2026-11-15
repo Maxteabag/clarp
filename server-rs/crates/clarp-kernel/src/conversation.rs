@@ -139,6 +139,16 @@ impl TurnEnd {
     }
 }
 
+/// A row of the conversation an agent had on the Host it came from, exactly as that Host served
+/// it to the apps. It is kept as it was: what the apps showed before the move is what they show
+/// after it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Imported {
+    pub id: String,
+    /// The row as the other Host's `GET /log` gave it.
+    pub row: Value,
+}
+
 /// Any one thing a conversation holds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entry {
@@ -146,6 +156,7 @@ pub enum Entry {
     Reply(Reply),
     Tool(ToolCall),
     Notice(Notice),
+    Imported(Imported),
     TurnEnd(TurnEnd),
 }
 
@@ -156,6 +167,7 @@ impl Entry {
             Self::Reply(_) => kind::REPLY,
             Self::Tool(_) => kind::TOOL,
             Self::Notice(_) => kind::NOTICE,
+            Self::Imported(_) => kind::IMPORTED,
             Self::TurnEnd(_) => kind::TURN_END,
         }
     }
@@ -167,6 +179,7 @@ impl Entry {
             Self::Reply(reply) => &reply.id,
             Self::Tool(tool) => &tool.id,
             Self::Notice(notice) => &notice.id,
+            Self::Imported(imported) => &imported.id,
             Self::TurnEnd(end) => &end.id,
         }
     }
@@ -177,6 +190,7 @@ impl Entry {
             Self::Reply(reply) => Some(reply.turn),
             Self::Tool(tool) => Some(tool.turn),
             Self::Notice(notice) => notice.turn,
+            Self::Imported(_) => None,
             Self::TurnEnd(end) => Some(end.turn),
         }
     }
@@ -188,6 +202,7 @@ impl Entry {
             Self::Reply(reply) => serde_json::to_vec(reply),
             Self::Tool(tool) => serde_json::to_vec(tool),
             Self::Notice(notice) => serde_json::to_vec(notice),
+            Self::Imported(imported) => serde_json::to_vec(imported),
             Self::TurnEnd(end) => serde_json::to_vec(end),
         }?;
         let mut item = NewItem::new(self.kind(), ts_ms, body).keyed(self.id());
@@ -202,6 +217,7 @@ impl Entry {
             kind::REPLY => Self::Reply(serde_json::from_slice(&item.body)?),
             kind::TOOL => Self::Tool(serde_json::from_slice(&item.body)?),
             kind::NOTICE => Self::Notice(serde_json::from_slice(&item.body)?),
+            kind::IMPORTED => Self::Imported(serde_json::from_slice(&item.body)?),
             kind::TURN_END => Self::TurnEnd(serde_json::from_slice(&item.body)?),
             _ => return Ok(None),
         }))
@@ -245,6 +261,10 @@ mod tests {
                 turn: Some(3),
                 code: "usage-limit".to_string(),
                 text: "The usage limit was reached.".to_string(),
+            }),
+            Entry::Imported(Imported {
+                id: "live-abc".to_string(),
+                row: serde_json::json!({"id": "live-abc", "role": "assistant", "text": "from before"}),
             }),
             Entry::TurnEnd(TurnEnd {
                 id: "t-3".to_string(),

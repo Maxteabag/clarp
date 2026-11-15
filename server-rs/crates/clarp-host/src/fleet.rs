@@ -106,6 +106,11 @@ enum Ask {
         request: CreateAgentRequest,
         answer: Answer<Result<AgentRecord, String>>,
     },
+    /// An agent that comes from another Host, as it was known there.
+    Adopt {
+        record: AgentRecord,
+        answer: Answer<Result<Arc<Member>, String>>,
+    },
     Remove {
         session: String,
         answer: Answer<bool>,
@@ -162,6 +167,15 @@ impl FleetHandle {
         request: CreateAgentRequest,
     ) -> Result<Result<AgentRecord, String>, Unavailable> {
         self.ask(|answer| Ask::Create { request, answer }).await
+    }
+
+    /// Adds an agent that comes from another Host, under the identity it had there. The inner
+    /// error says why it cannot be taken.
+    pub async fn adopt(
+        &self,
+        record: AgentRecord,
+    ) -> Result<Result<Arc<Member>, String>, Unavailable> {
+        self.ask(|answer| Ask::Adopt { record, answer }).await
     }
 
     /// Removes an agent from the fleet. Its history stays on disk. Returns whether it was there.
@@ -335,6 +349,9 @@ impl Fleet {
                 Ask::Create { request, answer } => {
                     let _ = answer.send(Ok(self.create(request)));
                 }
+                Ask::Adopt { record, answer } => {
+                    let _ = answer.send(Ok(self.adopt(record)));
+                }
                 Ask::Remove { session, answer } => {
                     let _ = answer.send(self.remove(&session));
                 }
@@ -435,6 +452,45 @@ impl Fleet {
         self.publish();
         self.tell_roster("created", &record.session);
         Ok(record)
+    }
+
+    fn adopt(&mut self, mut record: AgentRecord) -> Result<Arc<Member>, String> {
+        if record.agent_id.trim().is_empty() || record.session.trim().is_empty() {
+            return Err("an agent that arrives needs its id and its session name".to_string());
+        }
+        if self
+            .members
+            .iter()
+            .any(|member| member.record.agent_id == record.agent_id)
+        {
+            return Err(format!(
+                "this Host already has the agent {}",
+                record.agent_id
+            ));
+        }
+        if self.taken(&record.session) {
+            return Err(format!(
+                "this Host already has an agent called {}",
+                record.session
+            ));
+        }
+        if !Path::new(&record.cwd).is_dir() {
+            return Err(format!("{} is not a directory on this machine", record.cwd));
+        }
+        if record.conversation_id.trim().is_empty() {
+            record.conversation_id = ids::uuid();
+        }
+        record.deleted_at_ms = None;
+        let setup = setup(&self.works, &record)?;
+        self.put(&record)?;
+        let member = Arc::new(Member {
+            record: record.clone(),
+            agent: agent::spawn(setup),
+        });
+        self.members.push(member.clone());
+        self.publish();
+        self.tell_roster("created", &record.session);
+        Ok(member)
     }
 
     fn put(&mut self, record: &AgentRecord) -> Result<(), String> {

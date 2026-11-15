@@ -42,6 +42,35 @@ pub fn iso(ms: i64) -> String {
     )
 }
 
+/// The moment a time of the contract's form names, in milliseconds. `None` for anything else.
+pub fn from_iso(text: &str) -> Option<i64> {
+    let (date, time) = text.trim().split_once(['T', ' '])?;
+    let mut date = date.splitn(3, '-').map(|part| part.parse::<i64>().ok());
+    let (year, month, day) = (date.next()??, date.next()??, date.next()??);
+    let time = time.trim_end_matches('Z');
+    let time = time.split(['+']).next().unwrap_or(time);
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
+    let mut clock = clock.splitn(3, ':').map(|part| part.parse::<i64>().ok());
+    let (hour, minute, second) = (
+        clock.next()??,
+        clock.next()??,
+        clock.next().flatten().unwrap_or(0),
+    );
+    let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // A date of the civil calendar to days since 1970 (Howard Hinnant's algorithm).
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year.rem_euclid(400);
+    let month_index = (month + 9) % 12;
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1_000 + millis)
+}
+
 /// The state an app shows for an agent.
 pub fn state_kind(status: &Status) -> AgentStateKind {
     match (&status.live, &status.last) {
@@ -366,6 +395,15 @@ fn turn_end(end: &TurnEnd) -> Value {
 
 /// One thing of a conversation as the contract's "turn": a row, with every field of a row.
 pub fn row(version: &Versioned) -> Value {
+    if let Entry::Imported(imported) = &version.entry {
+        // A row from the Host the agent came from is served as that Host served it. Only its
+        // revision is this Host's: that is what orders it among the rows written here.
+        let mut row = imported.row.clone();
+        if row.is_object() {
+            row["revision"] = json!(version.revision);
+        }
+        return row;
+    }
     let mut row = json!({
         "id": version.entry.id(),
         "role": "assistant",
@@ -430,6 +468,8 @@ pub fn row(version: &Versioned) -> Value {
             row["kind"] = json!("notice");
             row["text"] = json!(notice.text);
         }
+        // Served as it came, above.
+        Entry::Imported(_) => {}
         // Never a row of its own: it is told on the row it closes.
         Entry::TurnEnd(_) => {}
     }
@@ -502,6 +542,14 @@ fn preview(version: &Versioned) -> String {
         Entry::Reply(reply) => reply.text.clone(),
         Entry::Notice(notice) => notice.text.clone(),
         Entry::Tool(call) => call.name.clone(),
+        Entry::Imported(imported) => {
+            let text = imported.row["text"].as_str().unwrap_or("");
+            if imported.row["role"] == "user" {
+                format!("You: {text}")
+            } else {
+                text.to_string()
+            }
+        }
         Entry::TurnEnd(_) => String::new(),
     }
 }
@@ -631,6 +679,51 @@ mod tests {
     use clarp_protocol::snapshot::AgentSummary;
 
     use super::*;
+
+    #[test]
+    fn a_time_is_read_back_as_it_was_written() {
+        for ms in [
+            0,
+            1_756_791_660_123,
+            951_782_400_000,
+            1_794_700_800_000,
+            -1,
+            4_102_444_799_999,
+        ] {
+            assert_eq!(from_iso(&iso(ms)), Some(ms), "{}", iso(ms));
+        }
+        assert_eq!(
+            from_iso("2026-11-15T04:27:09.698Z"),
+            Some(1_794_716_829_698)
+        );
+        assert_eq!(from_iso("2026-11-15 04:27:09"), Some(1_794_716_829_000));
+        assert_eq!(from_iso("2026-11-15T04:27Z"), Some(1_794_716_820_000));
+        assert_eq!(from_iso(""), None);
+        assert_eq!(from_iso("yesterday"), None);
+        assert_eq!(from_iso("2026-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn a_row_from_another_host_is_served_as_it_came() {
+        let came = json!({"id": "live-abc", "role": "assistant", "text": "from before", "revision": 812,
+                          "tools": [{"name": "Bash"}], "phase": "final"});
+        let served = row(&version(
+            Entry::Imported(clarp_kernel::conversation::Imported {
+                id: "live-abc".to_string(),
+                row: came.clone(),
+            }),
+            5 << 20,
+            None,
+        ));
+        assert_eq!(
+            served["revision"],
+            5 << 20,
+            "only the revision is this Host's"
+        );
+        let mut same = served.clone();
+        same["revision"] = json!(812);
+        assert_eq!(same, came);
+    }
 
     #[test]
     fn a_time_is_written_as_the_contract_writes_it() {

@@ -9,33 +9,51 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use crate::ids;
+
 pub const PAIR_USAGE: &str =
     "usage: clarp-host pair --url URL [--name DEVICE] [--scope full|limited] \
 [--ttl SECONDS] [--host ADDR:PORT]
 URL is the address the device will reach this Host at. The administrator's token is read from
 CLARP_HOST_TOKEN.";
 
+pub const IMPORT_USAGE: &str =
+    "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT]
+Reads the agent NAME and its conversation from the Host at --from and gives them to this Host.
+The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN.";
+
+/// How many rows of a conversation are asked for at a time.
+const PAGE: usize = 1_000;
+
 /// Sends one request to the Host at `address` and returns the status with the body as JSON.
-pub fn post(address: &str, path: &str, token: &str, body: &Value) -> Result<(u16, Value), String> {
+fn request(
+    method: &str,
+    address: &str,
+    path: &str,
+    token: &str,
+    body: Option<&Value>,
+) -> Result<(u16, Value), String> {
+    let address = address.trim_start_matches("http://").trim_end_matches('/');
     let mut stream = TcpStream::connect(address)
         .map_err(|error| format!("no Host answers at {address}: {error}"))?;
-    let timeout = Some(Duration::from_secs(20));
+    let timeout = Some(Duration::from_secs(120));
     stream
         .set_read_timeout(timeout)
         .and_then(|()| stream.set_write_timeout(timeout))
         .map_err(|error| error.to_string())?;
-    let body = body.to_string();
+    let body = body.map(Value::to_string).unwrap_or_default();
     let authorization = if token.is_empty() {
         String::new()
     } else {
         format!("Authorization: Bearer {token}\r\n")
     };
-    let request = format!(
-        "POST {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+    let head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
         body.len()
     );
     stream
-        .write_all(request.as_bytes())
+        .write_all(head.as_bytes())
+        .and_then(|()| stream.write_all(body.as_bytes()))
         .map_err(|error| error.to_string())?;
     let mut answer = String::new();
     stream
@@ -48,6 +66,91 @@ pub fn post(address: &str, path: &str, token: &str, body: &Value) -> Result<(u16
         .and_then(|code| code.parse().ok())
         .ok_or("the Host's answer was not an HTTP response")?;
     Ok((status, serde_json::from_str(body).unwrap_or(Value::Null)))
+}
+
+pub fn post(address: &str, path: &str, token: &str, body: &Value) -> Result<(u16, Value), String> {
+    request("POST", address, path, token, Some(body))
+}
+
+/// Asks a Host for something and returns it. Anything but a 200 is an error that says what.
+fn get(address: &str, path: &str, token: &str) -> Result<Value, String> {
+    match request("GET", address, path, token, None)? {
+        (200, answer) => Ok(answer),
+        (status, answer) => Err(format!(
+            "the Host at {address} answered {status} to {path}: {}",
+            answer["error"].as_str().unwrap_or("no reason given")
+        )),
+    }
+}
+
+/// `clarp-host import`: moves an agent, with its conversation, from another Host to this one.
+///
+/// It reads what any app reads from the other Host: the agent's row in the snapshot and the
+/// conversation, page by page. The other Host is not changed. Returns what to show.
+pub fn import(
+    mut args: impl Iterator<Item = String>,
+    source_token: &str,
+    token: &str,
+) -> Result<String, String> {
+    let (mut from, mut session) = (None, None);
+    let mut host = "127.0.0.1:7690".to_string();
+    while let Some(arg) = args.next() {
+        let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
+        match arg.as_str() {
+            "--from" => from = Some(value("an address")?),
+            "--session" => session = Some(value("a session name")?),
+            "--host" => host = value("an address")?,
+            other => return Err(format!("unknown argument {other}")),
+        }
+    }
+    let from = from.ok_or("the move needs --from: the address of the Host the agent is on")?;
+    let session = session.ok_or("the move needs --session: the agent's session name")?;
+
+    let snapshot = get(&from, "/agents/snapshot", source_token)?;
+    let agent = snapshot["agents"]
+        .as_array()
+        .and_then(|agents| {
+            agents
+                .iter()
+                .find(|agent| agent["session"] == session.as_str())
+        })
+        .ok_or(format!("the Host at {from} has no agent called {session}"))?
+        .clone();
+    if agent["busy"] == true {
+        return Err(format!(
+            "{session} is in the middle of a turn on the Host at {from}: let it end first"
+        ));
+    }
+    // The conversation: the newest page, then further back until nothing is older.
+    let mut turns: Vec<Value> = Vec::new();
+    let mut path = format!("/log?session={}&limit={PAGE}", ids::in_a_link(&session));
+    loop {
+        let page = get(&from, &path, source_token)?;
+        let rows = page["turns"].as_array().cloned().unwrap_or_default();
+        let Some(oldest) = rows.first().and_then(|row| row["id"].as_str()) else {
+            break;
+        };
+        path = format!(
+            "/log?session={}&limit={PAGE}&before={}",
+            ids::in_a_link(&session),
+            ids::in_a_link(oldest)
+        );
+        turns.splice(0..0, rows);
+        if page["has_more"] != true {
+            break;
+        }
+    }
+    let count = turns.len();
+    let asked = json!({ "agent": agent, "from": format!("http://{from}"), "turns": turns });
+    let (status, answer) = post(&host, "/agents/import", token, &asked)?;
+    if status != 200 {
+        let why = answer["error"].as_str().unwrap_or("no reason given");
+        return Err(format!("this Host refused ({status}): {why}"));
+    }
+    Ok(format!(
+        "{session} is on this Host now, with the {count} rows of its conversation.\n\
+         It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns."
+    ))
 }
 
 /// `clarp-host pair`: has the running Host issue a pairing code, and returns what to show.
@@ -113,5 +216,29 @@ mod tests {
         // Nothing listens on port 1.
         let nobody = pair(words("--url http://x --host 127.0.0.1:1"), "");
         assert!(nobody.unwrap_err().contains("no Host answers"));
+    }
+
+    #[test]
+    fn a_move_needs_to_know_where_from_and_whom() {
+        assert!(
+            import(words("--session maximus"), "", "")
+                .unwrap_err()
+                .contains("--from")
+        );
+        assert!(
+            import(words("--from 127.0.0.1:1"), "", "")
+                .unwrap_err()
+                .contains("--session")
+        );
+        let nobody = import(
+            words("--from http://127.0.0.1:1/ --session maximus"),
+            "",
+            "",
+        );
+        assert!(
+            nobody
+                .unwrap_err()
+                .contains("no Host answers at 127.0.0.1:1")
+        );
     }
 }

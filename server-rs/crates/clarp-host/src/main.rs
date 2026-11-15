@@ -144,6 +144,24 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.peek().map(String::as_str) == Some("import") {
+        args.next();
+        let source = std::env::var("CLARP_SOURCE_TOKEN").unwrap_or_default();
+        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        return match clarp_host::admin::import(args, &source, &token) {
+            Ok(shown) => {
+                println!("{shown}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!(
+                    "clarp-host import: {error}\n{}",
+                    clarp_host::admin::IMPORT_USAGE
+                );
+                ExitCode::from(2)
+            }
+        };
+    }
     let config = match Config::from_args(args) {
         Ok(config) => config,
         Err(error) => {

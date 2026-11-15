@@ -101,7 +101,11 @@ pub trait Backend: Send + Sync {
 
     fn launch(&self, spec: &TurnSpec) -> Launch;
 
-    fn interpreter(&self, turn: u64) -> Box<dyn Interpreter>;
+    /// The interpreter of one turn's output. `name` is a name for the turn that no other turn
+    /// of any agent on any Host has: what the interpreter builds the ids of its pieces from
+    /// when the tool gives it none. (A turn's number is not such a name: an agent that moves
+    /// to another Host starts counting again there.)
+    fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter>;
 }
 
 /// The environment variable that names Claude Code's program, when it is not `claude` on the path.

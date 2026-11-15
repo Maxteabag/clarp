@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{
-    Action, Actor, ActorError, Changed, Outputs, Profile, QueueState, Sent, Status, Waiting,
+    Action, Actor, ActorError, Changed, ImportedRow, Outputs, Profile, QueueState, Sent, Status,
+    Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
@@ -62,6 +63,14 @@ pub enum Ask {
     /// What waits, in the order it will run.
     Queue {
         answer: Answer<(Vec<Waiting>, QueueState)>,
+    },
+    /// Take over the conversation the agent had on another Host. Answers how many rows came,
+    /// or why it cannot be done.
+    Import {
+        from: String,
+        backend_session: Option<String>,
+        rows: Vec<ImportedRow>,
+        answer: Answer<Result<usize, String>>,
     },
     Withdraw {
         turn: TurnId,
@@ -159,6 +168,22 @@ impl AgentHandle {
 
     pub async fn queue(&self) -> Result<(Vec<Waiting>, QueueState), Unavailable> {
         self.ask(|answer| Ask::Queue { answer }).await
+    }
+
+    /// Takes over the conversation the agent had on another Host.
+    pub async fn import(
+        &self,
+        from: String,
+        backend_session: Option<String>,
+        rows: Vec<ImportedRow>,
+    ) -> Result<Result<usize, String>, Unavailable> {
+        self.ask(|answer| Ask::Import {
+            from,
+            backend_session,
+            rows,
+            answer,
+        })
+        .await
     }
 
     pub async fn withdraw(&self, turn: TurnId, by: String) -> Result<bool, Unavailable> {
@@ -355,6 +380,12 @@ impl Worker {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
             }
+            Ask::Import {
+                from,
+                backend_session,
+                rows,
+                answer,
+            } => answered(actor.import(&from, backend_session, rows, now), answer)?,
             Ask::Withdraw { turn, by, answer } => answered(actor.withdraw(turn, &by, now), answer)?,
             Ask::Tail { limit, answer } => return read(actor.tail(limit), answer),
             Ask::After {
@@ -640,6 +671,7 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
                 drop(answer.send(Err(refusal())));

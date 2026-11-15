@@ -10,13 +10,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{ConnectInfo, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use clarp_actor::ImportedRow;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::clock::Clock;
@@ -33,7 +34,7 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::VERSION;
 use crate::agent::Unavailable;
 use crate::config::Config;
-use crate::fleet::{FleetHandle, Member};
+use crate::fleet::{AgentRecord, FleetHandle, Member};
 use crate::hub::{Hub, Published};
 use crate::pairing::{self, Device, Scope};
 use crate::{ids, wire};
@@ -45,6 +46,9 @@ pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has.
 pub const FEATURES: &[&str] = &[];
+
+/// The most a conversation that arrives from another Host may weigh, as JSON.
+const IMPORT_LIMIT: usize = 512 * 1024 * 1024;
 
 /// After this long without an event, a stream is sent a heartbeat.
 const HEARTBEAT: Duration = Duration::from_secs(10);
@@ -117,6 +121,11 @@ pub fn router(app: App) -> Router {
         .route("/agents/snapshot", get(snapshot))
         .route("/agents", post(create_agent))
         .route("/agents/{session}", delete(remove_agent))
+        // A whole conversation arrives in one request.
+        .route(
+            "/agents/import",
+            post(import_agent).layer(DefaultBodyLimit::max(IMPORT_LIMIT)),
+        )
         .route("/log", get(log))
         .route("/events", get(events))
         .route("/send", post(send))
@@ -358,6 +367,68 @@ async fn remove_agent(
             format!("unknown session {session}"),
         ))
     }
+}
+
+/// An agent as another Host knew it, with the conversation it had there.
+#[derive(Debug, Deserialize)]
+struct ImportRequest {
+    /// The agent's row in the other Host's snapshot.
+    agent: Value,
+    /// Where it comes from, for the record.
+    from: String,
+    /// The rows of its conversation, oldest first, as the other Host's `GET /log` gave them.
+    turns: Vec<Value>,
+}
+
+/// Takes an agent over from another Host: who it is, the conversation it had, and the tool's
+/// session, which its next turn here continues.
+async fn import_agent(
+    State(app): State<App>,
+    Json(request): Json<ImportRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let field = |name: &str| request.agent[name].as_str().unwrap_or("").to_string();
+    let backend_session = Some(field("backend_session_id")).filter(|session| !session.is_empty());
+    let record = AgentRecord {
+        agent_id: field("agent_id"),
+        session: field("session"),
+        persona: field("persona"),
+        backend: field("backend"),
+        cwd: field("cwd"),
+        model: field("model"),
+        effort: field("effort"),
+        // The conversation keeps its name: it is the tool's session, which goes on.
+        conversation_id: backend_session.clone().unwrap_or_default(),
+        created_at_ms: app.clock.now_ms(),
+        deleted_at_ms: None,
+    };
+    let rows: Vec<ImportedRow> = request
+        .turns
+        .into_iter()
+        .filter_map(|row| {
+            let id = row["id"].as_str()?.to_string();
+            let ts_ms = row["timestamp"]
+                .as_str()
+                .and_then(wire::from_iso)
+                .unwrap_or(0);
+            Some(ImportedRow { id, ts_ms, row })
+        })
+        .collect();
+    let member = app
+        .fleet
+        .adopt(record)
+        .await?
+        .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
+    let imported = member
+        .agent
+        .import(request.from, backend_session, rows)
+        .await?
+        .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
+    Ok(Json(json!({
+        "ok": true,
+        "session": member.record.session,
+        "agent_id": member.record.agent_id,
+        "imported": imported,
+    })))
 }
 
 // ---- a conversation --------------------------------------------------------------------------
@@ -620,19 +691,6 @@ struct IssueRequest {
     url: Option<String>,
 }
 
-/// A value as it may stand in the query of a link.
-fn in_a_link(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
 /// The administrator has a code made for a device.
 async fn pairing_issue(
     State(app): State<App>,
@@ -656,9 +714,9 @@ async fn pairing_issue(
     if let Some(url) = request.url.filter(|url| !url.trim().is_empty()) {
         let uri = format!(
             "clarp://pair?name={}&url={}&code={}",
-            in_a_link(&app.config.name),
-            in_a_link(url.trim()),
-            in_a_link(&issued.code)
+            ids::in_a_link(&app.config.name),
+            ids::in_a_link(url.trim()),
+            ids::in_a_link(&issued.code)
         );
         answer["url"] = json!(url.trim());
         answer["uri"] = json!(uri);
@@ -821,12 +879,15 @@ mod tests {
 
     #[test]
     fn a_pairing_link_carries_its_values_whole() {
-        assert_eq!(in_a_link("Clarp Host (Rust)"), "Clarp%20Host%20%28Rust%29");
         assert_eq!(
-            in_a_link("https://host.example:7690"),
+            ids::in_a_link("Clarp Host (Rust)"),
+            "Clarp%20Host%20%28Rust%29"
+        );
+        assert_eq!(
+            ids::in_a_link("https://host.example:7690"),
             "https%3A%2F%2Fhost.example%3A7690"
         );
-        assert_eq!(in_a_link("clp_Abc-123_x.y~z"), "clp_Abc-123_x.y~z");
+        assert_eq!(ids::in_a_link("clp_Abc-123_x.y~z"), "clp_Abc-123_x.y~z");
     }
 
     #[test]

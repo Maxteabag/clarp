@@ -653,3 +653,74 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
         0
     );
 }
+
+#[test]
+fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
+    // Two Hosts. The agent lives on the first and has said something there.
+    let (old_place, new_place) = (Place::new("move-from"), Place::new("move-to"));
+    let (old_host, new_host) = (old_place.start(), new_place.start());
+    let made = old_host.post(
+        "/agents",
+        json!({ "name": "Mover", "backend": "scripted", "cwd": old_place.root.join("work").to_str().unwrap() }),
+    );
+    let (session, agent_id) = (
+        made["session"].as_str().unwrap().to_string(),
+        made["agent_id"].as_str().unwrap().to_string(),
+    );
+    old_host.send(&session, "what we spoke of", "old-1");
+    wait_for("the first Host's answer", || {
+        old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
+    });
+    let before = old_host.conversation(&session);
+
+    // The move, as its owner would run it.
+    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["import", "--from", &old_host.address, "--session", &session])
+        .args(["--host", &new_host.address])
+        .env_remove("CLARP_HOST_TOKEN")
+        .env_remove("CLARP_SOURCE_TOKEN")
+        .output()
+        .unwrap();
+    assert!(
+        moved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+    assert!(String::from_utf8_lossy(&moved.stdout).contains("with the 2 rows"));
+
+    // On the second Host it is the same agent, with the conversation it had, row for row.
+    let snapshot = new_host.get("/agents/snapshot");
+    assert_eq!(snapshot["agents"][0]["agent_id"], agent_id);
+    assert_eq!(snapshot["agents"][0]["session"], session);
+    assert_eq!(new_host.conversation(&session), before);
+    let came = new_host.turns(&session);
+    let was = old_host.turns(&session);
+    assert_eq!(
+        came.iter().map(|row| &row["id"]).collect::<Vec<_>>(),
+        was.iter().map(|row| &row["id"]).collect::<Vec<_>>(),
+        "the rows keep the ids the apps know them by"
+    );
+    // And it goes on there.
+    new_host.send(&session, "and now?", "new-1");
+    wait_for("the second Host's answer", || {
+        new_host.conversation(&session).len() == 4 && new_host.state(&session) == "done"
+    });
+    assert_eq!(
+        new_host.conversation(&session)[3],
+        said("assistant", "and now?")
+    );
+    // The first Host was read, not changed; and an agent arrives once.
+    assert_eq!(old_host.conversation(&session), before);
+    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["import", "--from", &old_host.address, "--session", &session])
+        .args(["--host", &new_host.address])
+        .env_remove("CLARP_HOST_TOKEN")
+        .output()
+        .unwrap();
+    assert_eq!(again.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already has the agent"));
+    // After a restart of the second Host it is all still there.
+    new_host.kill();
+    let new_host = new_place.start();
+    assert_eq!(new_host.conversation(&session).len(), 4);
+}
