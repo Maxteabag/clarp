@@ -26,8 +26,14 @@ INJECTED = ("<task-notification>\n<task-id>b{n}</task-id>\n</task-notification>"
             "<clarp-account-recovery>\nCarry on ({n}).\n</clarp-account-recovery>")
 
 
-def _how(switch):
-    return {"settings": {"boundary_skips_dropped_records": switch}}
+# The switches a Host can run with beside this one.
+OTHERS = {"full_digest_while_parsing": True, "carry_live_rows": True, "carry_settled_turns": True,
+          "tail_yield_after_first_write": True}
+BESIDE = pytest.mark.parametrize("beside", [{}, OTHERS], ids=["alone", "beside the other switches"])
+
+
+def _how(switch, beside=None):
+    return {"settings": {"boundary_skips_dropped_records": switch, **(beside or {})}}
 
 
 def _record(role, content, second):
@@ -55,9 +61,10 @@ def _retentions(report):
     return [e["code"] for e in report["tail_events"] if e["event"] == "transcriptTailRetention"]
 
 
+@BESIDE
 @SWITCH
 @pytest.mark.parametrize("injected", [5, 8])
-def test_a_long_turn_with_harness_records_after_its_prompt(tmp_path, injected, switch):
+def test_a_long_turn_with_harness_records_after_its_prompt(tmp_path, injected, switch, beside):
     """Three turns, then one that runs on: its prompt, and steps with
     harness records among them. With five the prompt is still among the six
     newest candidates; with eight it is not."""
@@ -73,7 +80,7 @@ def test_a_long_turn_with_harness_records_after_its_prompt(tmp_path, injected, s
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             full.tick(0)
-            first = actual.tick(0, faults=_how(switch))
+            first = actual.tick(0, faults=_how(switch, beside))
             assert _decision(first) == "full_no_frontier(missing_unknown)"
             assert _frontiers(candidate) == (1 if found else 0)
             assert ("no_safe_boundary_tail_differs" in _retentions(first)) is not found
@@ -84,7 +91,7 @@ def test_a_long_turn_with_harness_records_after_its_prompt(tmp_path, injected, s
                     if tick == 2:
                         output.write(_injected(100, 42))
                 full.tick(tick)
-                report = actual.tick(tick, faults=_how(switch))
+                report = actual.tick(tick, faults=_how(switch, beside))
                 assert _decision(report) == ("tail_applied" if found else
                                              "full_no_frontier(bootstrap_refused)")
                 harness.assert_product_equal(reference, candidate)
