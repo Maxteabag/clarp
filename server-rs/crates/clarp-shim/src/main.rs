@@ -1,42 +1,59 @@
 //! `clarp-shim`: owns one tool process for as long as it lives.
 //!
-//!     clarp-shim --spool FILE --socket PATH [--cwd DIR] -- PROGRAM [ARGS...]
+//!     clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] -- PROGRAM [ARGS...]
 //!
-//! It starts PROGRAM in its own process group, appends every line it prints to the spool, listens
-//! on the socket for the server's few requests, and when the program is gone writes how it went
-//! and exits with the same code. It knows nothing about any tool: the lines are opaque to it.
-//! It never exits before the program does, and it does not care whether a server is there.
+//! It makes the turn's spool, starts PROGRAM in its own process group, appends every line it
+//! prints to the spool, listens on the socket for the server's few requests, and when the program
+//! is gone writes how it went and exits with the same code. It knows nothing about any tool: the
+//! lines are opaque to it. It never exits before the program does, and it does not care whether
+//! a server is there.
+//!
+//! The order of the first steps is what makes a turn start at most once:
+//!
+//! 1. The spool is created, and creating it fails when it is already there. Of two shims started
+//!    for the same turn, one gets the turn and the other leaves without starting anything.
+//! 2. The program is started, and "spawned" is written to the spool and made durable.
+//! 3. Only then is the program given the message on its standard input, and the shim prints
+//!    `ready` on its own standard output for whoever started it.
+//!
+//! A spool that says "spawned" belongs to a turn that must never be started again. A spool that
+//! does not belongs to a turn whose program was never given anything to do.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, ExitCode, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use clarp_shim::{Reply, Request, SOCKET_ENV};
+use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request, SOCKET_ENV};
 use clarp_spool::{Entry, MAX_OUTPUT_CHUNK, Record, ShimEvent, SpoolWriter};
-use nix::sys::signal::{Signal, killpg};
-use nix::unistd::Pid;
+use nix::sys::signal::{SigSet, Signal, killpg};
+use nix::unistd::{Pid, setsid};
+
+/// How long a tool gets to end by itself when the shim is told to go.
+const GRACE_ON_SIGNAL_MS: u64 = 5_000;
 
 struct Args {
     spool: PathBuf,
     socket: PathBuf,
     cwd: Option<PathBuf>,
+    stdin_file: Option<PathBuf>,
     program: String,
     program_args: Vec<String>,
 }
 
 fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
-    let (mut spool, mut socket, mut cwd) = (None, None, None);
+    let (mut spool, mut socket, mut cwd, mut stdin_file) = (None, None, None, None);
     loop {
         match argv.next().as_deref() {
             Some("--spool") => spool = argv.next().map(PathBuf::from),
             Some("--socket") => socket = argv.next().map(PathBuf::from),
             Some("--cwd") => cwd = argv.next().map(PathBuf::from),
+            Some("--stdin-file") => stdin_file = argv.next().map(PathBuf::from),
             Some("--") => break,
             Some(other) => return Err(format!("unknown argument {other}")),
             None => return Err("missing -- PROGRAM".to_string()),
@@ -47,6 +64,7 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
         spool: spool.ok_or("missing --spool FILE")?,
         socket: socket.ok_or("missing --socket PATH")?,
         cwd,
+        stdin_file,
         program,
         program_args: argv.collect(),
     })
@@ -63,38 +81,49 @@ fn now_ms() -> i64 {
 enum ToSpool {
     Entry(Entry),
     /// Write, make durable, and tell the sender it is done.
-    Final(Entry, Sender<()>),
+    Now(Entry, Sender<()>),
+    /// A connection that wants a newline whenever the spool has grown.
+    Follow(UnixStream),
 }
 
-/// What the socket's threads send to the one thread that owns the tool's standard input.
+/// What is sent to the one thread that owns the tool's standard input.
 enum ToStdin {
-    Data(String),
+    Data(Vec<u8>),
     Close,
 }
 
+/// Appends one entry. A spool that cannot be written is a turn nobody will ever read; there is
+/// no one to tell but stderr, and the tool goes on regardless.
+fn write(writer: &mut SpoolWriter, entry: Entry, durable: bool) {
+    let record = Record { t: now_ms(), entry };
+    let written = writer
+        .append(&record)
+        .and_then(|()| if durable { writer.sync() } else { Ok(()) });
+    if let Err(error) = written {
+        eprintln!("clarp-shim: cannot write the spool: {error}");
+    }
+}
+
 fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
+    let mut followers: Vec<UnixStream> = Vec::new();
     for message in entries {
         match message {
             ToSpool::Entry(entry) => {
                 let durable = matches!(entry, Entry::Shim(_));
-                // A spool that cannot be written is a turn nobody will ever read; there is no one
-                // to tell but stderr, and the tool goes on regardless.
-                if let Err(error) = writer.append(&Record { t: now_ms(), entry }) {
-                    eprintln!("clarp-shim: cannot write the spool: {error}");
-                } else if durable {
-                    let _ = writer.sync();
-                }
+                write(&mut writer, entry, durable);
             }
-            ToSpool::Final(entry, done) => {
-                if let Err(error) = writer
-                    .append(&Record { t: now_ms(), entry })
-                    .and_then(|()| writer.sync())
-                {
-                    eprintln!("clarp-shim: cannot write the spool: {error}");
-                }
+            ToSpool::Now(entry, done) => {
+                write(&mut writer, entry, true);
                 let _ = done.send(());
             }
+            ToSpool::Follow(follower) => followers.push(follower),
         }
+        // Whoever follows is told there is more to read. A follower that is not reading already
+        // has a hint waiting and is not waited for; one that is gone is forgotten.
+        followers.retain_mut(|follower| match follower.write(b"\n") {
+            Ok(_) => true,
+            Err(error) => error.kind() == ErrorKind::WouldBlock,
+        });
     }
 }
 
@@ -122,12 +151,8 @@ fn pump(stream: impl Read, to_spool: Sender<ToSpool>, wrap: fn(String) -> Entry)
                 line.pop();
             }
         }
-        if to_spool
-            .send(ToSpool::Entry(wrap(
-                String::from_utf8_lossy(&line).into_owned(),
-            )))
-            .is_err()
-        {
+        let text = String::from_utf8_lossy(&line).into_owned();
+        if to_spool.send(ToSpool::Entry(wrap(text))).is_err() {
             break;
         }
     }
@@ -137,11 +162,7 @@ fn stdin_thread(mut stdin: ChildStdin, requests: mpsc::Receiver<ToStdin>) {
     for request in requests {
         match request {
             ToStdin::Data(data) => {
-                if stdin
-                    .write_all(data.as_bytes())
-                    .and_then(|()| stdin.flush())
-                    .is_err()
-                {
+                if stdin.write_all(&data).and_then(|()| stdin.flush()).is_err() {
                     break; // the tool closed its input; there is nothing left to feed
                 }
             }
@@ -161,8 +182,8 @@ struct Control {
 impl Control {
     fn handle(&self, request: Request) -> Reply {
         match request {
-            Request::Ping => Reply::ok(Some(self.pid)),
-            Request::Stdin { data } => match self.to_stdin.send(ToStdin::Data(data)) {
+            Request::Ping | Request::Follow => Reply::ok(Some(self.pid)),
+            Request::Stdin { data } => match self.to_stdin.send(ToStdin::Data(data.into_bytes())) {
                 Ok(()) => Reply::ok(Some(self.pid)),
                 Err(_) => Reply::failed("the tool's input is closed"),
             },
@@ -170,13 +191,15 @@ impl Control {
                 let _ = self.to_stdin.send(ToStdin::Close);
                 Reply::ok(Some(self.pid))
             }
-            Request::Hook { name, data } => match self
-                .to_spool
-                .send(ToSpool::Entry(Entry::Hook { name, data }))
-            {
-                Ok(()) => Reply::ok(Some(self.pid)),
-                Err(_) => Reply::failed("the spool is closed"),
-            },
+            Request::Hook { name, data } => {
+                match self
+                    .to_spool
+                    .send(ToSpool::Entry(Entry::Hook { name, data }))
+                {
+                    Ok(()) => Reply::ok(Some(self.pid)),
+                    Err(_) => Reply::failed("the spool is closed"),
+                }
+            }
             Request::Stop { grace_ms } => {
                 self.stop(grace_ms);
                 Reply::ok(Some(self.pid))
@@ -184,35 +207,28 @@ impl Control {
         }
     }
 
-    fn signal(&self, signal: Signal) {
-        if self.exited.load(Ordering::SeqCst) {
-            return;
-        }
-        let _ = self
-            .to_spool
-            .send(ToSpool::Entry(Entry::Shim(ShimEvent::Stopping {
-                signal: signal.as_str().to_string(),
-            })));
-        // The tool is the leader of its own process group, so this reaches what it started too.
+    /// Signals the tool's whole process group: the tool leads it, so this reaches what it started.
+    fn signal(pid: u32, to_spool: &Sender<ToSpool>, signal: Signal) {
+        let stopping = ShimEvent::Stopping {
+            signal: signal.as_str().to_string(),
+        };
+        let _ = to_spool.send(ToSpool::Entry(Entry::Shim(stopping)));
         let _ = killpg(
-            Pid::from_raw(i32::try_from(self.pid).unwrap_or(i32::MAX)),
+            Pid::from_raw(i32::try_from(pid).unwrap_or(i32::MAX)),
             signal,
         );
     }
 
     fn stop(&self, grace_ms: u64) {
-        self.signal(Signal::SIGTERM);
+        if self.exited.load(Ordering::SeqCst) {
+            return;
+        }
+        Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);
         let (pid, exited, to_spool) = (self.pid, self.exited.clone(), self.to_spool.clone());
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(grace_ms));
             if !exited.load(Ordering::SeqCst) {
-                let _ = to_spool.send(ToSpool::Entry(Entry::Shim(ShimEvent::Stopping {
-                    signal: Signal::SIGKILL.as_str().to_string(),
-                })));
-                let _ = killpg(
-                    Pid::from_raw(i32::try_from(pid).unwrap_or(i32::MAX)),
-                    Signal::SIGKILL,
-                );
+                Self::signal(pid, &to_spool, Signal::SIGKILL);
             }
         });
     }
@@ -228,7 +244,9 @@ fn serve(connection: UnixStream, control: &Control) {
         if line.trim().is_empty() {
             continue;
         }
-        let reply = match serde_json::from_str::<Request>(&line) {
+        let request = serde_json::from_str::<Request>(&line);
+        let follow = matches!(request, Ok(Request::Follow));
+        let reply = match request {
             Ok(request) => control.handle(request),
             Err(error) => Reply::failed(format!("not a request: {error}")),
         };
@@ -239,28 +257,58 @@ fn serve(connection: UnixStream, control: &Control) {
         if write_half.write_all(text.as_bytes()).is_err() {
             break;
         }
+        if follow {
+            // From here this connection only carries hints, written by the thread that owns the
+            // spool. They must never make that thread wait.
+            if write_half.set_nonblocking(true).is_ok() {
+                let _ = control.to_spool.send(ToSpool::Follow(write_half));
+            }
+            return;
+        }
     }
 }
 
-fn run(args: Args) -> Result<u8, String> {
-    let writer =
-        SpoolWriter::open(&args.spool).map_err(|e| format!("{}: {e}", args.spool.display()))?;
-    let (to_spool, spool_entries) = mpsc::channel();
-    let spool_writer = std::thread::spawn(move || spool_thread(writer, spool_entries));
-    let finish = |entry: Entry| {
-        let (done, wait) = mpsc::channel();
-        if to_spool.send(ToSpool::Final(entry, done)).is_ok() {
-            let _ = wait.recv();
-        }
-    };
-
-    let _ = std::fs::remove_file(&args.socket);
-    if let Some(dir) = args.socket.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+fn listen(socket: &Path) -> std::io::Result<UnixListener> {
+    let _ = std::fs::remove_file(socket);
+    if let Some(dir) = socket.parent() {
+        std::fs::create_dir_all(dir)?;
     }
-    let listener =
-        UnixListener::bind(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
+    UnixListener::bind(socket)
+}
 
+fn run(args: Args) -> Result<u8, String> {
+    // A session of its own: what happens to the server's terminal or process group does not
+    // reach a running turn.
+    let _ = setsid();
+    let mut writer = match SpoolWriter::create(&args.spool) {
+        Ok(writer) => writer,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            eprintln!(
+                "clarp-shim: {} is already there: another shim has this turn",
+                args.spool.display()
+            );
+            return Ok(EXIT_TURN_TAKEN);
+        }
+        Err(error) => return Err(format!("{}: {error}", args.spool.display())),
+    };
+    // From here on the turn is this shim's, and whatever goes wrong is said in the spool.
+    let mut not_started = |error: String| -> Result<u8, String> {
+        write(
+            &mut writer,
+            Entry::Shim(ShimEvent::SpawnFailed { error }),
+            true,
+        );
+        let _ = std::fs::remove_file(&args.socket);
+        Ok(EXIT_NOT_STARTED)
+    };
+    let message = match args.stdin_file.as_ref().map(std::fs::read).transpose() {
+        Ok(message) => message,
+        Err(error) => return not_started(format!("the message could not be read: {error}")),
+    };
+    let listener = match listen(&args.socket) {
+        Ok(listener) => listener,
+        Err(error) => return not_started(format!("{}: {error}", args.socket.display())),
+    };
     let mut command = Command::new(&args.program);
     command
         .args(&args.program_args)
@@ -274,21 +322,44 @@ fn run(args: Args) -> Result<u8, String> {
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
-        Err(error) => {
-            finish(Entry::Shim(ShimEvent::SpawnFailed {
-                error: format!("{}: {error}", args.program),
-            }));
-            let _ = std::fs::remove_file(&args.socket);
-            return Ok(127);
-        }
+        Err(error) => return not_started(format!("{}: {error}", args.program)),
     };
     let pid = child.id();
-    let _ = to_spool.send(ToSpool::Entry(Entry::Shim(ShimEvent::Spawned { pid })));
+
+    // The tool was started with the signals as they were. From here this thread, and every
+    // thread it starts, leaves them to the one thread that waits for them: a shim that is told
+    // to go ends its tool first and says so in the spool.
+    let mut signals = SigSet::empty();
+    signals.add(Signal::SIGTERM);
+    signals.add(Signal::SIGINT);
+    signals.add(Signal::SIGHUP);
+    let signals_blocked = signals.thread_block().is_ok();
+
+    let (to_spool, spool_entries) = mpsc::channel();
+    std::thread::spawn(move || spool_thread(writer, spool_entries));
+    let record_now = |entry: Entry| {
+        let (done, wait) = mpsc::channel();
+        if to_spool.send(ToSpool::Now(entry, done)).is_ok() {
+            let _ = wait.recv();
+        }
+    };
+    record_now(Entry::Shim(ShimEvent::Spawned { pid }));
+    // Whoever started this shim may wait for this line: the turn is taken, the tool is up and
+    // the socket answers. A shim that ends without saying it never had the turn, or said why
+    // in the spool.
+    {
+        let mut out = std::io::stdout();
+        let _ = out.write_all(b"ready\n").and_then(|()| out.flush());
+    }
 
     let exited = Arc::new(AtomicBool::new(false));
     let (to_stdin, stdin_requests) = mpsc::channel();
     if let Some(stdin) = child.stdin.take() {
         std::thread::spawn(move || stdin_thread(stdin, stdin_requests));
+    }
+    if let Some(message) = message {
+        let _ = to_stdin.send(ToStdin::Data(message));
+        let _ = to_stdin.send(ToStdin::Close);
     }
     let mut pumps = Vec::new();
     if let Some(stdout) = child.stdout.take() {
@@ -309,6 +380,14 @@ fn run(args: Args) -> Result<u8, String> {
         to_spool: to_spool.clone(),
         to_stdin,
     });
+    if signals_blocked {
+        let control = control.clone();
+        std::thread::spawn(move || {
+            while signals.wait().is_ok() {
+                control.stop(GRACE_ON_SIGNAL_MS);
+            }
+        });
+    }
     std::thread::spawn(move || {
         for connection in listener.incoming().flatten() {
             let control = control.clone();
@@ -324,13 +403,11 @@ fn run(args: Args) -> Result<u8, String> {
     for pump in pumps {
         let _ = pump.join();
     }
-    finish(Entry::Shim(ShimEvent::Exited {
+    record_now(Entry::Shim(ShimEvent::Exited {
         code: status.code(),
         signal: status.signal(),
     }));
     let _ = std::fs::remove_file(&args.socket);
-    drop(to_spool);
-    let _ = spool_writer;
     Ok(status
         .code()
         .and_then(|code| u8::try_from(code).ok())
@@ -343,7 +420,7 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("clarp-shim: {error}");
             eprintln!(
-                "usage: clarp-shim --spool FILE --socket PATH [--cwd DIR] -- PROGRAM [ARGS...]"
+                "usage: clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] -- PROGRAM [ARGS...]"
             );
             ExitCode::from(2)
         }

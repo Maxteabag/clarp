@@ -26,11 +26,31 @@ pub enum Origin {
     Trigger { name: String },
 }
 
+/// How a message enters the mailbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Admission {
+    /// It waits its turn behind what already waits, and is held while the agent is paused.
+    #[default]
+    Queue,
+    /// The user wants it now: it ends the live turn, goes ahead of what waits its turn, and runs
+    /// even while the agent is paused, without lifting the pause.
+    Direct,
+}
+
+impl Admission {
+    fn is_queue(&self) -> bool {
+        *self == Self::Queue
+    }
+}
+
 /// What a running turn is doing right now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "activity", rename_all = "kebab-case")]
 pub enum Activity {
     Thinking,
+    /// Writing its answer.
+    Responding,
     Tool {
         name: String,
     },
@@ -69,6 +89,8 @@ pub enum TurnEvent {
         turn: TurnId,
         message_seq: u64,
         origin: Origin,
+        #[serde(default, skip_serializing_if = "Admission::is_queue")]
+        admission: Admission,
         at_ms: i64,
     },
     Started {
@@ -95,6 +117,7 @@ pub struct Queued {
     /// The position in the agent's log of the message this turn answers.
     pub message_seq: u64,
     pub origin: Origin,
+    pub admission: Admission,
     pub accepted_at_ms: i64,
 }
 
@@ -165,11 +188,18 @@ impl std::error::Error for IllegalTransition {}
 
 impl Queued {
     /// Accepts a message as a turn. This is where a turn begins.
-    pub fn accept(turn: TurnId, message_seq: u64, origin: Origin, at_ms: i64) -> (Self, TurnEvent) {
+    pub fn accept(
+        turn: TurnId,
+        message_seq: u64,
+        origin: Origin,
+        admission: Admission,
+        at_ms: i64,
+    ) -> (Self, TurnEvent) {
         let event = TurnEvent::Accepted {
             turn,
             message_seq,
             origin: origin.clone(),
+            admission,
             at_ms,
         };
         (
@@ -177,6 +207,7 @@ impl Queued {
                 id: turn,
                 message_seq,
                 origin,
+                admission,
                 accepted_at_ms: at_ms,
             },
             event,
@@ -360,9 +391,10 @@ impl Turn {
                 turn,
                 message_seq,
                 origin,
+                admission,
                 at_ms,
             } => Ok(Self::Queued(
-                Queued::accept(*turn, *message_seq, origin.clone(), *at_ms).0,
+                Queued::accept(*turn, *message_seq, origin.clone(), *admission, *at_ms).0,
             )),
             other => Err(IllegalTransition {
                 turn: TurnId(0),
@@ -477,7 +509,7 @@ mod tests {
     use super::*;
 
     fn accepted() -> (Queued, TurnEvent) {
-        Queued::accept(TurnId(7), 41, Origin::User, 1_000)
+        Queued::accept(TurnId(7), 41, Origin::User, Admission::Queue, 1_000)
     }
 
     /// Drives a whole turn with the typed transitions and returns the end state with its events.
@@ -557,7 +589,8 @@ mod tests {
             Some(Turn::Settled(settled))
         );
 
-        let (queued, _) = super::Queued::accept(TurnId(7), 41, Origin::User, 1_000);
+        let (queued, _) =
+            super::Queued::accept(TurnId(7), 41, Origin::User, Admission::Queue, 1_000);
         let (starting, started) = queued.start(1_100);
         let (settled, failed) = starting.settle(
             StartOutcome::Failed {

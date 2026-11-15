@@ -10,24 +10,36 @@
 //! 1. An accepted message becomes exactly one turn, and that turn starts at most once.
 //! 2. An agent runs one turn at a time. The others wait in the mailbox, oldest first.
 //! 3. A Stop ends the live turn and holds the mailbox. Nothing in the mailbox is forgotten: a
-//!    resume, or the next message from the user, lets it run again in order. (On 15 Nov 2026 the
-//!    Python Host kept two of the owner's messages held after a Stop and a resume, and counted
-//!    them as work in progress, which suppressed the agent's own wakes for three hours.)
+//!    resume lets it run again in order. (On 15 Nov 2026 the Python Host kept two of the owner's
+//!    messages held after a Stop and a resume, and counted them as work in progress, which
+//!    suppressed the agent's own wakes for three hours.)
+//! 4. A direct message is the user saying "this, now". It ends the live turn, goes ahead of what
+//!    waits its turn, and runs even while the mailbox is held, without lifting the hold. It never
+//!    ends a turn that has not started: two direct messages in a row both run, in order.
 
 use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
 use crate::turn::{
-    Activity, IllegalTransition, Origin, Outcome, Queued, RunOutcome, StartOutcome, Turn,
-    TurnEvent, TurnId,
+    Activity, Admission, IllegalTransition, Origin, Outcome, Queued, RunOutcome, Settled,
+    StartOutcome, Turn, TurnEvent, TurnId,
 };
+
+/// Who stopped a turn that a direct message replaced.
+pub fn preempted_by(turn: TurnId) -> String {
+    format!("message of turn {}", turn.0)
+}
 
 /// What can be asked of an agent, by a client or by the shim that runs its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// A message was written to the log at `message_seq` and wants a turn.
-    Accept { message_seq: u64, origin: Origin },
+    Accept {
+        message_seq: u64,
+        origin: Origin,
+        admission: Admission,
+    },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
     /// End the live turn and hold the mailbox.
@@ -120,6 +132,10 @@ pub struct Agent {
     stopping: Option<String>,
     paused: bool,
     settled: u64,
+    /// The last turn that held the agent and ended.
+    last: Option<Settled>,
+    /// The tool's own session, as the tool last named it: where the next turn continues.
+    backend_session: Option<String>,
 }
 
 impl Default for Agent {
@@ -131,6 +147,8 @@ impl Default for Agent {
             stopping: None,
             paused: false,
             settled: 0,
+            last: None,
+            backend_session: None,
         }
     }
 }
@@ -157,6 +175,26 @@ impl Agent {
         self.settled
     }
 
+    /// The last turn that held the agent and ended. A message that was taken back never did.
+    pub fn last(&self) -> Option<&Settled> {
+        self.last.as_ref()
+    }
+
+    /// The tool's own session, where the agent's next turn continues.
+    pub fn backend_session(&self) -> Option<&str> {
+        self.backend_session.as_deref()
+    }
+
+    /// The number the next accepted message's turn will have.
+    pub fn next_turn(&self) -> TurnId {
+        TurnId(self.next_turn)
+    }
+
+    /// Who asked the live turn to stop, while it has not gone yet.
+    pub fn stopping(&self) -> Option<&str> {
+        self.stopping.as_deref()
+    }
+
     fn live_id(&self) -> Option<TurnId> {
         self.live.as_ref().map(Turn::id)
     }
@@ -173,19 +211,24 @@ impl Agent {
             Command::Accept {
                 message_seq,
                 origin,
+                admission,
             } => {
                 let turn = TurnId(work.agent.next_turn);
-                let from_user = origin == Origin::User;
-                let (_, accepted) = Queued::accept(turn, message_seq, origin, now_ms);
+                let (_, accepted) = Queued::accept(turn, message_seq, origin, admission, now_ms);
                 work.record(AgentEvent::Turn {
                     turn,
                     change: accepted,
                 });
-                if from_user && work.agent.paused {
-                    work.record(AgentEvent::Resumed {
-                        by: "a message from the user".to_string(),
-                        at_ms: now_ms,
-                    });
+                if admission == Admission::Direct {
+                    // The live turn makes way. One that is already on its way out is left to it.
+                    if let (Some(live), None) = (work.agent.live_id(), &work.agent.stopping) {
+                        work.record(AgentEvent::StopRequested {
+                            turn: live,
+                            by: preempted_by(turn),
+                            at_ms: now_ms,
+                        });
+                        work.decision.effects.push(Effect::StopTurn { turn: live });
+                    }
                 }
             }
             Command::Withdraw { turn, by } => {
@@ -324,7 +367,17 @@ impl Agent {
                 });
             }
             if let Turn::Queued(queued) = Turn::begin(change)? {
-                self.mailbox.push_back(queued);
+                if queued.admission == Admission::Direct {
+                    // Ahead of what waits its turn, behind the direct messages already waiting.
+                    let at = self
+                        .mailbox
+                        .iter()
+                        .position(|waiting| waiting.admission != Admission::Direct)
+                        .unwrap_or(self.mailbox.len());
+                    self.mailbox.insert(at, queued);
+                } else {
+                    self.mailbox.push_back(queued);
+                }
             }
             self.next_turn += 1;
             return Ok(());
@@ -333,12 +386,16 @@ impl Agent {
             let Some(live) = self.live.take() else {
                 return Ok(());
             };
-            let next = live.apply(change)?;
-            if matches!(next, Turn::Settled(_)) {
-                self.settled += 1;
-                self.stopping = None;
-            } else {
-                self.live = Some(next);
+            if let TurnEvent::Bound { backend_session } = change {
+                self.backend_session = Some(backend_session.clone());
+            }
+            match live.apply(change)? {
+                Turn::Settled(ended) => {
+                    self.settled += 1;
+                    self.stopping = None;
+                    self.last = Some(ended);
+                }
+                next => self.live = Some(next),
             }
             return Ok(());
         }
@@ -416,14 +473,18 @@ impl Work {
         }
     }
 
-    /// Starts the oldest waiting turn when the agent is free and not held.
+    /// Starts the first waiting turn when the agent is free. A held mailbox lets only a direct
+    /// message through.
     fn start_next(&mut self, now_ms: i64) {
-        if self.agent.paused || self.agent.live.is_some() {
+        if self.agent.live.is_some() {
             return;
         }
         let Some(next) = self.agent.mailbox.front() else {
             return;
         };
+        if self.agent.paused && next.admission != Admission::Direct {
+            return;
+        }
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
@@ -483,10 +544,22 @@ mod tests {
             Ok(decision.effects)
         }
 
+        /// A message that waits its turn.
         fn user(&mut self, message_seq: u64) -> Vec<Effect> {
             self.send(Command::Accept {
                 message_seq,
                 origin: Origin::User,
+                admission: Admission::Queue,
+            })
+            .unwrap()
+        }
+
+        /// A message the user wants answered now.
+        fn direct(&mut self, message_seq: u64) -> Vec<Effect> {
+            self.send(Command::Accept {
+                message_seq,
+                origin: Origin::User,
+                admission: Admission::Direct,
             })
             .unwrap()
         }
@@ -579,9 +652,15 @@ mod tests {
             matches!(a.history.last(), Some(AgentEvent::Turn { change: TurnEvent::Settled { outcome: Outcome::Stopped { by }, .. }, .. }) if by == "peter")
         );
         assert_eq!((a.live(), a.waiting()), (None, vec![2, 3]));
-        // The next message from the user lifts the hold, and the older messages run first.
+        // Another message that waits its turn is held with the rest.
+        assert_eq!(a.user(13), vec![]);
+        assert!(a.agent.is_paused());
+        // A resume lets them run, the oldest first.
         assert_eq!(
-            a.user(13),
+            a.send(Command::Resume {
+                by: "peter".to_string()
+            })
+            .unwrap(),
             vec![Effect::StartTurn {
                 turn: TurnId(2),
                 message_seq: 11
@@ -611,6 +690,98 @@ mod tests {
     }
 
     #[test]
+    fn a_direct_message_ends_the_live_turn_and_runs_ahead_of_what_waits() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.user(11);
+        assert_eq!(
+            a.direct(12),
+            vec![Effect::StopTurn { turn: TurnId(1) }],
+            "the live turn is told to make way"
+        );
+        assert!(
+            !a.agent.is_paused(),
+            "a direct message does not hold the mailbox"
+        );
+        assert_eq!(a.waiting(), vec![3, 2], "ahead of what waits its turn");
+        // A second one before the first has started: behind it, and nothing more to stop.
+        assert_eq!(a.direct(13), vec![]);
+        assert_eq!(a.waiting(), vec![3, 4, 2]);
+        // The old process goes. Whatever it says, it went because it was replaced.
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }]
+        );
+        assert!(a.history.iter().any(|event| matches!(
+            event,
+            AgentEvent::Turn { turn: TurnId(1), change: TurnEvent::Settled { outcome: Outcome::Stopped { by }, .. } }
+                if *by == preempted_by(TurnId(3))
+        )));
+        // The second direct message does not end the first: both run, in order, then the queue.
+        assert_eq!(
+            a.finish(3),
+            vec![Effect::StartTurn {
+                turn: TurnId(4),
+                message_seq: 13
+            }]
+        );
+        assert_eq!(
+            a.finish(4),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        a.finish(2);
+        assert_eq!(
+            a.started,
+            vec![TurnId(1), TurnId(3), TurnId(4), TurnId(2)],
+            "every message ran exactly once"
+        );
+    }
+
+    #[test]
+    fn a_direct_message_runs_past_a_stop_and_leaves_the_rest_held() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(Command::Stop {
+            by: "peter".to_string(),
+        })
+        .unwrap();
+        assert_eq!(a.finish(1), vec![], "held");
+        assert_eq!(
+            a.direct(12),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }],
+            "the user's next message runs although the mailbox is held"
+        );
+        assert!(a.agent.is_paused(), "and the hold stays as it was");
+        assert_eq!(
+            a.finish(3),
+            vec![],
+            "the held message still waits for a resume"
+        );
+        assert_eq!(a.waiting(), vec![2]);
+        assert_eq!(
+            a.send(Command::Resume {
+                by: "peter".to_string()
+            })
+            .unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+    }
+
+    #[test]
     fn a_message_from_another_agent_does_not_lift_a_stop_but_a_resume_does() {
         let mut a = Driven::new();
         a.send(Command::Stop {
@@ -622,6 +793,7 @@ mod tests {
             origin: Origin::Agent {
                 agent_id: "arnold".to_string(),
             },
+            admission: Admission::Queue,
         };
         assert_eq!(a.send(from_agent).unwrap(), vec![], "accepted, and held");
         assert_eq!(
@@ -629,7 +801,8 @@ mod tests {
                 message_seq: 21,
                 origin: Origin::Trigger {
                     name: "heartbeat".to_string()
-                }
+                },
+                admission: Admission::Queue,
             })
             .unwrap(),
             vec![]
@@ -762,9 +935,15 @@ mod tests {
                         } else {
                             Origin::User
                         };
+                        let admission = if next(4) == 0 {
+                            Admission::Direct
+                        } else {
+                            Admission::Queue
+                        };
                         Command::Accept {
                             message_seq: 100 + step,
                             origin,
+                            admission,
                         }
                     }
                     3 => Command::Stop {

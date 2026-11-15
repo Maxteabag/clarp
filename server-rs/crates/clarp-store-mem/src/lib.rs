@@ -9,12 +9,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use clarp_ports::codec::{CodecSet, CodecTag};
-use clarp_ports::log::{AgentLog, Item, LogEngine, LogError, NewItem, Seq};
+use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
 
 struct Row {
     turn: Option<u64>,
     kind: u16,
     ts_ms: i64,
+    key: Option<String>,
     tag: CodecTag,
     stored: Vec<u8>,
 }
@@ -58,18 +59,15 @@ impl MemLog {
         self.rows.lock().map_err(|_| poisoned())
     }
 
-    fn read(&self, rows: &[Row], from_index: usize, count: usize) -> Result<Vec<Item>, LogError> {
-        let mut items = Vec::with_capacity(count.min(rows.len()));
-        for (offset, row) in rows.iter().enumerate().skip(from_index).take(count) {
-            items.push(Item {
-                seq: offset as Seq + 1,
-                turn: row.turn,
-                kind: row.kind,
-                ts_ms: row.ts_ms,
-                body: self.codecs.decode(row.tag, &row.stored)?,
-            });
-        }
-        Ok(items)
+    fn item(&self, index: usize, row: &Row) -> Result<Item, LogError> {
+        Ok(Item {
+            seq: index as Seq + 1,
+            turn: row.turn,
+            kind: row.kind,
+            ts_ms: row.ts_ms,
+            key: row.key.clone(),
+            body: self.codecs.decode(row.tag, &row.stored)?,
+        })
     }
 }
 
@@ -83,6 +81,7 @@ impl AgentLog for MemLog {
                 turn: item.turn,
                 kind: item.kind,
                 ts_ms: item.ts_ms,
+                key: item.key.clone(),
                 tag,
                 stored,
             });
@@ -96,15 +95,47 @@ impl AgentLog for MemLog {
         Ok(self.rows()?.len() as Seq)
     }
 
-    fn read_after(&self, after: Seq, limit: usize) -> Result<Vec<Item>, LogError> {
+    fn read_after(&self, after: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
         let rows = self.rows()?;
         let from = usize::try_from(after).unwrap_or(usize::MAX);
-        self.read(&rows, from, limit)
+        let mut items = Vec::new();
+        for (index, row) in rows.iter().enumerate().skip(from) {
+            if items.len() >= limit {
+                break;
+            }
+            if kinds.has(row.kind) {
+                items.push(self.item(index, row)?);
+            }
+        }
+        Ok(items)
     }
 
-    fn read_tail(&self, limit: usize) -> Result<Vec<Item>, LogError> {
+    fn read_before(&self, before: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
         let rows = self.rows()?;
-        let from = rows.len().saturating_sub(limit);
-        self.read(&rows, from, limit)
+        // The item at index i has position i + 1, so "before position p" is "index below p - 1".
+        let end = usize::try_from(before.saturating_sub(1))
+            .unwrap_or(usize::MAX)
+            .min(rows.len());
+        let mut items = Vec::new();
+        for (index, row) in rows.iter().enumerate().take(end).rev() {
+            if items.len() >= limit {
+                break;
+            }
+            if kinds.has(row.kind) {
+                items.push(self.item(index, row)?);
+            }
+        }
+        items.reverse();
+        Ok(items)
+    }
+
+    fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+        let rows = self.rows()?;
+        for (index, row) in rows.iter().enumerate().rev() {
+            if row.key.as_deref() == Some(key) {
+                return Ok(Some(self.item(index, row)?));
+            }
+        }
+        Ok(None)
     }
 }

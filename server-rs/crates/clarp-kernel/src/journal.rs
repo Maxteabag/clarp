@@ -1,25 +1,52 @@
 //! The agent and its log together: write first, then change.
 //!
-//! [`Recorder`] is the agent's state with the log it is rebuilt from. A command is decided, its
-//! events are appended to the log in one transaction, and only when that append has succeeded is
-//! the state changed and the effects handed out. If the append fails, nothing happened: the state
-//! is as it was and the caller is told. Opening a recorder replays the log, so a process that died
-//! at any point comes back in the state of its last successful append.
+//! [`Recorder`] is the agent's state with the log it is rebuilt from. Whatever happens is first
+//! appended to the log in one transaction, and only when that append has succeeded is the state
+//! changed and the effects handed out. If the append fails, nothing happened: the state is as it
+//! was and the caller is told. Opening a recorder replays the log, so a process that died at any
+//! point comes back in the state of its last successful append.
+//!
+//! Things that happen together are written together, as a [`Batch`]: a message and the turn it
+//! becomes; what a stretch of a tool's output means, with the position in that output the log
+//! has now reached. There is never one without the other.
 
 use clarp_ports::log::{AgentLog, LogError, NewItem, Seq};
+use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
-use crate::turn::{IllegalTransition, Origin};
+use crate::turn::{Admission, IllegalTransition, Origin, TurnId};
 
 /// What an item in an agent's log is. The numbers are permanent once a log holds them.
 pub mod kind {
+    use clarp_ports::log::Kinds;
+
     /// An [`AgentEvent`](crate::agent::AgentEvent) as JSON.
     pub const AGENT_EVENT: u16 = 1;
-    /// A message to the agent, as the bytes the sender gave.
-    pub const MESSAGE: u16 = 10;
+    /// A [`SpoolCursor`](super::SpoolCursor) as JSON: how far into a turn's spool the log has got.
+    pub const SPOOL_CURSOR: u16 = 2;
+    /// A [`Message`](crate::conversation::Message) to the agent.
+    pub const MESSAGE: u16 = 100;
+    /// A [`Reply`](crate::conversation::Reply) of the agent.
+    pub const REPLY: u16 = 101;
+    /// A [`ToolCall`](crate::conversation::ToolCall).
+    pub const TOOL: u16 = 102;
+    /// A [`Notice`](crate::conversation::Notice) from the Host.
+    pub const NOTICE: u16 = 103;
+
+    /// What an agent is rebuilt from.
+    pub const MACHINERY: Kinds = Kinds::range(1, 99);
+    /// What a conversation is read from.
+    pub const CONVERSATION: Kinds = Kinds::range(100, 199);
 }
 
 const PAGE: usize = 1_000;
+
+/// How far into a turn's spool the log has got: everything before `offset` is in the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpoolCursor {
+    pub turn: TurnId,
+    pub offset: u64,
+}
 
 #[derive(Debug)]
 pub enum JournalError {
@@ -34,6 +61,8 @@ pub enum JournalError {
         seq: Seq,
         transition: IllegalTransition,
     },
+    /// Something could not be put into words for the log. Nothing was written.
+    Encode(String),
     Refused(Refusal),
 }
 
@@ -43,6 +72,7 @@ impl std::fmt::Display for JournalError {
             Self::Log(error) => write!(f, "{error}"),
             Self::Corrupt { seq, why } => write!(f, "log item {seq} is not an event: {why}"),
             Self::Illegal { seq, transition } => write!(f, "log item {seq}: {transition}"),
+            Self::Encode(why) => write!(f, "an item could not be written: {why}"),
             Self::Refused(refusal) => write!(f, "{refusal}"),
         }
     }
@@ -56,137 +86,307 @@ impl From<LogError> for JournalError {
     }
 }
 
+/// A message on its way to an agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Incoming {
+    /// The message's id. A second message with the same id is the same message, sent again.
+    pub key: Option<String>,
+    pub body: Vec<u8>,
+    pub origin: Origin,
+    pub admission: Admission,
+}
+
 /// What a message did: where it is in the log, and what the actor must now do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Accepted {
     pub message_seq: Seq,
+    /// The turn the message became. `None` when this was a message the log already held.
+    pub turn: Option<TurnId>,
+    /// The log already held this message: nothing was written and nothing is to be done.
+    pub duplicate: bool,
     pub effects: Vec<Effect>,
+}
+
+/// What a batch did, once it is in the log.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Committed {
+    /// The position of the batch's first item. 0 when the batch was empty.
+    pub first_seq: Seq,
+    /// The position of the batch's last item. 0 when the batch was empty.
+    pub last_seq: Seq,
+    pub events: Vec<AgentEvent>,
+    pub effects: Vec<Effect>,
+}
+
+impl Committed {
+    /// The position of the item that [`Batch::item`] put at `index`.
+    pub fn seq_of(&self, index: usize) -> Seq {
+        self.first_seq + index as Seq
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.first_seq == 0
+    }
 }
 
 pub struct Recorder {
     log: Box<dyn AgentLog>,
     agent: Agent,
+    cursor: Option<SpoolCursor>,
+    /// The position of the newest item. This recorder is the log's one writer, so it knows.
+    last_seq: Seq,
 }
 
-fn event_item(event: &AgentEvent, turn: Option<u64>, ts_ms: i64) -> Result<NewItem, JournalError> {
-    let body = serde_json::to_vec(event).map_err(|e| JournalError::Corrupt {
-        seq: 0,
-        why: e.to_string(),
-    })?;
-    Ok(NewItem {
-        turn,
-        kind: kind::AGENT_EVENT,
-        ts_ms,
-        body,
-    })
-}
-
-fn turn_of(event: &AgentEvent) -> Option<u64> {
-    match event {
+fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
+    let body = serde_json::to_vec(event).map_err(|e| JournalError::Encode(e.to_string()))?;
+    let mut item = NewItem::new(kind::AGENT_EVENT, ts_ms, body);
+    item.turn = match event {
         AgentEvent::Turn { turn, .. } | AgentEvent::StopRequested { turn, .. } => Some(turn.0),
         AgentEvent::Paused { .. } | AgentEvent::Resumed { .. } => None,
-    }
+    };
+    Ok(item)
 }
 
 impl Recorder {
     /// Opens an agent from its log: the state is whatever its history says.
     pub fn open(log: Box<dyn AgentLog>) -> Result<Self, JournalError> {
         let mut agent = Agent::new();
+        let mut cursor = None;
         let mut after = 0;
         loop {
-            let page = log.read_after(after, PAGE)?;
+            let page = log.read_after(after, kind::MACHINERY, PAGE)?;
             let Some(last) = page.last() else { break };
             after = last.seq;
             for item in &page {
-                if item.kind != kind::AGENT_EVENT {
-                    continue;
+                let corrupt = |e: serde_json::Error| JournalError::Corrupt {
+                    seq: item.seq,
+                    why: e.to_string(),
+                };
+                match item.kind {
+                    kind::AGENT_EVENT => {
+                        let event: AgentEvent =
+                            serde_json::from_slice(&item.body).map_err(corrupt)?;
+                        agent
+                            .apply(&event)
+                            .map_err(|transition| JournalError::Illegal {
+                                seq: item.seq,
+                                transition,
+                            })?;
+                    }
+                    kind::SPOOL_CURSOR => {
+                        cursor = Some(serde_json::from_slice(&item.body).map_err(corrupt)?);
+                    }
+                    // A kind a newer build wrote: not ours to understand, not ours to refuse.
+                    _ => {}
                 }
-                let event: AgentEvent =
-                    serde_json::from_slice(&item.body).map_err(|e| JournalError::Corrupt {
-                        seq: item.seq,
-                        why: e.to_string(),
-                    })?;
-                agent
-                    .apply(&event)
-                    .map_err(|transition| JournalError::Illegal {
-                        seq: item.seq,
-                        transition,
-                    })?;
             }
         }
-        Ok(Self { log, agent })
+        let last_seq = log.last_seq()?;
+        Ok(Self {
+            log,
+            agent,
+            cursor,
+            last_seq,
+        })
+    }
+
+    /// The position of the newest item in the log.
+    pub fn last_seq(&self) -> Seq {
+        self.last_seq
     }
 
     pub fn agent(&self) -> &Agent {
         &self.agent
     }
 
-    /// Records a command's events, then applies them. Returns the effects to carry out.
-    pub fn handle(&mut self, command: Command, now_ms: i64) -> Result<Vec<Effect>, JournalError> {
-        let decision = self
-            .agent
-            .decide(command, now_ms)
-            .map_err(JournalError::Refused)?;
-        let mut items = Vec::with_capacity(decision.events.len());
-        for event in &decision.events {
-            items.push(event_item(event, turn_of(event), now_ms)?);
-        }
-        self.commit(&items, &decision.events)?;
-        Ok(decision.effects)
+    /// The log, for reading. Only a [`Batch`] writes to it.
+    pub fn log(&self) -> &dyn AgentLog {
+        self.log.as_ref()
     }
 
-    /// Accepts a message: the message and the turn it becomes are written in one transaction, so
-    /// there is never a message without its turn or a turn without its message.
+    /// How far into this turn's spool the log has got: 0 when none of it is in the log yet.
+    pub fn spool_offset(&self, turn: TurnId) -> u64 {
+        match self.cursor {
+            Some(cursor) if cursor.turn == turn => cursor.offset,
+            _ => 0,
+        }
+    }
+
+    /// Starts a batch: things that happened together and are written together.
+    pub fn batch(&mut self) -> Batch<'_> {
+        Batch {
+            work: self.agent.clone(),
+            recorder: self,
+            items: Vec::new(),
+            events: Vec::new(),
+            effects: Vec::new(),
+            cursor: None,
+            failed: None,
+        }
+    }
+
+    /// Records a command's events, then applies them. Returns the effects to carry out.
+    pub fn handle(&mut self, command: Command, now_ms: i64) -> Result<Vec<Effect>, JournalError> {
+        let mut batch = self.batch();
+        batch
+            .command(command, now_ms)
+            .map_err(JournalError::Refused)?;
+        Ok(batch.commit()?.effects)
+    }
+
+    /// Accepts a message that waits its turn and has no id of its own.
     pub fn accept(
         &mut self,
         body: Vec<u8>,
         origin: Origin,
         now_ms: i64,
     ) -> Result<Accepted, JournalError> {
-        let message_seq = self.log.last_seq()? + 1;
-        let decision = self
-            .agent
-            .decide(
+        self.accept_message(
+            Incoming {
+                key: None,
+                body,
+                origin,
+                admission: Admission::Queue,
+            },
+            now_ms,
+        )
+    }
+
+    /// Accepts a message: the message and the turn it becomes are written in one transaction, so
+    /// there is never a message without its turn or a turn without its message. A message whose
+    /// id the log already holds was accepted before; it is not accepted again.
+    pub fn accept_message(
+        &mut self,
+        message: Incoming,
+        now_ms: i64,
+    ) -> Result<Accepted, JournalError> {
+        if let Some(key) = &message.key
+            && let Some(earlier) = self.log.find(key)?
+        {
+            return Ok(Accepted {
+                message_seq: earlier.seq,
+                turn: None,
+                duplicate: true,
+                effects: Vec::new(),
+            });
+        }
+        let message_seq = self.last_seq + 1;
+        let turn = self.agent.next_turn();
+        let mut batch = self.batch();
+        let mut item = NewItem::new(kind::MESSAGE, now_ms, message.body).in_turn(turn.0);
+        item.key = message.key;
+        batch.item(item);
+        batch
+            .command(
                 Command::Accept {
                     message_seq,
-                    origin,
+                    origin: message.origin,
+                    admission: message.admission,
                 },
                 now_ms,
             )
             .map_err(JournalError::Refused)?;
-        let mut items = vec![NewItem {
-            turn: None,
-            kind: kind::MESSAGE,
-            ts_ms: now_ms,
-            body,
-        }];
-        for event in &decision.events {
-            items.push(event_item(event, turn_of(event), now_ms)?);
-        }
-        self.commit(&items, &decision.events)?;
+        let committed = batch.commit()?;
         Ok(Accepted {
             message_seq,
-            effects: decision.effects,
+            turn: Some(turn),
+            duplicate: false,
+            effects: committed.effects,
         })
     }
+}
 
-    fn commit(&mut self, items: &[NewItem], events: &[AgentEvent]) -> Result<(), JournalError> {
-        if items.is_empty() {
-            return Ok(());
+/// Things that happened together, on their way into the log as one append.
+///
+/// A batch works on a copy of the agent. Nothing it holds is real until [`Batch::commit`] has
+/// written it; a batch that is dropped never happened.
+pub struct Batch<'a> {
+    recorder: &'a mut Recorder,
+    work: Agent,
+    items: Vec<NewItem>,
+    events: Vec<AgentEvent>,
+    effects: Vec<Effect>,
+    cursor: Option<SpoolCursor>,
+    failed: Option<JournalError>,
+}
+
+impl Batch<'_> {
+    /// Decides a command against the agent as this batch has moved it, and adds its events.
+    /// A command the agent refuses adds nothing: the refusal is returned and the batch stands.
+    pub fn command(&mut self, command: Command, now_ms: i64) -> Result<(), Refusal> {
+        let decision = self.work.decide(command, now_ms)?;
+        for event in decision.events {
+            match event_item(&event, now_ms) {
+                Ok(item) => self.items.push(item),
+                Err(error) => {
+                    self.failed.get_or_insert(error);
+                }
+            }
+            // Decided on this very state a moment ago: if it does not apply, the state machine
+            // is wrong, and the batch must not be written.
+            if let Err(transition) = self.work.apply(&event) {
+                self.failed
+                    .get_or_insert(JournalError::Illegal { seq: 0, transition });
+            }
+            self.events.push(event);
         }
-        let first_seq = self.log.last_seq()? + 1;
-        self.log.append(items)?;
-        // The events are durable. From here the state must follow them; an event that was just
-        // decided on this very state and does not apply means the state machine is wrong.
-        for event in events {
-            self.agent
-                .apply(event)
-                .map_err(|transition| JournalError::Illegal {
-                    seq: first_seq,
-                    transition,
-                })?;
-        }
+        self.effects.extend(decision.effects);
         Ok(())
+    }
+
+    /// Adds an item that is not an event, such as a piece of the conversation. Returns its place
+    /// in the batch, for [`Committed::seq_of`].
+    pub fn item(&mut self, item: NewItem) -> usize {
+        self.items.push(item);
+        self.items.len() - 1
+    }
+
+    /// Records that everything before `offset` in the turn's spool is in the log with this batch.
+    pub fn cursor(&mut self, turn: TurnId, offset: u64, now_ms: i64) {
+        let cursor = SpoolCursor { turn, offset };
+        match serde_json::to_vec(&cursor) {
+            Ok(body) => {
+                self.items
+                    .push(NewItem::new(kind::SPOOL_CURSOR, now_ms, body).in_turn(turn.0));
+                self.cursor = Some(cursor);
+            }
+            Err(error) => {
+                self.failed
+                    .get_or_insert(JournalError::Encode(error.to_string()));
+            }
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// The agent as it will be once this batch is in the log.
+    pub fn agent(&self) -> &Agent {
+        &self.work
+    }
+
+    /// Writes everything in one append, then changes the state.
+    pub fn commit(self) -> Result<Committed, JournalError> {
+        if let Some(error) = self.failed {
+            return Err(error);
+        }
+        if self.items.is_empty() {
+            return Ok(Committed::default());
+        }
+        let last_seq = self.recorder.log.append(&self.items)?;
+        // The items are durable. From here the state follows them.
+        self.recorder.last_seq = last_seq;
+        self.recorder.agent = self.work;
+        if let Some(cursor) = self.cursor {
+            self.recorder.cursor = Some(cursor);
+        }
+        Ok(Committed {
+            first_seq: last_seq + 1 - self.items.len() as Seq,
+            last_seq,
+            events: self.events,
+            effects: self.effects,
+        })
     }
 }
 
@@ -198,7 +398,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use clarp_codec::standard_set;
-    use clarp_ports::log::{Item, LogEngine};
+    use clarp_ports::log::{Item, Kinds, LogEngine};
     use clarp_store_mem::MemEngine;
 
     use super::*;
@@ -262,6 +462,14 @@ mod tests {
                     Command::TurnEnded {
                         turn: TurnId(1),
                         outcome: RunOutcome::Completed,
+                    },
+                    t,
+                )
+            }),
+            Box::new(|r, t| {
+                r.handle(
+                    Command::Resume {
+                        by: "peter".to_string(),
                     },
                     t,
                 )
@@ -342,7 +550,7 @@ mod tests {
         let log = engine
             .open(Path::new("/agents/a"), standard_set("zstd").unwrap())
             .unwrap();
-        let items = log.read_after(0, 10).unwrap();
+        let items = log.read_after(0, Kinds::ALL, 10).unwrap();
         let kinds: Vec<u16> = items.iter().map(|item| item.kind).collect();
         assert_eq!(
             kinds,
@@ -370,11 +578,24 @@ mod tests {
         fn last_seq(&self) -> Result<Seq, LogError> {
             self.inner.last_seq()
         }
-        fn read_after(&self, after: Seq, limit: usize) -> Result<Vec<Item>, LogError> {
-            self.inner.read_after(after, limit)
+        fn read_after(
+            &self,
+            after: Seq,
+            kinds: Kinds,
+            limit: usize,
+        ) -> Result<Vec<Item>, LogError> {
+            self.inner.read_after(after, kinds, limit)
         }
-        fn read_tail(&self, limit: usize) -> Result<Vec<Item>, LogError> {
-            self.inner.read_tail(limit)
+        fn read_before(
+            &self,
+            before: Seq,
+            kinds: Kinds,
+            limit: usize,
+        ) -> Result<Vec<Item>, LogError> {
+            self.inner.read_before(before, kinds, limit)
+        }
+        fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+            self.inner.find(key)
         }
     }
 
@@ -452,15 +673,9 @@ mod tests {
             turn: TurnId(1),
             change: crate::turn::TurnEvent::Started { at_ms: 1 },
         };
-        log.append(&[event_item(&impossible, Some(1), 1).unwrap()])
+        log.append(&[event_item(&impossible, 1).unwrap()]).unwrap();
+        log.append(&[NewItem::new(kind::AGENT_EVENT, 2, b"not json".to_vec())])
             .unwrap();
-        log.append(&[NewItem {
-            turn: None,
-            kind: kind::AGENT_EVENT,
-            ts_ms: 2,
-            body: b"not json".to_vec(),
-        }])
-        .unwrap();
         drop(log);
         let opened = Recorder::open(
             engine
@@ -470,6 +685,171 @@ mod tests {
         assert!(
             matches!(opened, Err(JournalError::Illegal { seq: 1, .. })),
             "a start with no acceptance cannot have happened"
+        );
+    }
+
+    fn message(key: &str, admission: Admission) -> Incoming {
+        Incoming {
+            key: Some(key.to_string()),
+            body: key.as_bytes().to_vec(),
+            origin: Origin::User,
+            admission,
+        }
+    }
+
+    #[test]
+    fn a_message_sent_twice_is_accepted_once() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        let first = recorder
+            .accept_message(message("u-1", Admission::Queue), 1)
+            .unwrap();
+        assert_eq!((first.turn, first.duplicate), (Some(TurnId(1)), false));
+        let again = recorder
+            .accept_message(message("u-1", Admission::Queue), 2)
+            .unwrap();
+        assert!(again.duplicate, "the same id is the same message");
+        assert_eq!(again.message_seq, first.message_seq);
+        assert_eq!(again.effects, vec![], "and it starts nothing");
+        assert_eq!(recorder.agent().next_turn(), TurnId(2), "one turn, not two");
+        // The retry may arrive after a crash: the log remembers, not the process.
+        drop(recorder);
+        let mut recorder = open(&engine);
+        assert!(
+            recorder
+                .accept_message(message("u-1", Admission::Queue), 3)
+                .unwrap()
+                .duplicate
+        );
+        let other = recorder
+            .accept_message(message("u-2", Admission::Queue), 4)
+            .unwrap();
+        assert_eq!((other.turn, other.duplicate), (Some(TurnId(2)), false));
+    }
+
+    #[test]
+    fn a_direct_message_is_recorded_as_one_and_replaces_the_live_turn() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        recorder
+            .accept_message(message("u-1", Admission::Queue), 1)
+            .unwrap();
+        recorder
+            .accept_message(message("u-2", Admission::Queue), 2)
+            .unwrap();
+        let direct = recorder
+            .accept_message(message("u-3", Admission::Direct), 3)
+            .unwrap();
+        assert_eq!(direct.effects, vec![Effect::StopTurn { turn: TurnId(1) }]);
+        let order = |r: &Recorder| r.agent().waiting().map(|q| q.id.0).collect::<Vec<_>>();
+        assert_eq!(order(&recorder), vec![3, 2]);
+        drop(recorder);
+        assert_eq!(
+            order(&open(&engine)),
+            vec![3, 2],
+            "the order survives a restart"
+        );
+    }
+
+    #[test]
+    fn a_batch_is_one_write_and_a_refused_command_does_not_spoil_it() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        recorder.accept(b"go".to_vec(), Origin::User, 1).unwrap();
+        let before = recorder.log().last_seq().unwrap();
+
+        let mut batch = recorder.batch();
+        batch
+            .command(Command::TurnStarted { turn: TurnId(1) }, 10)
+            .unwrap();
+        let reply = batch.item(NewItem::new(kind::REPLY, 11, b"hello".to_vec()).keyed("r-1"));
+        assert_eq!(
+            batch.command(
+                Command::TurnMoved {
+                    turn: TurnId(7),
+                    activity: Activity::Waiting
+                },
+                12
+            ),
+            Err(Refusal::NotLive(TurnId(7))),
+            "a signal about another turn is refused"
+        );
+        batch
+            .command(
+                Command::TurnEnded {
+                    turn: TurnId(1),
+                    outcome: RunOutcome::Completed,
+                },
+                13,
+            )
+            .unwrap();
+        batch.cursor(TurnId(1), 4_096, 13);
+        assert!(
+            batch.agent().live().is_none(),
+            "the batch sees the turn as over"
+        );
+        let committed = batch.commit().unwrap();
+
+        assert_eq!(committed.first_seq, before + 1);
+        assert_eq!(
+            recorder.log().find("r-1").unwrap().unwrap().seq,
+            committed.seq_of(reply),
+            "an item is where the batch said it would be"
+        );
+        assert_eq!(committed.last_seq, recorder.log().last_seq().unwrap());
+        assert!(recorder.agent().live().is_none());
+        assert_eq!(recorder.agent().settled(), 1);
+        assert_eq!(recorder.spool_offset(TurnId(1)), 4_096);
+        assert_eq!(
+            recorder.spool_offset(TurnId(2)),
+            0,
+            "a cursor belongs to its turn"
+        );
+        let after = recorder.agent().clone();
+        drop(recorder);
+        let reopened = open(&engine);
+        assert_eq!(reopened.agent(), &after);
+        assert_eq!(
+            reopened.spool_offset(TurnId(1)),
+            4_096,
+            "the cursor is rebuilt with the agent"
+        );
+    }
+
+    #[test]
+    fn a_batch_that_is_dropped_or_cannot_be_written_never_happened() {
+        let engine = MemEngine::new();
+        let appends_left = Arc::new(AtomicUsize::new(1));
+        let inner = engine
+            .open(Path::new("/agents/a"), standard_set("zstd").unwrap())
+            .unwrap();
+        let mut recorder = Recorder::open(Box::new(Failing {
+            inner,
+            appends_left: appends_left.clone(),
+        }))
+        .unwrap();
+        recorder.accept(b"go".to_vec(), Origin::User, 1).unwrap();
+        let before = recorder.agent().clone();
+
+        let mut dropped = recorder.batch();
+        dropped
+            .command(Command::TurnStarted { turn: TurnId(1) }, 2)
+            .unwrap();
+        drop(dropped);
+        assert_eq!(recorder.agent(), &before, "a dropped batch changes nothing");
+
+        let mut batch = recorder.batch();
+        batch
+            .command(Command::TurnStarted { turn: TurnId(1) }, 3)
+            .unwrap();
+        batch.cursor(TurnId(1), 100, 3);
+        assert!(matches!(batch.commit(), Err(JournalError::Log(_))));
+        assert_eq!(recorder.agent(), &before, "nor does one the disk refused");
+        assert_eq!(recorder.spool_offset(TurnId(1)), 0);
+
+        assert!(
+            recorder.batch().commit().unwrap().is_empty(),
+            "an empty batch writes nothing and succeeds"
         );
     }
 }
