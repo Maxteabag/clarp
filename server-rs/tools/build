@@ -35,6 +35,8 @@ esac
 
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
 rsync -a --delete --exclude target/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
+# The contract's schemas and fixtures sit beside server-rs in the repository; tests read them.
+rsync -a --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$remote/contract/"
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
 set +e
 ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec flock /var/tmp/clarp-build/lock bash -c 'echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder; CARGO_TERM_COLOR=never nice -n 19 ionice -c3 $cargo_cmd; code=\$?; : > /var/tmp/clarp-build/holder; exit \$code'"

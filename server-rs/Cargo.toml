@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/clarp-ports",
+    "crates/clarp-protocol",
     "crates/clarp-codec",
     "crates/clarp-store-mem",
     "crates/clarp-store-sqlite",
@@ -16,6 +17,8 @@ publish = false
 clarp-ports = { path = "crates/clarp-ports" }
 clarp-codec = { path = "crates/clarp-codec" }
 rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 zstd = "0.13"
 
 [workspace.lints.rust]
