@@ -269,6 +269,19 @@ create` and follows it with `clarp-admin agent helper-state`: the two commands t
 is built on. Held to the Python Host by the scenario `helpers`. Not there: a helper that starts from its
 maker's conversation (`agent fork`), and the program `clarp-sub-agent` itself on this Host's path.
 
+**A turn that fails says why, as the Python Host says it** (15 Nov 2026). How a turn ended is read off the
+tool's own words into a kind (`clarp-kernel/src/failures.rs`, the Python Host's wordings, 668 texts): a
+connection that dropped, an account that is out, a sign-in that ran out, a plan without the model, a tool
+that died. The kind is kept with the turn's end in the log as it was read when it happened: a log is replayed,
+never read again, because wordings change and what happened does not. The user is told in the Python Host's
+words (`failures::told`, 764 tellings): the agent's state carries the kind, the sentence for it, the tool's
+and the provider's words, and that the message is kept; under the message that caused it the Host says why
+in a row of its own (`marker-<message>`); and the turn's end is told on the last thing the turn itself put
+into the conversation, which is the message when the turn said nothing. The gauge of how full the
+conversation is keeps what a turn last said of it: a tool that dies says nothing. Held to the Python Host by
+the scenario `failed-turns`. Not there yet: trying again (the Python Host tries a dropped connection three
+times) and waiting for an account. Today every failure ends the turn, and says so.
+
 **Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
 Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token
 their turn was given (`CLARP_TOOL_TOKEN`, `clarp_host::tool_token`): it follows from the administrator's token,

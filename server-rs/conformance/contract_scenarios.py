@@ -602,6 +602,13 @@ SCENARIOS = [
             {'op': 'quiesce'},
             {**LOG, 'name': 'log after the tool died'},
             {**SNAPSHOT, 'name': 'snapshot after the tool died'},
+            # And the agent works on.
+            send('synthetic greeting mike', 'mike'),
+            {'op': 'wait_reply', 'after': 'u-mike'},
+            {'op': 'quiesce'},
+            LOG,
+            SNAPSHOT,
+            # A scenario grows at its end: what was compared before keeps its place and its name.
             # A turn that had begun to answer when its account was out: where its end is told.
             send(SLOW + '[qa-says-first] [qa-usage-limit] synthetic work november', 'november'),
             {'op': 'wait_busy', 'busy': True},
@@ -609,12 +616,16 @@ SCENARIOS = [
             {'op': 'quiesce'},
             {**LOG, 'name': 'log after a turn that had begun to answer'},
             {**SNAPSHOT, 'name': 'snapshot after a turn that had begun to answer'},
-            # And the agent works on.
-            send('synthetic greeting mike', 'mike'),
-            {'op': 'wait_reply', 'after': 'u-mike'},
+            # A turn that works, and then a tool that dies without a word of how full the
+            # conversation is: what the gauge shows then.
+            send('synthetic greeting oscar', 'oscar'),
+            {'op': 'wait_reply', 'after': 'u-oscar'},
             {'op': 'quiesce'},
-            LOG,
-            SNAPSHOT,
+            send(SLOW + '[qa-crash] synthetic work papa', 'papa'),
+            {'op': 'wait_busy', 'busy': True},
+            {'op': 'wait_busy', 'busy': False},
+            {'op': 'quiesce'},
+            {**SNAPSHOT, 'name': 'snapshot after a tool died that had worked before'},
         ],
     },
 ]

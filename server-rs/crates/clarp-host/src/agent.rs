@@ -382,6 +382,7 @@ pub(crate) fn never_ran() -> Status {
         backend_session: None,
         label: String::new(),
         resting: None,
+        context_tokens: None,
     }
 }
 

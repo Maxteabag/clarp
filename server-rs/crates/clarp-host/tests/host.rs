@@ -4517,7 +4517,11 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
         "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
         "exit 1 ;;\n*crash*)\n",
         init,
-        "echo 'Error: the tool broke' >&2\nexit 1 ;;\nesac\n",
+        "echo 'Error: the tool broke' >&2\nexit 1 ;;\n*count*)\n",
+        init,
+        "printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_9\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"counted\"}]}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"counted\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2}}'\n",
+        "exit 0 ;;\nesac\n",
         STAND_IN_ANSWERS,
     ]
     .concat();
@@ -4645,6 +4649,34 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
         (&json!("assistant"), &json!("completed"))
     );
     assert_eq!(rows[4]["turn"], Value::Null);
+
+    // How full the conversation is, is what a turn last said of it. A tool that dies says
+    // nothing: the gauge stays, and the Host still knows it after it was started again.
+    host.send(&agent, "count this", "november");
+    wait_for("the count", || {
+        host.turns(&agent).len() == 8 && host.state(&agent) == "done"
+    });
+    assert_eq!(row()["context_tokens"], 9);
+    host.send(&agent, "crash now", "oscar");
+    failed(10);
+    assert_eq!(row()["context_tokens"], 9);
+    host.kill();
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let again = host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == agent)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (&again["context_tokens"], &again["latest_state"]),
+        (&json!(9), &json!("interrupted"))
+    );
 }
 
 #[test]

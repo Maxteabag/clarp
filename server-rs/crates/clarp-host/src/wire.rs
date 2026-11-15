@@ -1115,7 +1115,7 @@ pub fn summary(
         "activity": activity(record, status),
         "live_activity": live_activity,
         "compacting": kind == AgentStateKind::Compacting,
-        "context_tokens": ended.and_then(|end| end.tokens_in),
+        "context_tokens": status.context_tokens,
         "context_window": clarp_backend::context_window(&record.backend),
         "queued_turn_count": status.waiting.len(),
         "queued_turn_revision": status.queue_revision,
@@ -1222,6 +1222,7 @@ mod tests {
             backend_session: Some("sess-1".to_string()),
             label: String::new(),
             resting: None,
+            context_tokens: None,
         }
     }
 
@@ -1481,6 +1482,11 @@ mod tests {
             42,
             None,
         );
+        // The gauge is what a turn last said of the conversation, whichever turn that was.
+        let busy = Status {
+            context_tokens: Some(5),
+            ..busy
+        };
         let row = summary(
             &record(),
             &busy,

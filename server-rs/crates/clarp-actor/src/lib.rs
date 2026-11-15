@@ -304,6 +304,9 @@ pub struct Status {
     pub label: String,
     /// What the agent rests in since it last said so, until its next turn starts.
     pub resting: Option<Rest>,
+    /// How many tokens the tool's conversation held when a turn last said so: the gauge an
+    /// app shows. A turn that says nothing of it (a tool that died) leaves it as it was.
+    pub context_tokens: Option<u64>,
 }
 
 /// What changed in the agent's books together, to be written together: a goal, and
@@ -373,7 +376,13 @@ pub struct Actor {
     unstored_changes: u64,
     /// The newest revision given to something that is shown and not stored.
     shown_revision: u64,
+    /// How full the tool's conversation was when a turn last said so ([`Status`]).
+    context_tokens: Option<u64>,
 }
+
+/// How many turns back the log is asked how full the conversation was, when the agent is
+/// opened. A tool that has said nothing for so many turns in a row says it at its next one.
+const CONTEXT_LOOKBACK: usize = 20;
 
 /// Hands over every record of one kind that the log has, oldest first. Items of the same
 /// range that a newer build wrote in a kind of its own are passed over.
@@ -581,7 +590,9 @@ impl Actor {
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
+            context_tokens: None,
         };
+        actor.context_tokens = actor.context_from_log()?;
         let mut out = Outputs::default();
         let live = match actor.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, true)),
@@ -667,7 +678,21 @@ impl Actor {
             backend_session: agent.backend_session().map(str::to_string),
             label: agent.label().to_string(),
             resting: agent.resting(),
+            context_tokens: self.context_tokens,
         }
+    }
+
+    /// What the newest turn that said so says of how full the conversation was.
+    fn context_from_log(&self) -> Result<Option<u64>, ActorError> {
+        let Some(last) = self.recorder.agent().last() else {
+            return Ok(None);
+        };
+        for turn in (1..=last.id.0).rev().take(CONTEXT_LOOKBACK) {
+            if let Some(tokens) = self.turn_end(turn)?.and_then(|end| end.tokens_in) {
+                return Ok(Some(tokens));
+            }
+        }
+        Ok(None)
     }
 
     /// How the last turn that held the agent ended, with what its tool said of itself.
@@ -1484,6 +1509,9 @@ impl Actor {
     /// The live turn is over, in the log: its files have done their work.
     fn forget_live(&mut self) {
         if let Some(live) = self.live.take() {
+            if let Some((tokens_in, _)) = live.tokens {
+                self.context_tokens = Some(tokens_in);
+            }
             let _ = std::fs::remove_file(self.profile.stdin_path(live.turn));
             if !self.profile.keep_spools {
                 let _ = std::fs::remove_file(self.profile.spool_path(live.turn));
