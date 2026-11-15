@@ -626,6 +626,9 @@ SCENARIOS = [
             {'op': 'wait_busy', 'busy': False},
             {'op': 'quiesce'},
             {**SNAPSHOT, 'name': 'snapshot after a tool died that had worked before'},
+            # Every row is read once more: a row a client has read has a name it can be held to
+            # wherever else it is named (a notification names the row it is about).
+            {**LOG, 'name': 'log at the end'},
         ],
     },
 ]
