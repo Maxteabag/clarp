@@ -116,7 +116,7 @@ the messages were accepted, when the turns are in their first steps. `--moment e
 seconds after the first command ended; the messages go out `--stagger` apart, so one restart meets turns
 that have just ended, turns that are answering, and turns still in their commands.
 
-On 15 Nov 2026, on the build of `d9868bea`, with real Claude Code turns:
+On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from 17:55 on that of `2e935ef7`:
 
 | When | How | Turns | What it met | Result |
 |---|---|---|---|---|
@@ -125,10 +125,13 @@ On 15 Nov 2026, on the build of `d9868bea`, with real Claude Code turns:
 | 17:35 | the Host killed (`SIGKILL`) | 5 | every turn in its command | held: back after 2.1 s with all five |
 | 17:36 | the Host killed | 5 | the messages just accepted, the turns starting | held |
 | 17:37 | the Host killed | 8 | one turn just ended, two whose command ended while the Host was down (one had answered too before it was back), five in their commands | held |
+| 17:55 | the Host updated by the installer, `d9868bea` to `2e935ef7` | 3 | every turn in its command (`sleep 40`) | held: the new build had all three |
+| 17:57 | the service restarted, on the new build | 2 | every turn in its command | held |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Thirty turns, none interrupted, lost or
-run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no more.
+completed, answered with its word, and its command ran exactly once. Thirty-five turns, none interrupted,
+lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no
+more.
 
 ## What a round does not prove
 
