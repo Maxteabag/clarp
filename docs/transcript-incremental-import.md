@@ -343,6 +343,25 @@ every rule in pairs: the change it lets through is a tail and equals the full
 replay; its nearest harmful twin is a full import and equals it too, and
 imported as a tail leaves different rows.
 
+The lane (`tests/readmodel`) runs in two configurations. At the importer's
+defaults, and with `RM_N14_CONFIGURATION=hosts`, which adds the switches both
+Hosts run with (`carry_live_rows`, `tail_yield_after_first_write`,
+`carry_settled_turns`) under each test's own settings; a test about one of
+them being off says so itself. Two things differ between them on purpose.
+A write that a test injects while an import has given the writer away is
+placed by what the tail did: the tail runs first, and the reference's replay
+gets the same write before the same row, not at the same count of yields. And
+revisions: once an import has removed a slot or parked a row, every batch it
+commits takes a number from the message clock, so the numbers of the rows
+after it depend on where the batches end. At the defaults the lane makes both
+lanes batch alike (a batch ends by its rows there, never by the 25 ms of wall
+clock a Host also ends one by) and compares the numbers themselves. With the
+Hosts' switches a tail gives the writer away only once it has written and
+the replay before every batch, so there it compares what the numbers order:
+the rows' order of writing, which rows share a number, and how many rows a
+head, a replace revision and the clock are not older than
+(`test_rm_n14_revision_order.py`).
+
 A process that holds no frontier for a file takes the stored one when it
 never had one (a Host start), lost it to the cache's size limit, or the last
 import wrote nothing and could not publish (`checkpoint_not_written`: an

@@ -28,6 +28,34 @@ BASE_MS = 1_791_706_800_000
 # stored beside it (the reference lane imports in full and keeps neither).
 METADATA_TABLES = frozenset({"transcript_import_checkpoints", "transcript_import_frontiers"})
 
+# The lane runs in one of two configurations, chosen by RM_N14_CONFIGURATION:
+# "" is the importer's defaults; "hosts" adds the switches both Hosts run
+# with. A test's own settings come on top of either, so a test that is about
+# one of these switches being off says so itself.
+#     RM_N14_CONFIGURATION=hosts uv run --frozen --group dev python -m pytest tests/readmodel
+HOSTS_SWITCHES = {"carry_live_rows": True, "tail_yield_after_first_write": True,
+                  "carry_settled_turns": True}
+
+
+def configuration() -> str:
+    chosen = os.environ.get("RM_N14_CONFIGURATION", "")
+    if chosen not in ("", "hosts"):
+        raise ValueError(f"unknown lane configuration {chosen!r}")
+    return chosen
+
+
+def configured(**settings) -> dict:
+    """The importer's settings in this configuration, a test's own on top."""
+    return {**(HOSTS_SWITCHES if configuration() == "hosts" else {}), **settings}
+
+
+def tail_yields_before_it_writes(faults=None) -> bool:
+    """Where a tail first gives the writer away, with these faults' settings:
+    before its first row, written or not (True), or only once it has written
+    one (``tail_yield_after_first_write``). A tail of three new rows, one row
+    a batch, yields six times the first way and twice the second."""
+    return not configured(**(faults or {}).get("settings", {})).get("tail_yield_after_first_write")
+
 
 def append_bytes(backend: str, ordinal: int, *, size: int = 1024,
                  long_turn: bool = False) -> bytes:
@@ -100,8 +128,57 @@ def database_view(path: pathlib.Path, *, metadata: bool = False) -> dict:
         return view
 
 
-def assert_product_equal(reference: pathlib.Path, candidate: pathlib.Path) -> None:
+def _revisions_by_order(view: dict) -> dict:
+    """The view with every number of the message clock replaced by what it
+    orders. A message row's revision becomes its rank among the revisions
+    rows carry: the same order of writing and the same rows sharing a number
+    give the same ranks, whatever numbers lie unused between them. A head's
+    revision, its replace revision and the clock itself become the count of
+    rows they are not older than: what a reader with that cursor has seen.
+
+    Why: once an import has removed a slot or parked a row, every batch it
+    commits takes a number from the clock (message_writes.commit_batch), so
+    the numbers after it depend on where the writer gave the lock away. Two
+    runs that batch differently number the same rows, in the same order,
+    differently (issue 349)."""
+    if "messages" not in view:
+        return view
+    columns = view["messages"]["columns"]
+    at = columns.index("revision")
+    carried = sorted(row[at] for row in view["messages"]["rows"])
+    rank = {revision: number for number, revision in enumerate(sorted(set(carried)))}
+
+    def covered(revision):
+        return sum(1 for own in carried if own <= revision)
+
+    out = dict(view)
+    rows = [[rank[value] if index == at else value for index, value in enumerate(row)]
+            for row in view["messages"]["rows"]]
+    rows.sort(key=lambda r: json.dumps(r, sort_keys=True, separators=(",", ":")))
+    out["messages"] = {"columns": columns, "rows": rows}
+    for table, names in (("conversation_heads", ("revision", "replace_revision")),
+                         ("message_clock", ("revision",))):
+        if table not in view:
+            continue
+        positions = [view[table]["columns"].index(name) for name in names]
+        rows = [[covered(value) if index in positions else value for index, value in enumerate(row)]
+                for row in view[table]["rows"]]
+        rows.sort(key=lambda r: json.dumps(r, sort_keys=True, separators=(",", ":")))
+        out[table] = {"columns": view[table]["columns"], "rows": rows}
+    return out
+
+
+def assert_product_equal(reference: pathlib.Path, candidate: pathlib.Path, *,
+                         revisions: str | None = None) -> None:
+    """Every product table of the two stores, row for row. ``revisions``:
+    "value" compares the message clock's numbers themselves, "order" what
+    they order (``_revisions_by_order``). Left out, it is "value" at the
+    defaults and "order" in the Hosts' configuration: there a tail gives the
+    writer away only once it has written, a replay before every batch, so
+    their batches end at different rows by design."""
     left, right = database_view(reference), database_view(candidate)
+    if (revisions or ("order" if configuration() == "hosts" else "value")) == "order":
+        left, right = _revisions_by_order(left), _revisions_by_order(right)
     differing = sorted(k for k in left.keys() | right.keys() if left.get(k) != right.get(k))
     if differing:
         # Never include row contents in a diagnostic, even for synthetic data.
@@ -163,6 +240,10 @@ def assert_checkpoint_parse_equal(database: pathlib.Path, transcript: pathlib.Pa
             "turn_count": cp.turn_count, "store_carry_certified": False}
 
 
+# Where the tick in hand placed its injected write, for a tick that fails.
+_INTERVENED: dict = {}
+
+
 def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
              lane: str, *, tick: int, initialize: bool = True,
              close: bool = True, faults: dict | None = None) -> dict:
@@ -175,6 +256,7 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
         db.reset_for_tests(database)
         telemetry.reset_for_tests(database.with_suffix(".telemetry.sqlite"))
         eventlog.reset_for_tests(database.parent / (database.stem + "-logs"))
+    _INTERVENED.clear()
     metrics = {"lane": lane, "backend": backend, "tick": tick,
                "process_id": os.getpid(), "source_bytes": transcript.stat().st_size,
                "components": {}, "queries": {}, "probe_sql_s": 0.0,
@@ -209,6 +291,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
 
     def measured_execute(writer, *args, **kwargs):
         started = time.perf_counter()
+        if writer.locked and (faults or {}).get("slow_writer"):
+            time.sleep(faults["slow_writer"])       # a starved machine: seconds a statement
         try:
             return execute(writer, *args, **kwargs)
         finally:
@@ -228,8 +312,9 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
         with ExitStack() as stack:
             stack.enter_context(patch("time.time", return_value=(BASE_MS + tick * 1000) / 1000))
             stack.enter_context(patch.object(inc, "settings", return_value=dict(inc._DEFAULTS,
-                enabled=lane == "checkpoint", sample_every=1, max_cpu_seconds_per_hour=1e9,
-                max_load_per_cpu=1e9, max_io_pressure=1e9, max_memory_pressure=1e9)))
+                **configured(), enabled=lane == "checkpoint", sample_every=1,
+                max_cpu_seconds_per_hour=1e9, max_load_per_cpu=1e9, max_io_pressure=1e9,
+                max_memory_pressure=1e9)))
             for name in ("_row_phases", "_visible_replies", "_prepare_import_prelude", "_revalidate_import_prelude"):
                 if hasattr(message_writes, name):
                     stack.enter_context(patch.object(message_writes, name, timed(name, getattr(message_writes, name))))
@@ -479,6 +564,7 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             # Every time the import gives the writer away, and what it had
             # written by the first time.
             metrics["yields"] = 0
+            metrics["yield_seqs"] = []     # the row each yield came before
             metrics["changes_at_first_yield"] = None
             changes_before = connection.total_changes
             plain_yield = message_writes._ImportWriter.yield_writer
@@ -488,12 +574,17 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     metrics["changes_at_first_yield"] = connection.total_changes - changes_before
                     metrics["first_yield_seq"] = writer.seq
                 metrics["yields"] += 1
+                metrics["yield_seqs"].append(writer.seq)
                 return plain_yield(writer)
 
             stack.enter_context(patch.object(message_writes._ImportWriter, "yield_writer", counted_yield))
-            if "write_budget_seconds" in faults:
-                stack.enter_context(patch.object(
-                    message_store, "IMPORT_WRITE_BUDGET_SECONDS", faults["write_budget_seconds"]))
+            # A batch ends after its rows or after 25 ms of wall clock. On a
+            # starved machine the clock ends batches where a quiet one does
+            # not, and two lanes starved differently number the same rows
+            # differently (issue 349). In the lane a batch ends by its rows,
+            # unless the test sets the clock's budget itself.
+            stack.enter_context(patch.object(
+                message_store, "IMPORT_WRITE_BUDGET_SECONDS", faults.get("write_budget_seconds", 1e9)))
             if "commit_every" in faults:
                 stack.enter_context(patch.object(message_store, "IMPORT_COMMIT_EVERY", faults["commit_every"]))
             from lib import message_import_rows
@@ -555,6 +646,9 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     injected = True
                     metrics["yield_intervention"] = metrics["yield_windows"]
                     metrics["yield_seq"] = writer.seq
+                    # A tick that fails after this reports it all the same.
+                    _INTERVENED.update(yield_intervention=metrics["yield_windows"],
+                                       yield_seq=writer.seq)
 
                 stack.enter_context(patch.object(message_writes._ImportWriter, "yield_writer", intervene_during_yield))
             if faults.get("commit_before_checkpoint"):
@@ -710,7 +804,8 @@ if __name__ == "__main__":
                                   faults=request.get("faults"))
             except Exception as error:
                 print(f"oracleTickFailed code={type(error).__name__}", file=sys.stderr)
-                result = {"failure_code": type(error).__name__, "process_id": os.getpid()}
+                result = {"failure_code": type(error).__name__, "process_id": os.getpid(),
+                          **_INTERVENED}
             first = False
             print(json.dumps(result), flush=True)
     else:
