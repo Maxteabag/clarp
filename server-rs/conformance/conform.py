@@ -27,6 +27,7 @@ The report prints structure, counts and codes, never message text.
 from __future__ import annotations
 
 import argparse
+import bisect
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import json
@@ -346,10 +347,13 @@ NOT_BUILT = {
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
-# A conversation's revisions order its rows, and the order is all a client may rely on. The two
-# Hosts count differently, so a revision is compared as its place among the revisions of its
-# capture, not as its number. A queue's revision is another thing: both Hosts count the same
-# changes, and it is compared as the number it is.
+# A conversation's revisions are what a client syncs by: it holds a cursor (the head an answer
+# gave it) and asks what changed since. The two Hosts count differently, and the Python Host
+# writes rows that change in the same breath in either order from run to run (reference defects
+# R8 and R16), so a revision is compared as what a client can tell of it: a head as its place
+# among the cursors of its capture, a row's revision as how many of those cursors it is newer
+# than. A queue's revision is another thing: both Hosts count the same changes, and it is
+# compared as the number it is.
 HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 # Readings of the clock the harness's normalizer has no name for: when something an agent made
 # was pinned, put away or thrown away, and when what it asked was answered. Whether there is
@@ -416,29 +420,38 @@ def own_particulars(body):
     return out
 
 
-def revisions(value, found: set, row=False):
-    """Collects a capture's conversation revisions: a row's `revision` and the heads."""
+def cursors(value, found: set):
+    """Collects the cursors a capture hands its client: the heads of its answers."""
     if isinstance(value, list):
         for item in value:
-            revisions(item, found, row)
+            cursors(item, found)
     elif isinstance(value, dict):
         for key, item in value.items():
-            if isinstance(item, int) and not isinstance(item, bool) and (
-                    key in HEAD_KEYS or (row and key == 'revision')):
+            if key in HEAD_KEYS and isinstance(item, int) and not isinstance(item, bool):
                 found.add(item)
             else:
-                revisions(item, found, key == 'turns')
+                cursors(item, found)
 
 
-def ranked(value, rank: dict, row=False):
+def ranked(value, held: list, row=False):
+    """Revisions as what a client can tell of them. A head is its place among the cursors the
+    capture handed out. A row's revision is how many of those cursors it is newer than: a
+    client holds a cursor and asks what changed since, so what it can tell of a row is which
+    of its cursors the row is newer than. How two rows that changed between the same two
+    cursors stand to each other, no client can tell."""
     if isinstance(value, list):
-        return [ranked(item, rank, row) for item in value]
+        return [ranked(item, held, row) for item in value]
     if isinstance(value, dict):
-        return {key: rank.get(item, item)
-                if isinstance(item, int) and not isinstance(item, bool) and (
-                    key in HEAD_KEYS or (row and key == 'revision'))
-                else ranked(item, rank, key == 'turns')
-                for key, item in value.items()}
+        out = {}
+        for key, item in value.items():
+            whole = isinstance(item, int) and not isinstance(item, bool)
+            if whole and key in HEAD_KEYS:
+                out[key] = held.index(item) + 1 if item in held else item
+            elif whole and row and key == 'revision':
+                out[key] = bisect.bisect_left(held, item)
+            else:
+                out[key] = ranked(item, held, key == 'turns')
+        return out
     return value
 
 
@@ -481,10 +494,10 @@ def core(raw: dict) -> dict:
                 data = {**data, 'version': '<version>'}
         sse.append({**frame, 'data': data})
     found: set = set()
-    revisions([exchange['body'] for exchange in http], found)
-    rank = {number: place for place, number in enumerate(sorted(found - {0}), start=1)}
+    cursors([exchange['body'] for exchange in http], found)
+    held = sorted(found - {0})
     names = agent_rows(http)
-    http = [{**exchange, 'body': renamed(ranked(exchange['body'], rank), names)} for exchange in http]
+    http = [{**exchange, 'body': renamed(ranked(exchange['body'], held), names)} for exchange in http]
     sse = [{**frame, 'data': renamed(frame.get('data'), names)} for frame in sse]
     return {**raw, 'http': http, 'sse': sse}
 
