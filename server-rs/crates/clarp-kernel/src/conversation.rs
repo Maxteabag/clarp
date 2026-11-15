@@ -191,6 +191,18 @@ impl Entry {
         }
     }
 
+    /// Who asked for the turn this thing belongs to, by the contract's word for it. What
+    /// the Host says itself is nobody's turn, and is shown like what a person began.
+    pub fn origin_name(&self) -> &str {
+        match self {
+            Self::Message(message) => message.origin.name(),
+            Self::Reply(reply) => reply.origin.name(),
+            Self::Tool(call) => call.origin.name(),
+            Self::Imported(imported) => imported.row["origin"].as_str().unwrap_or("user"),
+            Self::Notice(_) | Self::TurnEnd(_) => "user",
+        }
+    }
+
     pub fn turn(&self) -> Option<u64> {
         match self {
             Self::Message(_) => None,

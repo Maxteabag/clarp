@@ -18,6 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_actor::ImportedRow;
+use clarp_actor::conversation::Which;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::turn::{Admission, Origin};
@@ -487,6 +488,8 @@ struct LogQuery {
     limit: Option<usize>,
     after_revision: Option<u64>,
     before: Option<String>,
+    /// `0`, `false` or `no`: without what a watcher or the Host's own routine began.
+    include_automated: Option<String>,
 }
 
 async fn log(
@@ -500,27 +503,33 @@ async fn log(
         return Ok(Json(wire::no_conversation(&home)));
     };
     let limit = query.limit.unwrap_or(100).clamp(1, 5_000);
+    let include_automated = !query
+        .include_automated
+        .as_deref()
+        .is_some_and(|said| matches!(said.to_lowercase().as_str(), "0" | "false" | "no"));
+    let which = if include_automated {
+        Which::All
+    } else {
+        Which::WithoutAutomated
+    };
     // "After revision 0" is how a client that has nothing yet asks: it gets the newest page.
     let after = query.after_revision.filter(|revision| *revision > 0);
     let (page, replace) = if let Some(revision) = after {
-        let page = member.agent.after(revision, limit).await?;
+        let page = member.agent.after(revision, limit, which).await?;
         // A client that holds a revision this conversation never reached holds another
         // conversation: it must drop what it has.
         let replace = revision > page.head_revision;
         (page, replace)
     } else if let Some(id) = query.before {
-        let older = member.agent.before(id, limit).await?;
+        let older = member.agent.before(id, limit, which).await?;
         (older.unwrap_or_default(), false)
     } else {
-        (member.agent.tail(limit).await?, false)
+        (member.agent.tail(limit, which).await?, false)
     };
     let status = &member.agent.view().status;
-    Ok(Json(wire::log_response(
-        &member.record,
-        status,
-        &page,
-        replace,
-    )))
+    let mut answer = wire::log_response(&member.record, status, &page, replace);
+    answer["includes_automated"] = json!(include_automated);
+    Ok(Json(answer))
 }
 
 // ---- the commands ----------------------------------------------------------------------------
