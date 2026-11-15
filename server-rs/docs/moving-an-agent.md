@@ -13,7 +13,8 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 | The conversation's name (`conversation_id`) | kept, so it is the same conversation to an app |
 | Its library: what it made for its user (documents, tables, reports with every version they had, recordings and files) and what it asked, each under its id, with its times, whether it is pinned or put away, and a request as open or as answered as it was | read from `GET /artifacts?session=` and, for a report, `GET /artifacts/<id>/revisions`. An answer that still waited to be told to the agent is told on the Rust Host, after the resume |
 | Its plans and goals: each plan under its id and at its revision, with its steps, what was done, the goal's criteria and evidence, its history, how its work goes on, and the newest version of each of the goal's documents | read from `GET /task-plans?session=` and `GET /task-plan/document`. The library and the plans arrive with the conversation or not at all: an agent does not arrive without what it made and what it is committed to |
-| The files it published: its gallery (the newest 500 images), and every file its conversation names | read from `GET /media?session=` and `GET /media/<id>`, and published here under the ids they have, so that an image in an old reply still shows |
+| The files it published: its gallery (the newest 500 images), and the files its recordings, films and documents in the library are made of | read from `GET /media?session=` and `GET /media/<id>`, and published here under the ids they have, as the agent's own: the gallery row for row, a library file under the name and the kind its artifact says, so that the agent goes on with the artifact here |
+| Every other file its library, its plans or its conversation names: a picture another agent published that it shows, a still of a film | read from `GET /media/<id>` and kept here under the id it has, so that an image in an old reply still shows. It comes along and is not made the agent's own: it is not in its gallery, and no artifact of its is made of it. When the agent that published it moves here too, it is that agent's own, in its gallery as it was, and still one file |
 
 ## What does not move yet
 
@@ -46,12 +47,23 @@ CLARP_SOURCE_TOKEN=<the Python Host's token> CLARP_HOST_TOKEN=<the Rust Host's t
   clarp-host import --from 127.0.0.1:7682 --session <session name> --host 127.0.0.1:7690
 ```
 
-It answers with the number of rows and of files that arrived. The conversation arrives in one
-write or not at all, and an agent whose conversation did not arrive does not stay on the Rust
-Host: the command can simply be run again. The files follow the conversation. One that could
-not be read on the other Host (a file a reply names that is no longer there) is counted and
-does not undo the move; `clarp-host import --files` with the same words reads the files once
-more for an agent that is here already, and a file that arrived before does not arrive twice.
+It reads everything from the other Host before it gives this one anything, and answers with
+the number of rows, of things in the library, of plans and of files that arrived. The
+conversation arrives in one write or not at all, and an agent whose conversation did not arrive
+does not stay on the Rust Host: the command can simply be run again. The files follow the
+conversation, and it says three things of them apart:
+
+- how many arrived;
+- how many it names that are **not on the other Host either** (a reply that shows a picture
+  which that Host never had or no longer has). There was nothing to bring, and nothing is
+  unfinished: the picture is as missing here as it was there;
+- how many **did not arrive**, with the reason of the first: the other Host did not answer for
+  it, or this Host did not take it. That does not undo the move. `clarp-host import --files`
+  with the same words gives the files once more to an agent that is here already, and a file
+  that arrived before does not arrive twice.
+
+A Python Host lists an agent's newest 500 images and no more. An agent with more brings the
+newest 500 as its own; an older one comes along when something names it.
 
 An agent moves to a Rust Host once. One that went back and comes again is refused, because its
 history from the first time is still on the Rust Host's disk; taking that up again is not
@@ -82,7 +94,7 @@ there.
 
 | When | What | Result |
 |---|---|---|
-| 15 Nov 2026 | `an_agent_moves_from_one_host_to_another_with_its_conversation` (`crates/clarp-host/tests/host.rs`): two Rust Hosts, real binaries | The conversation arrives whole, the next turn continues the tool's session, a second move of the same agent is refused. An image and a document the agent published arrive under their ids, byte for byte, the image in its gallery as it was; a file the conversation names that is gone is counted; asked for again, nothing arrives twice. Its goal arrives as it stood (the plan read on the new Host equals the plan read on the old one, field for field; so do its working notes), is shown as the artifact it had, and the agent's next step on the new Host follows the revision it had. Its library arrives row for row equal: notes still pinned, a report with both its versions and its page for a browser, a request still waiting in the inbox |
+| 15 Nov 2026 | `an_agent_moves_from_one_host_to_another_with_its_conversation` (`crates/clarp-host/tests/host.rs`): two Rust Hosts, real binaries | The conversation arrives whole, the next turn continues the tool's session, a second move of the same agent is refused. An image and a document the agent published arrive under their ids, byte for byte, the image in its gallery as it was; the document, which nothing the agent said names, arrives because an artifact in its library is made of it, and the agent revises that artifact on the new Host. A picture another agent published, which the conversation shows, comes along and is fetched as it was; it is not in the agent's gallery and the agent can make no artifact of it; when its publisher moves too it is in the publisher's gallery, and still one file on the disk. A file the conversation names that is gone is said to be on neither Host, not to have failed; asked for again, nothing arrives twice. Its goal arrives as it stood (the plan read on the new Host equals the plan read on the old one, field for field; so do its working notes), is shown as the artifact it had, and the agent's next step on the new Host follows the revision it had. Its library arrives row for row equal: notes still pinned, a report with both its versions and its page for a browser, a request still waiting in the inbox |
 | 15 Nov 2026 | Rehearsal against the live Python Host on elitebook (reads only), into a scratch Rust Host: one Claude agent (23 rows) and one Codex agent (179 rows) | Both arrived in under two seconds. Every row equal to the Python Host's in every field but its revision; same order; same `conversation_id`. No turn was run on the scratch Host and it was removed afterwards |
 | 15 Nov 2026, 21:22 | Rehearsal of the move as it is now, against the live Python Host (reads only), into a scratch Rust Host that had `false` in place of every tool: a Claude agent that was idle, chosen for having the most goals among those with images (12,771 rows, 18 plans with a goal, 4 images) | It arrived whole. The newest page of the conversation has the same ids in the same order. All 18 plans arrived, each equal to the Python Host's field for field except the four fields of the goal updater, a janitor this Host does not have (`updater.enabled`, `janitor_agent_id`, `last_run_at`, `last_receipt`). The 4 images arrived byte for byte, their rows equal field for field. It arrived held, nothing waited and nothing ran. The scratch Host and its directory were removed. It also showed that the command counted paths of the machine with `/media/` in them as files it could not read; fixed |
 

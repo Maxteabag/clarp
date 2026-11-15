@@ -3331,21 +3331,35 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     wait_for("the first Host's answer", || {
         old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
     });
-    // It published an image and a document there, and its conversation names both, and a
-    // file that is no longer anywhere.
-    let png: Vec<u8> = [
-        &b"\x89PNG\r\n\x1a\n"[..],
-        &13u32.to_be_bytes(),
-        b"IHDR",
-        &8u32.to_be_bytes(),
-        &6u32.to_be_bytes(),
-        &[8, 6, 0, 0, 0],
-    ]
-    .concat();
+    // Another agent lives there too, and has said something.
+    let made = old_host.post(
+        "/agents",
+        json!({ "name": "Other", "backend": "scripted", "cwd": old_place.root.join("work").to_str().unwrap() }),
+    );
+    let other_session = made["session"].as_str().unwrap().to_string();
+    old_host.send(&other_session, "what the other said", "other-1");
+    wait_for("the other agent's answer", || {
+        old_host.conversation(&other_session).len() == 2 && old_host.state(&other_session) == "done"
+    });
+    // The agent published an image and a document there, and the other agent an image. Its
+    // conversation names its own image, the other agent's, and a file that is no longer
+    // anywhere. Nothing it said names the document: an artifact in its library is made of it.
+    let png_of = |width: u32, height: u32| -> Vec<u8> {
+        [
+            &b"\x89PNG\r\n\x1a\n"[..],
+            &13u32.to_be_bytes(),
+            b"IHDR",
+            &width.to_be_bytes(),
+            &height.to_be_bytes(),
+            &[8, 6, 0, 0, 0],
+        ]
+        .concat()
+    };
+    let (png, their_png) = (png_of(8, 6), png_of(4, 3));
     let pdf = b"%PDF-1.7\n1 0 obj\n".to_vec();
-    let publish = |bytes: &[u8], name: &str, kind: &str, caption: &str| -> Value {
+    let publish = |session: &str, bytes: &[u8], name: &str, kind: &str, caption: &str| -> Value {
         let said = [
-            ("X-Session", session.as_str()),
+            ("X-Session", session),
             ("X-File-Name", name),
             ("X-Caption", caption),
             ("Content-Type", kind),
@@ -3354,16 +3368,24 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         assert_eq!(answer.status, 200, "{}", answer.text());
         serde_json::from_slice(&answer.body).unwrap()
     };
-    let image = publish(&png, "chart.png", "image/png", "A%20chart%20%5Bone%5D");
-    let paper = publish(&pdf, "report.pdf", "application/pdf", "");
-    let (image_id, paper_id) = (
+    let image = publish(
+        &session,
+        &png,
+        "chart.png",
+        "image/png",
+        "A%20chart%20%5Bone%5D",
+    );
+    let paper = publish(&session, &pdf, "report.pdf", "application/pdf", "");
+    let theirs = publish(&other_session, &their_png, "theirs.png", "image/png", "");
+    let (image_id, paper_id, their_id) = (
         image["asset_id"].as_str().unwrap().to_string(),
         paper["asset_id"].as_str().unwrap().to_string(),
+        theirs["asset_id"].as_str().unwrap().to_string(),
     );
     let naming = format!(
-        "see {} and the paper at {} and /media/asset_gone_long_ago, kept under /media/disk",
+        "see {} and {} and /media/asset_gone_long_ago, kept under /media/disk",
         image["markdown"].as_str().unwrap(),
-        paper["url"].as_str().unwrap()
+        theirs["markdown"].as_str().unwrap()
     );
     old_host.send(&session, &naming, "old-2");
     wait_for("the first Host's second answer", || {
@@ -3407,8 +3429,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     };
     let plan_before = without_now(goal(&old_host, &dir, &["get", &plan_id]));
     let notes_before = goal(&old_host, &dir, &["read", &plan_id, "working-notes.md"]);
-    // And it has a library there: notes its user pinned, a report it revised, and a
-    // request that still waits for its user.
+    // And it has a library there: notes its user pinned, a report it revised, a request
+    // that still waits for its user, and the document it published, as a file to open.
     let made = |host: &Host, body: Value| -> Value {
         let (status, answer) = host.ask("POST", "/artifacts", Some(&body));
         assert_eq!(status, 201, "{answer}");
@@ -3436,6 +3458,14 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .as_str()
         .unwrap()
         .to_string();
+    let the_paper = json!({
+        "url": paper["url"], "mime_type": "application/pdf", "file_name": "report.pdf",
+    });
+    made(
+        &old_host,
+        json!({ "session": session, "type": "file", "title": "The paper", "artifact_id": "paper-1",
+                "payload": the_paper }),
+    );
     let library_of = |host: &Host| -> Vec<Value> {
         let listed = host.get(&format!("/artifacts?session={session}&order=created"));
         listed["artifacts"].as_array().unwrap().clone()
@@ -3443,8 +3473,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let library_before = library_of(&old_host);
     assert_eq!(
         library_before.len(),
-        4,
-        "a plan, notes, a report, a request"
+        5,
+        "a plan, notes, a report, a request, a paper"
     );
     let was_before = old_host.get("/artifacts/findings/revisions?version=v1");
     let before = old_host.conversation(&session);
@@ -3463,13 +3493,15 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         String::from_utf8_lossy(&moved.stderr)
     );
     let told = String::from_utf8_lossy(&moved.stdout).into_owned();
-    assert!(
-        told.contains(
-            "with the 4 rows of its conversation, the 4 things in its library, its plan and \
-             2 files it published (1 more"
-        ),
-        "{told}"
+    // What came is said, and what was not there to bring is not called unfinished.
+    let said_of_it = format!(
+        "with the 4 rows of its conversation, the 5 things in its library, its plan and the 3 \
+         files it published or shows.\nOne file that it names is not on the Host at {} either: \
+         there was nothing to bring.\nIt is still on the Host at",
+        old_host.address
     );
+    assert!(told.contains(&said_of_it), "{told}");
+    assert!(!told.contains("did not arrive"), "{told}");
 
     // Its goal came with it: the plan as it stood, at its revision, with its steps, its
     // history, its working notes, and the artifact it is shown as.
@@ -3538,8 +3570,9 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     assert_eq!(stepped["counts"]["in_progress"], 1);
 
-    // What it published came with it, under the ids its conversation names: the image in
-    // its gallery as it was, the bytes of both as they were.
+    // What it published came with it, under the ids that name it: the image in its gallery
+    // as it was, the bytes of both as they were. The document came because its artifact is
+    // made of it.
     let gallery = new_host.get(&format!("/media?session={session}"));
     let shown = gallery["assets"].as_array().unwrap();
     assert_eq!(shown.len(), 1, "{gallery}");
@@ -3581,6 +3614,43 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         (200, "application/pdf")
     );
     assert!(came.body == pdf);
+    // The document is the agent's own here, under the name and the kind it had: the agent
+    // goes on with the artifact that is made of it.
+    let (status, revised) = new_host.ask(
+        "POST",
+        "/artifacts/paper-1",
+        Some(&json!({ "summary": "Read it", "payload": the_paper })),
+    );
+    assert_eq!(status, 200, "{revised}");
+    assert_eq!(revised["artifact"]["summary"], "Read it", "{revised}");
+    // The other agent's picture came along, because the conversation shows it: it is
+    // fetched here as it was there. It is not this agent's: not in its gallery, and nothing
+    // of this agent's is made of it.
+    let came = fetch(
+        &new_host,
+        "",
+        "GET",
+        &format!("/media/{their_id}"),
+        &[],
+        b"",
+    );
+    assert_eq!(
+        (came.status, came.header("content-type")),
+        (200, "image/png")
+    );
+    assert!(came.body == their_png);
+    let not_its_own = json!({
+        "session": session, "type": "file", "title": "Not mine",
+        "payload": { "url": theirs["url"], "mime_type": "image/png", "file_name": "theirs.png" },
+    });
+    let (status, refused) = new_host.ask("POST", "/artifacts", Some(&not_its_own));
+    assert_ne!(status, 201, "{refused}");
+    assert!(
+        refused
+            .to_string()
+            .contains("media asset not found for this session"),
+        "{refused}"
+    );
     // Asked for again, the files are the same files: nothing arrives twice.
     let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
         .args(["import", "--files", "--from", &old_host.address])
@@ -3591,13 +3661,16 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .unwrap();
     let told = String::from_utf8_lossy(&again.stdout).into_owned();
     assert!(
-        again.status.success() && told.contains("has 2 files it published"),
+        again.status.success()
+            && told.contains(&format!(
+                "{session} has the 3 files it published or shows here."
+            )),
         "{told}"
     );
     let gallery = new_host.get(&format!("/media?session={session}"));
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
-    // The image, the document, and the report's two pages.
-    assert_eq!(files_under(&new_place.root.join("data").join("media")), 4);
+    // The image, the document, the other agent's image, and the report's two pages.
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 5);
     // Only the administrator says which id a file has, and an id is one file's.
     let taken = [
         ("X-Session", session.as_str()),
@@ -3645,10 +3718,47 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .unwrap();
     assert_eq!(again.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&again.stderr).contains("already has the agent"));
+    // The agent whose picture came along moves too. Its picture is here already, as a file
+    // the first agent shows: it becomes its own here, in its gallery as it was, and it is
+    // still one file. The first agent's gallery is as it was.
+    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["import", "--from", &old_host.address])
+        .args(["--session", &other_session, "--host", &new_host.address])
+        .env_remove("CLARP_HOST_TOKEN")
+        .env_remove("CLARP_SOURCE_TOKEN")
+        .output()
+        .unwrap();
+    let told = String::from_utf8_lossy(&moved.stdout).into_owned();
+    assert!(
+        moved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+    assert!(
+        told.contains(
+            "with the 2 rows of its conversation and the one file it published or shows.\nIt is still"
+        ),
+        "{told}"
+    );
+    let gallery = new_host.get(&format!("/media?session={other_session}"));
+    let shown = gallery["assets"].as_array().unwrap();
+    assert_eq!(shown.len(), 1, "{gallery}");
+    for field in ["asset_id", "source_name", "created_at", "width", "height"] {
+        assert_eq!(shown[0][field], theirs[field], "{field}");
+    }
+    let gallery = new_host.get(&format!("/media?session={session}"));
+    assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
+    assert_eq!(gallery["assets"][0]["asset_id"], image_id.as_str());
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 5);
     // After a restart of the second Host it is all still there.
     new_host.kill();
     let new_host = new_place.start();
     assert_eq!(new_host.conversation(&session).len(), 6);
+    assert_eq!(new_host.conversation(&other_session).len(), 2);
+    let gallery = new_host.get(&format!("/media?session={other_session}"));
+    assert_eq!(gallery["assets"][0]["asset_id"], their_id.as_str());
+    let gallery = new_host.get(&format!("/media?session={session}"));
+    assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
     let came = fetch(
         &new_host,
         "",

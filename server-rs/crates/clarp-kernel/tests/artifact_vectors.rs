@@ -330,6 +330,7 @@ impl Fleet {
             caption: media::kept_caption(&text(args, "caption")),
             created_by: media::kept_publisher(""),
             created_at: now,
+            named_only: false,
         };
         // A record is read as it was written.
         let read: Asset = serde_json::from_slice(&serde_json::to_vec(&asset).unwrap()).unwrap();
