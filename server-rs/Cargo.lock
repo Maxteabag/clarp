@@ -50,6 +50,9 @@ dependencies = [
 name = "clarp-kernel"
 version = "0.0.1"
 dependencies = [
+ "clarp-codec",
+ "clarp-ports",
+ "clarp-store-mem",
  "serde",
  "serde_json",
 ]
