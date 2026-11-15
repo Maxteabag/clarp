@@ -37,13 +37,13 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::VERSION;
 use crate::agent::Unavailable;
 use crate::config::Config;
-use crate::fleet::{AgentRecord, FleetHandle, Member};
+use crate::fleet::{AgentRecord, Directory, FleetHandle, Member, NotMade};
 use crate::hub::{Hub, Published};
 use crate::pairing::{self, Device, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
-use crate::{ids, joblog, library, peers, plans, push, wire};
+use crate::{ids, joblog, library, peers, plans, push, roster, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -75,6 +75,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("artifact_pins", 38),
     // `POST /devices` takes a phone's own grant, and the Host pushes by it.
     ("push_grants", 39),
+    // `GET /agents/snapshot?include_archived=0` and `GET /agents/archived`.
+    ("snapshot_without_archived", 82),
     // `DELETE /devices` and `GET /devices/push-tokens`.
     ("push_unregister", 93),
 ];
@@ -195,6 +197,7 @@ pub fn router(app: App) -> Router {
         .merge(plans::routes())
         .merge(push::routes())
         .merge(peers::routes())
+        .merge(roster::routes())
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }
@@ -369,38 +372,52 @@ fn identity(app: &App) -> ServerInfo {
     }
 }
 
-async fn snapshot(State(app): State<App>) -> Json<Value> {
+/// An agent's row in the snapshot: who it is and what it is doing.
+pub(crate) fn agent_row(directory: &Directory, member: &Member) -> Value {
+    let view = member.agent.view();
+    let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
+    let mut row = wire::summary(
+        &member.record,
+        &view.status,
+        view.backend,
+        view.newest.as_ref(),
+        view.ended.as_ref(),
+        focused,
+    );
+    // What runs for the agent besides its turn.
+    let running = view
+        .jobs
+        .iter()
+        .filter(|job| job.status.is_active())
+        .count();
+    row["background_jobs"]["count"] = json!(running);
+    row
+}
+
+#[derive(Debug, Deserialize)]
+struct SnapshotQuery {
+    include_archived: Option<String>,
+}
+
+/// Every agent of the Host. With `include_archived=0` the ones that are put away are left
+/// out and counted: `GET /agents/archived` pages them.
+async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) -> Json<Value> {
     let directory = app.fleet.directory();
+    let without_archived = query.include_archived.as_deref() == Some("0");
+    let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
     let agents: Vec<Value> = directory
         .members
         .iter()
-        .map(|member| {
-            let view = member.agent.view();
-            let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
-            let mut row = wire::summary(
-                &member.record,
-                &view.status,
-                view.backend,
-                view.newest.as_ref(),
-                view.ended.as_ref(),
-                focused,
-            );
-            // What runs for the agent besides its turn.
-            let running = view
-                .jobs
-                .iter()
-                .filter(|job| job.status.is_active())
-                .count();
-            row["background_jobs"]["count"] = json!(running);
-            row
-        })
+        .filter(|member| !(without_archived && put_away(member)))
+        .map(|member| agent_row(&directory, member))
         .collect();
+    // Every agent's name, whichever agents were asked for.
     let roster: Vec<&str> = directory
         .members
         .iter()
         .map(|member| member.record.persona.as_str())
         .collect();
-    Json(json!({
+    let mut body = json!({
         "agents": agents,
         "focus": directory.focus,
         "roster": roster,
@@ -409,13 +426,21 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
         "model_avatars": false,
         // What the Python Host says while nobody has chosen otherwise.
         "tool_explanations": { "detail_level": 2, "enabled": true },
-    }))
+    });
+    if without_archived {
+        let archived = directory.members.iter().filter(|member| put_away(member));
+        body["archived_count"] = json!(archived.count());
+        // The agents put away that an agent in the list names as the one that made it.
+        // No agent makes another on this Host yet.
+        body["archived_parents"] = json!([]);
+    }
+    Json(body)
 }
 
 async fn create_agent(
     State(app): State<App>,
     Json(request): Json<CreateAgentRequest>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<Response, ApiError> {
     match app.fleet.create(request).await? {
         Ok(record) => Ok(Json(json!({
             "ok": true,
@@ -424,8 +449,10 @@ async fn create_agent(
             "agent_id": record.agent_id,
             "backend": record.backend,
             "cwd": record.cwd,
-        }))),
-        Err(why) => Err(ApiError::new(StatusCode::BAD_REQUEST, why)),
+        }))
+        .into_response()),
+        Err(NotMade::Refused(why)) => Err(ApiError::new(StatusCode::BAD_REQUEST, why)),
+        Err(NotMade::Occupied { owner, session }) => Ok(roster::occupied(&owner, &session)),
     }
 }
 
@@ -473,7 +500,10 @@ async fn import_agent(
         // The conversation keeps its name: it is the tool's session, which goes on.
         conversation_id: backend_session.clone().unwrap_or_default(),
         created_at_ms: app.clock.now_ms(),
-        deleted_at_ms: None,
+        // An agent that was muted or put away stays so where it goes.
+        muted: request.agent["muted"] == true,
+        archived_at_ms: request.agent["archived_at"].as_i64(),
+        ..AgentRecord::default()
     };
     let rows: Vec<ImportedRow> = request
         .turns

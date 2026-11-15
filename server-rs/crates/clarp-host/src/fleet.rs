@@ -11,6 +11,7 @@ use std::sync::mpsc;
 
 use clarp_actor::Profile;
 use clarp_kernel::devices::{self, PushBook, PushRow};
+use clarp_kernel::roster;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::kv::KeyValue;
@@ -46,7 +47,7 @@ const PEERS: &str = "peer";
 const STOP_GRACE_MS: u64 = 5_000;
 
 /// What the fleet knows about an agent: who it is, not what it is doing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentRecord {
     pub agent_id: String,
     /// The agent's name in every request. Unique among the agents of a Host.
@@ -64,6 +65,66 @@ pub struct AgentRecord {
     pub created_at_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at_ms: Option<i64>,
+    /// The user muted it: what it says is marked unread and pages nobody.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub muted: bool,
+    /// When the agent was put away, when it is. It keeps everything and can still be
+    /// written to; the apps leave it out of their lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at_ms: Option<i64>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// What the user changes about an agent after it is made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Amend {
+    /// Whether what it says pages the user.
+    Mute(bool),
+    /// Its name as a person reads it, as [`roster::display_name`] keeps one. Its session
+    /// name and its id stay: everything that names the agent goes on naming it.
+    Rename(String),
+    /// Put away, or taken out again.
+    Archive(bool),
+    /// Which model its next turn runs with, and how much effort. `None` leaves one as it
+    /// is; an empty text is the tool's own choice.
+    Tune {
+        model: Option<String>,
+        effort: Option<String>,
+    },
+}
+
+/// Why an agent was not changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotAmended {
+    /// The Host has no such agent.
+    Unknown,
+    /// Another agent has the name.
+    Occupied { owner: String, session: String },
+}
+
+/// An agent as a change left it. `taken` is done when the agent's own thread has it.
+struct Amended {
+    record: AgentRecord,
+    taken: oneshot::Receiver<()>,
+}
+
+/// Why an agent was not made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotMade {
+    /// The request cannot be met, and this says why.
+    Refused(String),
+    /// Another agent has the name.
+    Occupied { owner: String, session: String },
+}
+
+impl From<String> for NotMade {
+    fn from(why: String) -> Self {
+        Self::Refused(why)
+    }
 }
 
 /// An agent of the fleet: who it is and the way to its thread.
@@ -91,6 +152,15 @@ impl Directory {
         self.members
             .iter()
             .find(|member| member.record.session == session)
+    }
+
+    /// The agent a request names, by its session name or by its id.
+    pub fn named(&self, key: &str) -> Option<&Arc<Member>> {
+        self.by_session(key).or_else(|| {
+            self.members
+                .iter()
+                .find(|member| member.record.agent_id == key)
+        })
     }
 
     /// The device that presents this token, when it is paired and not revoked.
@@ -175,7 +245,13 @@ enum Ask {
     /// The inner error is a refusal: the request cannot be met, and says why.
     Create {
         request: CreateAgentRequest,
-        answer: Answer<Result<AgentRecord, String>>,
+        answer: Answer<Result<AgentRecord, NotMade>>,
+    },
+    /// The user changes something about an agent.
+    Amend {
+        key: String,
+        change: Amend,
+        answer: Answer<Result<Amended, NotAmended>>,
     },
     /// An agent that comes from another Host, as it was known there.
     Adopt {
@@ -276,8 +352,33 @@ impl FleetHandle {
     pub async fn create(
         &self,
         request: CreateAgentRequest,
-    ) -> Result<Result<AgentRecord, String>, Unavailable> {
+    ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
         self.ask(|answer| Ask::Create { request, answer }).await
+    }
+
+    /// Changes something about the agent a request names, by its session name or its id.
+    /// Answers the agent as it then is, when its own thread has the change too: what the
+    /// agent says next, it says as what it now is.
+    pub async fn amend(
+        &self,
+        key: String,
+        change: Amend,
+    ) -> Result<Result<AgentRecord, NotAmended>, Unavailable> {
+        let amended = self
+            .ask(|answer| Ask::Amend {
+                key,
+                change,
+                answer,
+            })
+            .await?;
+        Ok(match amended {
+            Ok(Amended { record, taken }) => {
+                // An agent whose thread has ended takes nothing, and says nothing either.
+                let _ = taken.await;
+                Ok(record)
+            }
+            Err(why) => Err(why),
+        })
     }
 
     /// Adds an agent that comes from another Host, under the identity it had there. The inner
@@ -442,7 +543,7 @@ struct Fleet {
     directory: watch::Sender<Arc<Directory>>,
 }
 
-fn non_empty(text: &str) -> Option<String> {
+pub(crate) fn non_empty(text: &str) -> Option<String> {
     Some(text.trim().to_string()).filter(|text| !text.is_empty())
 }
 
@@ -568,6 +669,13 @@ impl Fleet {
             match ask {
                 Ask::Create { request, answer } => {
                     let _ = answer.send(Ok(self.create(request)));
+                }
+                Ask::Amend {
+                    key,
+                    change,
+                    answer,
+                } => {
+                    let _ = answer.send(self.amend(&key, change));
                 }
                 Ask::Adopt { record, answer } => {
                     let _ = answer.send(Ok(self.adopt(record)));
@@ -790,10 +898,18 @@ impl Fleet {
             .any(|member| member.record.session == session)
     }
 
-    fn create(&mut self, request: CreateAgentRequest) -> Result<AgentRecord, String> {
+    /// The agent that has this name, when it is not `except`.
+    fn owner_of_name(&self, name: &str, except: &str) -> Option<&AgentRecord> {
+        self.members
+            .iter()
+            .map(|member| &member.record)
+            .find(|record| record.agent_id != except && roster::same_name(&record.persona, name))
+    }
+
+    fn create(&mut self, request: CreateAgentRequest) -> Result<AgentRecord, NotMade> {
         let persona = request.name.trim().to_string();
         if persona.is_empty() {
-            return Err("an agent needs a name".to_string());
+            return Err("an agent needs a name".to_string().into());
         }
         let cwd = request
             .cwd
@@ -801,7 +917,14 @@ impl Fleet {
             .and_then(non_empty)
             .unwrap_or_else(|| self.works.config.default_cwd.display().to_string());
         if !Path::new(&cwd).is_dir() {
-            return Err(format!("{cwd} is not a directory"));
+            return Err(format!("{cwd} is not a directory").into());
+        }
+        // One agent has a name at a time: who is written to by name must be one agent.
+        if let Some(owner) = self.owner_of_name(&persona, "") {
+            return Err(NotMade::Occupied {
+                owner: owner.persona.clone(),
+                session: owner.session.clone(),
+            });
         }
         let base = ids::slug(&persona);
         let mut session = base.clone();
@@ -822,7 +945,7 @@ impl Fleet {
             effort: request.effort.unwrap_or_default(),
             conversation_id: ids::uuid(),
             created_at_ms: self.now_ms(),
-            deleted_at_ms: None,
+            ..AgentRecord::default()
         };
         // Refused before anything is written: an agent whose backend this Host lacks.
         let setup = setup(&self.works, &record)?;
@@ -834,6 +957,67 @@ impl Fleet {
         self.publish();
         self.tell_roster("created", &record.session);
         Ok(record)
+    }
+
+    fn amend(
+        &mut self,
+        key: &str,
+        change: Amend,
+    ) -> Result<Result<Amended, NotAmended>, Unavailable> {
+        let by = |find: &dyn Fn(&AgentRecord) -> bool| {
+            self.members.iter().position(|member| find(&member.record))
+        };
+        let Some(at) =
+            by(&|record| record.session == key).or_else(|| by(&|record| record.agent_id == key))
+        else {
+            return Ok(Err(NotAmended::Unknown));
+        };
+        let before = &self.members[at].record;
+        let mut record = before.clone();
+        match change {
+            Amend::Mute(muted) => record.muted = muted,
+            Amend::Rename(name) => {
+                if let Some(owner) = self.owner_of_name(&name, &record.agent_id) {
+                    return Ok(Err(NotAmended::Occupied {
+                        owner: owner.persona.clone(),
+                        session: owner.session.clone(),
+                    }));
+                }
+                record.persona = name;
+            }
+            // Put away again, an agent is put away now.
+            Amend::Archive(archived) => record.archived_at_ms = archived.then(|| self.now_ms()),
+            Amend::Tune { model, effort } => {
+                if let Some(model) = model {
+                    record.model = model;
+                }
+                if let Some(effort) = effort {
+                    record.effort = effort;
+                }
+            }
+        }
+        let (took, taken) = oneshot::channel();
+        if record == *before {
+            let _ = took.send(());
+            return Ok(Ok(Amended { record, taken }));
+        }
+        let renamed = record.persona != before.persona;
+        self.put(&record).map_err(Unavailable)?;
+        // The agent's thread is told in the order the fleet made the changes.
+        let agent = self.members[at].agent.clone();
+        agent.amended(record.clone(), took);
+        self.members[at] = Arc::new(Member {
+            record: record.clone(),
+            agent,
+        });
+        self.publish();
+        if renamed {
+            self.works.hub.publish(
+                wire::roster_renamed(&record.session, &record.persona),
+                self.now_ms(),
+            );
+        }
+        Ok(Ok(Amended { record, taken }))
     }
 
     fn adopt(&mut self, mut record: AgentRecord) -> Result<Arc<Member>, String> {

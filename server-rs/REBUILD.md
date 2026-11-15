@@ -228,7 +228,7 @@ made; while a desktop app says its user sits in front of it (`presence.rs`, `POS
 phone is paged; a token the push service calls dead is not sent to again. A Host pushes nothing until it is
 given a relay (`--push-relay`), which `tools/install-host` does. Held end to end by a Host with a paired
 phone and a stand-in relay. Not there: Android phones (FCM), Live Activities, the silent push that asks an
-app to sync, an agent's portrait in a push, muting an agent.
+app to sync, an agent's portrait in a push.
 
 **Agents write to each other, also across Hosts** (15 Nov 2026). The skill tells an agent to hand work to
 another with `clarp-admin prompt --to SESSION --from ME`; on this Host the same command is answered by the Host
@@ -241,6 +241,19 @@ owner's to do at an install). A request that comes back is there too (`clarp-adm
 asker's goal waits for the result as a dependency with a deadline and its owner is woken with the answer, and
 an update is a message, at most five to a request. Not there: a message for later (`--delay`), and a request
 to an agent of another Host (the Python Host has none either).
+
+**The user changes who an agent is** (15 Nov 2026). Its name (`POST /agent-rename`), whether what it says
+pages (`/agent-mute`: marked unread, nobody paged, also when it asks something), whether it is put away
+(`/agent-archive`), and which model it runs with how much effort (`/agent-llm`, from its next turn on). The
+change is the fleet's (`fleet.rs`, `Amend`): one writer for who an agent is, and the agent's own thread has
+the change before the request is answered. One agent has a name at a time, at a rename and when an agent is
+made, as on the Python Host: who is written to by name is one agent. An agent that is put away keeps
+everything and can still be written to; the apps read the snapshot without the ones put away
+(`?include_archived=0`) and page those (`GET /agents/archived`, the Python Host's cursor byte for byte). An
+agent reads the roster and tunes itself with `clarp-admin sessions` and `clarp-admin model` (the skill
+`clarp-sessions`). The rules are `clarp-kernel/src/roster.rs`; held to the Python Host by the scenario
+`roster-edits`. Not there: the list of models a tool offers (any name is taken, and the tool says at its next
+turn whether it has it), an agent's voice, portrait and MCP servers.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every

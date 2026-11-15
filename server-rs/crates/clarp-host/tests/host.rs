@@ -3291,3 +3291,493 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let new_host = new_place.start();
     assert_eq!(new_host.conversation(&session).len(), 4);
 }
+
+#[test]
+fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
+    let place = Place::new("roster");
+    let host = place.start();
+    let heard = host.listen();
+    let ada = host.new_agent("Ada");
+    let bob = host.new_agent("Bob");
+    let row = |host: &Host, session: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .cloned()
+            .unwrap_or_else(|| panic!("{session} is not in the snapshot"))
+    };
+    let refused = |path: &str, body: Value| -> (u16, Value) { host.ask("POST", path, Some(&body)) };
+    let why = |path: &str, body: Value| -> (u16, String) {
+        let (status, answer) = refused(path, body);
+        (status, answer["error"].as_str().unwrap_or("").to_string())
+    };
+
+    // One agent has a name at a time, whatever the case of its letters.
+    let (status, taken) = refused("/agents", json!({ "name": " ada ", "backend": "scripted" }));
+    assert_eq!(status, 409);
+    assert_eq!(
+        taken,
+        json!({
+            "error": "contact_occupied",
+            "message": "Ada already has an active session. Open or release that chat before starting another.",
+            "owner": "Ada",
+            "session": "ada",
+        })
+    );
+
+    // A name.
+    let (status, taken) = refused("/agent-rename", json!({ "session": bob, "name": "ADA" }));
+    assert_eq!(status, 409);
+    assert_eq!(
+        taken,
+        json!({
+            "error": "contact_occupied",
+            "message": "Ada already has an active session.",
+            "owner": "Ada",
+            "session": "ada",
+        })
+    );
+    let name_refused = "name required (maximum 60 characters)".to_string();
+    assert_eq!(
+        why("/agent-rename", json!({ "name": "X" })),
+        (400, "session required".to_string())
+    );
+    assert_eq!(
+        why("/agent-rename", json!({ "session": bob, "name": "   " })),
+        (400, name_refused.clone())
+    );
+    assert_eq!(
+        why(
+            "/agent-rename",
+            json!({ "session": bob, "name": "n".repeat(61) })
+        ),
+        (400, name_refused)
+    );
+    assert_eq!(
+        why("/agent-rename", json!({ "session": "nobody", "name": "X" })),
+        (404, "no such agent".to_string())
+    );
+    assert_eq!(
+        why("/agent-rename", json!([1])),
+        (400, "bad json".to_string())
+    );
+    assert_eq!(
+        host.post(
+            "/agent-rename",
+            json!({ "session": bob, "name": "  Robert   the  Second " })
+        ),
+        json!({ "ok": true, "session": "bob", "name": "Robert the Second" })
+    );
+    assert_eq!(row(&host, &bob)["persona"], "Robert the Second");
+    wait_for("the apps to hear of the new name", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-roster"
+                && event["kind"] == "agent-renamed"
+                && event["session"] == "bob"
+                && event["name"] == "Robert the Second"
+        })
+    });
+    // Its own name in other letters is its own to take, and an agent is also named by its id.
+    host.post(
+        "/agent-rename",
+        json!({ "session": bob, "name": "robert the second" }),
+    );
+    let bob_id = row(&host, &bob)["agent_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        host.post("/agent-rename", json!({ "session": bob_id, "name": "Bob" })),
+        json!({ "ok": true, "session": bob_id, "name": "Bob" })
+    );
+    assert_eq!(row(&host, &bob)["persona"], "Bob");
+    // The name that was given up is free again.
+    let rob = host.post(
+        "/agents",
+        json!({ "name": "Robert the Second", "backend": "scripted" }),
+    );
+    assert_eq!(rob["session"], "robert-the-second");
+
+    // Whether it pages.
+    assert_eq!(
+        why("/agent-mute", json!({ "session": ada })),
+        (400, "muted required".to_string())
+    );
+    assert_eq!(
+        why("/agent-mute", json!({ "muted": true })),
+        (400, "session required".to_string())
+    );
+    assert_eq!(
+        why("/agent-mute", json!({ "session": "nobody", "muted": true })),
+        (404, "no such agent".to_string())
+    );
+    assert_eq!(row(&host, &ada)["muted"], false);
+    assert_eq!(
+        host.post("/agent-mute", json!({ "session": ada, "muted": true })),
+        json!({ "ok": true, "session": "ada", "muted": true })
+    );
+    assert_eq!(row(&host, &ada)["muted"], true);
+    host.send(&ada, "anything new?", "m1");
+    let told = |id: &str| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| event["type"] == "user-notification" && event["cause_message_id"] == id)
+            .cloned()
+    };
+    wait_for("the muted agent's turn to be told", || {
+        told("u-m1").is_some()
+    });
+    let quiet = told("u-m1").unwrap();
+    assert_eq!(
+        (&quiet["push"], &quiet["muted"], &quiet["unread"]),
+        (&json!(false), &json!(true), &json!(true)),
+        "marked unread, and nobody is paged: {quiet}"
+    );
+    assert!(quiet["reason"].as_str().unwrap().ends_with("-muted"));
+    // Muted is what is plainly true.
+    assert_eq!(
+        host.post("/agent-mute", json!({ "session": ada, "muted": "yes" }))["muted"],
+        false
+    );
+    host.send(&ada, "and now?", "m2");
+    wait_for("the agent's turn to be told", || told("u-m2").is_some());
+    let loud = told("u-m2").unwrap();
+    assert_eq!(
+        (&loud["push"], &loud["muted"]),
+        (&json!(true), &json!(false))
+    );
+
+    // Put away, and taken out again.
+    let both = "session and archived required".to_string();
+    assert_eq!(
+        why(
+            "/agent-archive",
+            json!({ "session": ada, "archived": "yes" })
+        ),
+        (400, both.clone())
+    );
+    assert_eq!(
+        why("/agent-archive", json!({ "archived": true })),
+        (400, both)
+    );
+    assert_eq!(
+        why(
+            "/agent-archive",
+            json!({ "session": "nobody", "archived": true })
+        ),
+        (404, "no such agent".to_string())
+    );
+    assert_eq!(row(&host, &ada)["archived_at"], Value::Null);
+    assert_eq!(
+        host.post(
+            "/agent-archive",
+            json!({ "session": ada, "archived": true })
+        ),
+        json!({ "ok": true, "session": "ada", "archived": true })
+    );
+    let put_away_at = row(&host, &ada)["archived_at"].as_i64().unwrap();
+    assert!(put_away_at > 1_600_000_000_000);
+    let sessions = |snapshot: &Value| -> Vec<String> {
+        snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|agent| agent["session"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let without = host.get("/agents/snapshot?include_archived=0");
+    assert_eq!(sessions(&without), ["bob", "robert-the-second"]);
+    assert_eq!(without["archived_count"], 1);
+    assert_eq!(without["archived_parents"], json!([]));
+    assert_eq!(
+        without["roster"],
+        json!(["Ada", "Bob", "Robert the Second"]),
+        "the names are every agent's"
+    );
+    let whole = host.get("/agents/snapshot");
+    assert_eq!(sessions(&whole), ["ada", "bob", "robert-the-second"]);
+    assert_eq!(whole.get("archived_count"), None);
+    // Any other word for it is the whole list, as it has always been.
+    assert_eq!(
+        sessions(&host.get("/agents/snapshot?include_archived=false")).len(),
+        3
+    );
+    let page = host.get("/agents/archived");
+    assert_eq!(sessions(&page), ["ada"]);
+    assert_eq!(
+        (&page["total"], &page["next_cursor"]),
+        (&json!(1), &Value::Null)
+    );
+    assert_eq!(
+        page["agents"][0],
+        row(&host, &ada),
+        "the row the snapshot has"
+    );
+    for query in ["limit=0", "limit=201", "limit=07", "limit=x", "cursor=zzz"] {
+        let (status, answer) = host.ask("GET", &format!("/agents/archived?{query}"), None);
+        assert_eq!(
+            (status, answer["error"].as_str()),
+            (400, Some("invalid archived agents query")),
+            "{query}"
+        );
+    }
+    // An agent that is put away can still be written to, and stays put away.
+    host.send(&ada, "still there?", "m3");
+    wait_for("the answer of the agent that is put away", || {
+        host.conversation(&ada).len() == 6 && host.state(&ada) == "done"
+    });
+    assert_eq!(row(&host, &ada)["archived_at"], put_away_at);
+    // The list is read a page at a time, the last put away first.
+    host.post(
+        "/agent-archive",
+        json!({ "session": bob, "archived": true }),
+    );
+    let first = host.get("/agents/archived?limit=1");
+    assert_eq!(sessions(&first), ["bob"]);
+    assert_eq!(first["total"], 2);
+    let cursor = first["next_cursor"].as_str().unwrap().to_string();
+    let second = host.get(&format!("/agents/archived?limit=1&cursor={cursor}"));
+    assert_eq!(sessions(&second), ["ada"]);
+    assert_eq!(
+        (&second["total"], &second["next_cursor"]),
+        (&json!(2), &Value::Null)
+    );
+    assert_eq!(
+        host.post(
+            "/agent-archive",
+            json!({ "session": bob, "archived": false })
+        ),
+        json!({ "ok": true, "session": "bob", "archived": false })
+    );
+    assert_eq!(row(&host, &bob)["archived_at"], Value::Null);
+    assert_eq!(host.get("/agents/archived")["total"], 1);
+
+    // Which model, and how much effort.
+    let real = host.post("/agents", json!({ "name": "Real", "backend": "claude" }));
+    let real = real["session"].as_str().unwrap().to_string();
+    let claude_efforts = json!(["low", "medium", "high", "xhigh", "max"]);
+    assert_eq!(
+        host.post(
+            "/agent-llm",
+            json!({ "session": real, "model": " claude-opus-5-5 ", "effort": "HIGH" })
+        ),
+        json!({
+            "ok": true,
+            "backend": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "high",
+            "valid_efforts": claude_efforts,
+        })
+    );
+    let tuned = row(&host, &real);
+    assert_eq!(
+        (&tuned["model"], &tuned["effort"]),
+        (&json!("claude-opus-5-5"), &json!("high"))
+    );
+    // Only what a request has is changed, and saying nothing for one is the tool's choice.
+    let eased = host.post("/agent-llm", json!({ "session": real, "effort": null }));
+    assert_eq!(
+        (&eased["model"], &eased["effort"]),
+        (&json!("claude-opus-5-5"), &json!(""))
+    );
+    let asked = host.post("/agent-llm", json!({ "session": real }));
+    assert_eq!(
+        (&asked["model"], &asked["effort"]),
+        (&json!("claude-opus-5-5"), &json!(""))
+    );
+    let (status, answer) = refused("/agent-llm", json!({ "session": real, "effort": "ultra" }));
+    assert_eq!(status, 400);
+    assert_eq!(
+        answer,
+        json!({
+            "error": "invalid effort for backend",
+            "backend": "claude",
+            "valid_efforts": claude_efforts,
+        })
+    );
+    assert_eq!(
+        why("/agent-llm", json!({ "session": real, "model": 5 })),
+        (400, "model must be string or null".to_string())
+    );
+    assert_eq!(
+        why("/agent-llm", json!({ "session": real, "effort": ["high"] })),
+        (400, "effort must be string or null".to_string())
+    );
+    assert_eq!(
+        why("/agent-llm", json!({ "model": "x" })),
+        (400, "session required".to_string())
+    );
+    assert_eq!(
+        why("/agent-llm", json!({ "session": "nobody", "model": "x" })),
+        (404, "no such agent".to_string())
+    );
+    // Another tool has its own efforts.
+    let other = host.post("/agents", json!({ "name": "Other", "backend": "codex" }));
+    let other = other["session"].as_str().unwrap().to_string();
+    assert_eq!(
+        host.post("/agent-llm", json!({ "session": other, "effort": "ultra" }))["effort"],
+        "ultra"
+    );
+
+    // An agent reads the roster and tunes itself with its own tool.
+    let admin = |own: Option<&str>, args: &[&str]| -> (i32, String, String) {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+        command
+            .args(["tool", "clarp-admin"])
+            .args(args)
+            .current_dir(&place.root)
+            .env("CLARP_HOST_ADDR", &host.address)
+            .env("CLARP_HOST_TOKEN", &host.token)
+            .env_remove("CLAUDE_PWA_SESSION");
+        if let Some(own) = own {
+            command.env("CLAUDE_PWA_SESSION", own);
+        }
+        let out = command.output().unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).trim_end().to_string(),
+        )
+    };
+    let (code, out, err) = admin(None, &["sessions"]);
+    assert_eq!(code, 0, "{err}");
+    let listed: Value = serde_json::from_str(&out).unwrap();
+    let personas: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|agent| agent["persona"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        personas,
+        ["Ada", "Bob", "Other", "Real", "Robert the Second"]
+    );
+    let ada_row = row(&host, &ada);
+    assert_eq!(
+        listed[0],
+        json!({
+            "session": "ada",
+            "agent_id": ada_row["agent_id"],
+            "persona": "Ada",
+            "backend": "scripted",
+            "cwd": ada_row["cwd"],
+        })
+    );
+    let (code, out, err) = admin(Some(&real), &["model"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&out).unwrap(),
+        json!({
+            "session": "real",
+            "backend": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "",
+            "available": [],
+        })
+    );
+    let (code, out, err) = admin(
+        Some(&real),
+        &["model", "claude-haiku-5-5", "--effort", "low"],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&out).unwrap(),
+        json!({
+            "ok": true,
+            "backend": "claude",
+            "model": "claude-haiku-5-5",
+            "effort": "low",
+            "valid_efforts": claude_efforts,
+            "session": "real",
+            "applies": "next turn",
+        })
+    );
+    assert_eq!(row(&host, &real)["model"], "claude-haiku-5-5");
+    // `default` is the tool's own choice again, and another agent is named with --session.
+    let (code, out, err) = admin(
+        Some(&real),
+        &[
+            "model",
+            "default",
+            "--effort",
+            "default",
+            "--session",
+            &other,
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let cleared: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&cleared["session"], &cleared["model"], &cleared["effort"]),
+        (&json!("other"), &json!(""), &json!(""))
+    );
+    assert_eq!(
+        admin(None, &["model"]),
+        (
+            1,
+            String::new(),
+            "no session: pass --session (CLAUDE_PWA_SESSION is unset)".to_string()
+        )
+    );
+    assert_eq!(
+        admin(None, &["model", "--session", "nobody"]),
+        (
+            1,
+            String::new(),
+            "no such agent session: nobody".to_string()
+        )
+    );
+    assert_eq!(
+        admin(Some(&real), &["model", "--effort", "ultra"]),
+        (
+            1,
+            String::new(),
+            "model change refused (HTTP 400): {\"error\": \"invalid effort for backend\", \
+             \"backend\": \"claude\", \"valid_efforts\": [\"low\", \"medium\", \"high\", \
+             \"xhigh\", \"max\"]}"
+                .to_string()
+        )
+    );
+    assert_eq!(admin(Some(&real), &["model", "--bogus"]).0, 2);
+
+    // The Host keeps all of it.
+    host.post("/agent-mute", json!({ "session": bob, "muted": true }));
+    let before: Vec<Value> = [&ada, &bob, &real, &other]
+        .iter()
+        .map(|session| row(&host, session))
+        .collect();
+    host.kill();
+    let host = place.start();
+    let kept = |session: &str| {
+        let row = row(&host, session);
+        json!([
+            row["persona"],
+            row["muted"],
+            row["archived_at"],
+            row["model"],
+            row["effort"]
+        ])
+    };
+    for was in &before {
+        let session = was["session"].as_str().unwrap();
+        assert_eq!(
+            kept(session),
+            json!([
+                was["persona"],
+                was["muted"],
+                was["archived_at"],
+                was["model"],
+                was["effort"]
+            ]),
+            "{session}"
+        );
+    }
+    assert_eq!(kept(&ada)[2], put_away_at);
+    assert_eq!(kept(&bob), json!(["Bob", true, null, "", ""]));
+    assert_eq!(
+        kept(&real),
+        json!(["Real", false, null, "claude-haiku-5-5", "low"])
+    );
+    assert_eq!(kept(&other), json!(["Other", false, null, "", ""]));
+}

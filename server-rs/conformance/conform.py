@@ -62,6 +62,8 @@ import contract_scenarios as scenarios  # noqa: E402
 # The harness's fake Claude, and one thing more: it writes the transcript the real CLI writes,
 # which is where the Python Host reads a Claude agent's conversation from.
 FAKE_CLAUDE = HERE / 'fake_claude.py'
+# The agents the reference Host has besides the scenarios' own (tests/replay/host.py, SESSIONS).
+OTHER_AGENTS = ('rachel', 'mike')
 SCRATCH = Path(os.environ.get('CLARP_CONFORM_SCRATCH', '/var/tmp/cfm'))
 HTTP_OPS = ('get', 'post', 'put', 'delete', 'patch')
 # How long a conversation must stay as it is before it counts as settled. The Python Host goes on
@@ -101,13 +103,15 @@ class RustHost(replay.Host):
         claude_shim(provider / 'bin' / 'claude')
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         # The reference Host has its agents before it serves its first request. This one is given
-        # its agent and then started again, so that making the agent is not part of what a client
-        # sees of the scenario.
+        # the same agents and then started again, so that making them is not part of what a client
+        # sees of the scenario. The scenarios are about the first; the other two are the reference
+        # Host's codex agents, which no scenario runs: they are there to be other agents.
         self._launch()
-        status, _, made = self.request('POST', '/agents', {
-            'name': scenarios.AGENT.title(), 'backend': 'claude', 'cwd': str(self.root / 'workspace')})
-        if status != 200 or (made or {}).get('session') != scenarios.AGENT:
-            raise replay.StepFailed(f'the Rust Host did not make the agent ({status})')
+        for session, backend in ((scenarios.AGENT, 'claude'), *((other, 'codex') for other in OTHER_AGENTS)):
+            status, _, made = self.request('POST', '/agents', {
+                'name': session.title(), 'backend': backend, 'cwd': str(self.root / 'workspace')})
+            if status != 200 or (made or {}).get('session') != session:
+                raise replay.StepFailed(f'the Rust Host did not make the agent {session} ({status})')
         self._end()
         self._launch()
         return self
@@ -384,8 +388,8 @@ def settle(value, sessions):
         elif key in CLOCK_KEYS and isinstance(item, int) and not isinstance(item, bool) and item in EPOCH_MS:
             item = '<time>'
         elif key == 'agents' and isinstance(item, list):
-            # The reference Host starts with two codex agents (rachel, mike) that the Rust Host
-            # cannot run until it has a Codex adapter. Both sides are cut to the scenario's own.
+            # Both Hosts have two codex agents (rachel, mike) that no scenario is about. Both
+            # sides are cut to the scenario's own.
             item = [row for row in item if not isinstance(row, dict) or row.get('session') in sessions]
         elif key == 'roster' and isinstance(item, list):
             item = [name for name in item if isinstance(name, str) and name.lower() in sessions]

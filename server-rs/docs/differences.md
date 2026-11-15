@@ -21,7 +21,7 @@ introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 15 Nov 2026 
 `pairing`, `turn_queue_resume`, `background_jobs`, `background_job_cancel_generation`,
 `durable_task_goals`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`,
 `artifact_pins`, `decision_lifecycle`, `text_input_requests`, `push_grants`, `push_unregister`,
-`desktop_send_quiet_push`. Everything else in the Python Host's list is absent, also where a part
+`desktop_send_quiet_push`, `snapshot_without_archived`. Everything else in the Python Host's list is absent, also where a part
 of it is built (`attention_index`: `GET /attention` is there, the paged `GET /attention/inbox` is
 not; `goal_updater`: a criterion can be set aside, the Goal keeper is not there;
 `log_turn_summary`: rows carry the turn's end, an answer that tool work follows is not yet marked
@@ -73,3 +73,6 @@ it covers that exact difference and nothing else.
 | A message from an agent the Host does not have (an agent of a peer Host) | filed as an agent's, without a sender | filed as an agent's, with the name the sender gave | The reader sees who wrote, and on which Host to answer |
 | A send from outside with origin `heartbeat` | accepted when heartbeats are on | always refused with the words for heartbeats that are off | This Host has no heartbeats yet |
 | The model an agent's row shows after a turn that was stopped | the model of the last answer in the tool's transcript | the model of the last completed turn | The same thing, read from what the Host has. A turn that was cut off may not have said its model yet |
+| A model an agent is set to that its tool does not have | refused for Codex when the Host has the list `codex debug models` gave it, and by `clarp-admin model` for every tool, from the catalogue the apps read | taken; the tool says so at the agent's next turn | This Host has no catalogue of models yet. It comes with accounts and usage |
+| Two names that differ only in letters that fold to others (`ß` and `ss`) | one name (`str.casefold`) | two names (small letters compared) | Names are compared without their case. The rest of the folding table is not carried for a case no fleet has |
+| The answer to making an agent (`POST /agents`) | `ok`, `session`, `name` and the agent's row | `ok`, `session`, `persona`, `agent_id`, `backend`, `cwd` | Made by the user's tools and the conformance harness here, not by an app yet. It gets the Python Host's shape when agents make agents (`clarp-sub-agent`) |

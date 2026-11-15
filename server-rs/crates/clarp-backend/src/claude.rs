@@ -55,6 +55,10 @@ impl Backend for Claude {
         Some(1_000_000)
     }
 
+    fn efforts(&self) -> &'static [&'static str] {
+        &["low", "medium", "high", "xhigh", "max"]
+    }
+
     fn launch(&self, spec: &TurnSpec) -> Launch {
         let mut args: Vec<String> = [
             "-p",

@@ -34,6 +34,7 @@ pub mod pusher;
 pub mod relay;
 pub mod request_tool;
 pub mod revisions;
+pub mod roster;
 pub mod tools;
 pub mod wire;
 

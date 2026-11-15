@@ -571,8 +571,11 @@ pub fn user_notification(
         interrupted: false,
         client: asked.client,
     };
-    // Nothing mutes an agent on this Host yet, and no setting treats automation specially.
-    let agent = notify::Capabilities::default();
+    // No setting treats automation specially on this Host yet.
+    let agent = notify::Capabilities {
+        muted: record.muted,
+        ..notify::Capabilities::default()
+    };
     let notify::Decision::Notify {
         reason,
         push,
@@ -603,6 +606,11 @@ pub fn user_notification(
 
 pub fn roster(kind: &str, session: &str) -> Value {
     json!({ "type": "agent-roster", "kind": kind, "session": session })
+}
+
+/// An agent has another name: the apps read the list again.
+pub fn roster_renamed(session: &str, name: &str) -> Value {
+    json!({ "type": "agent-roster", "kind": "agent-renamed", "session": session, "name": name })
 }
 
 pub fn focus(record: &AgentRecord) -> Value {
@@ -929,12 +937,17 @@ pub fn summary(
         "persona": record.persona,
         "backend": backend,
         "cwd": record.cwd,
-        // The model that answered last. A turn that was cut off may or may not have said its
-        // model before it went: what an app shows must not depend on that.
-        "model": ended
-            .filter(|end| end.status == "completed")
-            .and_then(|end| end.model.clone())
-            .unwrap_or_else(|| record.model.clone()),
+        // The model the agent is set to. An agent that is set to none shows the model that
+        // answered last. A turn that was cut off may or may not have said its model before
+        // it went: what an app shows must not depend on that.
+        "model": if record.model.is_empty() {
+            ended
+                .filter(|end| end.status == "completed")
+                .and_then(|end| end.model.clone())
+                .unwrap_or_default()
+        } else {
+            record.model.clone()
+        },
         "effort": record.effort,
         "voice_id": "",
         "avatar_symbol": "",
@@ -944,9 +957,9 @@ pub fn summary(
         "mcp_servers": [],
         "heartbeat_enabled": false,
         "dreaming_enabled": false,
-        "muted": false,
+        "muted": record.muted,
         "quiet": false,
-        "archived_at": null,
+        "archived_at": record.archived_at_ms,
         "role": "agent",
         "is_janitor": false,
         "parent_agent_id": null,
@@ -1144,7 +1157,7 @@ mod tests {
             effort: String::new(),
             conversation_id: "conv-1".to_string(),
             created_at_ms: 1,
-            deleted_at_ms: None,
+            ..AgentRecord::default()
         }
     }
 
