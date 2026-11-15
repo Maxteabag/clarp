@@ -66,10 +66,12 @@ rows in either order).
 
 Some things are each Host's own choice, and comparing their values would only compare the
 choices. They are compared as what a client can rely on (`core` in `conform.py`, the table in
-`../docs/differences.md`): a conversation's revisions as their order, the ids of the rows an
-agent wrote as the order they are first read in, a Host's version as "a version". A queue's
-revision is compared as the number it is. Fields and events of features the Rust Host does not
-have yet are left out of both sides.
+`../docs/differences.md`): a conversation's revisions by the cursors a client holds (a head as
+its place among the cursors the capture handed out, a row's revision as how many of them it is
+newer than), the ids of the rows an agent wrote as the order they are first read in, the ids of
+what agents make as the same name wherever they are written, a Host's version as "a version".
+A queue's revision is compared as the number it is. Fields and events of features the Rust Host
+does not have yet are left out of both sides.
 
 The start of the turn that runs (`turn_started_at` in the snapshot) is what an app counts a
 running turn from (issue 354). It is a reading of a clock, and is compared as what it is a
