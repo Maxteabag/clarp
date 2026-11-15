@@ -190,10 +190,33 @@ scheme word for word.
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first.
 
-Not there yet, in the order it is planned: the first kept move (stage 2's gate); then stage 3, which is what
-makes an agent livable on this Host: speech in and out, push, portraits, artifacts, goals and their wakes. The
-iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every other
-feature out of `capabilities.features`.
+Not there yet: the first kept move (stage 2's gate), and stage 3, which is what makes an agent livable on this
+Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
+other feature out of `capabilities.features`. The owner declined an install on 15 Nov: a Host an agent cannot
+live on is not put on his machine. It is proposed again when stage 3's first surfaces are there.
+
+**Stage 3 goes in the order the load says.** Counted on the live elitebook Host on 15 Nov 2026, reads only, over
+the seven days before:
+
+| Surface | What it carried in seven days | Order |
+|---|---|---|
+| Notifications to the owner (and the push behind them) | 5,907 notifications | 1 |
+| Background jobs | 1,183 jobs, 3,188 job events | 2 |
+| Goals and their wakes | 88 plans, 4,347 goal events | 3 |
+| Sub-agents | 233 agents made, nearly all helpers | 4 |
+| Artifacts, media, decision cards | 172 artifacts, 203 media assets, 16 decisions | 5 |
+| Speech out and in | 45 clips, 709 voice events | 6 |
+
+Speech was planned first and is last: on this Host it carries the least. What is built of it stays: the crate
+`clarp-speech` holds the voice markup (what of a reply is spoken, what is shown), ported from
+`server/lib/voice_markup.py` and held to it by vectors written from the Python module. Its design, for when its
+turn comes: a speech engine is a program outside the Host (text in, audio out), a clip is a file that grows and
+is announced before its first byte, as the Python Host's chunked-file delivery does.
+
+An agent's Clarp tools (`clarp-goal`, `clarp-agent-bg`, `clarp-agent-artifacts`, `clarp-sub-agent`) reach their
+Host over HTTP with the address and token of the configuration they are pointed at. So the agent's side of the
+contract is endpoints too, and `tools/install-host` points an agent on the Rust Host at the Rust Host: a tool
+this Host does not serve yet fails here and does not act on the Python Host.
 
 ## 7. Stages and gates
 
