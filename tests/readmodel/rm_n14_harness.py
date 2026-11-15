@@ -359,13 +359,16 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
             if faults.get("source_moves"):
                 # The transcript changes while a tail has it. "when": "parse"
                 # (the parser has read its last byte and not yet returned),
+                # "read" (its reader has taken some of the range and not all
+                # of it; the report's ``source_moved_at`` is how far it was),
                 # "before_parse" (its bytes were hashed, the parser has not
                 # opened it yet) or "store" (parsed, about to be stored and
                 # published). "how":
                 # "grow" (a record is appended), "touch" (only the mtime
                 # moves), "rewrite" (a record is appended AND a byte of the
-                # last old record changes in place), "rewrite_earlier" (the
-                # same, the byte in a record an earlier tail imported),
+                # last old record changes in place), "rewrite_at" (the
+                # same, the byte where "words" begin: a record an earlier
+                # tail imported, one the reader has passed, one it has not),
                 # "replace" (the same bytes in a new file under the name).
                 moves, moved = faults["source_moves"], []
 
@@ -374,7 +377,7 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                         return
                     moved.append(True)
                     stat, how = transcript.stat(), moves["how"]
-                    if how in ("grow", "rewrite", "rewrite_earlier"):
+                    if how in ("grow", "rewrite", "rewrite_at"):
                         if how != "grow":
                             data = transcript.read_bytes()
                             at = data.rindex(b"synthetic") if how == "rewrite" \
@@ -393,7 +396,18 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     else:
                         raise ValueError(how)
 
-                if moves["when"] in ("parse", "before_parse"):
+                if moves["when"] == "read":
+                    native_readinto = inc._Range.readinto
+
+                    def readinto_then_move(self, buffer):
+                        count = native_readinto(self, buffer)
+                        if count and self._left > 0 and not moved:
+                            metrics["source_moved_at"] = self._file.tell()
+                            move_source()
+                        return count
+
+                    stack.enter_context(patch.object(inc._Range, "readinto", readinto_then_move))
+                elif moves["when"] in ("parse", "before_parse"):
                     parser = type(backends.by_id(backend))
                     native_parse = parser.parse_transcript
 
