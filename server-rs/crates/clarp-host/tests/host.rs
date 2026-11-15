@@ -2085,6 +2085,217 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
     );
 }
 
+/// Pairs a device with this Host. Answers the device's token and its id.
+fn pair(host: &Host, name: &str, scope: &str) -> (String, String) {
+    let issued = host.post(
+        "/pairing/issue",
+        json!({ "device_name": name, "scope": scope, "url": "https://host.example:7690" }),
+    );
+    let (status, paired) = host.ask_as(
+        "",
+        "POST",
+        "/pairing/exchange",
+        Some(&json!({ "code": issued["code"], "device_name": "" })),
+    );
+    assert_eq!(status, 201, "{paired}");
+    (
+        paired["device"]["token"].as_str().unwrap().to_string(),
+        paired["device"]["device_id"].as_str().unwrap().to_string(),
+    )
+}
+
+#[test]
+fn a_phone_registers_its_push_token_and_a_revoked_phone_is_sent_nothing() {
+    let place = Place::new("push-register");
+    let host = place.start_with_token("the-administrators-token");
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let (tablet, _) = pair(&host, "Tablet", "full");
+    let (reader, _) = pair(&host, "Reader", "limited");
+    let (a, b) = ("a1".repeat(32), "b2".repeat(32));
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let rows = |host: &Host, token: &str| {
+        let (status, answer) = host.ask_as(token, "GET", "/devices/push-tokens", None);
+        assert_eq!(status, 200, "{answer}");
+        answer["tokens"].as_array().unwrap().clone()
+    };
+    let live = |rows: &[Value]| {
+        rows.iter()
+            .filter(|row| row["disabled_at"].is_null())
+            .map(|row| row["token_prefix"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    let owned_elsewhere = (
+        409,
+        json!({ "ok": false, "error": "device_token_owned_elsewhere" }),
+    );
+    let not_found = (
+        404,
+        json!({ "ok": false, "error": "device_token_not_found" }),
+    );
+
+    // The phone registers its token. It is the phone's from then on: nobody takes it.
+    let registered = host.ask_as(
+        &phone,
+        "POST",
+        "/devices",
+        Some(&json!({
+            "token": a.to_uppercase(), "session": "vera", "push_grant": grant,
+            "base_url": "https://host.example:7690/",
+        })),
+    );
+    assert_eq!(registered, (200, json!({ "ok": true })));
+    assert_eq!(
+        host.ask_as(&tablet, "POST", "/devices", Some(&json!({ "token": a }))),
+        owned_elsewhere
+    );
+    assert_eq!(
+        host.ask("POST", "/devices", Some(&json!({ "token": a }))),
+        owned_elsewhere,
+        "nor the administrator"
+    );
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/devices",
+            Some(&json!({ "token": "too-short" }))
+        ),
+        (400, json!({ "ok": false, "error": "device_token_invalid" }))
+    );
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&json!({}))),
+        (400, json!({ "error": "token required" }))
+    );
+    assert_eq!(
+        host.ask_as(&reader, "POST", "/devices", Some(&json!({ "token": b })))
+            .0,
+        403,
+        "a device with limited scope registers nothing"
+    );
+
+    // What the Host has: the administrator sees every row, a device its own, and nobody
+    // the whole token.
+    let all = rows(&host, "the-administrators-token");
+    assert_eq!(all.len(), 1);
+    assert_eq!(
+        (
+            &all[0]["token_prefix"],
+            &all[0]["owner"],
+            &all[0]["owner_can_receive"],
+            &all[0]["environment"],
+            &all[0]["provider"]
+        ),
+        (
+            &json!("a1a1a1a1a1a1"),
+            &json!(phone_id),
+            &json!(true),
+            &json!("production"),
+            &json!("apns")
+        )
+    );
+    assert!(all[0].get("token").is_none());
+    assert_eq!(rows(&host, &tablet), Vec::<Value>::new());
+    assert_eq!(
+        host.ask_as(&reader, "GET", "/devices/push-tokens", None).0,
+        403
+    );
+
+    // A new token of the same phone retires the old one.
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&json!({ "token": b })))
+            .0,
+        200
+    );
+    let mine = rows(&host, &phone);
+    assert_eq!(mine.len(), 2);
+    assert_eq!(live(&mine), vec!["b2b2b2b2b2b2"]);
+
+    // Taking a token back: a device only its own, the administrator any one it names.
+    assert_eq!(
+        host.ask_as(&tablet, "DELETE", "/devices", Some(&json!({ "token": b }))),
+        not_found
+    );
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "DELETE",
+            "/devices",
+            Some(&json!({ "token_prefix": "b2b2b2b2b2b2" }))
+        ),
+        (400, json!({ "ok": false, "error": "token_required" }))
+    );
+    assert_eq!(
+        host.ask("DELETE", "/devices", Some(&json!({}))),
+        (
+            400,
+            json!({ "ok": false, "error": "one_of_token_token_prefix_device_id" })
+        )
+    );
+    assert_eq!(
+        host.ask(
+            "DELETE",
+            "/devices",
+            Some(&json!({ "token_prefix": "b2b2" }))
+        ),
+        (
+            400,
+            json!({ "ok": false, "error": "token_prefix_too_short" })
+        )
+    );
+    assert_eq!(
+        host.ask(
+            "DELETE",
+            "/devices",
+            Some(&json!({ "token_prefix": "c3c3c3c3c3c3" }))
+        ),
+        not_found
+    );
+    assert_eq!(
+        host.ask_as(&phone, "DELETE", "/devices", Some(&json!({ "token": b }))),
+        (200, json!({ "ok": true, "disabled": 1 }))
+    );
+    assert_eq!(live(&rows(&host, &phone)), Vec::<String>::new());
+
+    // Registered again, it lives again. The Host is killed and still has it.
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&json!({ "token": b })))
+            .0,
+        200
+    );
+    host.kill();
+    let host = place.start_with_token("the-administrators-token");
+    assert_eq!(
+        live(&rows(&host, "the-administrators-token")),
+        vec!["b2b2b2b2b2b2"]
+    );
+
+    // The phone is revoked: its rows stop at once, and are shown as rows nothing goes to.
+    host.post("/paired-devices/revoke", json!({ "device_id": phone_id }));
+    let after = rows(&host, "the-administrators-token");
+    assert_eq!(live(&after), Vec::<String>::new());
+    assert!(after.iter().all(|row| row["owner_can_receive"] == false));
+    // The administrator, who proves no device, cannot bring the token back to life.
+    assert_eq!(
+        host.ask("POST", "/devices", Some(&json!({ "token": b }))),
+        owned_elsewhere
+    );
+    // The same phone, paired again, registers its token: it is the new pairing's, and lives.
+    let (again, again_id) = pair(&host, "Phone", "full");
+    assert_eq!(
+        host.ask_as(&again, "POST", "/devices", Some(&json!({ "token": b })))
+            .0,
+        200
+    );
+    let mine = rows(&host, &again);
+    assert_eq!(live(&mine), vec!["b2b2b2b2b2b2"]);
+    assert!(mine.iter().all(|row| row["owner"] == again_id.as_str()));
+}
+
 #[test]
 fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away() {
     let place = Place::new("pair");

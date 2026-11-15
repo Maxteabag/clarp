@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 use clarp_actor::Profile;
+use clarp_kernel::devices::{self, PushBook, PushRow};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::kv::KeyValue;
@@ -35,6 +36,8 @@ const CODES: &str = "pairing-code";
 /// Paired devices, by device id.
 const DEVICES: &str = "device";
 const JOBS: &str = "job";
+/// The register of push devices: one row for each token, under the token.
+const PUSH: &str = "push";
 
 /// How long a tool gets to end by itself when its turn is stopped.
 const STOP_GRACE_MS: u64 = 5_000;
@@ -74,6 +77,8 @@ pub struct Directory {
     pub focus: Option<String>,
     /// The paired devices that may speak, by the digest of their token.
     pub devices: HashMap<String, Arc<Device>>,
+    /// The devices that are told of finished turns: who gets a push.
+    pub push: Arc<PushBook>,
 }
 
 impl Directory {
@@ -90,6 +95,45 @@ impl Directory {
         }
         self.devices.get(&pairing::digest(token))
     }
+
+    /// Whether pushes may go to a row this owner has: a row nobody owns keeps its pushes,
+    /// a paired device's only while the device is paired with full scope. A revoked phone
+    /// is not shown what agents say.
+    pub fn can_receive(&self, owner: &str) -> bool {
+        can_receive(&self.devices, owner)
+    }
+}
+
+fn can_receive(devices: &HashMap<String, Arc<Device>>, owner: &str) -> bool {
+    !owner.starts_with("device_")
+        || devices
+            .values()
+            .any(|device| device.device_id == owner && device.scope == Scope::Full)
+}
+
+/// A registration of a push token, as a device asked for it.
+#[derive(Debug, Clone, Default)]
+pub struct PushRegistration {
+    pub token: String,
+    pub session: String,
+    pub environment: String,
+    pub platform: String,
+    pub base_url: String,
+    pub push_grant: String,
+    /// The paired device that asks, with full scope. Empty: someone else.
+    pub owner: String,
+    pub provider: String,
+}
+
+/// What became of a push to a token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pushed {
+    /// It went out.
+    Sent,
+    /// The push service said the token is dead.
+    Dead,
+    /// The phone took its leave to push back.
+    GrantRevoked,
 }
 
 /// What every agent of a Host is given.
@@ -153,6 +197,21 @@ enum Ask {
         job_id: String,
         answer: Answer<Option<String>>,
     },
+    /// A device registers the token its push service gave it. The inner error is why not.
+    PushRegister {
+        registration: PushRegistration,
+        answer: Answer<Result<(), devices::Refused>>,
+    },
+    /// Stops pushes to live rows: by token, by owner, or a token of one owner only.
+    /// Answers how many rows it stopped.
+    PushDisable {
+        token: String,
+        owner: String,
+        only_owner: Option<String>,
+        answer: Answer<Result<usize, devices::Refused>>,
+    },
+    /// What became of a push to a token. Nobody waits for it.
+    Pushed { token: String, outcome: Pushed },
 }
 
 /// The way to the fleet's thread, and the fleet as anyone may read it.
@@ -255,6 +314,39 @@ impl FleetHandle {
         self.ask(|answer| Ask::Revoke { device_id, answer }).await
     }
 
+    /// Registers a push token. The inner error is why it was refused.
+    pub async fn push_register(
+        &self,
+        registration: PushRegistration,
+    ) -> Result<Result<(), devices::Refused>, Unavailable> {
+        self.ask(|answer| Ask::PushRegister {
+            registration,
+            answer,
+        })
+        .await
+    }
+
+    /// Stops pushes to live rows. Answers how many rows it stopped.
+    pub async fn push_disable(
+        &self,
+        token: String,
+        owner: String,
+        only_owner: Option<String>,
+    ) -> Result<Result<usize, devices::Refused>, Unavailable> {
+        self.ask(|answer| Ask::PushDisable {
+            token,
+            owner,
+            only_owner,
+            answer,
+        })
+        .await
+    }
+
+    /// Says what became of a push to a token. Does not wait.
+    pub fn pushed(&self, token: String, outcome: Pushed) {
+        let _ = self.tx.send(Ask::Pushed { token, outcome });
+    }
+
     /// Gives a background job's id to an agent. A job's id is one name on the whole Host:
     /// the inner error is the agent that has it already.
     pub async fn claim_job(
@@ -286,6 +378,8 @@ struct Fleet {
     /// Which agent each background job's id belongs to. The job itself is in that agent's
     /// log; this is only the way to it.
     jobs: HashMap<String, String>,
+    /// The register of push devices.
+    push: PushBook,
     directory: watch::Sender<Arc<Directory>>,
 }
 
@@ -365,10 +459,19 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
     for (job_id, stored) in store.list(JOBS).map_err(|error| error.to_string())? {
         jobs.insert(job_id, String::from_utf8_lossy(&stored).into_owned());
     }
+    let mut push = PushBook::new();
+    for (token, stored) in store.list(PUSH).map_err(|error| error.to_string())? {
+        let row: PushRow = serde_json::from_slice(&stored).map_err(|error| {
+            let named: String = token.chars().take(12).collect();
+            format!("the entry for the push token {named}… cannot be read: {error}")
+        })?;
+        push.apply(&[row]);
+    }
     let (directory, read) = watch::channel(Arc::new(Directory {
         members: members.clone(),
         focus: focus.clone(),
         devices: devices.clone(),
+        push: Arc::new(push.clone()),
     }));
     let (tx, rx) = mpsc::channel();
     let fleet = Fleet {
@@ -378,6 +481,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         focus,
         devices,
         jobs,
+        push,
         directory,
     };
     std::thread::Builder::new()
@@ -438,6 +542,21 @@ impl Fleet {
                 Ask::JobOwner { job_id, answer } => {
                     let _ = answer.send(Ok(self.jobs.get(&job_id).cloned()));
                 }
+                Ask::PushRegister {
+                    registration,
+                    answer,
+                } => {
+                    let _ = answer.send(self.push_register(&registration));
+                }
+                Ask::PushDisable {
+                    token,
+                    owner,
+                    only_owner,
+                    answer,
+                } => {
+                    let _ = answer.send(self.push_disable(&token, &owner, only_owner.as_deref()));
+                }
+                Ask::Pushed { token, outcome } => self.pushed(&token, outcome),
             }
         }
     }
@@ -469,7 +588,79 @@ impl Fleet {
             members: self.members.clone(),
             focus: self.focus.clone(),
             devices: self.devices.clone(),
+            push: Arc::new(self.push.clone()),
         }));
+    }
+
+    /// Keeps rows of the push register as a change left them, and publishes the register.
+    fn keep_push(&mut self, changed: &[PushRow]) -> Result<(), Unavailable> {
+        for row in changed {
+            let stored = serde_json::to_vec(row).map_err(|error| Unavailable(error.to_string()))?;
+            self.store
+                .put(PUSH, &row.token, &stored)
+                .map_err(|error| Unavailable(error.to_string()))?;
+        }
+        if !changed.is_empty() {
+            self.push.apply(changed);
+            self.publish();
+        }
+        Ok(())
+    }
+
+    fn push_register(
+        &mut self,
+        asked: &PushRegistration,
+    ) -> Result<Result<(), devices::Refused>, Unavailable> {
+        let devices = &self.devices;
+        let registered = self.push.register(
+            &devices::Registration {
+                token: &asked.token,
+                session: &asked.session,
+                environment: &asked.environment,
+                platform: &asked.platform,
+                base_url: &asked.base_url,
+                push_grant: &asked.push_grant,
+                owner: &asked.owner,
+                provider: &asked.provider,
+                // What a phone can run in a call is the calls' to know: not built yet.
+                modes: &[],
+            },
+            &|owner| can_receive(devices, owner),
+            self.works.clock.now_ms(),
+        );
+        match registered {
+            Ok(changed) => self.keep_push(&changed).map(Ok),
+            Err(why) => Ok(Err(why)),
+        }
+    }
+
+    fn push_disable(
+        &mut self,
+        token: &str,
+        owner: &str,
+        only_owner: Option<&str>,
+    ) -> Result<Result<usize, devices::Refused>, Unavailable> {
+        match self.push.disable(token, owner, only_owner, self.now_ms()) {
+            Ok(changed) => self.keep_push(&changed).map(|()| Ok(changed.len())),
+            Err(why) => Ok(Err(why)),
+        }
+    }
+
+    fn pushed(&mut self, token: &str, outcome: Pushed) {
+        let now = self.now_ms();
+        let changed = match outcome {
+            Pushed::Sent => self.push.pushed(token, now),
+            Pushed::Dead => self.push.dead(token, now),
+            Pushed::GrantRevoked => self.push.grant_revoked(token),
+        };
+        if let Some(row) = changed
+            && let Err(why) = self.keep_push(&[row])
+        {
+            eprintln!(
+                "clarp-host: what became of a push could not be kept: {}",
+                why.0
+            );
+        }
     }
 
     fn tell_roster(&self, kind: &str, session: &str) {
@@ -694,6 +885,11 @@ impl Fleet {
             .map_err(|error| Unavailable(error.to_string()))?;
         self.devices.remove(&device.token_hash);
         self.publish();
+        // Its push tokens stop at once: a revoked phone is not shown what agents say. The rows
+        // keep their owner, and come back only when a paired device registers the token again.
+        if let Ok(stopped) = self.push.disable("", device_id, None, self.now_ms()) {
+            self.keep_push(&stopped)?;
+        }
         Ok(true)
     }
 }

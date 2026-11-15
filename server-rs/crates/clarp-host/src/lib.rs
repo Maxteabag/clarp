@@ -27,6 +27,7 @@ pub mod library;
 pub mod pairing;
 pub mod plans;
 pub mod process;
+pub mod push;
 pub mod revisions;
 pub mod tools;
 pub mod wire;
