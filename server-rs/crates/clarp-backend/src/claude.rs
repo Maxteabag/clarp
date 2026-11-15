@@ -102,8 +102,8 @@ impl Backend for Claude {
         }
     }
 
-    fn interpreter(&self, turn: u64) -> Box<dyn Interpreter> {
-        Box::new(ClaudeInterpreter::new(turn))
+    fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
+        Box::new(ClaudeInterpreter::new(turn, name))
     }
 }
 
@@ -138,6 +138,8 @@ struct ResultFacts {
 
 pub struct ClaudeInterpreter {
     turn: u64,
+    /// The turn's own name, for the ids of pieces the tool does not name.
+    name: String,
     session: Option<String>,
     /// The activity last reported, so that only a change is reported.
     activity: Option<Activity>,
@@ -177,9 +179,10 @@ fn content_text(content: &Value) -> String {
 }
 
 impl ClaudeInterpreter {
-    pub fn new(turn: u64) -> Self {
+    pub fn new(turn: u64, name: &str) -> Self {
         Self {
             turn,
+            name: name.to_string(),
             session: None,
             activity: None,
             draft: None,
@@ -207,7 +210,7 @@ impl ClaudeInterpreter {
         // The provider's own name for the message, without its `msg_`: what is left is one
         // unbroken id, as every other id of a conversation is.
         match draft.id.strip_prefix("msg_").unwrap_or(&draft.id) {
-            "" => format!("r-{}-{}", self.turn, self.replies + 1),
+            "" => format!("r-{}-{}", self.name, self.replies + 1),
             name => format!("r-{name}"),
         }
     }
@@ -309,7 +312,7 @@ impl ClaudeInterpreter {
                 if matches!(status, "rejected" | "blocked") && !self.usage_limit {
                     self.usage_limit = true;
                     out.push(Signal::Notice(Notice {
-                        id: format!("n-{}-usage-limit", self.turn),
+                        id: format!("n-{}-usage-limit", self.name),
                         turn: Some(self.turn),
                         code: "usage-limit".to_string(),
                         text: USAGE_LIMIT.to_string(),
@@ -573,7 +576,7 @@ mod tests {
     use super::*;
 
     fn read(lines: &[&str], exit: (Option<i32>, Option<i32>)) -> Vec<Signal> {
-        let mut interpreter = ClaudeInterpreter::new(7);
+        let mut interpreter = ClaudeInterpreter::new(7, "m7");
         let mut out = Vec::new();
         let mut t = 1_000;
         for line in lines {

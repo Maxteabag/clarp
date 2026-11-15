@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect};
-use clarp_kernel::conversation::{Entry, Message, Notice, Reply, TurnEnd};
+use clarp_kernel::conversation::{Entry, Imported, Message, Notice, Reply, TurnEnd};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
 use clarp_kernel::turn::{Activity, Admission, RunOutcome, Settled, Turn, TurnId};
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
@@ -204,6 +204,15 @@ pub struct Waiting {
     pub accepted_at_ms: i64,
 }
 
+/// A row of the conversation an agent had on another Host, on its way in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedRow {
+    pub id: String,
+    pub ts_ms: i64,
+    /// The row as the other Host served it.
+    pub row: serde_json::Value,
+}
+
 /// The turn that holds the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStatus {
@@ -295,13 +304,20 @@ fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), ActorError> {
 
 /// What the Host says in a conversation when a turn did not finish, so that whoever reads it
 /// knows why there is no answer. A turn that was stopped on purpose needs no telling.
-fn ending_notice(turn: TurnId, code: &str, reason: &str) -> Entry {
+fn ending_notice(turn: TurnId, name: &str, code: &str, reason: &str) -> Entry {
     Entry::Notice(Notice {
-        id: format!("n-{}-{code}", turn.0),
+        id: format!("n-{name}-{code}"),
         turn: Some(turn.0),
         code: code.to_string(),
         text: reason.to_string(),
     })
+}
+
+/// A name for a turn that no other turn has, on this Host or on one the agent may move to: the
+/// id of the message it answers, without the mark that says it is a message. A turn's number
+/// is not such a name, because an agent that moves starts counting again.
+fn turn_name(message_id: &str) -> &str {
+    message_id.strip_prefix("u-").unwrap_or(message_id)
 }
 
 /// The log item for a piece of a conversation.
@@ -584,6 +600,50 @@ impl Actor {
         Ok((sent, out))
     }
 
+    /// Takes over the conversation an agent had on another Host: its rows as that Host served
+    /// them, and the tool's session to continue. Everything arrives in one write or not at all.
+    /// Only an agent that has no history here can be taken over; the inner error says so.
+    pub fn import(
+        &mut self,
+        from: &str,
+        backend_session: Option<String>,
+        rows: Vec<ImportedRow>,
+        now_ms: i64,
+    ) -> Result<(Result<usize, String>, Outputs), ActorError> {
+        if self.recorder.last_seq() != 0 {
+            let refusal = "the agent already has a history on this Host".to_string();
+            return Ok((Err(refusal), Outputs::default()));
+        }
+        let count = rows.len();
+        let mut batch = self.recorder.batch();
+        for row in rows {
+            let ts_ms = row.ts_ms;
+            let piece = Entry::Imported(Imported {
+                id: row.id,
+                row: row.row,
+            });
+            batch.item(written(&piece, ts_ms)?);
+        }
+        let adopt = Command::Adopt {
+            from: from.to_string(),
+            backend_session,
+        };
+        if let Err(refusal) = batch.command(adopt, now_ms) {
+            return Ok((Err(refusal.to_string()), Outputs::default()));
+        }
+        batch.commit()?;
+        self.unstored_changes = 0;
+        let out = Outputs {
+            changed: Changed {
+                conversation: true,
+                status: true,
+                queue: false,
+            },
+            ..Outputs::default()
+        };
+        Ok((Ok(count), out))
+    }
+
     /// Ends the live turn and holds the mailbox. Returns how many turns were told to end.
     pub fn stop(&mut self, by: &str, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
         let command = Command::Stop { by: by.to_string() };
@@ -687,6 +747,11 @@ impl Actor {
         // What the agent had written and nobody stored is kept: the user saw it.
         let unfinished = self.drafts().to_vec();
         let facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
+        let name = self
+            .live
+            .as_ref()
+            .map(|live| turn_name(&live.message_id).to_string())
+            .unwrap_or_default();
         let mut closes = self
             .live
             .as_ref()
@@ -705,11 +770,13 @@ impl Actor {
         }
         let told = match &command {
             _ if batch.agent().stopping().is_some() => None,
-            Command::StartFailed { reason, .. } => Some(ending_notice(turn, "turn-failed", reason)),
+            Command::StartFailed { reason, .. } => {
+                Some(ending_notice(turn, &name, "turn-failed", reason))
+            }
             Command::TurnEnded {
                 outcome: RunOutcome::Interrupted { reason },
                 ..
-            } => Some(ending_notice(turn, "turn-interrupted", reason)),
+            } => Some(ending_notice(turn, &name, "turn-interrupted", reason)),
             _ => None,
         };
         if batch.command(command, now_ms).is_ok() {
@@ -781,6 +848,7 @@ impl Actor {
         });
         let stdin_file = self.profile.stdin_path(turn);
         write_whole(&stdin_file, &launch.stdin)?;
+        let interpreter = self.backend.interpreter(turn.0, turn_name(&message.id));
         self.live = Some(LiveTurn {
             turn,
             last_row: message.id.clone(),
@@ -788,7 +856,7 @@ impl Actor {
             trace_id: message.trace_id,
             model: None,
             tokens: None,
-            interpreter: self.backend.interpreter(turn.0),
+            interpreter,
             offset: 0,
             drafts: Vec::new(),
             over: false,
@@ -850,7 +918,7 @@ impl Actor {
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
         let (mut model, mut tokens) = (None, None);
-        let mut interpreter = self.backend.interpreter(turn.0);
+        let mut interpreter = self.backend.interpreter(turn.0, turn_name(&message.id));
         let mut drafts = Vec::new();
         let mut signals = Vec::new();
         let mut offset = 0;
@@ -968,7 +1036,12 @@ impl Actor {
                             .command(Command::StartFailed { turn, reason }, t)
                             .is_ok();
                         if failed && !stopping {
-                            let notice = ending_notice(turn, "turn-failed", error);
+                            let notice = ending_notice(
+                                turn,
+                                turn_name(&live.message_id),
+                                "turn-failed",
+                                error,
+                            );
                             live.last_row = notice.id().to_string();
                             batch.item(written(&notice, t)?);
                         }
@@ -1002,10 +1075,12 @@ impl Actor {
                                 // It went because it was told to: nothing to explain.
                                 _ if batch.agent().stopping().is_some() => None,
                                 RunOutcome::Failed { reason } => {
-                                    Some(ending_notice(turn, "turn-failed", reason))
+                                    let name = turn_name(&live.message_id);
+                                    Some(ending_notice(turn, name, "turn-failed", reason))
                                 }
                                 RunOutcome::Interrupted { reason } => {
-                                    Some(ending_notice(turn, "turn-interrupted", reason))
+                                    let name = turn_name(&live.message_id);
+                                    Some(ending_notice(turn, name, "turn-interrupted", reason))
                                 }
                                 RunOutcome::Completed | RunOutcome::Stopped { .. } => None,
                             };
@@ -1066,7 +1141,12 @@ impl Actor {
                     .command(Command::TurnEnded { turn, outcome }, now_ms)
                     .is_ok();
                 if ended && !stopping {
-                    let notice = ending_notice(turn, "turn-interrupted", reason);
+                    let notice = ending_notice(
+                        turn,
+                        turn_name(&live.message_id),
+                        "turn-interrupted",
+                        reason,
+                    );
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }

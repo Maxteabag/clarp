@@ -19,7 +19,7 @@ const SESSION: &str = "00000000-0000-4000-8000-000000000001";
 fn read(fixture: &str) -> Vec<Signal> {
     let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
     let recorded = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let mut interpreter = ClaudeInterpreter::new(1);
+    let mut interpreter = ClaudeInterpreter::new(1, "m1");
     let mut out = Vec::new();
     let mut t = 0;
     for line in recorded.lines() {

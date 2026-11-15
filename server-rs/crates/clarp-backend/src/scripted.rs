@@ -64,13 +64,15 @@ impl Backend for Scripted {
         }
     }
 
-    fn interpreter(&self, turn: u64) -> Box<dyn Interpreter> {
-        Box::new(ScriptedInterpreter::new(turn))
+    fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
+        Box::new(ScriptedInterpreter::new(turn, name))
     }
 }
 
 pub struct ScriptedInterpreter {
     turn: u64,
+    /// The turn's own name, for the ids of its replies.
+    name: String,
     draft: String,
     replies: u32,
     tools: BTreeMap<String, ToolCall>,
@@ -80,9 +82,10 @@ pub struct ScriptedInterpreter {
 }
 
 impl ScriptedInterpreter {
-    pub fn new(turn: u64) -> Self {
+    pub fn new(turn: u64, name: &str) -> Self {
         Self {
             turn,
+            name: name.to_string(),
             draft: String::new(),
             replies: 0,
             tools: BTreeMap::new(),
@@ -93,7 +96,7 @@ impl ScriptedInterpreter {
     }
 
     fn reply_id(&self) -> String {
-        format!("r-{}-{}", self.turn, self.replies + 1)
+        format!("r-{}-{}", self.name, self.replies + 1)
     }
 
     fn say(&mut self, text: &str, out: &mut Vec<Signal>) {
@@ -221,7 +224,7 @@ mod tests {
     use super::*;
 
     fn read(lines: &[&str], code: Option<i32>, signal: Option<i32>) -> Vec<Signal> {
-        let mut interpreter = ScriptedInterpreter::new(2);
+        let mut interpreter = ScriptedInterpreter::new(2, "2");
         let mut out = Vec::new();
         for (n, line) in lines.iter().enumerate() {
             let entry = Entry::Out((*line).to_string());

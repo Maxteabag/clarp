@@ -93,7 +93,10 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D10 | Migration moves agents, not modules: the Rust Host is a new Host in the fleet | No shared-database coupling with the Python server, no big-bang switch |
 | D11 | The binary is `clarp-host`. (`clarpd` is taken: it is the desktop installer in dotfiles.) | Avoids a name collision the report missed |
 | D12 | Rust stable, edition 2024; Tokio; Axum; no message broker, no external database, no orchestrator | Plain, widely used, one binary and one directory of data |
-| D14 | A message is admitted **direct** or **queued**. Direct is the user's own send: it ends the live turn, goes ahead of what waits, and runs even while the mailbox is held, without lifting the hold. Queued waits its turn and is held by a Stop until a resume | It is what the Python Host documents (`docs/protocol.md`, section 4); the kernel's first rule ("a user message lifts the hold") was not |
+| D14 | The kernel admits a message **direct** or **queued**. Queued waits its turn and is held by a Stop until a resume. Direct ends the live turn, goes ahead of what waits and runs past a hold. **The edge admits every message queued**: the conformance run of 15 Nov showed that the Python Host queues a plain send to a busy Claude agent (`queued: true`), whatever `docs/protocol.md` section 4 says about preempting | The apps were built against what the Python Host does, not against what its document says. Direct stays in the kernel, tested, for the day something asks for it |
+| D19 | The Host names the tool's session before the tool starts (Claude: `--session-id`), with the agent's conversation id | A conversation must be called the same from its first message on: a client drops what it cached when the name changes |
+| D20 | How a turn ended is a conversation item of its own (`TURN_END`), written once, and told on the row that closed the turn; that row then carries the end's revision | The apps read `turn` on the closing row. Storing it once keeps the log append-only and lets a client that asks "what is newer" get the row again |
+| D21 | The edge writes the Python Host's shapes field for field, as JSON values built in `clarp-host/src/wire.rs` from what `conformance/golden` recorded, empty fields included. `clarp-protocol` stays the typed reading side | An app's decoder may count on a field being there. The recorded answers are the specification; the conformance run fails when the two drift |
 | D15 | A conversation's revision is `seq * 2^20 + n`: the log position, with room in between for the changes of a reply that is shown while it is written and not stored. A restart that rejoins a turn writes once, so later revisions are above earlier ones | Clients sync by revision; the log gives it for free; a growing reply needs revisions of its own |
 | D16 | A turn starts at most once by construction: the shim creates the turn's spool exclusively; "spawned" is durable before the tool is given the message; the shim prints `ready`; a second shim for the turn leaves with exit 125 | Rule 1 must not depend on the server remembering what it started |
 | D17 | The hub forgets. It keeps five minutes of events for clients that reconnect; after longer, or after a restart, a client is sent `agent-roster` and syncs from the snapshot and the conversations' revisions | An event is a wake-up, not the data; the logs are the durable record. Events that are themselves the data (a clip, a notification) get a durable home in stage 3 |
@@ -138,8 +141,12 @@ server-rs/
     clarp-shim/         `clarp-shim` (owns one tool process) and `clarp-hook`
     clarp-backend/      the backend port; Claude Code (stream-json), a scripted tool
     clarp-actor/        one agent's actor without its thread: send, stop, the spool pump, rejoin after a restart
-    clarp-host/         `clarp-host`: agent threads, launcher (direct, systemd scope), fleet, hub, HTTP edge
-  tools/build           the build queue: check, test, clippy, fmt on the XPS 15, one job at a time
+    clarp-host/         `clarp-host`: agent threads, launcher (direct, systemd scope), fleet, pairing, hub,
+                        HTTP edge, and `wire.rs`, where the Host's answers get the Python Host's shapes
+  conformance/          the Rust Host against the Python Host on what a client sees (README.md there)
+  docs/differences.md   what differs from the Python Host on purpose
+  docs/reference-defects.md   what the conformance runs showed to be wrong in the Python Host
+  tools/build           the build queue: check, test, clippy, fmt, conform on the XPS 15, one job at a time
   tools/repo-gates      the repository's Python gates, on the same machine and queue
 ```
 
@@ -159,8 +166,16 @@ CLARP_BUILD_ENV="CLARP_TEST_CLAUDE=1" server-rs/tools/build test --test host -- 
 It needs a logged-in Claude Code on the machine that runs it. On 15 Nov the XPS 15's was not; the test was run on
 elitebook with the binaries the XPS had built (running a built binary is not compiling).
 
-Not there yet, in the order it is planned: the conformance run against the Python Host (D18); the importer that
-moves one agent with its conversation; how an app is paired with this Host; the Codex adapter; then stage 3.
+**Conformance (D18) runs.** `conformance/` holds the corpus, the planted changes and the driver; the workflow
+`Conformance (Rust Host)` records the Python Host, proves that every planted change is caught, and compares the
+Rust Host; `tools/build conform` is the everyday loop against the recorded answers (about 20 seconds). Read
+`conformance/README.md` before you change anything a client can see: the recorded answers are the specification.
+
+**Pairing is there** (`clarp-host pair --url ...`, `POST /pairing/exchange`, scopes, revoke), the Python Host's
+scheme word for word.
+
+Not there yet, in the order it is planned: closing the remaining conformance differences; the importer that moves
+one agent with its conversation; the Codex adapter; then stage 3 (speech in and out, push, artifacts, goals).
 
 ## 7. Stages and gates
 

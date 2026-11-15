@@ -59,6 +59,11 @@ pub enum Command {
     TurnMoved { turn: TurnId, activity: Activity },
     /// The shim: the tool process is gone, and this is how it went.
     TurnEnded { turn: TurnId, outcome: RunOutcome },
+    /// The agent comes from another Host, with the tool's session it had there.
+    Adopt {
+        from: String,
+        backend_session: Option<String>,
+    },
 }
 
 /// What happened to an agent. These, in order, are its history.
@@ -81,6 +86,13 @@ pub enum AgentEvent {
     },
     Resumed {
         by: String,
+        at_ms: i64,
+    },
+    /// The agent was taken over from another Host. Its next turn continues the tool's session
+    /// it had there.
+    Adopted {
+        from: String,
+        backend_session: Option<String>,
         at_ms: i64,
     },
 }
@@ -108,6 +120,8 @@ pub enum Refusal {
     NotLive(TurnId),
     /// A resume for an agent that is not held.
     NotPaused,
+    /// An agent that has run a turn here is not one that just arrived.
+    AlreadyAtWork,
 }
 
 impl std::fmt::Display for Refusal {
@@ -116,6 +130,7 @@ impl std::fmt::Display for Refusal {
             Self::NotWaiting(turn) => write!(f, "turn {} is not waiting", turn.0),
             Self::NotLive(turn) => write!(f, "turn {} is not the live turn", turn.0),
             Self::NotPaused => write!(f, "the agent is not paused"),
+            Self::AlreadyAtWork => write!(f, "the agent has already worked on this Host"),
         }
     }
 }
@@ -275,6 +290,19 @@ impl Agent {
                 }
                 work.record(AgentEvent::Resumed { by, at_ms: now_ms });
             }
+            Command::Adopt {
+                from,
+                backend_session,
+            } => {
+                if work.agent.next_turn != 1 {
+                    return Err(Refusal::AlreadyAtWork);
+                }
+                work.record(AgentEvent::Adopted {
+                    from,
+                    backend_session,
+                    at_ms: now_ms,
+                });
+            }
             Command::TurnStarted { turn } => {
                 work.must_be_live(turn)?;
                 if matches!(work.agent.live, Some(Turn::Starting(_))) {
@@ -371,6 +399,9 @@ impl Agent {
                 }
                 self.stopping = Some(by.clone());
             }
+            AgentEvent::Adopted {
+                backend_session, ..
+            } => self.backend_session.clone_from(backend_session),
             AgentEvent::Turn { turn, change } => self.apply_turn(*turn, change)?,
         }
         Ok(())
@@ -770,6 +801,28 @@ mod tests {
             vec![TurnId(1), TurnId(3), TurnId(4), TurnId(2)],
             "every message ran exactly once"
         );
+    }
+
+    #[test]
+    fn an_agent_that_arrives_from_another_host_continues_its_tools_session() {
+        let mut a = Driven::new();
+        a.send(Command::Adopt {
+            from: "http://elitebook:7682".to_string(),
+            backend_session: Some("sess-9".to_string()),
+        })
+        .unwrap();
+        assert_eq!(a.agent.backend_session(), Some("sess-9"));
+        a.user(10);
+        a.finish(1);
+        assert_eq!(
+            a.send(Command::Adopt {
+                from: "elsewhere".to_string(),
+                backend_session: None,
+            }),
+            Err(Refusal::AlreadyAtWork),
+            "an agent arrives once, before it works"
+        );
+        assert_eq!(a.agent.backend_session(), Some("sess-9"));
     }
 
     #[test]

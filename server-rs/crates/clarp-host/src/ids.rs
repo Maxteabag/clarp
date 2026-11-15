@@ -68,6 +68,19 @@ pub fn uuid() -> String {
     )
 }
 
+/// A value as it may stand in the query of a link.
+pub fn in_a_link(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 /// A name as it may appear in a session: lowercase letters, digits and dashes.
 pub fn slug(name: &str) -> String {
     let mut slug = String::new();

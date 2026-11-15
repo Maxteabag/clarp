@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use clarp_actor::{Action, Actor, Outputs, Profile, ShimOrder};
+use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder};
 use clarp_backend::Backend;
 use clarp_backend::scripted::Scripted;
 use clarp_codec::standard_set;
@@ -190,6 +190,11 @@ fn shown(actor: &Actor) -> Vec<(String, String)> {
                 Entry::Tool(call) => format!("{} {:?} {:?}", call.name, call.status, call.output),
                 Entry::Notice(notice) => format!("notice: {}", notice.code),
                 Entry::TurnEnd(end) => format!("end: {}", end.status),
+                Entry::Imported(imported) => format!(
+                    "from before, {}: {}",
+                    imported.row["role"].as_str().unwrap_or("?"),
+                    imported.row["text"].as_str().unwrap_or("")
+                ),
             };
             (version.entry.id().to_string(), says)
         })
@@ -761,4 +766,78 @@ fn a_restart_rejoins_a_running_turn_and_starts_one_that_no_shim_took() {
         "the stop reaches the shim after the restart"
     );
     assert!(actor.status().live.unwrap().stopping);
+}
+
+#[test]
+fn an_agent_that_arrives_from_another_host_brings_its_conversation_and_goes_on_in_it() {
+    let mut world = World::new("import");
+    let mut actor = world.open();
+    let came = |id: &str, role: &str, text: &str, ts_ms: i64| ImportedRow {
+        id: id.to_string(),
+        ts_ms,
+        row: serde_json::json!({"id": id, "role": role, "text": text, "revision": 812}),
+    };
+    let now = world.tick();
+    let (taken, out) = actor
+        .import(
+            "http://elitebook:7682",
+            Some("sess-from-before".to_string()),
+            vec![
+                came("u-old", "user", "what we spoke of", 100),
+                came("live-old", "assistant", "the answer back then", 200),
+            ],
+            now,
+        )
+        .unwrap();
+    assert_eq!(taken, Ok(2));
+    assert!(out.changed.conversation && out.actions.is_empty());
+    assert_eq!(
+        shown(&actor),
+        vec![
+            pair("u-old", "from before, user: what we spoke of"),
+            pair("live-old", "from before, assistant: the answer back then"),
+        ]
+    );
+    assert_eq!(
+        actor.status().backend_session.as_deref(),
+        Some("sess-from-before")
+    );
+
+    // The next message goes on in the tool's own session, and its rows follow the old ones.
+    let now = world.tick();
+    let (_, out) = actor
+        .send(&message("u-new", "and now?"), Admission::Queue, now)
+        .unwrap();
+    let Action::Launch(order) = &out.actions[0] else {
+        panic!("the message launches a turn");
+    };
+    assert_eq!(order.turn, TurnId(1));
+    world.carry_out(&mut actor, out);
+    world.says(1, "Here we are again.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let rows = shown(&actor);
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[2], pair("u-new", "user: and now?"));
+    assert_eq!(rows[3], pair("r-new-1", "agent: Here we are again."));
+    let page = actor.tail(10).unwrap();
+    assert!(
+        page.entries
+            .windows(2)
+            .all(|pair| pair[0].revision < pair[1].revision),
+        "old rows and new ones are in one order"
+    );
+
+    // It arrives once. A second arrival, or one after it has worked here, is refused.
+    let now = world.tick();
+    let (again, _) = actor.import("elsewhere", None, Vec::new(), now).unwrap();
+    assert!(again.is_err());
+    // And all of it is there after a restart.
+    drop(actor);
+    let actor = world.open();
+    assert_eq!(shown(&actor), rows);
+    assert_eq!(
+        actor.status().backend_session.as_deref(),
+        Some("sess-from-before")
+    );
 }
