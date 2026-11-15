@@ -25,6 +25,11 @@
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
+# What an installation was told (--listen, --name, --claude, --codex, --push-relay) is kept with
+# it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
+# --start: a relay that was turned off stays off. What is said now replaces what was kept, and
+# `default` forgets it (--push-relay default).
+#
 # It installs beside a Python Host and touches nothing of it: its own directories
 # (~/.local/share/clarp-host, ~/.config/clarp-host), its own port, its own unit (clarp-host.service).
 #
@@ -38,16 +43,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-from="$here/dist"; listen="127.0.0.1:7690"; name="$(hostname) Rust"; start=0; files_only=0; claude=""; codex=""
-push_relay="https://clarp-audio-central.peter-w-adams96.workers.dev"
+from="$here/dist"; start=0; files_only=0
+declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen) listen="$2"; shift 2 ;;
-        --name) name="$2"; shift 2 ;;
-        --claude) claude="$2"; shift 2 ;;
-        --codex) codex="$2"; shift 2 ;;
-        --push-relay) push_relay="$2"; [ "$push_relay" = off ] && push_relay=""; shift 2 ;;
+        --listen|--name|--claude|--codex|--push-relay) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
         *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--start] [--files-only]" >&2; exit 2 ;;
@@ -57,6 +58,25 @@ done
 share="${XDG_DATA_HOME:-$HOME/.local/share}/clarp-host"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/clarp-host"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+# What this installation was told before, then what it is told now. Only what somebody chose is
+# kept: where nobody chose, the installer's own answer of the day holds.
+kept="$config/install.conf"
+declare -A chosen=()
+if [ -f "$kept" ]; then
+    while IFS= read -r line; do
+        case "${line%%=*}" in
+            listen|name|claude|codex|push-relay) chosen["${line%%=*}"]="${line#*=}" ;;
+        esac
+    done < "$kept"
+fi
+for key in "${!said[@]}"; do
+    if [ "${said[$key]}" = default ]; then unset "chosen[$key]"; else chosen[$key]="${said[$key]}"; fi
+done
+listen="${chosen[listen]:-127.0.0.1:7690}"; name="${chosen[name]:-$(hostname) Rust}"
+claude="${chosen[claude]:-}"; codex="${chosen[codex]:-}"
+push_relay="${chosen[push-relay]:-https://clarp-audio-central.peter-w-adams96.workers.dev}"
+[ "$push_relay" = off ] && push_relay=""
 port="${listen##*:}"; address="${listen%:*}"
 
 # The world an agent's commands run in: the one the Python Host on this machine gives them, so
@@ -77,6 +97,7 @@ done
 (cd "$from" && sha256sum --quiet -c SHA256SUMS) || { echo "install-host: the binaries in $from are not the ones that were built" >&2; exit 1; }
 
 mkdir -p "$share/bin" "$share/tools" "$share/data" "$config" "$units"
+(umask 077; for key in "${!chosen[@]}"; do printf '%s=%s\n' "$key" "${chosen[$key]}"; done | sort > "$kept")
 # Put in place under another name and moved: a Host that is running keeps the file it has open.
 for binary in clarp-host clarp-shim; do
     install -m 755 "$from/$binary" "$share/bin/.$binary.new"
@@ -177,6 +198,9 @@ WantedBy=default.target
 EOF
 
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
+if [ -n "$push_relay" ]; then pushes="through $push_relay"; else pushes="nowhere (the relay is off)"; fi
+echo "it listens on $listen as \"$name\"; pushes go $pushes"
+[ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
 echo "the agents' own tools: $tools names in $share/tools"
 [ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
