@@ -9,7 +9,7 @@ use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{LiveStatus, Status};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
-use clarp_kernel::jobs::{Job, JobRecord, LOST_REASONS};
+use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::turn::{Activity, Origin, Outcome};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
@@ -355,7 +355,7 @@ pub fn queue_updated(
 pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
     let active = job.status.is_active();
     // Lost is not failed: nobody heard from it any more, which says nothing about its work.
-    let lost = LOST_REASONS.contains(&job.terminal_reason.as_str());
+    let lost = job.lost();
     let signs = [job.heartbeat_at_ms, job.progress_at_ms];
     let last_sign = signs.iter().flatten().max();
     let freshness = match last_sign {
@@ -364,13 +364,7 @@ pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
         Some(at) if (now_ms - at).max(0) <= job.heartbeat_timeout_ms => "fresh",
         Some(_) => "stale",
     };
-    let outcome = if lost {
-        "unknown"
-    } else if active {
-        "pending"
-    } else {
-        job.status.as_str()
-    };
+    let outcome = job.outcome_state();
     let agent_name = if record.persona.is_empty() {
         &record.session
     } else {

@@ -133,6 +133,23 @@ impl Job {
         format!("bg1:{}:{}", self.generation, self.id)
     }
 
+    /// Nobody heard from it any more: it was ended for that, which says nothing of its work.
+    pub fn lost(&self) -> bool {
+        LOST_REASONS.contains(&self.terminal_reason.as_str())
+    }
+
+    /// What became of the work, as far as anyone knows: `pending` while it runs, `unknown`
+    /// when its worker was lost, else the status it ended with.
+    pub fn outcome_state(&self) -> &'static str {
+        if self.lost() {
+            "unknown"
+        } else if self.status.is_active() {
+            "pending"
+        } else {
+            self.status.as_str()
+        }
+    }
+
     /// The newer of its heartbeat and its progress line.
     pub fn last_sign_ms(&self) -> i64 {
         self.heartbeat_at_ms
