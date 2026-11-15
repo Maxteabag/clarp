@@ -3,7 +3,8 @@
 
     server-rs/tools/soak run     [--host ADDR:PORT] [--session S] [--every SECONDS] [--evidence FILE]
                                  [--rounds N] [--turn-timeout SECONDS]
-    server-rs/tools/soak restart [--host ADDR:PORT] [--agents N] [--seconds S] [--by COMMAND] [--evidence FILE]
+    server-rs/tools/soak restart [--host ADDR:PORT] [--agents N] [--seconds S] [--by COMMAND]
+                                 [--moment running|accepted|ending] [--evidence FILE]
     server-rs/tools/soak report  [--evidence FILE]
 
 `run` writes to an agent of the Host every `--every` seconds (default 900) and waits for the
@@ -24,6 +25,11 @@ restart or an update of the Host between or during turns is on record.
 the exercise is in a command that takes a while when the service is restarted, and afterwards
 every message must be there once, ended once, completed and answered, its command run once.
 With `--by "server-rs/tools/install-host --start"` the restart is the installer's: an update.
+With `--by "systemctl --user kill -s KILL clarp-host.service"` the Host is killed, and systemd
+starts it again. With `--moment accepted` the restart follows the messages at once, and meets
+the turns in their first steps instead of in their commands. With `--moment ending` it comes
+`--settle` seconds after the first command ended: the messages go out `--stagger` apart, so
+the turns are met at the different steps of their ends.
 
 The token is read from CLARP_HOST_TOKEN, or from the file the installer wrote
 (~/.config/clarp-host/env). Nothing but this Host is spoken to.
@@ -295,7 +301,7 @@ def restart(args) -> int:
     for i, session in enumerate(sessions, 1):
         mark, word = f"mark-{exercise}-{i}", f"held {i}"
         text = (f"Restart check {i}. Use your shell tool to run exactly this one command, and wait until it has "
-                f"finished:\n\necho {mark} >> {marks}; sleep {args.seconds}\n\n"
+                f"finished:\n\necho {mark} $(date +%s.%N) >> {marks}; sleep {args.seconds}\n\n"
                 f"Then reply with exactly these two words and nothing else: {word}")
         client_id = f"restart-{exercise}-{i}"
         status, sent = host.ask("POST", "/send", {"session": session, "client_msg_id": client_id,
@@ -303,27 +309,48 @@ def restart(args) -> int:
         if status != 200:
             return gave_up("not_accepted", f"{session}: {status} {sent}")
         asked[session] = {"message_id": f"u-{client_id}", "mark": mark, "word": word, "sent": time.monotonic()}
-        # One after the other: ten tools starting in the same breath is a load of its own.
-        time.sleep(args.stagger)
+        # One after the other: ten tools starting in the same breath is a load of its own. Not
+        # when the restart is to meet the turns' first steps: then it follows the last message.
+        time.sleep(0 if args.moment == "accepted" else args.stagger)
 
     def marked() -> dict:
+        """How often each agent's command began: its mark is a word of its own in the file."""
         try:
-            lines = marks.read_text().split()
+            words = marks.read_text().split()
         except OSError:
-            lines = []
-        return {session: lines.count(given["mark"]) for session, given in asked.items()}
+            words = []
+        return {session: words.count(given["mark"]) for session, given in asked.items()}
 
-    # All of them in their turns, and their commands begun.
+    def first_began() -> float:
+        """When the first command of this exercise began, as the command itself wrote it down."""
+        ours, times = {given["mark"] for given in asked.values()}, []
+        try:
+            for line in marks.read_text().splitlines():
+                mark, _, at = line.partition(" ")
+                if mark in ours:
+                    times.append(float(at))
+        except (OSError, ValueError):
+            pass
+        return min(times) if times else time.time()
+
+    # All of them in their turns, and their commands begun. Or, for the first steps of a turn,
+    # no waiting at all: the messages were accepted a moment ago and their turns are starting.
     deadline, running = time.monotonic() + args.start_timeout, []
-    while time.monotonic() < deadline:
+    while args.moment != "accepted" and time.monotonic() < deadline:
         rows, begun = snapshot(host), marked()
         running = [session for session in sessions if (rows.get(session) or {}).get("busy") and begun[session] >= 1]
         if len(running) == len(sessions):
             break
-        time.sleep(1)
-    if len(running) != len(sessions):
+        time.sleep(0.2 if args.moment == "ending" else 1)
+    if args.moment != "accepted" and len(running) != len(sessions):
         return gave_up("not_all_running", f"{len(running)} of {len(sessions)} were in their command in time")
-    time.sleep(args.settle)
+    if args.moment == "running":
+        time.sleep(args.settle)
+    if args.moment == "ending":
+        # So long after the first command ended. The messages went out one after the other, so
+        # the restart meets the turns at different steps of their ends: answered, answering,
+        # the command just over, still in it.
+        time.sleep(max(0.0, first_began() + args.seconds + args.settle - time.time()))
     rows = snapshot(host)
     running = [session for session in sessions if (rows.get(session) or {}).get("busy")]
     version_before = version_of(host)
@@ -388,9 +415,11 @@ def restart(args) -> int:
                "command_ran": ran[session], "seconds": ended.get(session), **(seen or {})})
     version_after = version_of(host)
     restarted = bool(since_before and since_after and since_before != since_after)
-    held = restarted and outcomes == {"ok": len(sessions)} and len(running) == len(sessions)
+    held = (restarted and outcomes == {"ok": len(sessions)}
+            and (args.moment != "running" or len(running) == len(sessions)))
     write({"kind": "restart_summary", "outcome": "held" if held else "not_held", "agents": len(sessions),
-           "running_at_restart": len(running), "taken_up_after": len(taken_up), "outcomes": outcomes,
+           "moment": args.moment, "running_at_restart": len(running), "taken_up_after": len(taken_up),
+           "outcomes": outcomes,
            "restarted": restarted, "answered_again_ms": answers_again, "by": args.by or f"systemctl restart {args.unit}",
            "restart_took_ms": round((restarted_at - began) * 1000), "up_since": since_before,
            "up_since_after": since_after, "host_version": version_before, "host_version_after": version_after,
@@ -441,7 +470,8 @@ def report(args) -> int:
     exercises = [line for line in lines if line.get("kind") == "restart_summary"]
     for line in exercises:
         outcomes = ", ".join(f"{name}: {count}" for name, count in sorted((line.get("outcomes") or {}).items()))
-        print(f"restart with turns running, {time.strftime('%d %b %H:%M', time.localtime(line['at'] / 1000))}: "
+        print(f"restart with turns {line.get('moment', 'running')}, "
+              f"{time.strftime('%d %b %H:%M', time.localtime(line['at'] / 1000))}, by `{line.get('by', 'systemctl restart')}`: "
               f"{line.get('outcome')}; {line.get('running_at_restart', 0)} of {line.get('agents', 0)} running at the restart"
               + (f"; {outcomes}" if outcomes else "")
               + (f"; builds {line.get('host_version')} -> {line.get('host_version_after')}" if line.get("host_version") else ""))
@@ -469,6 +499,9 @@ def main() -> int:
             command.add_argument("--settle", type=float, default=2, help="how long after the last command began")
             command.add_argument("--stagger", type=float, default=1, help="seconds between two agents' messages")
             command.add_argument("--by", default="", help="the command that restarts the Host (default: systemctl)")
+            command.add_argument("--moment", choices=("running", "accepted", "ending"), default="running",
+                                 help="restart when every command runs, right after the messages were accepted, "
+                                      "or --settle seconds after the first command ended")
             command.add_argument("--start-timeout", type=float, default=180)
             command.add_argument("--model", default="haiku")
             command.add_argument("--cwd", default="~/clarp-host-soak")
