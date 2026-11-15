@@ -402,6 +402,27 @@ finds the imported bytes or the file's identity changed, one line names the
 file and the check (`transcriptPrefixChanged file=… what=…`) and the import
 is full.
 
+A full import parses the file and then reads all of it again for that
+digest: twice the file, every time (588 MB for a 284 MB transcript). With
+`full_digest_while_parsing = true` it takes the digest from the bytes its
+parser was handed, which are hashed as the parser reads them, and the digest
+of the bytes an earlier import read from the same pass, on the way past
+their last byte. That is done only when the file did not change while it
+was parsed: the same inode, size, modification time and change time as when
+it was opened. Then the bytes the parser read are the file's, and a second
+read would give the same digest. A file that grew or was touched meanwhile
+is read again as before, because growth cannot be told from a rewrite
+without reading; a rewrite that puts the modification time back still moves
+the change time, which cannot be set. Off by default.
+
+Every full import that reaches its digest says in the journal which it was:
+`transcriptFullDigest code=saved count=1 backend=claude size=lt256m`. The
+word is `saved`, or why the second read was made: `switch_off`, `grew`,
+`touched`, `identity_changed` (another file under the name, a shorter one,
+or none), `earlier_import_moved` (the earlier import's size is not the one
+the parse was told to mark) or `not_observed` (the parser did not read the
+file in one whole pass). No session, path or id.
+
 Rolling back to a 123 release: the schema guard refuses older code on the
 newer database unless the rollback is asked for. With the override, the 123
 release never reads the new table and imports as it always did; the rows in

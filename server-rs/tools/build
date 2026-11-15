@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Compile and test server-rs on the build machine, one job at a time.
+#
+#   server-rs/tools/build check            type-check the workspace (the inner loop: seconds once warm)
+#   server-rs/tools/build test [args...]   cargo test --workspace [args...]
+#   server-rs/tools/build clippy           the lint gate, as CI runs it
+#   server-rs/tools/build fmt              format the sources in place here (runs rustfmt remotely, copies back)
+#   server-rs/tools/build status           who holds the queue, and the machine's load
+#
+# Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
+# and never several builds at once. This script is that rule: it copies this checkout's server-rs/
+# to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
+# with a target directory per checkout, so a second run is incremental.
+set -euo pipefail
+
+HOST="${CLARP_BUILD_HOST:-xps15}"
+JOBS="${CLARP_BUILD_JOBS:-6}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"           # .../server-rs
+name="$(basename "$(dirname "$here")")"                            # the worktree's name keys the remote copy
+remote="/var/tmp/clarp-build/$name"
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
+cmd="${1:-check}"; shift || true
+
+if [ "$cmd" = status ]; then
+    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; if [ -s /var/tmp/clarp-build/holder ] && ! flock -n /var/tmp/clarp-build/lock true 2>/dev/null; then echo "building: $(cat /var/tmp/clarp-build/holder)"; else echo "queue: free"; fi'
+fi
+
+case "$cmd" in
+    check)  cargo_cmd="cargo check --workspace --all-targets -j $JOBS" ;;
+    test)   cargo_cmd="cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
+    clippy) cargo_cmd="cargo clippy --workspace --all-targets -j $JOBS -- -D warnings" ;;
+    fmt)    cargo_cmd="cargo fmt --all" ;;
+    *) echo "usage: build check|test [args]|clippy|fmt|status" >&2; exit 2 ;;
+esac
+
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
+rsync -a --delete --exclude target/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
+who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
+set +e
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec flock /var/tmp/clarp-build/lock bash -c 'echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder; CARGO_TERM_COLOR=never nice -n 19 ionice -c3 $cargo_cmd; code=\$?; : > /var/tmp/clarp-build/holder; exit \$code'"
+code=$?
+set -e
+if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
+    rsync -a --exclude target/ --exclude Cargo.lock -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/crates/" "$here/crates/"
+fi
+# The lockfile is made by the first build; bring it home so it is committed.
+rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/Cargo.lock" "$here/Cargo.lock" 2>/dev/null || true
+exit $code
