@@ -137,14 +137,17 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 20:40 | the Host updated by the installer, `61194d0c` to `87818123` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 8 ms, with all three |
 | 21:03 | the Host updated by the installer, `87818123` to `fedf357e` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 16 ms, with all three |
 | 21:23 | the Host updated by the installer, `fedf357e` to `d0788034` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 35 ms, with all three |
+| 21:44 | the Host updated by the installer, `d0788034` to `6b06bb21` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 22:15 | the Host updated by the installer, `6b06bb21` to `bcb9a916` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 23:59 | the Host updated by the installer, `bcb9a916` to `d3b9193c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 2 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Forty-seven turns, none interrupted,
-lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no
-more.
+completed, answered with its word, and its command ran exactly once. Fifty-six turns in fourteen exercises,
+none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+the command and no more.
 
-The updates of 20:02, 20:40, 21:03 and 21:23 were installed from a release built out of a clean checkout of
-the commit that had just landed, not out of the working tree: what runs is what is on main.
+The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
+just landed, not out of the working tree: what runs is what is on main.
 
 ## An agent publishes a file
 
@@ -166,6 +169,18 @@ answered `done`. The report is in its library as it was written (kind `html_form
 anywhere); a summary of the library names the page by its length and digest instead of carrying it; its
 revisions list its one version; and the page lies in the store of files, once.
 
+## An agent asks with a form
+
+On the build of `d3b9193c`, just after midnight on 16 Nov 2026: the agent `restart-3`, in a real Claude Code
+turn, was asked to write a small form and the JSON Schema of its answers and to publish them with
+`clarp-agent-artifacts create-form`. It did (the tool printed the artifact, exit 0). The form is in its
+library with its page and its schema. Answers that do not fit were sent the way an app sends them
+(`POST /artifacts/<id>/submit`) and refused in the words the Python Host's library has for them: `'soon' is
+not one of ['now', 'later']`. Answers that fit were answered with a receipt (`pending`); the agent was told
+them as what its user said, with the form's title, its version, the submission and the answers, and replied
+in a real turn that it took them as a preference and had started nothing, which is what the message asks of
+it. The same answers sent again under their id were answered `delivered`, and the agent was not told twice.
+
 ## The soak so far
 
 Rounds 1 to 13 (15 Nov, 17:15 to 20:01): twelve completed and answered with their word; none lost, none
@@ -179,6 +194,10 @@ time the account runs out during a round, the soak shows whether the turn waits 
 Rounds 14 to 16 (to 20:43) completed, on the builds of `61194d0c` and `87818123`. At 20:43 the soak was
 started again as the job `rust-host-soak-2`, on the tool as installed with `87818123`: it writes down why a
 turn did not finish and follows a turn that waits to its end. It went on counting where the evidence ended.
+
+Rounds 17 to 28 (to 23:46) completed, across five more builds (`fedf357e`, `d0788034`, `6b06bb21`,
+`bcb9a916` and, from 23:59, `d3b9193c`). In all, 28 rounds over six and a half hours: 27 completed and
+answered with their word, the one of 19:31 as told above; none lost, none doubled.
 
 ## What a round does not prove
 
