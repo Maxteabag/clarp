@@ -15,8 +15,17 @@ conformance run compares them (`NOT_YET` in `conformance/conform.py`).
 |---|---|---|
 | `send_delivery_state` | `/log`: `delivery_scope`, `delivery_stop_generation`, and `delivery` on a user row; the event `delivery-updated` | Stage 3 |
 
-Everything else in the Python Host's `capabilities.features` is absent too; the conformance
-corpus does not reach it yet. The list grows as the corpus does.
+The Rust Host lists a feature when everything the feature names is built and held to the Python
+Host (`FEATURES` in `crates/clarp-host/src/edge.rs`, each with the contract number that
+introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 15 Nov 2026 these are:
+`pairing`, `turn_queue_resume`, `background_jobs`, `background_job_cancel_generation`,
+`durable_task_goals`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`,
+`artifact_pins`, `decision_lifecycle`, `text_input_requests`, `push_grants`, `push_unregister`,
+`desktop_send_quiet_push`. Everything else in the Python Host's list is absent, also where a part
+of it is built (`attention_index`: `GET /attention` is there, the paged `GET /attention/inbox` is
+not; `goal_updater`: a criterion can be set aside, the Goal keeper is not there;
+`log_turn_summary`: rows carry the turn's end, an answer that tool work follows is not yet marked
+as commentary).
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):

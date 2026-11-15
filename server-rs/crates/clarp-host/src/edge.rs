@@ -4,7 +4,7 @@
 //! the answer in the types of `clarp-protocol`. It holds no state of its own and decides
 //! nothing about an agent.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -50,8 +50,34 @@ use crate::{ids, joblog, library, plans, push, wire};
 pub const HOST_CONTRACT: u64 = 99;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
-/// The features of the contract this Host has.
-pub const FEATURES: &[&str] = &[];
+/// The features of the contract this Host has, each with the contract number that
+/// introduced it (the Python Host's `FEATURE_CONTRACTS`): the apps gate on a feature being
+/// listed, some on it being listed with its number. A feature is listed here when everything
+/// it names is built and held to the Python Host; what is half there is not listed.
+pub const FEATURES: &[(&str, u64)] = &[
+    // What agents make and ask: the library, the inbox, requests and every way they end.
+    ("artifact_summary_v1", 73),
+    ("flat_artifact_responses", 1),
+    ("artifacts", 1),
+    // Background jobs, and a cancel that names the run it means.
+    ("background_jobs", 1),
+    // Pairing codes and devices with tokens of their own.
+    ("pairing", 1),
+    // `POST /turn-queue/resume`.
+    ("turn_queue_resume", 7),
+    // Plans with goals: `/task-plan`, `/task-plans`, `/task-plan/action`.
+    ("durable_task_goals", 21),
+    ("background_job_cancel_generation", 23),
+    // A send that says it came from the desk is not pushed to the phone.
+    ("desktop_send_quiet_push", 27),
+    ("decision_lifecycle", 28),
+    ("text_input_requests", 29),
+    ("artifact_pins", 38),
+    // `POST /devices` takes a phone's own grant, and the Host pushes by it.
+    ("push_grants", 39),
+    // `DELETE /devices` and `GET /devices/push-tokens`.
+    ("push_unregister", 93),
+];
 
 /// The most a conversation that arrives from another Host may weigh, as JSON.
 const IMPORT_LIMIT: usize = 512 * 1024 * 1024;
@@ -313,13 +339,16 @@ fn identity(app: &App) -> ServerInfo {
             version: 1,
             features: FEATURES
                 .iter()
-                .map(|feature| (*feature).to_string())
+                .map(|(feature, _)| (*feature).to_string())
                 .collect(),
         },
         contract: Contract {
             host: HOST_CONTRACT,
             min_ios: MIN_IOS_CONTRACT,
-            features: BTreeMap::new(),
+            features: FEATURES
+                .iter()
+                .map(|(feature, introduced)| ((*feature).to_string(), *introduced))
+                .collect(),
         },
         // Nobody said which app is asking, so nothing is known of whether it fits.
         client: Some(ClientCompatibility {
