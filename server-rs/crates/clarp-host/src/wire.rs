@@ -73,13 +73,19 @@ pub fn state_name(kind: &AgentStateKind) -> String {
         .unwrap_or_else(|| "idle".to_string())
 }
 
-/// When the state an app shows began.
-fn state_since(status: &Status) -> Option<i64> {
+/// When the state an app shows began. An agent that never ran has been as it is since it was made.
+fn state_since(record: &AgentRecord, status: &Status) -> i64 {
     match (&status.live, &status.last) {
-        (Some(live), _) => Some(live.started_at_ms),
-        (None, Some(last)) => Some(last.ended_at_ms),
-        (None, None) => None,
+        (Some(live), _) => live.started_at_ms,
+        (None, Some(last)) => last.ended_at_ms,
+        (None, None) => record.created_at_ms,
     }
+}
+
+/// The name of the tool's session: what the tool said, or, before it has said anything, the
+/// name the Host gave it.
+fn session_name(record: &AgentRecord, status: &Status) -> String {
+    conversation_id(record, status)
 }
 
 /// The id a client gave a message, from the id the conversation files it under.
@@ -137,22 +143,48 @@ fn ending_detail(outcome: &Outcome) -> Value {
     }
 }
 
-/// An agent's state, as the one that watches all states tells it.
-pub fn state(record: &AgentRecord, status: &Status, backend: &str, now_ms: i64) -> Value {
+/// The name the Python Host's Claude runner goes by when it reports a finished turn. Everything
+/// else calls the backend by its own name.
+fn runner(backend: &str) -> &str {
+    if backend == "claude" {
+        "clarp"
+    } else {
+        backend
+    }
+}
+
+/// An agent's state, as the one that watches all states tells it. `ended` is how the last turn
+/// ended, when it is known.
+pub fn state(
+    record: &AgentRecord,
+    status: &Status,
+    backend: &str,
+    ended: Option<&TurnEnd>,
+) -> Value {
     let kind = state_kind(status);
     let detail = match (&status.live, &status.last) {
         (Some(live), _) => json!({
-            "backend_session_id": status.backend_session.clone().unwrap_or_default(),
+            "backend_session_id": session_name(record, status),
             "dispatch": backend,
             "origin": "user",
             "source": "pwa",
             "trace_id": live.trace_id.clone().unwrap_or_default(),
         }),
-        (None, Some(last)) if last.outcome == Outcome::Completed => json!({
-            "dispatch": backend,
-            "duration_ms": last.ended_at_ms - last.started_at_ms.unwrap_or(last.ended_at_ms),
-            "origin": "user",
-        }),
+        (None, Some(last)) if last.outcome == Outcome::Completed => {
+            let mut detail = json!({
+                "dispatch": runner(backend),
+                "duration_ms": last.ended_at_ms - last.started_at_ms.unwrap_or(last.ended_at_ms),
+                "origin": "user",
+            });
+            if let Some(end) = ended.filter(|end| end.turn == last.id.0) {
+                detail["trace_id"] = json!(end.trace_id.clone().unwrap_or_default());
+                if let (Some(tokens_in), Some(tokens_out)) = (end.tokens_in, end.tokens_out) {
+                    detail["tokens_in"] = json!(tokens_in);
+                    detail["tokens_out"] = json!(tokens_out);
+                }
+            }
+            detail
+        }
         (None, Some(last)) => ending_detail(&last.outcome),
         (None, None) => json!({}),
     };
@@ -162,14 +194,14 @@ pub fn state(record: &AgentRecord, status: &Status, backend: &str, now_ms: i64) 
         "session": record.session,
         "persona": record.persona,
         "kind": state_name(&kind),
-        "ts": state_since(status).unwrap_or(now_ms),
+        "ts": state_since(record, status),
         "detail": detail,
         "status_text": "",
     })
 }
 
 /// The state a Stop leaves, as the route that took the Stop tells it at once.
-pub fn stopped(record: &AgentRecord, status: &Status, now_ms: i64) -> Option<Value> {
+pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
     let last = status.last.as_ref()?;
     let Outcome::Stopped { .. } = last.outcome else {
         return None;
@@ -180,14 +212,14 @@ pub fn stopped(record: &AgentRecord, status: &Status, now_ms: i64) -> Option<Val
         "session": record.session,
         "persona": record.persona,
         "kind": "interrupted",
-        "ts": state_since(status).unwrap_or(now_ms),
+        "ts": state_since(record, status),
         "detail": ending_detail(&last.outcome),
     }))
 }
 
 /// What an agent is doing, as a line a client can show. The same object is the snapshot's
 /// `activity` and, with its number, the `agent-activity` event.
-pub fn activity(record: &AgentRecord, status: &Status, now_ms: i64) -> Value {
+pub fn activity(record: &AgentRecord, status: &Status) -> Value {
     let kind = state_kind(status);
     let running = status.live.as_ref();
     let (action, phase, state, outcome, summary) = match (&kind, status.last.as_ref()) {
@@ -220,6 +252,7 @@ pub fn activity(record: &AgentRecord, status: &Status, now_ms: i64) -> Value {
                 "Turn failed",
             ),
         },
+        (AgentStateKind::Spawned, _) => ("started", "spawned", "idle", "ok", "Started"),
         _ => ("idle", "idle", "idle", "ok", "Idle"),
     };
     let tool = match running.map(|live| &live.activity) {
@@ -242,7 +275,7 @@ pub fn activity(record: &AgentRecord, status: &Status, now_ms: i64) -> Value {
         "call_id": null,
         "started_at_ms": null,
         "turn_started_ms": running.map(|live| live.started_at_ms),
-        "ts": state_since(status).unwrap_or(now_ms),
+        "ts": state_since(record, status),
     });
     if let Some(Outcome::Stopped { by }) = status.last.as_ref().map(|last| &last.outcome)
         && running.is_none()
@@ -254,16 +287,27 @@ pub fn activity(record: &AgentRecord, status: &Status, now_ms: i64) -> Value {
     activity
 }
 
-pub fn queue_updated(record: &AgentRecord, status: &Status) -> Value {
-    json!({
+/// The queue changed. `message_id` names the message the change is about, when it is about
+/// one: a message that joined the queue, or one that left it to run (`started`).
+pub fn queue_updated(
+    record: &AgentRecord,
+    status: &Status,
+    message_id: Option<&str>,
+    started: bool,
+) -> Value {
+    let mut event = json!({
         "type": "queue-updated",
         "agent_id": record.agent_id,
         "session": record.session,
         "queue_depth": status.waiting.len(),
         "queue_paused": status.paused,
-        "queue_started": false,
+        "queue_started": started,
         "queue_revision": status.queue_revision,
-    })
+    });
+    if let Some(message_id) = message_id {
+        event["client_msg_id"] = json!(client_id(message_id));
+    }
+    event
 }
 
 /// A finished turn the user should know about: what an app badges and marks unread from.
@@ -307,10 +351,11 @@ pub fn focus(record: &AgentRecord) -> Value {
 
 // ---- a conversation --------------------------------------------------------------------------
 
-/// How a turn ended, on the row that closed it.
+/// How a turn ended, on the row that closed it. A turn is named by the trace its message was
+/// sent under, which is the name the apps already know it by.
 fn turn_end(end: &TurnEnd) -> Value {
     json!({
-        "turn_id": end.turn.to_string(),
+        "turn_id": end.trace_id.clone().unwrap_or_else(|| end.turn.to_string()),
         "status": end.status,
         "started_at_ms": end.started_at_ms,
         "ended_at_ms": end.ended_at_ms,
@@ -359,7 +404,10 @@ pub fn row(version: &Versioned) -> Value {
                 row["sender_session"] = json!(sender.session);
             }
         }
-        Entry::Reply(reply) => row["text"] = json!(reply.text),
+        Entry::Reply(reply) => {
+            row["text"] = json!(reply.text);
+            row["trace_id"] = json!(reply.trace_id.clone().unwrap_or_default());
+        }
         Entry::Tool(call) => {
             let status = match call.status {
                 ToolStatus::Running => "running",
@@ -412,6 +460,13 @@ pub fn log_response(
     page: &Page,
     replace_required: bool,
 ) -> Value {
+    // Claude Code keeps a transcript of its own under the session's name. The Python Host
+    // names that file; so does this one, for what it is worth to whoever looks for it.
+    let file = status
+        .backend_session
+        .as_ref()
+        .filter(|_| record.backend == "claude")
+        .map(|session| format!("{session}.jsonl"));
     json!({
         "conversation_id": conversation_id(record, status),
         "turns": page.entries.iter().map(row).collect::<Vec<_>>(),
@@ -421,7 +476,7 @@ pub fn log_response(
         "replace_required": replace_required,
         "latest_ts": page.entries.last().map(|last| iso(last.ts_ms)).unwrap_or_default(),
         "cwd": record.cwd,
-        "file": null,
+        "file": file,
         "includes_automated": true,
     })
 }
@@ -451,24 +506,55 @@ fn preview(version: &Versioned) -> String {
     }
 }
 
-/// An agent's row in the snapshot, with every field of a row.
+/// An agent's row in the snapshot, with every field of a row. `ended` is how the last turn
+/// ended, when it is known.
 pub fn summary(
     record: &AgentRecord,
     status: &Status,
     backend: &str,
     newest: Option<&Versioned>,
+    ended: Option<&TurnEnd>,
     focused: bool,
-    now_ms: i64,
 ) -> Value {
     let kind = state_kind(status);
     let live = status.live.as_ref();
-    let since = state_since(status);
+    let last = status.last.as_ref();
+    let ended = ended.filter(|end| last.is_some_and(|last| last.id.0 == end.turn));
+    let since = state_since(record, status);
     let last_message = newest.map(preview).unwrap_or_default();
-    let conversation = conversation_id(record, status);
-    let live_state = if live.is_some() {
-        state_name(&kind)
+    let completed = last.filter(|last| last.outcome == Outcome::Completed);
+    // The turn an app may show as the agent's current or latest one, by its trace.
+    let turn_id = match live {
+        Some(live) => live.trace_id.clone(),
+        None => ended.and_then(|end| end.trace_id.clone()),
+    };
+    // An agent that never ran has nothing to show there at all.
+    let live_activity = if live.is_none() && last.is_none() {
+        Value::Null
     } else {
-        "idle".to_string()
+        let state = match (live, completed) {
+            (Some(_), _) => state_name(&kind),
+            (None, Some(_)) => "idle".to_string(),
+            (None, None) => "interrupted".to_string(),
+        };
+        let headline = (live.is_none() && completed.is_none()).then_some("Interrupted");
+        json!({
+            "state": state,
+            "headline": headline,
+            "since_ms": since,
+            "turn_id": turn_id,
+            "turn_started_ms": live.map(|live| live.started_at_ms),
+            "running_tools": u8::from(kind == AgentStateKind::Tool),
+            "tool": null,
+            "item_id": null,
+        })
+    };
+    // The Python Host keeps the start of a turn that did not finish, and forgets the start of
+    // one that did.
+    let turn_started_at = match (live, last) {
+        (Some(live), _) => live.started_at_ms,
+        (None, Some(last)) if last.outcome != Outcome::Completed => last.started_at_ms.unwrap_or(0),
+        _ => 0,
     };
     json!({
         "agent_id": record.agent_id,
@@ -476,7 +562,7 @@ pub fn summary(
         "persona": record.persona,
         "backend": backend,
         "cwd": record.cwd,
-        "model": record.model,
+        "model": ended.and_then(|end| end.model.clone()).unwrap_or_else(|| record.model.clone()),
         "effort": record.effort,
         "voice_id": "",
         "avatar_symbol": "",
@@ -506,8 +592,8 @@ pub fn summary(
             "can_voice_target": true,
         },
 
-        "backend_session_id": status.backend_session.clone().unwrap_or_default(),
-        "conversation_id": conversation,
+        "backend_session_id": session_name(record, status),
+        "conversation_id": conversation_id(record, status),
         "head_revision": status.head_revision,
         "last_message_id": newest.map(|row| row.entry.id()).unwrap_or_default(),
         "last_message": last_message,
@@ -518,23 +604,14 @@ pub fn summary(
         "focused": focused,
         "latest_state": state_name(&kind),
         "latest_state_ts": since,
-        "turn_started_at": live.map_or(0, |live| live.started_at_ms),
-        "last_activity": since.map(|ms| ms / 1_000),
-        "last_turn_end": status.last.as_ref().map(|last| last.ended_at_ms / 1_000),
+        "turn_started_at": turn_started_at,
+        "last_activity": since / 1_000,
+        "last_turn_end": completed.map_or(0, |last| last.ended_at_ms / 1_000),
         "status_text": null,
-        "activity": activity(record, status, now_ms),
-        "live_activity": {
-            "state": live_state,
-            "since_ms": since,
-            "turn_id": live.map(|live| live.turn.0.to_string()),
-            "turn_started_ms": live.map(|live| live.started_at_ms),
-            "running_tools": u8::from(kind == AgentStateKind::Tool),
-            "tool": null,
-            "headline": null,
-            "item_id": null,
-        },
+        "activity": activity(record, status),
+        "live_activity": live_activity,
         "compacting": kind == AgentStateKind::Compacting,
-        "context_tokens": null,
+        "context_tokens": ended.and_then(|end| end.tokens_in),
         "context_window": null,
         "queued_turn_count": status.waiting.len(),
         "queued_turn_revision": status.queue_revision,
@@ -662,6 +739,10 @@ mod tests {
             started_at_ms: Some(10),
             ended_at_ms: 40,
             tool_count: 1,
+            trace_id: None,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
         };
         Page {
             entries: vec![
@@ -696,6 +777,7 @@ mod tests {
                         id: "r-1".to_string(),
                         turn: 1,
                         text: "One file.".to_string(),
+                        trace_id: None,
                     }),
                     7 << 20,
                     Some(end),
@@ -721,7 +803,10 @@ mod tests {
             (&answer["has_more"], &answer["missing"]),
             (&json!(true), &json!(false))
         );
-        assert!(answer["file"].is_null() && answer.get("file").is_some());
+        assert_eq!(
+            answer["file"], "sess-1.jsonl",
+            "Claude Code's own transcript of the session"
+        );
         let turns = answer["turns"].as_array().unwrap();
         let said: Vec<(&str, &str, &str)> = turns
             .iter()
@@ -758,7 +843,8 @@ mod tests {
         assert_eq!(turns[2]["phase"], "final");
         assert_eq!(
             turns[2]["turn"],
-            json!({"turn_id": "1", "status": "completed", "started_at_ms": 10, "ended_at_ms": 40, "worked_ms": 30, "tool_count": 1})
+            json!({"turn_id": "1", "status": "completed", "started_at_ms": 10, "ended_at_ms": 40, "worked_ms": 30, "tool_count": 1}),
+            "a turn without a trace is named by its number"
         );
         // And it is the contract's shape: it reads as the type the apps are generated from.
         let typed: LogResponse = serde_json::from_value(answer).unwrap();
@@ -791,6 +877,22 @@ mod tests {
         );
     }
 
+    fn ended() -> TurnEnd {
+        TurnEnd {
+            id: "t-1".to_string(),
+            turn: 1,
+            closes: "r-1".to_string(),
+            status: "completed".to_string(),
+            started_at_ms: Some(1_100),
+            ended_at_ms: 4_000,
+            tool_count: 0,
+            trace_id: Some("trace-1".to_string()),
+            model: Some("fable".to_string()),
+            tokens_in: Some(5),
+            tokens_out: Some(7),
+        }
+    }
+
     #[test]
     fn a_status_becomes_a_snapshot_row_with_every_field() {
         let busy = status(
@@ -811,7 +913,14 @@ mod tests {
             42,
             None,
         );
-        let row = summary(&record(), &busy, "claude", Some(&newest), true, 9_000);
+        let row = summary(
+            &record(),
+            &busy,
+            "claude",
+            Some(&newest),
+            Some(&ended()),
+            true,
+        );
         assert_eq!(row["latest_state"], "tool");
         assert_eq!(
             (&row["busy"], &row["focused"]),
@@ -833,6 +942,11 @@ mod tests {
         );
         assert_eq!(row["activity"]["tool"], "Bash");
         assert_eq!(row["turn_started_at"], 5_000);
+        assert_eq!(row["live_activity"]["turn_id"], "trace-2");
+        assert_eq!(
+            (&row["model"], &row["context_tokens"]),
+            (&json!("fable"), &json!(5))
+        );
         assert_eq!(
             row.as_object().unwrap().len(),
             54,
@@ -840,6 +954,72 @@ mod tests {
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();
         assert_eq!(typed.session, "maximus");
+    }
+
+    #[test]
+    fn the_row_of_an_agent_that_never_ran_and_of_one_that_was_stopped() {
+        let mut fresh = status(None, None);
+        fresh.backend_session = None;
+        fresh.head_revision = 0;
+        let row = summary(&record(), &fresh, "claude", None, None, false);
+        assert_eq!(row["latest_state"], "spawned");
+        assert_eq!(
+            (
+                &row["activity"]["action"],
+                &row["activity"]["summary"],
+                &row["activity"]["state"]
+            ),
+            (&json!("started"), &json!("Started"), &json!("idle"))
+        );
+        assert!(
+            row["live_activity"].is_null(),
+            "nothing to show of a turn that never was"
+        );
+        assert_eq!(
+            (&row["conversation_id"], &row["last_message"]),
+            (&json!(""), &json!(""))
+        );
+        assert_eq!(
+            (&row["last_turn_end"], &row["turn_started_at"]),
+            (&json!(0), &json!(0))
+        );
+        assert_eq!(row["latest_state_ts"], 1, "as it is since it was made");
+
+        let halted = status(
+            None,
+            Some(Outcome::Stopped {
+                by: "user".to_string(),
+            }),
+        );
+        let row = summary(&record(), &halted, "claude", None, None, false);
+        assert_eq!(row["latest_state"], "interrupted");
+        assert_eq!(
+            (
+                &row["live_activity"]["state"],
+                &row["live_activity"]["headline"]
+            ),
+            (&json!("interrupted"), &json!("Interrupted"))
+        );
+        assert_eq!(
+            row["turn_started_at"], 1_100,
+            "the start of a turn that did not finish is kept"
+        );
+        assert_eq!(row["last_turn_end"], 0);
+
+        let done = summary(
+            &record(),
+            &status(None, Some(Outcome::Completed)),
+            "claude",
+            None,
+            Some(&ended()),
+            false,
+        );
+        assert_eq!(
+            (&done["last_turn_end"], &done["turn_started_at"]),
+            (&json!(4), &json!(0))
+        );
+        assert_eq!(done["live_activity"]["state"], "idle");
+        assert!(done["live_activity"]["headline"].is_null());
     }
 
     #[test]
@@ -852,7 +1032,7 @@ mod tests {
             json!({"type": "agent-state", "agent_id": "a1", "session": "maximus", "kind": "thinking",
                    "client_msg_id": "m2", "trace_id": "trace-2", "queue_started": false, "queue_remaining": 1})
         );
-        let told = state(&record(), &thinking, "claude", 9_000);
+        let told = state(&record(), &thinking, "claude", None);
         assert_eq!(
             (&told["kind"], &told["status_text"]),
             (&json!("thinking"), &json!(""))
@@ -861,7 +1041,7 @@ mod tests {
             told["detail"],
             json!({"backend_session_id": "sess-1", "dispatch": "claude", "origin": "user", "source": "pwa", "trace_id": "trace-2"})
         );
-        let doing = activity(&record(), &thinking, 9_000);
+        let doing = activity(&record(), &thinking);
         assert_eq!(
             (
                 &doing["action"],
@@ -882,11 +1062,15 @@ mod tests {
 
         let done = status(None, Some(Outcome::Completed));
         assert_eq!(
-            state(&record(), &done, "claude", 9_000)["detail"]["duration_ms"],
-            2_900
+            state(&record(), &done, "claude", Some(&ended()))["detail"],
+            json!({"dispatch": "clarp", "duration_ms": 2_900, "origin": "user", "trace_id": "trace-1", "tokens_in": 5, "tokens_out": 7})
         );
-        assert_eq!(activity(&record(), &done, 9_000)["summary"], "Done");
-        assert!(stopped(&record(), &done, 9_000).is_none());
+        assert_eq!(
+            state(&record(), &done, "scripted", None)["detail"]["dispatch"],
+            "scripted"
+        );
+        assert_eq!(activity(&record(), &done)["summary"], "Done");
+        assert!(stopped(&record(), &done).is_none());
 
         let halted = status(
             None,
@@ -894,14 +1078,14 @@ mod tests {
                 by: "user".to_string(),
             }),
         );
-        let at_once = stopped(&record(), &halted, 9_000).unwrap();
+        let at_once = stopped(&record(), &halted).unwrap();
         assert_eq!(at_once["kind"], "interrupted");
         assert_eq!(at_once["detail"]["source"], "user_stop");
         assert!(
             at_once.get("status_text").is_none(),
             "the route's word has no status text"
         );
-        let after = activity(&record(), &halted, 9_000);
+        let after = activity(&record(), &halted);
         assert_eq!(
             (
                 &after["action"],
@@ -917,20 +1101,27 @@ mod tests {
             )
         );
 
-        let queue = queue_updated(&record(), &thinking);
+        let held = queue_updated(&record(), &thinking, None, false);
         assert_eq!(
             (
-                &queue["queue_depth"],
-                &queue["queue_paused"],
-                &queue["queue_revision"]
+                &held["queue_depth"],
+                &held["queue_paused"],
+                &held["queue_revision"],
+                &held["queue_started"]
             ),
-            (&json!(1), &json!(true), &json!(7))
+            (&json!(1), &json!(true), &json!(7), &json!(false))
+        );
+        assert!(held.get("client_msg_id").is_none());
+        let left = queue_updated(&record(), &thinking, Some("u-m2"), true);
+        assert_eq!(
+            (&left["client_msg_id"], &left["queue_started"]),
+            (&json!("m2"), &json!(true))
         );
         // Each is an event of the contract: it reads as the type the apps are generated from.
         for (event, is) in [
             (sent, "agent-state"),
             (doing, "agent-activity"),
-            (queue, "queue-updated"),
+            (left, "queue-updated"),
         ] {
             let mut numbered = event;
             numbered["event_id"] = json!(5);
@@ -953,6 +1144,7 @@ mod tests {
                 id: "r-1".to_string(),
                 turn: 1,
                 text: "All done.".to_string(),
+                trace_id: None,
             }),
             9,
             None,

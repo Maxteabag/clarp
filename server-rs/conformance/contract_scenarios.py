@@ -55,6 +55,11 @@ SCENARIOS = [
     {
         'id': 'retry-same-client-id',
         'what': 'a client resends after a lost acknowledgement: one message, one turn',
+        # The Python Host answers this in two ways (15 Nov 2026, runs 43678950870 and
+        # 43679413710): the reply is either the row it wrote while the turn ran, with the turn's
+        # end on it, or the row it imported from the tool's transcript, without. Reported as a
+        # defect of the reference; compared, not counted.
+        'unsteady': True,
         'steps': [
             send('synthetic durable charlie', 'charlie'),
             {'op': 'wait_reply', 'after': 'u-charlie'},
@@ -124,6 +129,22 @@ SCENARIOS = [
             {'op': 'quiesce'},
             LOG,
             QUEUE,
+        ],
+    },
+    {
+        'id': 'send-after-stop',
+        'what': 'after a Stop the queue is held; the user writes again',
+        'steps': [
+            send(SLOW + 'synthetic task to stop', 'kilo'),
+            {'op': 'wait_busy', 'busy': True},
+            post('/stop', {'session': AGENT}),
+            {'op': 'wait_busy', 'busy': False},
+            {'op': 'quiesce', 'held': True},
+            send('synthetic after the stop lima', 'lima'),
+            {'op': 'quiesce', 'held': True},
+            LOG,
+            QUEUE,
+            SNAPSHOT,
         ],
     },
     {

@@ -16,7 +16,7 @@ use clarp_actor::{
     Action, Actor, ActorError, Changed, Outputs, Profile, QueueState, Sent, Status, Waiting,
 };
 use clarp_backend::Backend;
-use clarp_kernel::conversation::{Entry, Message};
+use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::turn::{Activity, Admission, Outcome, TurnId};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
@@ -103,6 +103,8 @@ pub struct View {
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
+    /// How the last turn ended, with what its tool said of itself.
+    pub ended: Option<TurnEnd>,
     pub backend: &'static str,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
@@ -206,6 +208,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let (view_tx, view) = watch::channel(Arc::new(View {
         status: idle,
         newest: None,
+        ended: None,
         backend: setup.backend.id(),
         broken: Some("the agent is being opened".to_string()),
     }));
@@ -216,6 +219,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         view: view_tx,
         told: None,
         newest: None,
+        ended: None,
         transcript_sent: None,
         transcript_due: None,
     };
@@ -239,6 +243,8 @@ struct Worker {
     told: Option<Status>,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
+    /// How the last turn ended.
+    ended: Option<TurnEnd>,
     transcript_sent: Option<Instant>,
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
@@ -318,6 +324,7 @@ impl Worker {
         // told to look at everything anyway. What follows from opening it is.
         self.told = self.actor.as_ref().map(Actor::status);
         self.newest = self.newest_row();
+        self.ended = self.last_end();
         self.publish_view();
         self.after(out);
         Ok(())
@@ -413,6 +420,11 @@ impl Worker {
         page.entries.into_iter().last()
     }
 
+    /// How the last turn ended, as the log has it.
+    fn last_end(&self) -> Option<TurnEnd> {
+        self.actor.as_ref()?.last_end().ok()?
+    }
+
     fn publish_view(&self) {
         let Some(actor) = &self.actor else {
             return;
@@ -420,6 +432,7 @@ impl Worker {
         self.view.send_replace(Arc::new(View {
             status: actor.status(),
             newest: self.newest.clone(),
+            ended: self.ended.clone(),
             backend: actor.backend_id(),
             broken: None,
         }));
@@ -435,46 +448,88 @@ impl Worker {
         };
         let status = actor.status();
         let backend = actor.backend_id();
+        let before = self.told.take();
+        let was_live = before.as_ref().and_then(|told| told.live.as_ref());
+        let was_waiting: &[TurnId] = before.as_ref().map_or(&[], |told| told.waiting.as_slice());
+        // The ids of the messages that have joined the queue since the clients were last told.
+        let joined: Vec<String> = if status
+            .waiting
+            .iter()
+            .any(|turn| !was_waiting.contains(turn))
+        {
+            actor
+                .queue()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|waiting| !was_waiting.contains(&waiting.turn))
+                .map(|waiting| waiting.message_id)
+                .collect()
+        } else {
+            Vec::new()
+        };
         if changed.conversation {
             self.newest = self.newest_row();
         }
+        let turn_ended = status.last.as_ref().map(|last| last.id)
+            != before
+                .as_ref()
+                .and_then(|told| told.last.as_ref())
+                .map(|was| was.id);
+        if turn_ended {
+            self.ended = self.last_end();
+        }
         let now = self.now_ms();
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
-        let before = self.told.take();
-        let was_live = before.as_ref().and_then(|told| told.live.as_ref());
 
+        // The queue: a message joined it, one left it to run, it was held or let go.
+        for message_id in &joined {
+            hub.publish(
+                wire::queue_updated(&record, &status, Some(message_id), false),
+                now,
+            );
+        }
         // A turn began: the word a send is answered with, for every client that did not send it.
         if let Some(live) = &status.live
             && was_live.map(|was| was.turn) != Some(live.turn)
         {
-            let waited = before
-                .as_ref()
-                .is_some_and(|told| told.waiting.contains(&live.turn));
+            let waited = was_waiting.contains(&live.turn);
+            if waited {
+                hub.publish(
+                    wire::queue_updated(&record, &status, Some(&live.message_id), true),
+                    now,
+                );
+            }
             hub.publish(
                 wire::dispatched(&record, live, waited, status.waiting.len()),
                 now,
             );
         }
+        if before
+            .as_ref()
+            .is_some_and(|told| told.paused != status.paused)
+        {
+            hub.publish(wire::queue_updated(&record, &status, None, false), now);
+        }
         // What the agent is doing changed: its state, and the line that describes it.
         if before.as_ref().map(told_state) != Some(told_state(&status)) {
             if status.live.is_none()
-                && let Some(at_once) = wire::stopped(&record, &status, now)
+                && turn_ended
+                && let Some(at_once) = wire::stopped(&record, &status)
             {
                 hub.publish(at_once, now);
             }
-            hub.publish(wire::state(&record, &status, backend, now), now);
-            hub.publish(wire::activity(&record, &status, now), now);
+            hub.publish(
+                wire::state(&record, &status, backend, self.ended.as_ref()),
+                now,
+            );
+            hub.publish(wire::activity(&record, &status), now);
         }
         // A turn ended with an answer: the user is told, once.
-        let ended = status.last.as_ref().filter(|last| {
-            last.outcome == Outcome::Completed
-                && before
-                    .as_ref()
-                    .and_then(|told| told.last.as_ref())
-                    .map(|was| was.id)
-                    != Some(last.id)
-        });
-        if let (Some(ended), Some(reply)) = (ended, &self.newest)
+        let answered = status
+            .last
+            .as_ref()
+            .filter(|last| turn_ended && last.outcome == Outcome::Completed);
+        if let (Some(ended), Some(reply)) = (answered, &self.newest)
             && matches!(reply.entry, Entry::Reply(_))
             && reply.turn_number == Some(ended.id.0)
         {
@@ -487,9 +542,6 @@ impl Worker {
                 wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms),
                 now,
             );
-        }
-        if changed.queue {
-            hub.publish(wire::queue_updated(&record, &status), now);
         }
         self.told = Some(status);
         self.publish_view();

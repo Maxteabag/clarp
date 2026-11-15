@@ -118,6 +118,7 @@ impl ScriptedInterpreter {
             id,
             turn: self.turn,
             text,
+            trace_id: None,
         }));
     }
 
@@ -273,7 +274,8 @@ mod tests {
             Signal::Reply(Reply {
                 id: "r-2-1".to_string(),
                 turn: 2,
-                text: "plain text is the reply\nand so is this".to_string()
+                text: "plain text is the reply\nand so is this".to_string(),
+                trace_id: None,
             })
         );
         assert!(matches!(&durable[3], Signal::Tool(call) if call.status == ToolStatus::Running));
@@ -285,7 +287,8 @@ mod tests {
             Signal::Reply(Reply {
                 id: "r-2-2".to_string(),
                 turn: 2,
-                text: "One file.".to_string()
+                text: "One file.".to_string(),
+                trace_id: None,
             })
         );
         assert_eq!(durable[7], Signal::Ended(RunOutcome::Completed));

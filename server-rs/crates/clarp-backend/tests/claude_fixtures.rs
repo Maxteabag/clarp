@@ -44,7 +44,12 @@ fn read(fixture: &str) -> Vec<Signal> {
 fn stored(signals: &[Signal]) -> Vec<&Signal> {
     signals
         .iter()
-        .filter(|signal| !matches!(signal, Signal::Live(_)))
+        .filter(|signal| {
+            !matches!(
+                signal,
+                Signal::Live(_) | Signal::Model(_) | Signal::Usage { .. }
+            )
+        })
         .collect()
 }
 
@@ -65,8 +70,8 @@ fn a_real_turn_that_only_answers() {
     };
     assert_eq!(reply.text, "The quick brown fox.");
     assert!(
-        reply.id.starts_with("r-msg_"),
-        "a reply is named after the provider's message"
+        reply.id.starts_with("r-") && reply.id.len() > 12 && !reply.id.contains('_'),
+        "a reply is named after the provider's message, as one unbroken id"
     );
     assert_eq!(stored[3], &Signal::Ended(RunOutcome::Completed));
     // While it was written it was shown under the same name, and it ended as it was stored.
@@ -135,5 +140,17 @@ fn a_recorded_turn_reads_the_same_however_often_it_is_read() {
     assert_eq!(
         read("claude-2.1.321-tool.jsonl"),
         read("claude-2.1.321-tool.jsonl")
+    );
+}
+
+#[test]
+fn a_real_turn_says_which_model_ran_it_and_what_it_cost() {
+    let signals = read("claude-2.1.321-plain.jsonl");
+    assert!(signals.contains(&Signal::Model("claude-haiku-5-5".to_string())));
+    assert!(
+        signals.iter().any(
+            |signal| matches!(signal, Signal::Usage { tokens_in, tokens_out } if *tokens_in > 0 && *tokens_out > 0)
+        ),
+        "the result's usage is passed on"
     );
 }

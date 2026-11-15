@@ -93,16 +93,29 @@ class RustHost(replay.Host):
         provider = self.root / 'provider'
         for path in (provider / 'bin', self.root / 'workspace', self.root / 'home', self.root / 'tmp'):
             path.mkdir(parents=True)
-        shim = provider / 'bin' / 'claude'
-        claude_shim(shim)
+        claude_shim(provider / 'bin' / 'claude')
+        self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
+        # The reference Host has its agents before it serves its first request. This one is given
+        # its agent and then started again, so that making the agent is not part of what a client
+        # sees of the scenario.
+        self._launch()
+        status, _, made = self.request('POST', '/agents', {
+            'name': scenarios.AGENT.title(), 'backend': 'claude', 'cwd': str(self.root / 'workspace')})
+        if status != 200 or (made or {}).get('session') != scenarios.AGENT:
+            raise replay.StepFailed(f'the Rust Host did not make the agent ({status})')
+        self._end()
+        self._launch()
+        return self
+
+    def _launch(self):
+        provider = self.root / 'provider'
         env = replay.child_env()
         env.update({'HOME': str(self.root / 'home'), 'TMPDIR': str(self.root / 'tmp'),
-                    'CLARP_HOST_TOKEN': replay.TOKEN, 'CLARP_CLAUDE_PROGRAM': str(shim),
+                    'CLARP_HOST_TOKEN': replay.TOKEN, 'CLARP_CLAUDE_PROGRAM': str(provider / 'bin' / 'claude'),
                     'CLARP_QA_PROVIDER_ROOT': str(provider)})
-        self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
-             '--cwd', str(self.root / 'workspace'), '--listen', '127.0.0.1:0', '--name', 'conformance'],
+             '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0'],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
             env=env, cwd=str(self.root), start_new_session=True)
         first = self.process.stderr.readline().decode(errors='replace')
@@ -116,12 +129,12 @@ class RustHost(replay.Host):
                 with contextlib.suppress(ValueError):
                     log.write(line.decode(errors='replace'))
         threading.Thread(target=drain, daemon=True).start()
-        # The agent the Python replay Host starts with, as far as this Host can run it.
-        status, _, made = self.request('POST', '/agents', {
-            'name': scenarios.AGENT.title(), 'backend': 'claude', 'cwd': str(self.root / 'workspace')})
-        if status != 200 or (made or {}).get('session') != scenarios.AGENT:
-            raise replay.StepFailed(f'the Rust Host did not make the agent ({status})')
-        return self
+
+    def _end(self):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.process.pid, signal.SIGKILL)
+        self.process.wait(timeout=5)
+        self.process = None
 
 
 class Events(replay.SSE):
@@ -231,6 +244,23 @@ def capture(make_host, scenario, root: Path) -> dict:
 
 
 EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
+# What belongs to a feature of the contract the Rust Host does not have yet (it leaves the
+# feature out of `capabilities.features`, which is how an app learns not to expect it). These
+# fields and events are left out of both sides before the Rust Host is compared: they are not
+# differences to explain one by one, they are one feature that is not there yet. The register
+# of what is not there yet is server-rs/docs/differences.md.
+NOT_YET = {
+    'send_delivery_state': {
+        'fields': ('delivery_scope', 'delivery_stop_generation', 'delivery'),
+        'events': ('delivery-updated',),
+    },
+}
+NOT_YET_FIELDS = frozenset(field for feature in NOT_YET.values() for field in feature['fields'])
+NOT_YET_EVENTS = frozenset(event for feature in NOT_YET.values() for event in feature['events'])
+# A conversation's revisions order its rows, and the order is all a client may rely on. The two
+# Hosts count differently, so a revision is compared as its place among the revisions of its
+# capture, not as its number.
+REVISION_KEYS = frozenset({'revision', 'latest_revision', 'head_revision'})
 
 
 def settle(value, sessions):
@@ -254,6 +284,58 @@ def settle(value, sessions):
             item = [name for name in item if isinstance(name, str) and name.lower() in sessions]
         out[key] = settle(item, sessions)
     return out
+
+
+def without_features(value):
+    """A body or an event without the fields of the features the Rust Host does not have yet."""
+    if isinstance(value, list):
+        return [without_features(item) for item in value]
+    if isinstance(value, dict):
+        return {key: without_features(item) for key, item in value.items() if key not in NOT_YET_FIELDS}
+    return value
+
+
+def revisions(value, found: set):
+    if isinstance(value, list):
+        for item in value:
+            revisions(item, found)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key in REVISION_KEYS and isinstance(item, int) and not isinstance(item, bool):
+                found.add(item)
+            else:
+                revisions(item, found)
+
+
+def ranked(value, rank: dict):
+    if isinstance(value, list):
+        return [ranked(item, rank) for item in value]
+    if isinstance(value, dict):
+        return {key: rank.get(item, item) if key in REVISION_KEYS and isinstance(item, int)
+                and not isinstance(item, bool) else ranked(item, rank) for key, item in value.items()}
+    return value
+
+
+def core(raw: dict) -> dict:
+    """A raw capture as it is compared across Hosts: without what belongs to features the Rust
+    Host does not have yet, with revisions as their order, and with each Host's own version
+    string as just "a version"."""
+    http = [{**exchange, 'body': without_features(exchange['body'])} for exchange in raw['http']]
+    sse = []
+    for frame in raw['sse']:
+        data = frame.get('data')
+        if isinstance(data, dict):
+            if data.get('type') in NOT_YET_EVENTS:
+                continue
+            data = without_features(data)
+            if data.get('type') == 'server-version' and 'version' in data:
+                data = {**data, 'version': '<version>'}
+        sse.append({**frame, 'data': data})
+    found: set = set()
+    revisions([exchange['body'] for exchange in http], found)
+    rank = {number: place for place, number in enumerate(sorted(found - {0}), start=1)}
+    http = [{**exchange, 'body': ranked(exchange['body'], rank)} for exchange in http]
+    return {**raw, 'http': http, 'sse': sse}
 
 
 def seen_by_a_client(raw: dict) -> dict:
@@ -296,21 +378,28 @@ def corpus(make_host, chosen, where: Path, jobs: int) -> dict:
     """Every chosen scenario against its own fresh Host; scenario id -> what a client saw."""
     def one(item):
         index, scenario = item
-        return scenario['id'], seen_by_a_client(capture(make_host, scenario, where / f's{index:02d}'))
+        raw = capture(make_host, scenario, where / f's{index:02d}')
+        # Both views of the same run: everything, and what is compared across Hosts.
+        return scenario['id'], {'full': seen_by_a_client(raw), 'core': seen_by_a_client(core(raw))}
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         return dict(pool.map(one, enumerate(chosen)))
 
 
-def differences(a: dict, b: dict, chosen) -> diff.Report:
+def differences(a: dict, b: dict, chosen, view: str = 'full') -> diff.Report:
     report = diff.Report()
     for scenario in chosen:
-        diff.compare(comparable(a[scenario['id']]), comparable(b[scenario['id']]), report)
+        diff.compare(comparable(a[scenario['id']][view]), comparable(b[scenario['id']][view]), report)
     return report
 
 
 def run_errors(seen: dict, label: str) -> list:
-    return [f'{label} / {scenario}: {capture["error"]}' for scenario, capture in sorted(seen.items())
-            if capture['error']]
+    return [f'{label} / {scenario}: {views["full"]["error"]}' for scenario, views in sorted(seen.items())
+            if views['full']['error']]
+
+
+def steady(chosen):
+    """The scenarios the reference answers the same way every time: the ones that count."""
+    return [scenario for scenario in chosen if not scenario.get('unsteady')]
 
 
 def python_host(build: Path):
@@ -324,17 +413,22 @@ def rust_host(binary: Path):
 def load_golden(directory: Path, chosen) -> dict:
     golden = {}
     for scenario in chosen:
-        path = directory / f"{scenario['id']}.json"
-        if not path.is_file():
-            raise SystemExit(f'nothing is written down for {scenario["id"]} in {directory}: record it first')
-        golden[scenario['id']] = json.loads(path.read_text())
+        views = {}
+        for view, path in (('full', directory / f"{scenario['id']}.json"),
+                           ('core', directory / 'core' / f"{scenario['id']}.json")):
+            if not path.is_file():
+                raise SystemExit(f'nothing is written down for {scenario["id"]} in {path.parent}: record it first')
+            views[view] = json.loads(path.read_text())
+        golden[scenario['id']] = views
     return golden
 
 
 def write_golden(directory: Path, seen: dict):
-    directory.mkdir(parents=True, exist_ok=True)
-    for scenario, capture in seen.items():
-        (directory / f'{scenario}.json').write_text(json.dumps(capture, indent=1, sort_keys=True) + '\n')
+    """What a Host answered: everything, and under core/ what is compared across Hosts."""
+    (directory / 'core').mkdir(parents=True, exist_ok=True)
+    for scenario, views in seen.items():
+        for view, path in (('full', directory / f'{scenario}.json'), ('core', directory / 'core' / f'{scenario}.json')):
+            path.write_text(json.dumps(views[view], indent=1, sort_keys=True) + '\n')
 
 
 def load_intended(path) -> set:
@@ -350,8 +444,12 @@ def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
     first = corpus(python_host(build), chosen, run.label('py-a'), jobs)
     second = corpus(python_host(build), chosen, run.label('py-b'), jobs)
     errors = run_errors(first, 'python') + run_errors(second, 'python again')
-    report = differences(first, second, chosen)
+    report = differences(first, second, steady(chosen))
     lines = [diff.render(report, set(), 'the Python Host against itself', errors)]
+    unsteady = differences(first, second, [s for s in chosen if s.get('unsteady')])
+    if unsteady.items:
+        lines.append(diff.render(unsteady, set(), 'scenarios the reference is known not to answer the same '
+                                 'way twice (reported as defects of the reference; not counted)'))
     ok = not errors and not report.items
     lines.append('REFERENCE REPRODUCIBLE' if ok else 'REFERENCE NOT REPRODUCIBLE: nothing below can be trusted')
     return first, lines, ok, second
@@ -385,7 +483,7 @@ def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tu
         copy = planted_copy(build, change, run.label(f"plant-{change['id']}"))
         seen = corpus(python_host(copy), chosen, run.label(f"run-{change['id']}"), jobs)
         errors = run_errors(seen, change['id'])
-        report = differences(golden, seen, chosen)
+        report = differences(golden, seen, steady(chosen))
         hits = caught(change, report.items)
         verdict = 'CAUGHT' if hits and not errors else 'MISSED'
         ok = ok and verdict == 'CAUGHT'
@@ -403,7 +501,7 @@ def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tu
 def against_rust(binary: Path, golden: dict, chosen, intended: set, run: Run, jobs: int) -> tuple:
     seen = corpus(rust_host(binary), chosen, run.label('rust'), jobs)
     errors = run_errors(seen, 'rust')
-    report = differences(golden, seen, chosen)
+    report = differences(golden, seen, steady(chosen), view='core')
     unexplained = [d for d in report.items if d['id'] not in intended]
     lines = [diff.render(report, intended, 'the Python Host (base) against the Rust Host (head)', errors)]
     lines += ['', '# The same differences by shape', *diff.shapes(report, top=200)]

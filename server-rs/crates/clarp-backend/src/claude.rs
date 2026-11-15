@@ -204,10 +204,11 @@ impl ClaudeInterpreter {
     }
 
     fn reply_id(&self, draft: &Draft) -> String {
-        if draft.id.is_empty() {
-            format!("r-{}-{}", self.turn, self.replies + 1)
-        } else {
-            format!("r-{}", draft.id)
+        // The provider's own name for the message, without its `msg_`: what is left is one
+        // unbroken id, as every other id of a conversation is.
+        match draft.id.strip_prefix("msg_").unwrap_or(&draft.id) {
+            "" => format!("r-{}-{}", self.turn, self.replies + 1),
+            name => format!("r-{name}"),
         }
     }
 
@@ -239,6 +240,7 @@ impl ClaudeInterpreter {
             id,
             turn: self.turn,
             text,
+            trace_id: None,
         }));
     }
 
@@ -288,6 +290,15 @@ impl ClaudeInterpreter {
                 // work behind it answers that first, with a result of its own. The turn is over
                 // when the process is, and the last result is the one that counts.
                 self.settle(out);
+                let tokens = |name: &str| event["usage"][name].as_u64();
+                if let (Some(tokens_in), Some(tokens_out)) =
+                    (tokens("input_tokens"), tokens("output_tokens"))
+                {
+                    out.push(Signal::Usage {
+                        tokens_in,
+                        tokens_out,
+                    });
+                }
                 self.result = Some(ResultFacts {
                     is_error: event["is_error"].as_bool().unwrap_or(false),
                     text: text_of(&event["result"]).to_string(),
@@ -312,6 +323,10 @@ impl ClaudeInterpreter {
     fn on_system(&mut self, event: &Value, out: &mut Vec<Signal>) {
         match text_of(&event["subtype"]) {
             "init" => {
+                let model = text_of(&event["model"]);
+                if !model.is_empty() {
+                    out.push(Signal::Model(model.to_string()));
+                }
                 let session = text_of(&event["session_id"]).trim();
                 if !session.is_empty() && self.session.as_deref() != Some(session) {
                     self.session = Some(session.to_string());
@@ -592,13 +607,35 @@ mod tests {
         out
     }
 
-    /// The signals without the live ones, which only show what the replies will say.
+    /// What a turn did: the signals without the reply as it grows, and without what the tool
+    /// says of itself.
     fn durable(signals: &[Signal]) -> Vec<Signal> {
         signals
             .iter()
-            .filter(|signal| !matches!(signal, Signal::Live(_)))
+            .filter(|signal| {
+                !matches!(
+                    signal,
+                    Signal::Live(_) | Signal::Model(_) | Signal::Usage { .. }
+                )
+            })
             .cloned()
             .collect()
+    }
+
+    #[test]
+    fn what_the_tool_says_of_itself_is_passed_on() {
+        let signals = read(
+            &[
+                INIT,
+                r#"{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":5,"output_tokens":7}}"#,
+            ],
+            (Some(0), None),
+        );
+        assert_eq!(signals[0], Signal::Model("m".to_string()));
+        assert!(signals.contains(&Signal::Usage {
+            tokens_in: 5,
+            tokens_out: 7
+        }));
     }
 
     const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"sess-1","model":"m"}"#;
@@ -650,7 +687,7 @@ mod tests {
         assert!(
             signals
                 .iter()
-                .any(|signal| matches!(signal, Signal::Live(live) if live.id == "r-msg_1")),
+                .any(|signal| matches!(signal, Signal::Live(live) if live.id == "r-1")),
             "the growing reply has the id the finished one will have"
         );
 
@@ -677,17 +714,19 @@ mod tests {
                 }),
                 Signal::Tool(tool(ToolStatus::Running, None, None)),
                 Signal::Reply(Reply {
-                    id: "r-msg_1".to_string(),
+                    id: "r-1".to_string(),
                     turn: 7,
-                    text: "I will look.".to_string()
+                    text: "I will look.".to_string(),
+                    trace_id: None,
                 }),
                 Signal::Tool(tool(ToolStatus::Ok, Some("a.txt"), Some(1_130))),
                 Signal::Moved(Activity::Thinking),
                 Signal::Moved(Activity::Responding),
                 Signal::Reply(Reply {
-                    id: "r-msg_2".to_string(),
+                    id: "r-2".to_string(),
                     turn: 7,
-                    text: "One file.".to_string()
+                    text: "One file.".to_string(),
+                    trace_id: None,
                 }),
                 Signal::Ended(RunOutcome::Completed),
             ]
@@ -716,7 +755,7 @@ mod tests {
             .collect();
         assert_eq!(
             replies,
-            vec![("r-msg_1", "First.\n\nSecond."), ("r-msg_2", "Third.")]
+            vec![("r-1", "First.\n\nSecond."), ("r-2", "Third.")]
         );
         assert_eq!(signals.last(), Some(&Signal::Ended(RunOutcome::Completed)));
     }
@@ -735,7 +774,7 @@ mod tests {
             (Some(0), None),
         );
         assert_eq!(
-            signals,
+            durable(&signals),
             vec![
                 Signal::Bound {
                     backend_session: "sess-1".to_string()
@@ -866,9 +905,10 @@ mod tests {
         assert_eq!(
             tail[0],
             Signal::Reply(Reply {
-                id: "r-msg_1".to_string(),
+                id: "r-1".to_string(),
                 turn: 7,
-                text: "Half a sen".to_string()
+                text: "Half a sen".to_string(),
+                trace_id: None,
             }),
             "what the agent had written is kept"
         );

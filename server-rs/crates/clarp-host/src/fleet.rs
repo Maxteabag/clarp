@@ -112,6 +112,8 @@ enum Ask {
     },
     Select {
         session: String,
+        /// Tell the clients. A message to an agent opens it without a word.
+        announce: bool,
         answer: Answer<Option<AgentRecord>>,
     },
     Issue {
@@ -169,7 +171,22 @@ impl FleetHandle {
 
     /// Makes an agent the one that is open. `None` when there is no such agent.
     pub async fn select(&self, session: String) -> Result<Option<AgentRecord>, Unavailable> {
-        self.ask(|answer| Ask::Select { session, answer }).await
+        self.ask(|answer| Ask::Select {
+            session,
+            announce: true,
+            answer,
+        })
+        .await
+    }
+
+    /// Makes an agent the one that is open because it was written to. Nobody is told.
+    pub async fn open(&self, session: String) -> Result<Option<AgentRecord>, Unavailable> {
+        self.ask(|answer| Ask::Select {
+            session,
+            announce: false,
+            answer,
+        })
+        .await
     }
 
     /// Issues a pairing code. The inner error says why the request cannot be met.
@@ -321,8 +338,12 @@ impl Fleet {
                 Ask::Remove { session, answer } => {
                     let _ = answer.send(self.remove(&session));
                 }
-                Ask::Select { session, answer } => {
-                    let _ = answer.send(self.select(&session));
+                Ask::Select {
+                    session,
+                    announce,
+                    answer,
+                } => {
+                    let _ = answer.send(self.select(&session, announce));
                 }
                 Ask::Issue {
                     device_name,
@@ -445,7 +466,11 @@ impl Fleet {
         Ok(true)
     }
 
-    fn select(&mut self, session: &str) -> Result<Option<AgentRecord>, Unavailable> {
+    fn select(
+        &mut self,
+        session: &str,
+        announce: bool,
+    ) -> Result<Option<AgentRecord>, Unavailable> {
         let Some(record) = self
             .members
             .iter()
@@ -454,12 +479,17 @@ impl Fleet {
         else {
             return Ok(None);
         };
-        self.store
-            .put(SETTINGS, FOCUS, record.agent_id.as_bytes())
-            .map_err(|error| Unavailable(error.to_string()))?;
-        self.focus = Some(record.agent_id.clone());
-        self.publish();
-        self.works.hub.publish(wire::focus(&record), self.now_ms());
+        let already = self.focus.as_deref() == Some(record.agent_id.as_str());
+        if !already {
+            self.store
+                .put(SETTINGS, FOCUS, record.agent_id.as_bytes())
+                .map_err(|error| Unavailable(error.to_string()))?;
+            self.focus = Some(record.agent_id.clone());
+            self.publish();
+        }
+        if announce {
+            self.works.hub.publish(wire::focus(&record), self.now_ms());
+        }
         Ok(Some(record))
     }
 
