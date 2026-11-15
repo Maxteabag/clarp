@@ -6,6 +6,17 @@ from __future__ import annotations
 from lib import backends, transcript_incremental as inc
 
 
+def test_only_grew_is_the_same_file_longer_and_not_older():
+    """``_only_grew``: what lets a tail keep its frontier when its file moved."""
+    before = inc.Identity(device=7, inode=11, size=1000, mtime_ns=5_000)
+    grew = lambda **changed: inc._only_grew(before, inc.Identity(**{
+        "device": 7, "inode": 11, "size": 1001, "mtime_ns": 5_000, **changed}))
+    assert grew() and grew(mtime_ns=5_001) and grew(size=10**12)
+    assert not grew(mtime_ns=4_999)                 # longer, and older than it was
+    assert not grew(size=1000) and not grew(size=1000, mtime_ns=6_000) and not grew(size=999)
+    assert not grew(inode=12) and not grew(device=8)
+
+
 def _file(tmp_path):
     path = tmp_path / "transcript.jsonl"
     path.write_bytes(b"".join(b"record %d\n" % n for n in range(4000)))
