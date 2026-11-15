@@ -1,0 +1,3029 @@
+{
+ "about": "Written by server-rs/tools/report-vectors.py from server/lib/html_forms.py. Do not edit by hand.",
+ "python": "3.13.16",
+ "read_only_schema": {
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+ },
+ "origins": [
+  {
+   "given": [],
+   "result": []
+  },
+  {
+   "given": [
+    "https://example.org"
+   ],
+   "result": [
+    "https://example.org"
+   ]
+  },
+  {
+   "given": [
+    "https://example.org:443"
+   ],
+   "result": [
+    "https://example.org"
+   ]
+  },
+  {
+   "given": [
+    "https://example.org:8443"
+   ],
+   "result": [
+    "https://example.org:8443"
+   ]
+  },
+  {
+   "given": [
+    "https://EXAMPLE.org"
+   ],
+   "result": [
+    "https://example.org"
+   ]
+  },
+  {
+   "given": [
+    "https://example.org",
+    "https://example.org:443",
+    "https://Example.ORG"
+   ],
+   "result": [
+    "https://example.org"
+   ]
+  },
+  {
+   "given": [
+    "https://a.example.org",
+    "https://b.example.org"
+   ],
+   "result": [
+    "https://a.example.org",
+    "https://b.example.org"
+   ]
+  },
+  {
+   "given": [
+    "https://example.org/"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org/path"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://user@example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://user:secret@example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "http://example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:0"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins port"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:65535"
+   ],
+   "result": [
+    "https://example.org:65535"
+   ]
+  },
+  {
+   "given": [
+    "https://example.org:65536"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins port"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:99999"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins port"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:123456"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:08443"
+   ],
+   "result": [
+    "https://example.org:8443"
+   ]
+  },
+  {
+   "given": [
+    "https://-example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins hostname"
+   }
+  },
+  {
+   "given": [
+    "https://example-.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins hostname"
+   }
+  },
+  {
+   "given": [
+    "https://exa_mple.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example..org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins hostname"
+   }
+  },
+  {
+   "given": [
+    "https://.example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins hostname"
+   }
+  },
+  {
+   "given": [
+    "https://example.org."
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins hostname"
+   }
+  },
+  {
+   "given": [
+    "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.org"
+   ],
+   "result": [
+    "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.org"
+   ]
+  },
+  {
+   "given": [
+    "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins hostname"
+   }
+  },
+  {
+   "given": [
+    "https://localhost"
+   ],
+   "result": [
+    "https://localhost"
+   ]
+  },
+  {
+   "given": [
+    "https://1.2.3.4"
+   ],
+   "result": [
+    "https://1.2.3.4"
+   ]
+  },
+  {
+   "given": [
+    "https://1.2.3.4:8443"
+   ],
+   "result": [
+    "https://1.2.3.4:8443"
+   ]
+  },
+  {
+   "given": [
+    "https://1.2.3"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://1.2.3.4.5"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://256.1.1.1"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://01.2.3.4"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://1.2.3.04"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://0x7f.0.0.1"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://127.0.0.0x1"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://2130706433"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://example.123"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://123.example"
+   ],
+   "result": [
+    "https://123.example"
+   ]
+  },
+  {
+   "given": [
+    "https://example.0x1f"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins IPv4 address"
+   }
+  },
+  {
+   "given": [
+    "https://xn--bcher-kva.example"
+   ],
+   "result": [
+    "https://xn--bcher-kva.example"
+   ]
+  },
+  {
+   "given": [
+    "https://bücher.example"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org "
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    " https://example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org\n"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://[::1]"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org?x=1"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org#top"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://*.example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org 'unsafe-eval'"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://example.org; script-src *"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+   }
+  },
+  {
+   "given": [
+    "https://a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.org"
+   ],
+   "result": [
+    "https://a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.org"
+   ]
+  },
+  {
+   "given": [
+    "https://a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins origin"
+   }
+  },
+  {
+   "given": [
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a",
+    "https://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://ahttps://a"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": [
+    "https://o0.example.org",
+    "https://o1.example.org",
+    "https://o2.example.org",
+    "https://o3.example.org",
+    "https://o4.example.org",
+    "https://o5.example.org",
+    "https://o6.example.org",
+    "https://o7.example.org"
+   ],
+   "result": [
+    "https://o0.example.org",
+    "https://o1.example.org",
+    "https://o2.example.org",
+    "https://o3.example.org",
+    "https://o4.example.org",
+    "https://o5.example.org",
+    "https://o6.example.org",
+    "https://o7.example.org"
+   ]
+  },
+  {
+   "given": [
+    "https://o0.example.org",
+    "https://o1.example.org",
+    "https://o2.example.org",
+    "https://o3.example.org",
+    "https://o4.example.org",
+    "https://o5.example.org",
+    "https://o6.example.org",
+    "https://o7.example.org",
+    "https://o8.example.org"
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": [
+    7
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins origin"
+   }
+  },
+  {
+   "given": [
+    null
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins origin"
+   }
+  },
+  {
+   "given": [
+    "https://example.org",
+    7
+   ],
+   "error": {
+    "kind": "ValueError",
+    "message": "invalid connect_origins origin"
+   }
+  },
+  {
+   "given": "https://example.org",
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": null,
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": {
+    "0": "https://example.org"
+   },
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": 7,
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": true,
+   "error": {
+    "kind": "ValueError",
+    "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+   }
+  },
+  {
+   "given": [
+    "https://example.org:443",
+    "https://example.org:444",
+    "https://example.org"
+   ],
+   "result": [
+    "https://example.org",
+    "https://example.org:444"
+   ]
+  }
+ ],
+ "payloads": [
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": {
+     "type": "object",
+     "properties": {},
+     "additionalProperties": false
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "connect_origins": [
+     "https://example.org"
+    ]
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "connect_origins": [
+      "https://example.org"
+     ],
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src https://example.org; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src https://example.org; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[\"https://example.org\"]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>https://example.org</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src https://example.org; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "connect_origins": [
+     "https://EXAMPLE.org:443",
+     "https://example.org"
+    ]
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "connect_origins": [
+      "https://example.org"
+     ],
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src https://example.org; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src https://example.org; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[\"https://example.org\"]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>https://example.org</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src https://example.org; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "connect_origins": [
+     "http://example.org"
+    ]
+   },
+   "normalize": {
+    "error": {
+     "kind": "ValueError",
+     "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "connect_origins": "https://example.org"
+   },
+   "normalize": {
+    "error": {
+     "kind": "ValueError",
+     "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "connect_origins": []
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "connect_origins": [],
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": "yes"
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": "yes"
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "read_only must be a boolean"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": 1
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": 1
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "read_only must be a boolean"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "choice": {
+       "type": "string",
+       "enum": [
+        "a",
+        "b"
+       ]
+      }
+     },
+     "required": [
+      "choice"
+     ]
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "choice": {
+        "type": "string",
+        "enum": [
+         "a",
+         "b"
+        ]
+       }
+      },
+      "required": [
+       "choice"
+      ]
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "a read-only report cannot declare answers; omit answer_schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": {}
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {}
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "a read-only report cannot declare answers; omit answer_schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": {
+     "type": "object"
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object"
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "a read-only report cannot declare answers; omit answer_schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": {
+     "additionalProperties": false,
+     "properties": {},
+     "type": "object"
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": {
+     "type": "object",
+     "properties": {},
+     "additionalProperties": false,
+     "title": "Nothing"
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "title": "Nothing"
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "a read-only report cannot declare answers; omit answer_schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": null
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": null
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "a read-only report cannot declare answers; omit answer_schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "answer_schema": "none"
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": "none"
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "a read-only report cannot declare answers; omit answer_schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "",
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "   \n",
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "   \n",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script>   \n<details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": 7,
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": 7,
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": null,
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": null,
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  },
+  {
+   "payload": {
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v 1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v 1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": 7,
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": 7,
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "2026.11.15-rc_1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "2026.11.15-rc_1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1/2",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1/2",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "é",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "é",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires a stable version string"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<script>document.title = \"x\"</script><p>with a script</p>",
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<script>document.title = \"x\"</script><p>with a script</p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><script>document.title = \"x\"</script><p>with a script</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<p>æøå 日本 \"quoted\" &amp; <b>bold</b></p>",
+    "version": "v1",
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "content": "<p>æøå 日本 \"quoted\" &amp; <b>bold</b></p>",
+     "version": "v1",
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><p>æøå 日本 \"quoted\" &amp; <b>bold</b></p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": true,
+    "title": "ignored",
+    "extra": {
+     "kept": [
+      1,
+      2
+     ]
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true,
+     "title": "ignored",
+     "extra": {
+      "kept": [
+       1,
+       2
+      ]
+     },
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "choice": {
+       "type": "string",
+       "enum": [
+        "a",
+        "b"
+       ]
+      }
+     },
+     "required": [
+      "choice"
+     ]
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "choice": {
+        "type": "string",
+        "enum": [
+         "a",
+         "b"
+        ]
+       }
+      },
+      "required": [
+       "choice"
+      ]
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": false,
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "choice": {
+       "type": "string",
+       "enum": [
+        "a",
+        "b"
+       ]
+      }
+     },
+     "required": [
+      "choice"
+     ]
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": false,
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "choice": {
+        "type": "string",
+        "enum": [
+         "a",
+         "b"
+        ]
+       }
+      },
+      "required": [
+       "choice"
+      ]
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1"
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1"
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "answer_schema must describe an object"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "array"
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "array"
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "answer_schema must describe an object"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": [
+     "object"
+    ]
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": [
+      "object"
+     ]
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "answer_schema must describe an object"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "properties": {},
+     "additionalProperties": false
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "result": "ok"
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "a": {
+       "$ref": "#/x"
+      }
+     }
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "a": {
+        "$ref": "#/x"
+       }
+      }
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "schema references are not supported; inline the schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "allOf": [
+      {
+       "$dynamicRef": "#x"
+      }
+     ]
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "allOf": [
+       {
+        "$dynamicRef": "#x"
+       }
+      ]
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "schema references are not supported; inline the schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "a": {
+       "type": "nothing"
+      }
+     }
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "a": {
+        "type": "nothing"
+       }
+      }
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "invalid answer schema"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "inner": {
+       "type": "object",
+       "properties": {
+        "inner": {
+         "type": "object",
+         "properties": {
+          "inner": {
+           "type": "object",
+           "properties": {
+            "inner": {
+             "type": "object",
+             "properties": {
+              "inner": {
+               "type": "object",
+               "properties": {
+                "inner": {
+                 "type": "object",
+                 "properties": {
+                  "inner": {
+                   "type": "object",
+                   "properties": {
+                    "inner": {
+                     "type": "object",
+                     "properties": {
+                      "inner": {
+                       "type": "object",
+                       "properties": {
+                        "inner": {
+                         "type": "object",
+                         "properties": {
+                          "inner": {
+                           "type": "object",
+                           "properties": {
+                            "inner": {
+                             "type": "object",
+                             "properties": {
+                              "inner": {
+                               "type": "object",
+                               "properties": {
+                                "inner": {
+                                 "type": "object",
+                                 "properties": {
+                                  "inner": {
+                                   "type": "object",
+                                   "properties": {
+                                    "inner": {
+                                     "type": "object",
+                                     "properties": {
+                                      "inner": {
+                                       "type": "object",
+                                       "properties": {
+                                        "inner": {
+                                         "type": "object",
+                                         "properties": {
+                                          "inner": {
+                                           "type": "object",
+                                           "properties": {
+                                            "inner": {
+                                             "type": "object",
+                                             "properties": {
+                                              "inner": {
+                                               "type": "object",
+                                               "properties": {
+                                                "inner": {
+                                                 "type": "object",
+                                                 "properties": {
+                                                  "inner": {
+                                                   "type": "object",
+                                                   "properties": {
+                                                    "inner": {
+                                                     "type": "object",
+                                                     "properties": {
+                                                      "inner": {
+                                                       "type": "object",
+                                                       "properties": {
+                                                        "inner": {
+                                                         "type": "object",
+                                                         "properties": {
+                                                          "inner": {
+                                                           "type": "object",
+                                                           "properties": {
+                                                            "inner": {
+                                                             "type": "object"
+                                                            }
+                                                           }
+                                                          }
+                                                         }
+                                                        }
+                                                       }
+                                                      }
+                                                     }
+                                                    }
+                                                   }
+                                                  }
+                                                 }
+                                                }
+                                               }
+                                              }
+                                             }
+                                            }
+                                           }
+                                          }
+                                         }
+                                        }
+                                       }
+                                      }
+                                     }
+                                    }
+                                   }
+                                  }
+                                 }
+                                }
+                               }
+                              }
+                             }
+                            }
+                           }
+                          }
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "inner": {
+        "type": "object",
+        "properties": {
+         "inner": {
+          "type": "object",
+          "properties": {
+           "inner": {
+            "type": "object",
+            "properties": {
+             "inner": {
+              "type": "object",
+              "properties": {
+               "inner": {
+                "type": "object",
+                "properties": {
+                 "inner": {
+                  "type": "object",
+                  "properties": {
+                   "inner": {
+                    "type": "object",
+                    "properties": {
+                     "inner": {
+                      "type": "object",
+                      "properties": {
+                       "inner": {
+                        "type": "object",
+                        "properties": {
+                         "inner": {
+                          "type": "object",
+                          "properties": {
+                           "inner": {
+                            "type": "object",
+                            "properties": {
+                             "inner": {
+                              "type": "object",
+                              "properties": {
+                               "inner": {
+                                "type": "object",
+                                "properties": {
+                                 "inner": {
+                                  "type": "object",
+                                  "properties": {
+                                   "inner": {
+                                    "type": "object",
+                                    "properties": {
+                                     "inner": {
+                                      "type": "object",
+                                      "properties": {
+                                       "inner": {
+                                        "type": "object",
+                                        "properties": {
+                                         "inner": {
+                                          "type": "object",
+                                          "properties": {
+                                           "inner": {
+                                            "type": "object",
+                                            "properties": {
+                                             "inner": {
+                                              "type": "object",
+                                              "properties": {
+                                               "inner": {
+                                                "type": "object",
+                                                "properties": {
+                                                 "inner": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                   "inner": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                     "inner": {
+                                                      "type": "object",
+                                                      "properties": {
+                                                       "inner": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                         "inner": {
+                                                          "type": "object",
+                                                          "properties": {
+                                                           "inner": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                             "inner": {
+                                                              "type": "object"
+                                                             }
+                                                            }
+                                                           }
+                                                          }
+                                                         }
+                                                        }
+                                                       }
+                                                      }
+                                                     }
+                                                    }
+                                                   }
+                                                  }
+                                                 }
+                                                }
+                                               }
+                                              }
+                                             }
+                                            }
+                                           }
+                                          }
+                                         }
+                                        }
+                                       }
+                                      }
+                                     }
+                                    }
+                                   }
+                                  }
+                                 }
+                                }
+                               }
+                              }
+                             }
+                            }
+                           }
+                          }
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "answer schema nesting too deep"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "inner": {
+       "type": "object",
+       "properties": {
+        "inner": {
+         "type": "object",
+         "properties": {
+          "inner": {
+           "type": "object",
+           "properties": {
+            "inner": {
+             "type": "object",
+             "properties": {
+              "inner": {
+               "type": "object",
+               "properties": {
+                "inner": {
+                 "type": "object",
+                 "properties": {
+                  "inner": {
+                   "type": "object",
+                   "properties": {
+                    "inner": {
+                     "type": "object",
+                     "properties": {
+                      "inner": {
+                       "type": "object",
+                       "properties": {
+                        "inner": {
+                         "type": "object",
+                         "properties": {
+                          "inner": {
+                           "type": "object",
+                           "properties": {
+                            "inner": {
+                             "type": "object",
+                             "properties": {
+                              "inner": {
+                               "type": "object",
+                               "properties": {
+                                "inner": {
+                                 "type": "object",
+                                 "properties": {
+                                  "inner": {
+                                   "type": "object",
+                                   "properties": {
+                                    "inner": {
+                                     "type": "object",
+                                     "properties": {
+                                      "inner": {
+                                       "type": "object",
+                                       "properties": {
+                                        "inner": {
+                                         "type": "object",
+                                         "properties": {
+                                          "inner": {
+                                           "type": "object",
+                                           "properties": {
+                                            "inner": {
+                                             "type": "object",
+                                             "properties": {
+                                              "inner": {
+                                               "type": "object",
+                                               "properties": {
+                                                "inner": {
+                                                 "type": "object",
+                                                 "properties": {
+                                                  "inner": {
+                                                   "type": "object",
+                                                   "properties": {
+                                                    "inner": {
+                                                     "type": "object",
+                                                     "properties": {
+                                                      "inner": {
+                                                       "type": "object",
+                                                       "properties": {
+                                                        "inner": {
+                                                         "type": "object",
+                                                         "properties": {
+                                                          "inner": {
+                                                           "type": "object",
+                                                           "properties": {
+                                                            "inner": {
+                                                             "type": "object",
+                                                             "properties": {
+                                                              "inner": {
+                                                               "type": "object",
+                                                               "properties": {
+                                                                "inner": {
+                                                                 "type": "object",
+                                                                 "properties": {
+                                                                  "inner": {
+                                                                   "type": "object",
+                                                                   "properties": {
+                                                                    "inner": {
+                                                                     "type": "object",
+                                                                     "properties": {
+                                                                      "inner": {
+                                                                       "type": "object",
+                                                                       "properties": {
+                                                                        "inner": {
+                                                                         "type": "object",
+                                                                         "properties": {
+                                                                          "inner": {
+                                                                           "type": "object",
+                                                                           "properties": {
+                                                                            "inner": {
+                                                                             "type": "object",
+                                                                             "properties": {
+                                                                              "inner": {
+                                                                               "type": "object",
+                                                                               "properties": {
+                                                                                "inner": {
+                                                                                 "type": "object",
+                                                                                 "properties": {
+                                                                                  "inner": {
+                                                                                   "type": "object",
+                                                                                   "properties": {
+                                                                                    "inner": {
+                                                                                     "type": "object"
+                                                                                    }
+                                                                                   }
+                                                                                  }
+                                                                                 }
+                                                                                }
+                                                                               }
+                                                                              }
+                                                                             }
+                                                                            }
+                                                                           }
+                                                                          }
+                                                                         }
+                                                                        }
+                                                                       }
+                                                                      }
+                                                                     }
+                                                                    }
+                                                                   }
+                                                                  }
+                                                                 }
+                                                                }
+                                                               }
+                                                              }
+                                                             }
+                                                            }
+                                                           }
+                                                          }
+                                                         }
+                                                        }
+                                                       }
+                                                      }
+                                                     }
+                                                    }
+                                                   }
+                                                  }
+                                                 }
+                                                }
+                                               }
+                                              }
+                                             }
+                                            }
+                                           }
+                                          }
+                                         }
+                                        }
+                                       }
+                                      }
+                                     }
+                                    }
+                                   }
+                                  }
+                                 }
+                                }
+                               }
+                              }
+                             }
+                            }
+                           }
+                          }
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "inner": {
+        "type": "object",
+        "properties": {
+         "inner": {
+          "type": "object",
+          "properties": {
+           "inner": {
+            "type": "object",
+            "properties": {
+             "inner": {
+              "type": "object",
+              "properties": {
+               "inner": {
+                "type": "object",
+                "properties": {
+                 "inner": {
+                  "type": "object",
+                  "properties": {
+                   "inner": {
+                    "type": "object",
+                    "properties": {
+                     "inner": {
+                      "type": "object",
+                      "properties": {
+                       "inner": {
+                        "type": "object",
+                        "properties": {
+                         "inner": {
+                          "type": "object",
+                          "properties": {
+                           "inner": {
+                            "type": "object",
+                            "properties": {
+                             "inner": {
+                              "type": "object",
+                              "properties": {
+                               "inner": {
+                                "type": "object",
+                                "properties": {
+                                 "inner": {
+                                  "type": "object",
+                                  "properties": {
+                                   "inner": {
+                                    "type": "object",
+                                    "properties": {
+                                     "inner": {
+                                      "type": "object",
+                                      "properties": {
+                                       "inner": {
+                                        "type": "object",
+                                        "properties": {
+                                         "inner": {
+                                          "type": "object",
+                                          "properties": {
+                                           "inner": {
+                                            "type": "object",
+                                            "properties": {
+                                             "inner": {
+                                              "type": "object",
+                                              "properties": {
+                                               "inner": {
+                                                "type": "object",
+                                                "properties": {
+                                                 "inner": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                   "inner": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                     "inner": {
+                                                      "type": "object",
+                                                      "properties": {
+                                                       "inner": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                         "inner": {
+                                                          "type": "object",
+                                                          "properties": {
+                                                           "inner": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                             "inner": {
+                                                              "type": "object",
+                                                              "properties": {
+                                                               "inner": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                 "inner": {
+                                                                  "type": "object",
+                                                                  "properties": {
+                                                                   "inner": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                     "inner": {
+                                                                      "type": "object",
+                                                                      "properties": {
+                                                                       "inner": {
+                                                                        "type": "object",
+                                                                        "properties": {
+                                                                         "inner": {
+                                                                          "type": "object",
+                                                                          "properties": {
+                                                                           "inner": {
+                                                                            "type": "object",
+                                                                            "properties": {
+                                                                             "inner": {
+                                                                              "type": "object",
+                                                                              "properties": {
+                                                                               "inner": {
+                                                                                "type": "object",
+                                                                                "properties": {
+                                                                                 "inner": {
+                                                                                  "type": "object",
+                                                                                  "properties": {
+                                                                                   "inner": {
+                                                                                    "type": "object",
+                                                                                    "properties": {
+                                                                                     "inner": {
+                                                                                      "type": "object"
+                                                                                     }
+                                                                                    }
+                                                                                   }
+                                                                                  }
+                                                                                 }
+                                                                                }
+                                                                               }
+                                                                              }
+                                                                             }
+                                                                            }
+                                                                           }
+                                                                          }
+                                                                         }
+                                                                        }
+                                                                       }
+                                                                      }
+                                                                     }
+                                                                    }
+                                                                   }
+                                                                  }
+                                                                 }
+                                                                }
+                                                               }
+                                                              }
+                                                             }
+                                                            }
+                                                           }
+                                                          }
+                                                         }
+                                                        }
+                                                       }
+                                                      }
+                                                     }
+                                                    }
+                                                   }
+                                                  }
+                                                 }
+                                                }
+                                               }
+                                              }
+                                             }
+                                            }
+                                           }
+                                          }
+                                         }
+                                        }
+                                       }
+                                      }
+                                     }
+                                    }
+                                   }
+                                  }
+                                 }
+                                }
+                               }
+                              }
+                             }
+                            }
+                           }
+                          }
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "answer schema nesting too deep"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+    "version": "v1",
+    "read_only": null,
+    "answer_schema": {
+     "type": "object",
+     "properties": {
+      "choice": {
+       "type": "string",
+       "enum": [
+        "a",
+        "b"
+       ]
+      }
+     },
+     "required": [
+      "choice"
+     ]
+    }
+   },
+   "normalize": {
+    "result": {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": null,
+     "answer_schema": {
+      "type": "object",
+      "properties": {
+       "choice": {
+        "type": "string",
+        "enum": [
+         "a",
+         "b"
+        ]
+       }
+      },
+      "required": [
+       "choice"
+      ]
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><h1>Synthetic report</h1><p>All of it.</p><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "read_only must be a boolean"
+    }
+   }
+  },
+  {
+   "payload": {
+    "content": "",
+    "version": "",
+    "read_only": "x",
+    "answer_schema": 7,
+    "connect_origins": 7
+   },
+   "normalize": {
+    "error": {
+     "kind": "ValueError",
+     "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "rendered": {
+    "result": {
+     "page": "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27;; style-src &#x27;unsafe-inline&#x27;; img-src data:; font-src data:; media-src data:; connect-src &#x27;none&#x27;; frame-src &#x27;none&#x27;; form-action &#x27;none&#x27;; base-uri &#x27;none&#x27;; object-src &#x27;none&#x27;\"><script>window.clarpForm={capabilities:{\"network\":[]}};</script><details style=\"position:fixed;top:8px;right:8px;background:white;color:black;padding:6px;font:14px system-ui\"><summary>Network access</summary>External connections blocked</details>",
+     "policy": "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+    }
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "connect_origins must be an array of at most 8 exact HTTPS origins"
+    }
+   }
+  },
+  {
+   "payload": {},
+   "normalize": {
+    "result": {}
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  },
+  {
+   "payload": {
+    "read_only": true
+   },
+   "normalize": {
+    "result": {
+     "read_only": true,
+     "answer_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   },
+   "policy": {
+    "result": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'"
+   },
+   "contract": {
+    "error": {
+     "kind": "ValueError",
+     "message": "HTML form requires content"
+    }
+   }
+  }
+ ],
+ "others": [
+  {
+   "payload": null,
+   "normalize": {
+    "result": null
+   }
+  },
+  {
+   "payload": 7,
+   "normalize": {
+    "result": 7
+   }
+  },
+  {
+   "payload": "text",
+   "normalize": {
+    "result": "text"
+   }
+  },
+  {
+   "payload": [],
+   "normalize": {
+    "result": []
+   }
+  },
+  {
+   "payload": [
+    {
+     "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+     "version": "v1",
+     "read_only": true
+    }
+   ],
+   "normalize": {
+    "result": [
+     {
+      "content": "<h1>Synthetic report</h1><p>All of it.</p>",
+      "version": "v1",
+      "read_only": true
+     }
+    ]
+   }
+  }
+ ]
+}
