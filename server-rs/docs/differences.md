@@ -57,6 +57,7 @@ it covers that exact difference and nothing else.
 | The preview of a notification for a spoken reply | shows an emotion tag the engine acts out, `[sigh]` (defect R10) | does not | A notification shows the reply as every other place shows it |
 | `phase` of the reply that closes a later turn | `null` when the turn before had settled, `final` otherwise (defect R6) | `final` | A reply that closes a completed turn is the agent's final word in it, whenever it is read |
 | `last_completed_message` after a turn that had waited in the queue | the user's message, though the agent has answered it (defect R12) | the agent's answer | A list of chats shows what the agent last said, whichever way the turn began |
+| `model` in an agent's row after a turn that completed | empty after some turns (defect R13) | the model that answered | An app shows which model an agent runs on; a turn that completed has said it |
 | The focus after the Host sent an agent something by itself (an answer that is delivered, a goal that is taken up again) | moves to that agent (defect R14) | stays where the user put it | Focus is the agent the user has open, and where a message without a name goes. Only the user moves it |
 | `pinned` in the answer to the discard of a pinned artifact | `true`, beside `pinned_at: null` (defect R15) | `false` | A discard unpins. The answer says what is now true |
 

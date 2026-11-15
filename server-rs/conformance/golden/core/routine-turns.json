@@ -1,0 +1,1594 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:1>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send alfa"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 1,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-alfa",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "log after the first turn"
+  },
+  {
+   "body": {
+    "<bytes>": 36,
+    "<sha256>": "d1753bb69fdd21d06c149639140be0d781ec5265d187155cc18b90caea791ed0"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 409,
+   "step": "send bravo"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:3>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send charlie"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:4>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send delta"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:5>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send echo"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:6>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:6>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:2>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:2>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 2,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: synthetic routine alfa",
+      "last_message": "Claude replay reply: synthetic routine alfa",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:5>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:6>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot after routine turns"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 2,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-alfa",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "automated": true,
+      "automation_kind": "dreaming",
+      "display_cells": [],
+      "id": "u-charlie",
+      "kind": null,
+      "origin": "dreaming",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Automated dreaming run",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:3>"
+     },
+     {
+      "automated": true,
+      "automation_kind": "dreaming",
+      "display_cells": [],
+      "id": "<row:2>",
+      "kind": null,
+      "origin": "dreaming",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Dreaming check: no action needed.",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:3>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:3>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "automated": true,
+      "automation_kind": "dreaming",
+      "display_cells": [],
+      "id": "u-delta",
+      "kind": null,
+      "origin": "dreaming",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Automated dreaming run",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:4>"
+     },
+     {
+      "automated": true,
+      "automation_kind": "dreaming",
+      "display_cells": [],
+      "id": "<row:3>",
+      "kind": null,
+      "origin": "dreaming",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine delta",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:4>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:4>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "automated": true,
+      "automation_kind": "watcher",
+      "display_cells": [],
+      "id": "u-echo",
+      "kind": null,
+      "origin": "watcher",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Automated watcher event",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>"
+     },
+     {
+      "automated": true,
+      "automation_kind": "watcher",
+      "display_cells": [],
+      "id": "<row:4>",
+      "kind": null,
+      "origin": "watcher",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine echo",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:5>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": false,
+    "includes_automated": false,
+    "latest_revision": 2,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-alfa",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "log without automation"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": true,
+    "includes_automated": false,
+    "latest_revision": 2,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "log without automation, one row"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": false,
+    "includes_automated": false,
+    "latest_revision": 2,
+    "latest_ts": "",
+    "missing": false,
+    "replace_required": false,
+    "turns": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "log without automation, after the first turn"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:7>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send foxtrot"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": true,
+    "includes_automated": false,
+    "latest_revision": 3,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-foxtrot",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic routine foxtrot",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:7>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:5>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine foxtrot",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:7>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:7>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "log without automation, three rows"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": false,
+    "includes_automated": false,
+    "latest_revision": 3,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-alfa",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic routine alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "log without automation, before the last message"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:6>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:6>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:2>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:2>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 3,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "You: synthetic routine foxtrot",
+      "last_message": "Claude replay reply: synthetic routine foxtrot",
+      "last_message_id": "<row:5>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:7>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:6>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot at the end"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "routine-turns",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "event_id": "<eid:transcript-updated#1@45bbad>",
+    "session": "claire",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@45bbad>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "alfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:2>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "badge": true,
+    "cause_message_id": "u-alfa",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic routine alfa",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "charlie",
+    "event_id": "<eid:agent-state#2@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:2>",
+     "dispatch": "claude",
+     "origin": "dreaming",
+     "source": "pwa",
+     "trace_id": "<id:3>"
+    },
+    "event_id": "<eid:agent-state#5@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#5@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#6@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#6@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "dreaming",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:3>"
+    },
+    "event_id": "<eid:agent-state#7@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#7@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#8@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#8@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "delta",
+    "event_id": "<eid:agent-state#3@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:4>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:2>",
+     "dispatch": "claude",
+     "origin": "dreaming",
+     "source": "pwa",
+     "trace_id": "<id:4>"
+    },
+    "event_id": "<eid:agent-state#9@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#9@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#10@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#10@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "dreaming",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:4>"
+    },
+    "event_id": "<eid:agent-state#11@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#11@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#12@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#12@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "echo",
+    "event_id": "<eid:agent-state#4@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:5>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#4@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:2>",
+     "dispatch": "claude",
+     "origin": "watcher",
+     "source": "pwa",
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#13@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#13@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#14@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#14@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "watcher",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#15@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#15@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#16@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#16@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "badge": true,
+    "cause_message_id": "u-echo",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#2@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:9>",
+    "origin": "watcher",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic routine echo",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:4>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#2@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "foxtrot",
+    "event_id": "<eid:agent-state#5@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:7>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#5@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:2>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:7>"
+    },
+    "event_id": "<eid:agent-state#17@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#17@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#18@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#18@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:7>"
+    },
+    "event_id": "<eid:agent-state#19@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#19@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#20@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#20@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
+    "badge": true,
+    "cause_message_id": "u-foxtrot",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#3@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:10>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic routine foxtrot",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:5>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#3@f5caa0>"
+  }
+ ]
+}

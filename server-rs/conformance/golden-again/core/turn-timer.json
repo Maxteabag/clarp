@@ -412,7 +412,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 3,
+      "head_revision": 2,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -440,7 +440,7 @@
        "turn_started_ms": "<time>"
       },
       "mcp_servers": [],
-      "model": "replay-fake",
+      "model": "",
       "muted": false,
       "parent_agent_id": null,
       "persona": "Claire",
@@ -524,7 +524,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 4,
+      "head_revision": 3,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -552,7 +552,7 @@
        "turn_started_ms": null
       },
       "mcp_servers": [],
-      "model": "replay-fake",
+      "model": "",
       "muted": false,
       "parent_agent_id": null,
       "persona": "Claire",
@@ -597,7 +597,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 4,
+    "latest_revision": 3,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -613,7 +613,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 1,
+      "revision": 0,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -635,7 +635,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 3,
+      "revision": 1,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -665,7 +665,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 2,
+      "revision": 1,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -687,7 +687,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 4,
+      "revision": 2,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -769,6 +769,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "oscar",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -809,21 +824,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "oscar",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
   },
   {
    "data": {
