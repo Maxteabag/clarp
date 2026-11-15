@@ -3492,9 +3492,11 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // What came is said, and what was not there to bring is not called unfinished.
     let said_of_it = format!(
         "with the 4 rows of its conversation, the 5 things in its library, its plan and the 3 \
-         files it published or shows.\nOne file that it names is not on the Host at {} either: \
-         there was nothing to bring.\nIt is still on the Host at",
-        old_host.address
+         files it published or shows.\nOne file that it names is not on the Host at {old} either: \
+         there was nothing to bring. If another Host has it, `clarp-host import --files --from \
+         {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is still on \
+         the Host at",
+        old = old_host.address
     );
     assert!(told.contains(&said_of_it), "{told}");
     assert!(!told.contains("did not arrive"), "{told}");
@@ -3667,6 +3669,48 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
     // The image, the document, the other agent's image, and the report's two pages.
     assert_eq!(files_under(&new_place.root.join("data").join("media")), 5);
+    // The file its conversation names that the first Host does not have is on a third: a
+    // conversation that came from another Host names files that stayed there. Asked for
+    // there, it comes too, and is fetched here under the id that names it.
+    let third_place = Place::new("move-files");
+    let third_host = third_place.start();
+    let keeper = third_host.new_agent("Keeper");
+    let long_ago = b"%PDF-1.7\nkept elsewhere\n".to_vec();
+    let under_its_id = [
+        ("X-Session", keeper.as_str()),
+        ("X-Asset-Id", "asset_gone_long_ago"),
+        ("X-File-Name", "long-ago.pdf"),
+        ("Content-Type", "application/pdf"),
+    ];
+    let kept = fetch(&third_host, "", "POST", "/media", &under_its_id, &long_ago);
+    assert_eq!(kept.status, 200, "{}", kept.text());
+    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["import", "--files", "--from", &old_host.address])
+        .args(["--session", &session, "--host", &new_host.address])
+        .args(["--files-from", &third_host.address])
+        .env_remove("CLARP_HOST_TOKEN")
+        .env_remove("CLARP_SOURCE_TOKEN")
+        .env_remove("CLARP_FILES_TOKEN")
+        .output()
+        .unwrap();
+    let told = String::from_utf8_lossy(&again.stdout).into_owned();
+    assert!(again.status.success(), "{told}");
+    assert_eq!(
+        told.trim_end(),
+        format!(
+            "{session} has the 4 files it published or shows (one of them from the Host at {}) here.",
+            third_host.address
+        )
+    );
+    let came = fetch(&new_host, "", "GET", "/media/asset_gone_long_ago", &[], b"");
+    assert_eq!(
+        (came.status, came.header("content-type")),
+        (200, "application/pdf")
+    );
+    assert!(came.body == long_ago);
+    let gallery = new_host.get(&format!("/media?session={session}"));
+    assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 6);
     // Only the administrator says which id a file has, and an id is one file's.
     let taken = [
         ("X-Session", session.as_str()),
@@ -3745,7 +3789,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let gallery = new_host.get(&format!("/media?session={session}"));
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
     assert_eq!(gallery["assets"][0]["asset_id"], image_id.as_str());
-    assert_eq!(files_under(&new_place.root.join("data").join("media")), 5);
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 6);
     // After a restart of the second Host it is all still there.
     new_host.kill();
     let new_host = new_place.start();

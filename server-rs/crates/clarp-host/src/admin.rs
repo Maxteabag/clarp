@@ -26,11 +26,14 @@ Host's from CLARP_HOST_TOKEN.";
 
 pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
+                         [--files-from ADDR:PORT]
 Reads the agent NAME, its conversation, its library, its plans and goals and the files it
 published or shows from the Host at --from and gives them to this Host. With --files only
 the files are given, for an agent that is here already: a move whose files did not all
-arrive is finished that way.
-The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN.";
+arrive is finished that way. A file the Host at --from does not have is asked for at
+--files-from: a conversation that came from another Host names files that stayed there.
+The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN,
+and the token of the Host at --files-from from CLARP_FILES_TOKEN.";
 
 /// How many rows of a conversation are asked for at a time.
 const PAGE: usize = 1_000;
@@ -233,11 +236,24 @@ fn wanted(gallery: &[Value], library: &[Value], plans: &[Value], rows: &[Value])
     wanted
 }
 
+/// Where a move reads from and where it writes to.
+struct Way<'a> {
+    from: &'a str,
+    source_token: &'a str,
+    /// Another Host that is asked for a file the first does not have, and its token.
+    files_from: Option<(&'a str, &'a str)>,
+    host: &'a str,
+    token: &'a str,
+    session: &'a str,
+}
+
 /// How the files of a move fared.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Followed {
     arrived: usize,
-    /// Named, and not on the Host the agent comes from: there was nothing to bring.
+    /// Of those that arrived, how many the other Host had and the first did not.
+    elsewhere: usize,
+    /// Named, and not on a Host that was asked: there was nothing to bring.
     absent: usize,
     /// Not read there, or not taken here.
     failed: usize,
@@ -248,31 +264,56 @@ struct Followed {
 impl Followed {
     /// What the administrator is told of them: the words for the sentence that says what
     /// came, and the lines that say what did not.
-    fn told(&self, from: &str, session: &str) -> (String, String) {
-        let came = match self.arrived {
+    fn told(&self, way: &Way<'_>) -> (String, String) {
+        let (from, session) = (way.from, way.session);
+        let mut came = match self.arrived {
             0 => "no files".to_string(),
             1 => "the one file it published or shows".to_string(),
             many => format!("the {many} files it published or shows"),
         };
+        if let (Some((other, _)), true) = (way.files_from, self.elsewhere > 0) {
+            let count = match (self.elsewhere, self.arrived) {
+                (1, 1) => "from".to_string(),
+                (1, _) => "one of them from".to_string(),
+                (all, arrived) if all == arrived => "all from".to_string(),
+                (some, _) => format!("{some} of them from"),
+            };
+            came.push_str(&format!(" ({count} the Host at {other})"));
+        }
         let mut more = String::new();
-        match self.absent {
-            0 => {}
-            1 => more.push_str(&format!(
-                "One file that it names is not on the Host at {from} either: there was nothing to bring.\n"
+        let again = format!("`clarp-host import --files --from {from} --session {session}");
+        let (one, many) = (self.absent == 1, self.absent);
+        match (self.absent, way.files_from) {
+            (0, _) => {}
+            (_, Some((other, _))) => more.push_str(&format!(
+                "{} on neither Host ({from}, {other}): there was nothing to bring.\n",
+                if one {
+                    "One file that it names is".to_string()
+                } else {
+                    format!("{many} files that it names are")
+                }
             )),
-            many => more.push_str(&format!(
-                "{many} files that it names are not on the Host at {from} either: there was nothing to bring.\n"
+            // A conversation that came from another Host names files that stayed there.
+            (_, None) => more.push_str(&format!(
+                "{} not on the Host at {from} either: there was nothing to bring. If another \
+                 Host has {}, {again} --files-from ADDR:PORT` brings {} from there.\n",
+                if one {
+                    "One file that it names is".to_string()
+                } else {
+                    format!("{many} files that it names are")
+                },
+                if one { "it" } else { "them" },
+                if one { "it" } else { "them" },
             )),
         }
-        let again = format!("`clarp-host import --files --from {from} --session {session}`");
         match self.failed {
             0 => {}
             1 => more.push_str(&format!(
-                "One file did not arrive ({}): {again} tries it again.\n",
+                "One file did not arrive ({}): {again}` tries it again.\n",
                 self.why
             )),
             many => more.push_str(&format!(
-                "{many} files did not arrive (the first: {}): {again} tries them again.\n",
+                "{many} files did not arrive (the first: {}): {again}` tries them again.\n",
                 self.why
             )),
         }
@@ -280,24 +321,37 @@ impl Followed {
     }
 }
 
-/// Reads one file from the Host the agent is on and gives it to this one under the id it
-/// has. `Ok(false)` when that Host does not have it.
-fn bring(
-    from: &str,
-    source_token: &str,
-    host: &str,
-    token: &str,
-    session: &str,
-    want: &Wanted,
-) -> Result<bool, String> {
+/// Where a file a move wanted was found.
+enum Brought {
+    /// On the Host the agent is on.
+    There,
+    /// On the other Host that was asked.
+    Elsewhere,
+    Nowhere,
+}
+
+/// Reads one file from the Host the agent is on, or from the other Host that may be asked,
+/// and gives it to this one under the id it has.
+fn bring(way: &Way<'_>, want: &Wanted) -> Result<Brought, String> {
     let path = format!("/media/{}", ids::in_a_link(&want.id));
-    let (status, declared, bytes) = exchange("GET", from, &path, source_token, &[], &[])?;
-    match status {
-        200 => {}
-        // Named, and no longer there or never a file of that Host.
-        404 => return Ok(false),
-        other => return Err(format!("the Host at {from} answered {other} for it")),
-    }
+    let asked = |address: &str, token: &str| -> Result<Option<(String, Vec<u8>)>, String> {
+        match exchange("GET", address, &path, token, &[], &[])? {
+            (200, declared, bytes) => Ok(Some((declared, bytes))),
+            // Named, and no longer there or never a file of that Host.
+            (404, _, _) => Ok(None),
+            (other, _, _) => Err(format!("the Host at {address} answered {other} for it")),
+        }
+    };
+    let (found, declared, bytes) = match asked(way.from, way.source_token)? {
+        Some((declared, bytes)) => (Brought::There, declared, bytes),
+        None => match way.files_from {
+            None => return Ok(Brought::Nowhere),
+            Some((other, token)) => match asked(other, token)? {
+                Some((declared, bytes)) => (Brought::Elsewhere, declared, bytes),
+                None => return Ok(Brought::Nowhere),
+            },
+        },
+    };
     // Who published it is said as it is, when it is a word a header can carry.
     let fits = |text: &str| {
         text.bytes()
@@ -305,7 +359,7 @@ fn bring(
     };
     let created_by = Some(want.created_by.as_str()).filter(|by| fits(by));
     let mut said = vec![
-        ("X-Session", ids::in_a_link(session)),
+        ("X-Session", ids::in_a_link(way.session)),
         ("X-Asset-Id", want.id.clone()),
         ("X-File-Name", ids::in_a_link(&want.name)),
         ("X-Caption", ids::in_a_link(&want.caption)),
@@ -324,8 +378,8 @@ fn bring(
     if want.named_only {
         said.push(("X-Named-Only", "1".to_string()));
     }
-    match exchange("POST", host, "/media", token, &said, &bytes)? {
-        (200, _, _) => Ok(true),
+    match exchange("POST", way.host, "/media", way.token, &said, &bytes)? {
+        (200, _, _) => Ok(found),
         (status, _, answer) => {
             let answer: Value = serde_json::from_slice(&answer).unwrap_or(Value::Null);
             let why = answer["error"].as_str().unwrap_or("no reason given");
@@ -334,22 +388,19 @@ fn bring(
     }
 }
 
-/// The files of an agent come with it: each is read from the Host it is on and given to
-/// this one under the id it has, which is what names it. One that does not arrive does not
-/// keep the others from arriving.
-fn files(
-    from: &str,
-    source_token: &str,
-    host: &str,
-    token: &str,
-    session: &str,
-    wanted: &[Wanted],
-) -> Followed {
+/// The files of an agent come with it: each is read from the Host it is on, or from the
+/// other Host that may be asked, and given to this one under the id it has, which is what
+/// names it. One that does not arrive does not keep the others from arriving.
+fn files(way: &Way<'_>, wanted: &[Wanted]) -> Followed {
     let mut followed = Followed::default();
     for want in wanted {
-        match bring(from, source_token, host, token, session, want) {
-            Ok(true) => followed.arrived += 1,
-            Ok(false) => followed.absent += 1,
+        match bring(way, want) {
+            Ok(Brought::There) => followed.arrived += 1,
+            Ok(Brought::Elsewhere) => {
+                followed.arrived += 1;
+                followed.elsewhere += 1;
+            }
+            Ok(Brought::Nowhere) => followed.absent += 1,
             Err(why) => {
                 followed.failed += 1;
                 if followed.why.is_empty() {
@@ -386,8 +437,10 @@ pub fn import(
     mut args: impl Iterator<Item = String>,
     source_token: &str,
     token: &str,
+    files_token: &str,
 ) -> Result<String, String> {
     let (mut from, mut session, mut only_files) = (None, None, false);
+    let mut files_from: Option<String> = None;
     let mut host = "127.0.0.1:7690".to_string();
     while let Some(arg) = args.next() {
         let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
@@ -396,6 +449,7 @@ pub fn import(
             "--session" => session = Some(value("a session name")?),
             "--host" => host = value("an address")?,
             "--files" => only_files = true,
+            "--files-from" => files_from = Some(value("an address")?),
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -511,9 +565,17 @@ pub fn import(
     )?;
     let gallery = gallery["assets"].as_array().cloned().unwrap_or_default();
     let wants = wanted(&gallery, &library, &plans, &turns);
+    let way = Way {
+        from: &from,
+        source_token,
+        files_from: files_from.as_deref().map(|other| (other, files_token)),
+        host: &host,
+        token,
+        session: &session,
+    };
     if only_files {
-        let followed = files(&from, source_token, &host, token, &session, &wants);
-        let (came, more) = followed.told(&from, &session);
+        let followed = files(&way, &wants);
+        let (came, more) = followed.told(&way);
         return Ok(format!("{session} has {came} here.\n{more}")
             .trim_end()
             .to_string());
@@ -538,8 +600,8 @@ pub fn import(
         return Err(format!("this Host refused ({status}): {why}"));
     }
     // The agent is here. Its files follow: one that does not arrive does not undo the move.
-    let followed = files(&from, source_token, &host, token, &session, &wants);
-    let (came, more) = followed.told(&from, &session);
+    let followed = files(&way, &wants);
+    let (came, more) = followed.told(&way);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
          {more}\
@@ -897,43 +959,114 @@ mod tests {
 
     #[test]
     fn a_move_says_what_came_what_was_not_there_and_what_did_not_arrive() {
+        let way = |files_from| Way {
+            from: "old:1",
+            source_token: "",
+            files_from,
+            host: "new:2",
+            token: "",
+            session: "koko",
+        };
+        let (one, two) = (way(None), way(Some(("other:3", ""))));
         let all = Followed {
             arrived: 9,
             ..Followed::default()
         };
         assert_eq!(
-            all.told("old:1", "koko"),
+            all.told(&one),
             (
                 "the 9 files it published or shows".to_string(),
                 String::new()
             )
         );
-        let none = Followed::default();
-        assert_eq!(none.told("old:1", "koko").0, "no files");
+        assert_eq!(Followed::default().told(&one).0, "no files");
         let some = Followed {
             arrived: 1,
             absent: 155,
             failed: 2,
             why: "this Host answered 400: bad size".to_string(),
+            ..Followed::default()
         };
-        let (came, more) = some.told("old:1", "koko");
+        let (came, more) = some.told(&one);
         assert_eq!(came, "the one file it published or shows");
         assert_eq!(
             more,
-            "155 files that it names are not on the Host at old:1 either: there was nothing to bring.\n\
+            "155 files that it names are not on the Host at old:1 either: there was nothing to \
+             bring. If another Host has them, `clarp-host import --files --from old:1 --session \
+             koko --files-from ADDR:PORT` brings them from there.\n\
              2 files did not arrive (the first: this Host answered 400: bad size): \
              `clarp-host import --files --from old:1 --session koko` tries them again.\n"
         );
-        let one = Followed {
-            arrived: 0,
+        let single = Followed {
             absent: 1,
             failed: 1,
             why: "why".to_string(),
+            ..Followed::default()
         };
-        let (_, more) = one.told("old:1", "koko");
-        assert!(more.starts_with("One file that it names is not on the Host at old:1 either"));
+        let (_, more) = single.told(&one);
+        assert!(more.starts_with(
+            "One file that it names is not on the Host at old:1 either: there was nothing to \
+             bring. If another Host has it, `clarp-host import"
+        ));
+        assert!(more.contains("--files-from ADDR:PORT` brings it from there.\n"));
         assert!(more.contains("One file did not arrive (why): `clarp-host import --files"));
         assert!(more.ends_with("tries it again.\n"));
+        // With another Host to ask: what it had is said, and what neither has.
+        let found = Followed {
+            arrived: 160,
+            elsewhere: 72,
+            absent: 3,
+            ..Followed::default()
+        };
+        assert_eq!(
+            found.told(&two),
+            (
+                "the 160 files it published or shows (72 of them from the Host at other:3)"
+                    .to_string(),
+                "3 files that it names are on neither Host (old:1, other:3): there was nothing \
+                 to bring.\n"
+                    .to_string()
+            )
+        );
+        let lone = Followed {
+            arrived: 1,
+            elsewhere: 1,
+            absent: 1,
+            ..Followed::default()
+        };
+        assert_eq!(
+            lone.told(&two),
+            (
+                "the one file it published or shows (from the Host at other:3)".to_string(),
+                "One file that it names is on neither Host (old:1, other:3): there was nothing \
+                 to bring.\n"
+                    .to_string()
+            )
+        );
+        let every = Followed {
+            arrived: 4,
+            elsewhere: 4,
+            ..Followed::default()
+        };
+        assert!(
+            every
+                .told(&two)
+                .0
+                .ends_with("(all from the Host at other:3)")
+        );
+        let first = Followed {
+            arrived: 4,
+            elsewhere: 1,
+            ..Followed::default()
+        };
+        assert!(
+            first
+                .told(&two)
+                .0
+                .ends_with("(one of them from the Host at other:3)")
+        );
+        // Asked and not needed: nothing is said of the other Host.
+        assert_eq!(all.told(&two).0, "the 9 files it published or shows");
     }
 
     #[test]
@@ -957,17 +1090,18 @@ mod tests {
     #[test]
     fn a_move_needs_to_know_where_from_and_whom() {
         assert!(
-            import(words("--session maximus"), "", "")
+            import(words("--session maximus"), "", "", "")
                 .unwrap_err()
                 .contains("--from")
         );
         assert!(
-            import(words("--from 127.0.0.1:1"), "", "")
+            import(words("--from 127.0.0.1:1"), "", "", "")
                 .unwrap_err()
                 .contains("--session")
         );
         let nobody = import(
             words("--from http://127.0.0.1:1/ --session maximus"),
+            "",
             "",
             "",
         );

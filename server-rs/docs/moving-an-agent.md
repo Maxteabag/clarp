@@ -14,7 +14,7 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 | Its library: what it made for its user (documents, tables, reports with every version they had, recordings and files) and what it asked, each under its id, with its times, whether it is pinned or put away, and a request as open or as answered as it was | read from `GET /artifacts?session=` and, for a report, `GET /artifacts/<id>/revisions`. An answer that still waited to be told to the agent is told on the Rust Host, after the resume |
 | Its plans and goals: each plan under its id and at its revision, with its steps, what was done, the goal's criteria and evidence, its history, how its work goes on, and the newest version of each of the goal's documents | read from `GET /task-plans?session=` and `GET /task-plan/document`. The library and the plans arrive with the conversation or not at all: an agent does not arrive without what it made and what it is committed to |
 | The files it published: its gallery (the newest 500 images), and the files its recordings, films and documents in the library are made of | read from `GET /media?session=` and `GET /media/<id>`, and published here under the ids they have, as the agent's own: the gallery row for row, a library file under the name and the kind its artifact says, so that the agent goes on with the artifact here |
-| Every other file its library, its plans or its conversation names: a picture another agent published that it shows, a still of a film | read from `GET /media/<id>` and kept here under the id it has, so that an image in an old reply still shows. It comes along and is not made the agent's own: it is not in its gallery, and no artifact of its is made of it. When the agent that published it moves here too, it is that agent's own, in its gallery as it was, and still one file |
+| Every other file its library, its plans or its conversation names: a picture another agent published that it shows, a still of a film | read from `GET /media/<id>`, on the Host the agent is on or on a second Host that is named (`--files-from`), and kept here under the id it has, so that an image in an old reply still shows. It comes along and is not made the agent's own: it is not in its gallery, and no artifact of its is made of it. When the agent that published it moves here too, it is that agent's own, in its gallery as it was, and still one file |
 
 ## What does not move yet
 
@@ -67,6 +67,23 @@ conversation, and it says three things of them apart:
 
 A Python Host lists an agent's newest 500 images and no more. An agent with more brings the
 newest 500 as its own; an older one comes along when something names it.
+
+**Files that stayed on another Host.** A conversation that once came from another Host names
+files that stayed there: on elitebook, 72 files that conversations name were never on that
+Host and are all on laptopstudio (counted on both machines by the release owner on 15 Nov
+2026, `Maxteabag/clarp` issue 362). The move can ask a second Host for what the first does
+not have:
+
+```bash
+CLARP_SOURCE_TOKEN=<the first Host's token> CLARP_FILES_TOKEN=<the second Host's token> \
+CLARP_HOST_TOKEN=<the Rust Host's token> \
+  clarp-host import --from 127.0.0.1:7682 --session <session name> --host 127.0.0.1:7690 \
+    --files-from <the second Host's address>:7682
+```
+
+It says how many files came from there, and how many are on neither. With `--files` the same
+words bring them to an agent that has moved already. The second Host is only read, like the
+first.
 
 An agent moves to a Rust Host once. One that went back and comes again is refused, because its
 history from the first time is still on the Rust Host's disk; taking that up again is not

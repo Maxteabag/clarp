@@ -168,8 +168,9 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
         let told = [told];
         outs.push(actor.keep_with(&kept(&told), &message, admission, now)?.1);
     }
-    // What a user answered to a form is what the user said to the form's agent: it is in
-    // the conversation from now on, and the agent comes to it when it is free.
+    // What a user answered to a form is left for the form's agent the way a user leaves a
+    // message for an agent that is busy: it waits its turn in the queue, where its user can
+    // still take it back, and starts at once when the agent is free.
     for (artifact_id, submission_id) in actor.artifacts().untold() {
         let told = actor.artifacts().told(&artifact_id, &submission_id, now);
         let Some((form, prompt, _spoken)) = told else {
@@ -184,7 +185,7 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             client: None,
         };
         let told = [form];
-        let said = actor.keep_with(&kept(&told), &message, Admission::Queue, now)?;
+        let said = actor.keep_with(&kept(&told), &message, Admission::Later, now)?;
         outs.push(said.1);
     }
     Ok(outs)
