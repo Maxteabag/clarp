@@ -26,6 +26,10 @@ use sha2::{Digest, Sha256};
 
 use crate::jobs::parse_handle;
 
+mod wake;
+
+pub use wake::{Looked, Seen, TurnSeen, WAKE_PREFIX};
+
 pub const MAX_PLAN_ITEMS: usize = 500;
 /// How much of its history a goal carries along. Older entries are counted, not carried:
 /// the log has them all.
