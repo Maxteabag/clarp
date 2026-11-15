@@ -340,8 +340,11 @@ last one costs a read of the whole file. It is checked:
   the journal beside `tail_applied`). A mismatch is a full import either
   way. Everything that refuses a tail still does. What the full import did
   besides, and this does not: replay every turn, which also put right any
-  row a tail had left wrong, and move the boundary up to the last turn. Off
-  by default;
+  row a tail had left wrong, and move the boundary up to the last turn. So
+  every `audit_full_every`-th due audit of a conversation (8) is still the
+  full import; the checkpoint counts the audits by digest since its last
+  full import, and a full import for any reason starts the count again.
+  Off by default;
 - at every tail when `digest_every_tail = true` in `[transcript_shadow]`,
   which is how every tail worked before.
 
