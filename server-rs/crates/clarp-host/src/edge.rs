@@ -43,7 +43,7 @@ use crate::pairing::{self, Device, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
-use crate::{ids, joblog, library, plans, push, wire};
+use crate::{ids, joblog, library, peers, plans, push, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -194,6 +194,7 @@ pub fn router(app: App) -> Router {
         .merge(library::routes())
         .merge(plans::routes())
         .merge(push::routes())
+        .merge(peers::routes())
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }

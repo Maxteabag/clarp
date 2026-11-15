@@ -182,6 +182,24 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.peek().map(String::as_str) == Some("peer") {
+        args.next();
+        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        let peer_token = std::env::var("CLARP_PEER_TOKEN").unwrap_or_default();
+        return match clarp_host::admin::peer(args, &token, &peer_token) {
+            Ok(shown) => {
+                println!("{shown}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!(
+                    "clarp-host peer: {error}\n{}",
+                    clarp_host::admin::PEER_USAGE
+                );
+                ExitCode::from(2)
+            }
+        };
+    }
     if args.peek().map(String::as_str) == Some("tool") {
         args.next();
         let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();

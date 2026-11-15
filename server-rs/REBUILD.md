@@ -230,6 +230,15 @@ given a relay (`--push-relay`), which `tools/install-host` does. Held end to end
 phone and a stand-in relay. Not there: Android phones (FCM), Live Activities, the silent push that asks an
 app to sync, an agent's portrait in a push, muting an agent.
 
+**Agents write to each other, also across Hosts** (15 Nov 2026). The skill tells an agent to hand work to
+another with `clarp-admin prompt --to SESSION --from ME`; on this Host the same command is answered by the Host
+(`admin_tool.rs`). With `--server NAME` the message goes to an agent of another Host the owner named
+(`peers.rs`, `clarp-host peer add NAME URL`, the Python Host's scheme): that Host's own `POST /send`. This is
+what lets agents move one by one: an agent that lives here still reaches the ones on the Python Host beside
+it, and they reach it once the Python Host has this one as a peer (`clarp-admin peers add`, the release
+owner's to do at an install). Not there: a message for later (`--delay`), and a request that waits for its
+answer (`clarp-admin request` and `reply`).
+
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
 other feature out of `capabilities.features`. The owner declined an install on 15 Nov: a Host an agent cannot
