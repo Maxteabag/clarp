@@ -6,7 +6,7 @@
 //! nothing to say about is sent as the Python Host sends it when it has nothing to say.
 
 use clarp_actor::conversation::{Page, Versioned};
-use clarp_actor::{LiveStatus, Status};
+use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::jobs::{Job, JobRecord};
@@ -748,26 +748,51 @@ pub fn summary(
     let live_activity = if live.is_none() && last.is_none() {
         Value::Null
     } else {
-        // What the agent is doing, and the words the apps show for it. Writing its answer is
-        // a state of its own here, though the agent's row calls it thinking. A tool's own
-        // line (what it runs or reads) comes with the tool's details, which are not told yet.
-        let (state, headline) = match (live.map(|live| &live.activity), completed) {
-            (Some(Activity::Thinking), _) => ("thinking".to_string(), Some("Thinking")),
-            (Some(Activity::Responding), _) => ("responding".to_string(), Some("Responding")),
-            (Some(Activity::Compacting), _) => ("compacting".to_string(), Some("Compacting")),
-            (Some(Activity::Tool { .. } | Activity::Waiting), _) => (state_name(&kind), None),
-            (None, Some(_)) => ("idle".to_string(), None),
-            (None, None) => ("interrupted".to_string(), Some("Interrupted")),
+        // What the agent is doing, and the words the apps show for it. A tool that runs
+        // comes first, and the line says what it runs or reads. Writing its answer is a
+        // state of its own here, though the agent's row calls it thinking.
+        let tools: &[LiveTool] = live.map_or(&[], |live| live.tools.as_slice());
+        let line = |name: &str, category: &str, label: &str| {
+            Some(clarp_kernel::tools::headline(name, category, label))
+        };
+        let (state, headline) = match (live.map(|live| &live.activity), tools.last(), completed) {
+            (Some(_), Some(tool), _) => ("tool", line(&tool.name, tool.category, &tool.label)),
+            // A tool this Host was told of by its name alone.
+            (Some(Activity::Tool { name }), None, _) => {
+                let described = clarp_kernel::tools::describe(name, &Value::Null);
+                ("tool", line(name, described.category, &described.label))
+            }
+            (Some(Activity::Thinking), ..) => ("thinking", Some("Thinking".to_string())),
+            (Some(Activity::Responding), ..) => ("responding", Some("Responding".to_string())),
+            (Some(Activity::Compacting), ..) => ("compacting", Some("Compacting".to_string())),
+            (Some(Activity::Waiting), ..) => ("waiting", None),
+            (None, _, Some(_)) => ("idle", None),
+            (None, _, None) => ("interrupted", Some("Interrupted".to_string())),
+        };
+        // The tool that started last stands for all that run.
+        let tool = tools.last().map(|tool| {
+            json!({
+                "name": tool.name,
+                "call_id": tool.id,
+                "label": tool.label,
+                "category": tool.category,
+                "item_id": tool.id,
+                "started_at_ms": tool.started_at_ms,
+            })
+        });
+        let running_tools = match tools.len() {
+            0 => usize::from(kind == AgentStateKind::Tool),
+            running => running,
         };
         json!({
             "state": state,
             "headline": headline,
-            "since_ms": since,
+            "since_ms": tools.last().map_or(since, |tool| tool.started_at_ms),
             "turn_id": turn_id,
             "turn_started_ms": live.map(|live| live.started_at_ms),
-            "running_tools": u8::from(kind == AgentStateKind::Tool),
-            "tool": null,
-            "item_id": null,
+            "running_tools": running_tools,
+            "tool": tool,
+            "item_id": tools.last().map(|tool| &tool.id),
         })
     };
     // The Python Host keeps the start of a turn that did not finish, and forgets the start of
@@ -922,6 +947,7 @@ mod tests {
                 activity,
                 started_at_ms: 5_000,
                 tool_count: 1,
+                tools: Vec::new(),
                 stopping: false,
             }),
             last: last.map(|outcome| Settled {
@@ -1254,6 +1280,47 @@ mod tests {
                 json!("Compacting"),
                 json!("compacting")
             )
+        );
+        // A tool it was told of by name alone, and one it follows: the line says what it runs.
+        assert_eq!(row["live_activity"]["headline"], "Running Bash");
+        assert_eq!(row["live_activity"]["running_tools"], 1);
+        let mut followed = busy.clone();
+        followed.live.as_mut().unwrap().tools = vec![
+            LiveTool {
+                id: "c-1".to_string(),
+                name: "Read".to_string(),
+                category: "read",
+                label: "src/main.rs".to_string(),
+                started_at_ms: 6_000,
+            },
+            LiveTool {
+                id: "c-2".to_string(),
+                name: "Bash".to_string(),
+                category: "exec",
+                label: "npm test".to_string(),
+                started_at_ms: 7_000,
+            },
+        ];
+        let with_tools = summary(&record(), &followed, "claude", Some(&newest), None, true);
+        let doing = &with_tools["live_activity"];
+        assert_eq!(
+            (&doing["state"], &doing["headline"], &doing["running_tools"]),
+            (&json!("tool"), &json!("Running npm test"), &json!(2))
+        );
+        assert_eq!(
+            (
+                &doing["since_ms"],
+                &doing["item_id"],
+                &doing["turn_started_ms"]
+            ),
+            (&json!(7_000), &json!("c-2"), &json!(5_000))
+        );
+        assert_eq!(
+            doing["tool"],
+            json!({
+                "name": "Bash", "call_id": "c-2", "label": "npm test", "category": "exec",
+                "item_id": "c-2", "started_at_ms": 7_000,
+            })
         );
         assert_eq!(
             (&row["model"], &row["context_tokens"]),
