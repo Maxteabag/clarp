@@ -300,6 +300,18 @@ impl Recorder {
         message: Incoming,
         now_ms: i64,
     ) -> Result<Accepted, JournalError> {
+        self.accept_message_with(message, Vec::new(), now_ms)
+    }
+
+    /// Accepts a message, and writes `with` in the same transaction: what is true only if
+    /// the message was taken, and without which the message must not have been. For a message
+    /// the log already holds, nothing is written.
+    pub fn accept_message_with(
+        &mut self,
+        message: Incoming,
+        with: Vec<NewItem>,
+        now_ms: i64,
+    ) -> Result<Accepted, JournalError> {
         if let Some(key) = &message.key
             && let Some(earlier) = self.log.find(key)?
         {
@@ -325,6 +337,9 @@ impl Recorder {
         let mut item = NewItem::new(kind, now_ms, message.body).in_turn(turn.0);
         item.key = message.key;
         batch.item(item);
+        for item in with {
+            batch.item(item);
+        }
         batch
             .command(
                 Command::Accept {
