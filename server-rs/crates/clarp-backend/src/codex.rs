@@ -266,6 +266,7 @@ impl CodexInterpreter {
                 let reply = format!("r-{}-{id}", self.name);
                 if done {
                     out.push(Signal::Reply(Reply {
+                        origin: clarp_kernel::turn::Origin::User,
                         id: reply,
                         turn: self.turn,
                         text: text.to_string(),
@@ -298,6 +299,7 @@ impl CodexInterpreter {
                     .tools
                     .entry(id.to_string())
                     .or_insert_with(|| ToolCall {
+                        origin: clarp_kernel::turn::Origin::User,
                         id: format!("c-{}-{id}", self.name),
                         turn: self.turn,
                         name,
@@ -326,6 +328,7 @@ impl CodexInterpreter {
                 }
                 let (name, input) = call_of(item);
                 let call = ToolCall {
+                    origin: clarp_kernel::turn::Origin::User,
                     id: format!("c-{}-{id}", self.name),
                     turn: self.turn,
                     name: name.clone(),
@@ -528,6 +531,7 @@ mod tests {
                     text: "One file.".to_string()
                 }),
                 Signal::Reply(Reply {
+                    origin: clarp_kernel::turn::Origin::User,
                     id: "r-m1-item_1".to_string(),
                     turn: 3,
                     text: "One file.".to_string(),

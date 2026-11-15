@@ -12,6 +12,7 @@
 
 use clarp_kernel::conversation::{Entry, Reply, TurnEnd};
 use clarp_kernel::journal::kind;
+use clarp_kernel::turn::Origin;
 use clarp_ports::log::{AgentLog, Item, Seq};
 
 use crate::ActorError;
@@ -56,6 +57,8 @@ pub(crate) struct Draft {
     pub text: String,
     pub revision: u64,
     pub ts_ms: i64,
+    /// Who asked for the turn that writes it.
+    pub origin: Origin,
 }
 
 impl Draft {
@@ -66,6 +69,7 @@ impl Draft {
                 turn: self.turn,
                 text: self.text.clone(),
                 trace_id: None,
+                origin: self.origin.clone(),
             }),
             revision: self.revision,
             ts_ms: self.ts_ms,

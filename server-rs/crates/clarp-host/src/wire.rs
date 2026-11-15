@@ -10,7 +10,7 @@ use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::jobs::{Job, JobRecord};
-use clarp_kernel::turn::{Activity, Origin, Outcome};
+use clarp_kernel::turn::{Activity, Outcome};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Value, json};
@@ -147,12 +147,7 @@ pub fn transcript_updated(record: &AgentRecord) -> Value {
 
 /// A message was handed to the agent and its turn began: the answer to a send, for every
 /// client that did not send it.
-pub fn dispatched(
-    record: &AgentRecord,
-    live: &LiveStatus,
-    from_queue: bool,
-    waiting: usize,
-) -> Value {
+pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Value {
     json!({
         "type": "agent-state",
         "agent_id": record.agent_id,
@@ -160,7 +155,7 @@ pub fn dispatched(
         "kind": "thinking",
         "client_msg_id": client_id(&live.message_id),
         "trace_id": live.trace_id.clone().unwrap_or_default(),
-        "queue_started": from_queue,
+        "queue_started": live.from_queue,
         "queue_remaining": waiting,
     })
 }
@@ -206,7 +201,7 @@ pub fn state(
         (Some(live), _) => json!({
             "backend_session_id": session_name(record, status),
             "dispatch": backend,
-            "origin": "user",
+            "origin": live.origin.name(),
             "source": "pwa",
             "trace_id": live.trace_id.clone().unwrap_or_default(),
         }),
@@ -214,7 +209,7 @@ pub fn state(
             let mut detail = json!({
                 "dispatch": runner(backend),
                 "duration_ms": last.ended_at_ms - last.started_at_ms.unwrap_or(last.ended_at_ms),
-                "origin": "user",
+                "origin": last.origin.name(),
             });
             if let Some(end) = ended.filter(|end| end.turn == last.id.0) {
                 detail["trace_id"] = json!(end.trace_id.clone().unwrap_or_default());
@@ -554,8 +549,11 @@ pub fn user_notification(
     reply: &Versioned,
     done_ms: i64,
 ) -> Option<Value> {
-    let (preview, reason) = match &reply.entry {
-        Entry::Reply(reply) => notification_preview(&reply.text)?,
+    let (preview, reason, origin) = match &reply.entry {
+        Entry::Reply(reply) => {
+            let (preview, reason) = notification_preview(&reply.text)?;
+            (preview, reason, reply.origin.name())
+        }
         _ => return None,
     };
     Some(json!({
@@ -564,7 +562,7 @@ pub fn user_notification(
         "agent_id": record.agent_id,
         "session": record.session,
         "persona": record.persona,
-        "origin": "user",
+        "origin": origin,
         "reason": reason,
         "cause_message_id": cause_message_id,
         "source_message_id": reply.entry.id(),
@@ -638,11 +636,7 @@ pub fn row(version: &Versioned) -> Value {
             row["role"] = json!("user");
             row["text"] = json!(message.text);
             row["trace_id"] = json!(message.trace_id.clone().unwrap_or_default());
-            row["origin"] = json!(match &message.origin {
-                Origin::User => "user",
-                Origin::Agent { .. } => "agent",
-                Origin::Trigger { name } => name.as_str(),
-            });
+            row["origin"] = json!(message.origin.name());
             if let Some(sender) = &message.sender {
                 row["sender_agent_id"] = json!(sender.agent_id);
                 row["sender_name"] = json!(sender.name);
@@ -654,6 +648,7 @@ pub fn row(version: &Versioned) -> Value {
             // markup does: an app hides it itself, and speaks from it.
             row["text"] = json!(markup::strip_hidden_blocks(&reply.text));
             row["trace_id"] = json!(reply.trace_id.clone().unwrap_or_default());
+            row["origin"] = json!(reply.origin.name());
         }
         Entry::Tool(call) => {
             let status = match call.status {
@@ -662,6 +657,7 @@ pub fn row(version: &Versioned) -> Value {
                 ToolStatus::Error => "error",
             };
             row["kind"] = json!("tool");
+            row["origin"] = json!(call.origin.name());
             row["tool_name"] = json!(call.name);
             row["tools"] = json!([{
                 "id": call.id,
@@ -925,7 +921,7 @@ pub fn summary(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use clarp_kernel::conversation::{Message, Reply, ToolCall};
-    use clarp_kernel::turn::{Settled, TurnId};
+    use clarp_kernel::turn::{Origin, Settled, TurnId};
     use clarp_protocol::events::{Envelope, Event};
     use clarp_protocol::log::LogResponse;
     use clarp_protocol::snapshot::AgentSummary;
@@ -992,6 +988,8 @@ mod tests {
                 turn: TurnId(2),
                 message_id: "u-m2".to_string(),
                 trace_id: Some("trace-2".to_string()),
+                origin: Origin::User,
+                from_queue: false,
                 starting: false,
                 activity,
                 started_at_ms: 5_000,
@@ -1115,6 +1113,7 @@ mod tests {
                 ),
                 version(
                     Entry::Tool(ToolCall {
+                        origin: Origin::User,
                         id: "toolu_1".to_string(),
                         turn: 1,
                         name: "Bash".to_string(),
@@ -1129,6 +1128,7 @@ mod tests {
                 ),
                 version(
                     Entry::Reply(Reply {
+                        origin: Origin::User,
                         id: "r-1".to_string(),
                         turn: 1,
                         text: "One file.".to_string(),
@@ -1478,11 +1478,28 @@ mod tests {
     fn events_have_the_shapes_the_apps_read() {
         let thinking = status(Some(Activity::Thinking), None);
         let live = thinking.live.clone().unwrap();
-        let sent = dispatched(&record(), &live, false, 1);
+        let sent = dispatched(&record(), &live, 1);
         assert_eq!(
             sent,
             json!({"type": "agent-state", "agent_id": "a1", "session": "maximus", "kind": "thinking",
                    "client_msg_id": "m2", "trace_id": "trace-2", "queue_started": false, "queue_remaining": 1})
+        );
+        // A turn that an answer or a goal began says so, and one that came through the queue.
+        let woken = LiveStatus {
+            origin: Origin::Trigger {
+                name: "automation".to_string(),
+            },
+            from_queue: true,
+            ..live.clone()
+        };
+        assert_eq!(dispatched(&record(), &woken, 0)["queue_started"], true);
+        let by_itself = Status {
+            live: Some(woken),
+            ..thinking.clone()
+        };
+        assert_eq!(
+            state(&record(), &by_itself, "claude", None)["detail"]["origin"],
+            "automation"
         );
         let told = state(&record(), &thinking, "claude", None);
         assert_eq!(
@@ -1593,6 +1610,7 @@ mod tests {
     fn a_finished_turn_is_told_to_the_user() {
         let reply = version(
             Entry::Reply(Reply {
+                origin: Origin::User,
                 id: "r-1".to_string(),
                 turn: 1,
                 text: "All done.".to_string(),
@@ -1658,6 +1676,7 @@ mod tests {
         let reply = |text: &str| {
             version(
                 Entry::Reply(Reply {
+                    origin: Origin::User,
                     id: "r-1".to_string(),
                     turn: 1,
                     text: text.to_string(),

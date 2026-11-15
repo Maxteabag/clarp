@@ -983,11 +983,12 @@ impl Worker {
                         sender: None,
                         client: None,
                     };
-                    // Said to the agent, not left for later: a goal that is being worked was
-                    // resumed or made after the last Stop, and what that Stop still holds
-                    // does not hold it.
+                    // Left for the agent, as the Python Host leaves it: it goes through the
+                    // queue, where an app shows it while it waits. A hold that was placed
+                    // before does not hold it: a goal that is being worked was resumed or made
+                    // after the last Stop.
                     let woken =
-                        actor.keep_with(&kept_goal(&change), &message, Admission::Queue, now)?;
+                        actor.keep_with(&kept_goal(&change), &message, Admission::Later, now)?;
                     outs.push(woken.1);
                 }
             }
@@ -1114,17 +1115,15 @@ impl Worker {
         if let Some(live) = &status.live
             && was_live.map(|was| was.turn) != Some(live.turn)
         {
-            let waited = was_waiting.contains(&live.turn);
-            if waited {
+            // It left the queue to run: it had waited there, or it was left for later and
+            // nothing was in its way.
+            if live.from_queue {
                 hub.publish(
                     wire::queue_updated(&record, &status, Some(&live.message_id), true),
                     now,
                 );
             }
-            hub.publish(
-                wire::dispatched(&record, live, waited, status.waiting.len()),
-                now,
-            );
+            hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
         }
         if before
             .as_ref()
