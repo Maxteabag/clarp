@@ -38,6 +38,24 @@ fn differences(path: &str, ours: &Value, theirs: &Value, found: &mut Vec<String>
     }
 }
 
+/// Whether two wake messages say the same. What a goal waited for is shown in them as JSON,
+/// whose fields this Host writes in the order of the alphabet and the Python Host in the
+/// order they were given: that line is compared as what it says.
+fn same_message(ours: &str, theirs: &str) -> bool {
+    let (ours, theirs): (Vec<&str>, Vec<&str>) = (ours.lines().collect(), theirs.lines().collect());
+    ours.len() == theirs.len()
+        && ours.iter().zip(&theirs).all(|(a, b)| {
+            let result = |line: &str| {
+                let said = line.strip_prefix("Dependency result: ")?;
+                serde_json::from_str::<Value>(said).ok()
+            };
+            match (result(a), result(b)) {
+                (Some(a), Some(b)) => a == b,
+                _ => a == b,
+            }
+        })
+}
+
 /// What the tool printed, as the vectors keep it: the JSON it is, or nothing.
 fn printed(stdout: &str) -> Value {
     match stdout.trim() {
@@ -50,6 +68,7 @@ fn printed(stdout: &str) -> Value {
 fn the_goal_tool_answers_as_the_python_hosts_does() {
     let vectors: Value = serde_json::from_str(include_str!("fixtures/goal-vectors.json")).unwrap();
     let mut compared = 0;
+    let mut prompts = 0;
     let mut wrong: Vec<String> = Vec::new();
     for scenario in vectors["scenarios"].as_array().unwrap() {
         let name = scenario["name"].as_str().unwrap();
@@ -141,6 +160,18 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
                     said.stderr.trim()
                 ));
             }
+            // With every goal it printed, the Python Host says what it would wake the goal's
+            // owner with at that moment.
+            if let Some(theirs) = step["wake_prompt"].as_str() {
+                let plan_id = step["stdout"]["plan_id"].as_str().unwrap();
+                let ours = book.wake_prompt(plan_id).unwrap_or_default();
+                prompts += 1;
+                if !same_message(&ours, theirs) {
+                    found.push(format!(
+                        "the wake message: here\n{ours}\nthe Python Host's\n{theirs}"
+                    ));
+                }
+            }
             if !found.is_empty() {
                 found.truncate(12);
                 wrong.push(format!("{context}:\n    {}", found.join("\n    ")));
@@ -154,4 +185,5 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
         wrong.join("\n")
     );
     assert!(compared >= 70, "only {compared} steps were compared");
+    assert!(prompts >= 35, "only {prompts} wake messages were compared");
 }

@@ -4,7 +4,8 @@
 The Python Host's goal tool (`scripts/agent_tasks.py`, the program behind `clarp-goal`) is the
 reference. This runs sequences of its commands in a database of its own, with a clock and an
 id source that are fixed, and writes each command with what it printed and how it exited to
-`crates/clarp-host/tests/fixtures/goal-vectors.json`. The Rust tests replay the commands
+`crates/clarp-host/tests/fixtures/goal-vectors.json`. With every goal it printed goes the
+message its owner would be woken with at that moment (`task_goal_recovery._prompt`). The Rust tests replay the commands
 against the Rust Host's tool with the same clock and ids and must get the same.
 
     python3 server-rs/tools/goal-vectors.py            # write the vectors
@@ -77,6 +78,12 @@ class World:
         self.ids += 1
         return format(self.ids, f'0{nbytes * 2}x')
 
+    def wake_prompt(self, plan_id: str) -> str:
+        """The message the goal's owner would be woken with now, as the Python Host words it."""
+        from lib import db, task_goal_recovery
+        row = db.conn().execute('SELECT * FROM task_plans WHERE plan_id=?', (plan_id,)).fetchone()
+        return task_goal_recovery._prompt(row, json.loads(row['goal_json']))
+
     def run(self, *argv: str, note: str = '') -> dict:
         """One command, with {plan} and {rev} filled in from what the last one printed."""
         import agent_tasks
@@ -96,9 +103,11 @@ class World:
             printed = json.loads(text) if text else None
         except json.JSONDecodeError:
             printed = text
+        step = {'argv': filled, 'at': self.now, 'exit': code, 'stdout': printed, 'stderr': err.getvalue().strip()}
         if isinstance(printed, dict) and 'plan_id' in printed and 'items' in printed:
             self.plan, self.revision = printed['plan_id'], printed['revision']
-        step = {'argv': filled, 'at': self.now, 'exit': code, 'stdout': printed, 'stderr': err.getvalue().strip()}
+            if printed.get('goal'):
+                step['wake_prompt'] = self.wake_prompt(printed['plan_id'])
         if note:
             step['note'] = note
         self.steps.append(step)
