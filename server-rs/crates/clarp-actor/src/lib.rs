@@ -32,7 +32,9 @@ use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Rest};
-use clarp_kernel::conversation::{Entry, Imported, Message, Notice, Reply, TurnEnd};
+use clarp_kernel::conversation::{
+    Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
+};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
@@ -222,6 +224,33 @@ pub struct ImportedRow {
     pub row: serde_json::Value,
 }
 
+/// A tool call that runs, as much of it as is shown while it does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveTool {
+    /// The id of its row in the conversation.
+    pub id: String,
+    pub name: String,
+    /// What kind of thing it does, and what it does it to: see [`clarp_kernel::tools`].
+    pub category: &'static str,
+    pub label: String,
+    pub started_at_ms: i64,
+}
+
+/// Follows the tool calls that run: one that starts joins them, one that ends leaves.
+fn follow_tool(running: &mut Vec<LiveTool>, call: &ToolCall) {
+    running.retain(|tool| tool.id != call.id);
+    if call.status == ToolStatus::Running {
+        let described = clarp_kernel::tools::describe(&call.name, &call.input);
+        running.push(LiveTool {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            category: described.category,
+            label: described.label,
+            started_at_ms: call.started_at_ms,
+        });
+    }
+}
+
 /// The turn that holds the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStatus {
@@ -234,6 +263,8 @@ pub struct LiveStatus {
     pub activity: Activity,
     pub started_at_ms: i64,
     pub tool_count: u32,
+    /// The tool calls that run now, the one that started last at the end.
+    pub tools: Vec<LiveTool>,
     /// It was told to stop and has not gone yet.
     pub stopping: bool,
 }
@@ -274,6 +305,8 @@ struct LiveTurn {
     offset: u64,
     /// The replies being written, oldest first.
     drafts: Vec<Draft>,
+    /// The tool calls that run, oldest first.
+    tools: Vec<LiveTool>,
     /// The spool has said how the tool went. Nothing more will come.
     over: bool,
 }
@@ -483,9 +516,13 @@ impl Actor {
     pub fn status(&self) -> Status {
         let agent = self.recorder.agent();
         let stopping = agent.stopping().is_some();
-        let (message_id, trace_id) = match &self.live {
-            Some(live) => (live.message_id.clone(), live.trace_id.clone()),
-            None => (String::new(), None),
+        let (message_id, trace_id, tools) = match &self.live {
+            Some(live) => (
+                live.message_id.clone(),
+                live.trace_id.clone(),
+                live.tools.clone(),
+            ),
+            None => (String::new(), None, Vec::new()),
         };
         let live = match agent.live() {
             Some(Turn::Starting(turn)) => Some(LiveStatus {
@@ -496,6 +533,7 @@ impl Actor {
                 activity: Activity::Thinking,
                 started_at_ms: turn.started_at_ms,
                 tool_count: 0,
+                tools,
                 stopping,
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
@@ -506,6 +544,7 @@ impl Actor {
                 activity: turn.activity.clone(),
                 started_at_ms: turn.started_at_ms,
                 tool_count: turn.tool_count,
+                tools,
                 stopping,
             }),
             _ => None,
@@ -1105,6 +1144,7 @@ impl Actor {
             interpreter,
             offset: 0,
             drafts: Vec::new(),
+            tools: Vec::new(),
             over: false,
         });
         out.actions.push(Action::Launch(ShimOrder {
@@ -1170,6 +1210,7 @@ impl Actor {
         let (mut model, mut tokens) = (None, None);
         let mut interpreter = self.backend.interpreter(turn.0, turn_name(&message.id));
         let mut drafts = Vec::new();
+        let mut tools = Vec::new();
         let mut signals = Vec::new();
         let mut offset = 0;
         while offset < until {
@@ -1188,7 +1229,10 @@ impl Actor {
                             drafts.retain(|draft| draft.id != reply.id);
                             last_row = reply.id;
                         }
-                        Signal::Tool(call) => last_row = call.id,
+                        Signal::Tool(call) => {
+                            follow_tool(&mut tools, &call);
+                            last_row = call.id;
+                        }
                         Signal::Notice(notice) => last_row = notice.id,
                         Signal::Model(named) => model = Some(named),
                         Signal::Usage {
@@ -1223,6 +1267,7 @@ impl Actor {
             interpreter,
             offset,
             drafts,
+            tools,
             over: false,
         });
         out.changed.conversation = true;
@@ -1374,7 +1419,10 @@ impl Actor {
                             reply.trace_id = live.trace_id.clone();
                             Entry::Reply(reply)
                         }
-                        Signal::Tool(call) => Entry::Tool(call),
+                        Signal::Tool(call) => {
+                            follow_tool(&mut live.tools, &call);
+                            Entry::Tool(call)
+                        }
                         Signal::Notice(notice) => Entry::Notice(notice),
                     };
                     live.last_row = piece.id().to_string();

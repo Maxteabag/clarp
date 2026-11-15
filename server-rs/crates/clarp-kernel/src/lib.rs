@@ -10,4 +10,5 @@ pub mod conversation;
 pub mod goals;
 pub mod jobs;
 pub mod journal;
+pub mod tools;
 pub mod turn;
