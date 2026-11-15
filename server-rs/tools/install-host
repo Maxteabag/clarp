@@ -179,7 +179,8 @@ tools=$((tools + 1))
 # pipe of words cannot carry. It is the repository's own program (scripts/), the one the skills
 # were written against. A turn tells it where its Host is and gives it the token of the agent's
 # tools, which opens the door for tools and nothing else; a worker an agent left running finds
-# its Host in the file written below.
+# its Host in the file written below. Called from anywhere else, it still speaks to this Host
+# only: the name is never an action on another Host.
 media_publish="$here/../scripts/clarp-media-publish.py"
 if [ -f "$media_publish" ]; then
     install -m 644 "$media_publish" "$share/libexec/.clarp-media-publish.py.new"
@@ -191,7 +192,11 @@ if [ -n "\${CLARP_HOST_ADDR:-}" ] && [ -n "\${CLARP_TOOL_TOKEN:-}" ]; then
     CLAUDE_PWA_BASE_URL="http://\$CLARP_HOST_ADDR/tools"; CLAUDE_PWA_TOKEN="\$CLARP_TOOL_TOKEN"
     export CLAUDE_PWA_BASE_URL CLAUDE_PWA_TOKEN
 else
-    CLAUDE_PWA_CONFIG="\${CLAUDE_PWA_CONFIG:-$config/config.toml}"; export CLAUDE_PWA_CONFIG
+    # No turn told it where its Host is. It reads the file an installation of this Host wrote,
+    # and never another Host's: a file that is not this Host's is passed over.
+    named="\${CLAUDE_PWA_CONFIG:-$config/config.toml}"
+    grep -q '^kind = "clarp-host"' "\$named" 2>/dev/null || named="$config/config.toml"
+    CLAUDE_PWA_CONFIG="\$named"; export CLAUDE_PWA_CONFIG
 fi
 exec python3 "$share/libexec/clarp-media-publish.py" "\$@"
 EOF
