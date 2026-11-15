@@ -40,7 +40,7 @@ use crate::hub::{Hub, Published};
 use crate::pairing::{self, Device, Scope};
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
-use crate::{ids, joblog, wire};
+use crate::{ids, joblog, library, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -79,7 +79,7 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn new(status: StatusCode, error: impl Into<String>) -> Self {
+    pub(crate) fn new(status: StatusCode, error: impl Into<String>) -> Self {
         Self {
             status,
             error: error.into(),
@@ -87,7 +87,7 @@ impl ApiError {
         }
     }
 
-    fn plain(status: StatusCode, text: impl Into<String>) -> Self {
+    pub(crate) fn plain(status: StatusCode, text: impl Into<String>) -> Self {
         Self {
             status,
             error: text.into(),
@@ -148,6 +148,7 @@ pub fn router(app: App) -> Router {
             get(background_job).delete(cancel_background_job),
         )
         .route("/tools/run", post(run_tool))
+        .merge(library::routes())
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }

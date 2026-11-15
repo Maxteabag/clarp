@@ -18,7 +18,8 @@ use clarp_actor::{
     Status, Waiting,
 };
 use clarp_backend::Backend;
-use clarp_kernel::artifacts::{Artifact, ArtifactBook, Ctx, Maker};
+use clarp_kernel::artifacts::decisions as requests;
+use clarp_kernel::artifacts::{Artifact, ArtifactBook, Ctx, Maker, Refused, Shelf};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
@@ -33,6 +34,7 @@ use crate::goaltool;
 use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::{self, Launcher, Told};
+use crate::library::{self, Books, Done, Want};
 use crate::revisions::Revisions;
 use crate::tools::ToolAnswer;
 use crate::{process, wire};
@@ -136,6 +138,12 @@ pub enum Ask {
         ask: goaltool::Ask,
         answer: Answer<ToolAnswer>,
     },
+    /// Something is asked of the agent's artifacts: one is made or changed, a request to
+    /// the user is asked, answered, discarded or taken back.
+    Artifact {
+        want: Box<Want>,
+        answer: Answer<Result<Done, Refused>>,
+    },
     /// The newest changes of a job, oldest first.
     JobTimeline {
         id: String,
@@ -168,6 +176,8 @@ pub struct View {
     pub backend: &'static str,
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
+    /// What the agent made and asks, and its goals: what the apps read across agents.
+    pub books: Arc<Books>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
 }
@@ -286,6 +296,12 @@ impl AgentHandle {
     }
 
     /// What the agent is doing, as it last said.
+    /// Asks something of the agent's artifacts. The inner error is what the rules refuse.
+    pub async fn artifact(&self, want: Want) -> Result<Result<Done, Refused>, Unavailable> {
+        let want = Box::new(want);
+        self.ask(|answer| Ask::Artifact { want, answer }).await
+    }
+
     /// Answers the goal tool from this agent's goals.
     pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
         self.ask(|answer| Ask::Goal { ask, answer }).await
@@ -321,6 +337,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         ended: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
+        books: Arc::default(),
         broken: Some(OPENING.to_string()),
     }));
     let now_ms = setup.clock.now_ms();
@@ -337,6 +354,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         jobs_told: BTreeMap::new(),
         jobs_checked: Instant::now(),
         goals_looked_at: 0,
+        books: Arc::default(),
+        artifacts_told: BTreeMap::new(),
         clock_seen: (Instant::now(), now_ms),
     };
     let name = format!("agent-{}", worker.setup.record.session);
@@ -371,6 +390,10 @@ struct Worker {
     /// When the goals were last looked at, on the Host's clock. A goal that was due then and
     /// woke nobody is looked at again when something happens, not when the time comes.
     goals_looked_at: i64,
+    /// The agent's books as they were last published: written anew when one of them changes.
+    books: Arc<Books>,
+    /// Each artifact as the clients were last told of it.
+    artifacts_told: BTreeMap<String, ToldArtifact>,
     /// The two clocks as they were read together last: what tells a sleep of the machine.
     clock_seen: (Instant, i64),
 }
@@ -398,6 +421,23 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
         code: String::new(),
         message,
     })
+}
+
+/// What of an artifact a client is told when it changes: when it was last changed, what its
+/// user did with it, and where its request stands.
+type ToldArtifact = (i64, [Option<i64>; 3], Option<(i64, bool)>);
+
+fn told_artifact(artifact: &Artifact) -> ToldArtifact {
+    let request = artifact
+        .decision
+        .as_ref()
+        .map(|decision| (decision.revision, decision.delivery_pending()));
+    let by_user = [
+        artifact.pinned_at,
+        artifact.archived_at,
+        artifact.deleted_at,
+    ];
+    (artifact.updated_at, by_user, request)
 }
 
 fn kept_goal(change: &GoalChange) -> Kept<'_> {
@@ -510,7 +550,16 @@ impl Worker {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                     Instant::now() + Duration::from_millis(wait)
                 });
-            let due = [self.transcript_due, jobs_due, goals_due]
+            // And an agent with a request that runs out wakes to close it.
+            let requests_due = self
+                .actor
+                .as_ref()
+                .and_then(|actor| actor.artifacts().next_expiry())
+                .map(|due| {
+                    let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
+                    Instant::now() + Duration::from_millis(wait)
+                });
+            let due = [self.transcript_due, jobs_due, goals_due, requests_due]
                 .into_iter()
                 .flatten()
                 .min();
@@ -532,6 +581,9 @@ impl Worker {
                         }
                         if looked.is_ok() && goals_due.is_some_and(|due| due <= now) {
                             looked = self.check_goals();
+                        }
+                        if looked.is_ok() && requests_due.is_some_and(|due| due <= now) {
+                            looked = self.settle_requests();
                         }
                         if let Err(error) = looked {
                             eprintln!(
@@ -590,12 +642,116 @@ impl Worker {
             .collect();
         self.newest = self.newest_row();
         self.ended = self.last_end();
+        // Nor are its artifacts: only what changes from here on is told. How many of its
+        // requests wait for the user is counted from the start.
+        self.refresh_books();
+        self.artifacts_told = self
+            .books
+            .artifacts
+            .artifacts()
+            .map(|artifact| (artifact.artifact_id.clone(), told_artifact(artifact)))
+            .collect();
+        self.count_requests(self.now_ms());
         self.publish_view();
         self.after(out);
+        // An answer that was given and not yet told when the Host went away is told now.
+        self.settle_requests().map_err(|error| error.to_string())?;
         Ok(())
     }
 
+    /// Reads the agent's books anew for those who read them without asking the agent.
+    fn refresh_books(&mut self) {
+        if let Some(actor) = &self.actor {
+            self.books = Arc::new(Books {
+                artifacts: actor.artifacts().clone(),
+                goals: actor.goals().clone(),
+            });
+        }
+    }
+
+    /// Closes the requests whose time ran out and tells the agent every end that still
+    /// waits to be told.
+    fn settle_requests(&mut self) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        for out in library::settle(actor, now)? {
+            self.after(out);
+        }
+        Ok(())
+    }
+
+    /// Tells the apps of every artifact that is not as they were last told, and how many
+    /// requests wait for the user now.
+    fn tell_artifacts(&mut self) {
+        let now = self.now_ms();
+        let record = &self.setup.record;
+        let mut news = false;
+        for artifact in self.books.artifacts.artifacts() {
+            let state = told_artifact(artifact);
+            if self.artifacts_told.get(&artifact.artifact_id) != Some(&state) {
+                self.artifacts_told
+                    .insert(artifact.artifact_id.clone(), state);
+                let changed = wire::artifact_updated(record, &artifact.artifact_id);
+                self.setup.hub.publish(changed, now);
+                news = true;
+            }
+        }
+        let in_all = self.count_requests(now);
+        if news {
+            self.setup.hub.publish(wire::attention_updated(in_all), now);
+        }
+    }
+
+    /// Says how many of the agent's requests wait for the user, and answers how many wait
+    /// in all.
+    fn count_requests(&self, now: i64) -> usize {
+        let record = &self.setup.record;
+        let shelf = Shelf {
+            maker: Maker {
+                agent_id: &record.agent_id,
+                session: &record.session,
+                persona: &record.persona,
+            },
+            artifacts: &self.books.artifacts,
+            goals: &self.books.goals,
+        };
+        let waiting = requests::attention(&[shelf], true, false, now).len();
+        self.setup.hub.waiting_for_user(&record.agent_id, waiting)
+    }
+
+    /// Something is asked of the agent's artifacts. What changed is published before the
+    /// one who asked is answered, so that what it reads next is what it was told.
+    fn handle_artifact(
+        &mut self,
+        want: &Want,
+        answer: Answer<Result<Done, Refused>>,
+    ) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        match library::carry_out(actor, &self.setup.record, want, now) {
+            Ok(carried) => {
+                for out in carried.outs {
+                    self.after(out);
+                }
+                let _ = answer.send(Ok(carried.said));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = answer.send(Err(unavailable(&error)));
+                Err(error)
+            }
+        }
+    }
+
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
+        let ask = match ask {
+            Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
+            other => other,
+        };
         let now = self.now_ms();
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
@@ -686,6 +842,8 @@ impl Worker {
                 };
                 answered(written.map(|out| (said, out)), answer)?
             }
+            // Answered above, where what it changes is published first.
+            Ask::Artifact { .. } => return Ok(()),
             Ask::SpoolChanged => actor.spool_changed(now)?,
             Ask::ShimGone { turn } => actor.shim_gone(turn, now)?,
             Ask::LaunchFailed { turn, reason } => actor.launch_failed(turn, &reason, now)?,
@@ -705,6 +863,15 @@ impl Worker {
         }
         for action in out.actions {
             self.carry_out(action);
+        }
+        // The books are published before anything is told of them, and before whoever
+        // asked for the change is answered.
+        if out.changed.goals || out.changed.artifacts {
+            self.refresh_books();
+            self.publish_view();
+        }
+        if out.changed.artifacts {
+            self.tell_artifacts();
         }
         self.show(out.changed);
     }
@@ -888,6 +1055,7 @@ impl Worker {
                 .filter(|job| job.status.is_active() || job.updated_at_ms >= shown_since)
                 .cloned()
                 .collect(),
+            books: self.books.clone(),
             broken: None,
         }));
     }
@@ -1133,6 +1301,7 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}
             Ok(Ask::Close) | Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,

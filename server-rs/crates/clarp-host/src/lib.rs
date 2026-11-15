@@ -22,6 +22,7 @@ pub mod hub;
 pub mod ids;
 pub mod joblog;
 pub mod launcher;
+pub mod library;
 pub mod pairing;
 pub mod process;
 pub mod revisions;

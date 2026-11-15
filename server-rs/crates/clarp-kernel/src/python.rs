@@ -21,10 +21,39 @@ pub fn dumps(value: &Value) -> String {
     }
 }
 
+/// A value in the one form two writers agree on: its fields in the order of their names,
+/// nothing between them. What a digest of a value is taken of.
+pub fn canonical(value: &Value) -> String {
+    match value {
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(canonical).collect();
+            format!("[{}]", items.join(","))
+        }
+        Value::Object(fields) => {
+            let mut fields: Vec<(&String, &Value)> = fields.iter().collect();
+            fields.sort_by(|a, b| a.0.cmp(b.0));
+            let fields: Vec<String> = fields
+                .into_iter()
+                .map(|(key, value)| format!("{}:{}", Value::String(key.clone()), canonical(value)))
+                .collect();
+            format!("{{{}}}", fields.join(","))
+        }
+        plain => plain.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_value_has_one_form_for_a_digest() {
+        assert_eq!(
+            canonical(&json!({ "b": [1, { "z": null, "a": "x" }], "a": true })),
+            r#"{"a":true,"b":[1,{"a":"x","z":null}]}"#
+        );
+    }
 
     #[test]
     fn a_value_is_written_with_pythons_spaces() {
