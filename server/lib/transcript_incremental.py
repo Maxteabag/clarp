@@ -1623,9 +1623,11 @@ def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
     not change while it was read: the same file, the same size, the same
     modification and change times as when it was opened. Size or mtime alone
     would let a rewrite in place that restores the mtime through; the change
-    time cannot be set back. A file that grew or was touched meanwhile is
-    read again, as it always was: growth cannot be told from a rewrite
-    without reading."""
+    time cannot be set back. (A store through a memory map into a page that
+    is already dirty moves neither time and is not seen here; the audit finds
+    it, as it finds a rewrite that lands just after an import.) A file that
+    grew or was touched meanwhile is read again, as it always was: growth
+    cannot be told from a rewrite without reading."""
     if parsed_read is None or parsed_evidence is None or parsed_read.get("stat") is None:
         return None, "not_observed"
     try:
