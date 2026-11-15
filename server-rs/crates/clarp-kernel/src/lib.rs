@@ -7,5 +7,6 @@
 
 pub mod agent;
 pub mod conversation;
+pub mod jobs;
 pub mod journal;
 pub mod turn;

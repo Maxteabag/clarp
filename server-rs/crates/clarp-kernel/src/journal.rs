@@ -42,8 +42,13 @@ pub mod kind {
     /// A [`TurnEnd`](crate::conversation::TurnEnd): how a turn ended, for the row that closed it.
     pub const TURN_END: u16 = 110;
 
+    /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
+    pub const JOB: u16 = 300;
+
     /// What an agent is rebuilt from.
     pub const MACHINERY: Kinds = Kinds::range(1, 99);
+    /// The agent's background jobs.
+    pub const JOBS: Kinds = Kinds::range(300, 399);
     /// What a conversation is read from.
     pub const CONVERSATION: Kinds = Kinds::range(100, 199);
     /// The rows of a conversation: what a page of a chat is counted in.
