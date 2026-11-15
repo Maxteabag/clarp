@@ -266,14 +266,18 @@ def test_however_the_file_moves_the_tails_hashes_are_a_reads(tmp_path, backend, 
     on, off = seen[True], seen[False]
     if when != "store":
         assert on["is a read's"] in (None, True) and off["is a read's"] in (None, True)
-    if on != off:
-        # The one kind of difference, and it is in the switch's favour. A
-        # byte of a record an earlier import read changes while this tail
-        # runs, in a way the other checks let pass (the size and the mtime
-        # are what they were, or the file only grew and may). Read for its
-        # hashes, that part was read before the change: the tail goes on,
-        # and the change waits for the audit. With the switch the part is
-        # compared after the parse, and this tail is the full import.
-        assert how.startswith("rewrite an earlier record") and when != "store"
+    # The one kind of difference, and it is in the switch's favour. A byte of
+    # a record an earlier import read changes while this tail runs, in a way
+    # the other checks let pass: the size and the mtime are what they were,
+    # or the file only grew and may (before the parser opened it, so that
+    # what it was handed and a read afterwards agree). Read for its hashes,
+    # that part was read before the change: the tail goes on, and the change
+    # waits for the audit. With the switch the part is compared after the
+    # parse, and this tail is the full import.
+    found_now = how.startswith("rewrite an earlier record") and when != "store" and (
+        how.endswith("the mtime put back") or (keep and when == "before_parse"))
+    if found_now:
         assert off["decision"] in ("tail_applied", "deferred_tail_source_changed")
         assert off["published"] and on["decision"] == "full_tail_rewritten"
+    else:
+        assert on == off
