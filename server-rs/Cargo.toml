@@ -47,7 +47,10 @@ serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 # The fields of a JSON object stay in the order they were given: what an agent wrote and what
 # a tool was called with are read in that order, as the Python Host reads them.
-serde_json = { version = "1", features = ["preserve_order"] }
+# float_roundtrip: a fraction is read as the number it is. Without it the reader may be one
+# step off on a fraction of seventeen digits, and a number an agent published comes back as
+# another (found by the form vectors: 9.999999900000001e-05 was read as 9.9999999e-05).
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 zstd = "0.13"
 
 [workspace.lints.rust]
