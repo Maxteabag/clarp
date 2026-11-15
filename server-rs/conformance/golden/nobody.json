@@ -1,0 +1,106 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "conversation_id": "",
+    "cwd": "<ROOT>/home",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 0,
+    "latest_ts": "",
+    "missing": true,
+    "turns": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=nobody"
+  },
+  {
+   "body": {
+    "<bytes>": 20,
+    "<sha256>": "b74c3ba4113a26930e804fda2ddd7ba4407f3a4a549ae725ad4c01af4e96e9a3"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 404,
+   "step": "post /send"
+  },
+  {
+   "body": {
+    "ok": true,
+    "stop_actor": "user",
+    "stop_actor_verified": false,
+    "stop_reason": "",
+    "terminated": 0
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/stop",
+   "status": 200,
+   "step": "post /stop"
+  },
+  {
+   "body": {
+    "error": "no such session"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/select",
+   "status": 404,
+   "step": "post /select"
+  },
+  {
+   "body": {
+    "error": "agent not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/turn-queue",
+   "status": 404,
+   "step": "get /turn-queue?session=nobody"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "nobody",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  }
+ ]
+}

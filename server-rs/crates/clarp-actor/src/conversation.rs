@@ -65,6 +65,7 @@ impl Draft {
                 id: self.id.clone(),
                 turn: self.turn,
                 text: self.text.clone(),
+                trace_id: None,
             }),
             revision: self.revision,
             ts_ms: self.ts_ms,

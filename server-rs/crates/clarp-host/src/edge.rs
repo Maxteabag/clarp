@@ -22,7 +22,9 @@ use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::clock::Clock;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
 use clarp_protocol::responses::{SelectResponse, SendResponse, StopResponse};
-use clarp_protocol::server_info::{Capabilities, Contract, ServerInfo};
+use clarp_protocol::server_info::{
+    Capabilities, ClientCompatibility, Compatibility, Contract, LocalConnection, ServerInfo,
+};
 use futures_util::stream::{self, Stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -261,7 +263,7 @@ fn identity(app: &App) -> ServerInfo {
         image_version: None,
         default_cwd: app.config.default_cwd.display().to_string(),
         clarp_version: VERSION.to_string(),
-        min_app_version: "0".to_string(),
+        min_app_version: "1.0".to_string(),
         capabilities: Capabilities {
             version: 1,
             features: FEATURES
@@ -274,14 +276,26 @@ fn identity(app: &App) -> ServerInfo {
             min_ios: MIN_IOS_CONTRACT,
             features: BTreeMap::new(),
         },
-        client: None,
-        local_connection: None,
+        // Nobody said which app is asking, so nothing is known of whether it fits.
+        client: Some(ClientCompatibility {
+            status: Compatibility::Unknown,
+            platform: Some(String::new()),
+            build: Some(String::new()),
+            contract: Some(0),
+            reason: Some(String::new()),
+        }),
+        local_connection: Some(LocalConnection {
+            enabled: false,
+            port: None,
+            certificate_sha256: None,
+            urls: None,
+            service_type: None,
+        }),
     }
 }
 
 async fn snapshot(State(app): State<App>) -> Json<Value> {
     let directory = app.fleet.directory();
-    let now = app.clock.now_ms();
     let agents: Vec<Value> = directory
         .members
         .iter()
@@ -293,8 +307,8 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
                 &view.status,
                 view.backend,
                 view.newest.as_ref(),
+                view.ended.as_ref(),
                 focused,
-                now,
             )
         })
         .collect();
@@ -310,6 +324,8 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
         "personas": [],
         "available_mcp_servers": [],
         "model_avatars": false,
+        // What the Python Host says while nobody has chosen otherwise.
+        "tool_explanations": { "detail_level": 2, "enabled": true },
     }))
 }
 
@@ -444,13 +460,11 @@ async fn send(
         },
         None => Origin::User,
     };
-    // The user's own message takes the place of a running turn unless it asks to wait. A
-    // message from an agent never does.
-    let admission = if sender.is_none() && request.queue_if_busy != Some(true) {
-        Admission::Direct
-    } else {
-        Admission::Queue
-    };
+    let origin_is_user = origin == Origin::User;
+    // A message to an agent that is busy waits its turn. That is what the Python Host does
+    // today, whoever sent it and whatever `queue_if_busy` says, and so does this one. (The
+    // kernel can also take a message that replaces the running turn; nothing asks for it yet.)
+    let admission = Admission::Queue;
     let trace_id = request.trace_id.clone().unwrap_or_else(|| ids::hex(8));
     let client_msg_id = request.client_msg_id.clone().unwrap_or_else(ids::uuid);
     let message = Message {
@@ -462,6 +476,10 @@ async fn send(
         client: request.client,
     };
     let sent = member.agent.send(message, admission).await?;
+    if origin_is_user {
+        // Writing to an agent makes it the open one, without a word about it.
+        let _ = app.fleet.open(member.record.session.clone()).await;
+    }
     Ok(Json(SendResponse {
         ok: true,
         session: member.record.session.clone(),

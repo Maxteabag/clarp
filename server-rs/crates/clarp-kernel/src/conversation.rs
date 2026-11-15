@@ -44,6 +44,9 @@ pub struct Reply {
     pub id: String,
     pub turn: u64,
     pub text: String,
+    /// The trace of the turn that said it: the id the message was sent under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +100,17 @@ pub struct TurnEnd {
     pub started_at_ms: Option<i64>,
     pub ended_at_ms: i64,
     pub tool_count: u32,
+    /// The trace the turn's message was sent under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// The model the tool said it ran on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// What the tool said the turn took in and gave out, in tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_in: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_out: Option<u64>,
 }
 
 impl TurnEnd {
@@ -117,6 +131,10 @@ impl TurnEnd {
             started_at_ms: settled.started_at_ms,
             ended_at_ms: settled.ended_at_ms,
             tool_count: settled.tool_count,
+            trace_id: None,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
         })
     }
 }
@@ -210,6 +228,7 @@ mod tests {
                 id: "r-msg_1".to_string(),
                 turn: 3,
                 text: "hi".to_string(),
+                trace_id: None,
             }),
             Entry::Tool(ToolCall {
                 id: "toolu_1".to_string(),
@@ -235,6 +254,10 @@ mod tests {
                 started_at_ms: Some(5),
                 ended_at_ms: 30,
                 tool_count: 1,
+                trace_id: None,
+                model: None,
+                tokens_in: None,
+                tokens_out: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

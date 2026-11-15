@@ -244,6 +244,9 @@ struct LiveTurn {
     /// The last row this turn put into the conversation: the message itself until the turn
     /// says something. It is the row that is told how the turn ended.
     last_row: String,
+    /// What the tool has said of itself so far: its model, and what the turn cost.
+    model: Option<String>,
+    tokens: Option<(u64, u64)>,
     interpreter: Box<dyn Interpreter>,
     /// How far the turn's spool has been read. Never behind the position in the log.
     offset: u64,
@@ -251,6 +254,16 @@ struct LiveTurn {
     drafts: Vec<Draft>,
     /// The spool has said how the tool went. Nothing more will come.
     over: bool,
+}
+
+impl LiveTurn {
+    fn facts(&self) -> Facts {
+        Facts {
+            trace_id: self.trace_id.clone(),
+            model: self.model.clone(),
+            tokens: self.tokens,
+        }
+    }
 }
 
 pub struct Actor {
@@ -298,10 +311,23 @@ fn written(piece: &Entry, ts_ms: i64) -> Result<NewItem, ActorError> {
     })
 }
 
+/// What is known of a turn besides how it went: told with its end.
+#[derive(Debug, Clone, Default)]
+struct Facts {
+    trace_id: Option<String>,
+    model: Option<String>,
+    tokens: Option<(u64, u64)>,
+}
+
 /// How the turn that has just ended in this batch ended, for the row that closed it.
-fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str) -> Option<Entry> {
+fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Option<Entry> {
     let ended = batch.agent().last().filter(|last| last.id == turn)?;
-    TurnEnd::of(ended, closes).map(Entry::TurnEnd)
+    let mut end = TurnEnd::of(ended, closes)?;
+    end.trace_id = facts.trace_id;
+    end.model = facts.model;
+    end.tokens_in = facts.tokens.map(|(tokens_in, _)| tokens_in);
+    end.tokens_out = facts.tokens.map(|(_, tokens_out)| tokens_out);
+    Some(Entry::TurnEnd(end))
 }
 
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, live: LiveReply, ts_ms: i64) {
@@ -398,6 +424,24 @@ impl Actor {
             queue_revision: agent.queue_revision(),
             head_revision: self.head_revision(),
             backend_session: agent.backend_session().map(str::to_string),
+        }
+    }
+
+    /// How the last turn that held the agent ended, with what its tool said of itself.
+    pub fn last_end(&self) -> Result<Option<TurnEnd>, ActorError> {
+        let Some(last) = self.recorder.agent().last() else {
+            return Ok(None);
+        };
+        let Some(stored) = self.recorder.log().find(&format!("t-{}", last.id.0))? else {
+            return Ok(None);
+        };
+        match Entry::from_item(&stored) {
+            Ok(Some(Entry::TurnEnd(end))) => Ok(Some(end)),
+            Ok(_) => Ok(None),
+            Err(error) => Err(ActorError::Corrupt(format!(
+                "the end of turn {} cannot be read: {error}",
+                last.id.0
+            ))),
         }
     }
 
@@ -642,6 +686,7 @@ impl Actor {
         }
         // What the agent had written and nobody stored is kept: the user saw it.
         let unfinished = self.drafts().to_vec();
+        let facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
         let mut closes = self
             .live
             .as_ref()
@@ -653,6 +698,7 @@ impl Actor {
                 id: draft.id,
                 turn: draft.turn,
                 text: draft.text,
+                trace_id: facts.trace_id.clone(),
             });
             closes = piece.id().to_string();
             batch.item(written(&piece, now_ms)?);
@@ -671,7 +717,7 @@ impl Actor {
                 closes = notice.id().to_string();
                 batch.item(written(&notice, now_ms)?);
             }
-            if let Some(end) = closing(&batch, turn, &closes) {
+            if let Some(end) = closing(&batch, turn, &closes, facts) {
                 batch.item(written(&end, now_ms)?);
             }
         }
@@ -740,6 +786,8 @@ impl Actor {
             last_row: message.id.clone(),
             message_id: message.id,
             trace_id: message.trace_id,
+            model: None,
+            tokens: None,
             interpreter: self.backend.interpreter(turn.0),
             offset: 0,
             drafts: Vec::new(),
@@ -780,10 +828,14 @@ impl Actor {
                     reason: "the record of the turn's tool is gone".to_string(),
                 },
             };
-            let closes = self.message_at(message_seq)?.id;
+            let message = self.message_at(message_seq)?;
+            let facts = Facts {
+                trace_id: message.trace_id,
+                ..Facts::default()
+            };
             let mut batch = self.recorder.batch();
             if batch.command(command, now_ms).is_ok()
-                && let Some(end) = closing(&batch, turn, &closes)
+                && let Some(end) = closing(&batch, turn, &message.id, facts)
             {
                 batch.item(written(&end, now_ms)?);
             }
@@ -797,6 +849,7 @@ impl Actor {
         let until = self.recorder.spool_offset(turn);
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
+        let (mut model, mut tokens) = (None, None);
         let mut interpreter = self.backend.interpreter(turn.0);
         let mut drafts = Vec::new();
         let mut signals = Vec::new();
@@ -819,6 +872,11 @@ impl Actor {
                         }
                         Signal::Tool(call) => last_row = call.id,
                         Signal::Notice(notice) => last_row = notice.id,
+                        Signal::Model(named) => model = Some(named),
+                        Signal::Usage {
+                            tokens_in,
+                            tokens_out,
+                        } => tokens = Some((tokens_in, tokens_out)),
                         _ => {}
                     }
                 }
@@ -841,6 +899,8 @@ impl Actor {
             message_id: message.id,
             trace_id: message.trace_id,
             last_row,
+            model,
+            tokens,
             interpreter,
             offset,
             drafts,
@@ -912,7 +972,9 @@ impl Actor {
                             live.last_row = notice.id().to_string();
                             batch.item(written(&notice, t)?);
                         }
-                        if failed && let Some(end) = closing(&batch, turn, &live.last_row) {
+                        if failed
+                            && let Some(end) = closing(&batch, turn, &live.last_row, live.facts())
+                        {
                             batch.item(written(&end, t)?);
                         }
                         live.over = true;
@@ -954,7 +1016,10 @@ impl Actor {
                                 live.last_row = notice.id().to_string();
                                 batch.item(written(&notice, t)?);
                             }
-                            if ended && let Some(end) = closing(&batch, turn, &live.last_row) {
+                            if ended
+                                && let Some(end) =
+                                    closing(&batch, turn, &live.last_row, live.facts())
+                            {
                                 batch.item(written(&end, t)?);
                             }
                             continue;
@@ -966,9 +1031,21 @@ impl Actor {
                             show(&mut live.drafts, turn, reply, t);
                             continue;
                         }
-                        Signal::Reply(reply) => {
+                        Signal::Model(named) => {
+                            live.model = Some(named);
+                            continue;
+                        }
+                        Signal::Usage {
+                            tokens_in,
+                            tokens_out,
+                        } => {
+                            live.tokens = Some((tokens_in, tokens_out));
+                            continue;
+                        }
+                        Signal::Reply(mut reply) => {
                             // The finished reply takes the place of the one being written.
                             live.drafts.retain(|draft| draft.id != reply.id);
+                            reply.trace_id = live.trace_id.clone();
                             Entry::Reply(reply)
                         }
                         Signal::Tool(call) => Entry::Tool(call),
@@ -993,7 +1070,7 @@ impl Actor {
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }
-                if ended && let Some(end) = closing(&batch, turn, &live.last_row) {
+                if ended && let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
                     batch.item(written(&end, now_ms)?);
                 }
             }

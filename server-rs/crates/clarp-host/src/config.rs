@@ -51,7 +51,12 @@ impl Config {
         let mut codec = "zstd".to_string();
         let mut launcher = "direct".to_string();
         let mut shim = None;
-        let mut name = "Clarp Host (Rust)".to_string();
+        // A Host is called what its machine is called, unless it is told otherwise.
+        let mut name = std::fs::read_to_string("/proc/sys/kernel/hostname")
+            .map(|name| name.trim().to_string())
+            .ok()
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Clarp Host".to_string());
         let mut default_cwd = home();
         let mut keep_spools = false;
         while let Some(arg) = args.next() {

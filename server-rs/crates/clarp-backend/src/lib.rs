@@ -78,6 +78,13 @@ pub enum Signal {
     /// Something the user should be told that the agent did not say.
     Notice(Notice),
     Live(LiveReply),
+    /// The model the tool says it runs on.
+    Model(String),
+    /// What the tool says the turn took in and gave out, in tokens.
+    Usage {
+        tokens_in: u64,
+        tokens_out: u64,
+    },
     /// The tool process is gone, and this is how the turn went.
     Ended(RunOutcome),
 }
