@@ -47,6 +47,9 @@ pub mod kind {
     /// A [`GoalRecord`](crate::goals::GoalRecord) as JSON: what one change set in one of the
     /// agent's plans.
     pub const GOAL: u16 = 400;
+    /// An [`ArtifactRecord`](crate::artifacts::ArtifactRecord) as JSON: an artifact of the
+    /// agent's as a change left it.
+    pub const ARTIFACT: u16 = 500;
 
     /// What an agent is rebuilt from.
     pub const MACHINERY: Kinds = Kinds::range(1, 99);
@@ -54,6 +57,8 @@ pub mod kind {
     pub const JOBS: Kinds = Kinds::range(300, 399);
     /// The agent's goals and plans.
     pub const GOALS: Kinds = Kinds::range(400, 499);
+    /// What the agent made for its user and what it asks its user.
+    pub const ARTIFACTS: Kinds = Kinds::range(500, 599);
     /// What a conversation is read from.
     pub const CONVERSATION: Kinds = Kinds::range(100, 199);
     /// The rows of a conversation: what a page of a chat is counted in.

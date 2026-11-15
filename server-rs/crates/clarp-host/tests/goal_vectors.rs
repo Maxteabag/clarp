@@ -111,6 +111,11 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
                         };
                         let (said, change) = goaltool::answer(&book, owner, &ask, &mut world);
                         if let Some(change) = change {
+                            // The Python Host makes the artifact a new plan is shown as, and
+                            // names it: one id more.
+                            if matches!(ask, goaltool::Ask::Create { .. }) {
+                                ids(12);
+                            }
                             // As the Host does it: what the log keeps is what the book takes.
                             let record = book.record(&change, at);
                             let kept: clarp_kernel::goals::GoalRecord =
