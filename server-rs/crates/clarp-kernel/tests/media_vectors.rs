@@ -10,8 +10,8 @@
 use std::collections::BTreeMap;
 
 use clarp_kernel::media::{
-    Asset, FILES, IMAGES, MAX_BYTES, detect_mime, extension, image_size, is_image, is_taken,
-    markdown_alt, safe_name,
+    Asset, FILES, IMAGES, MAX_BYTES, Part, Refused, byte_range, detect_mime, extension, image_size,
+    is_image, is_taken, markdown_alt, read, safe_name, unquoted,
 };
 use serde_json::Value;
 
@@ -78,10 +78,10 @@ fn a_file_is_read_as_the_python_host_reads_it() {
         .iter()
         .map(|(label, hex)| (label.clone(), bytes(hex.as_str().unwrap())))
         .collect();
-    let read = vectors["read"].as_array().unwrap();
-    assert!(read.len() >= 1_500);
+    let readings = vectors["read"].as_array().unwrap();
+    assert!(readings.len() >= 1_500);
     let mut wrong = Vec::new();
-    for vector in read {
+    for vector in readings {
         let blob = &blobs[vector["blob"].as_str().unwrap()];
         let (declared, name) = (
             vector["content_type"].as_str().unwrap(),
@@ -114,12 +114,29 @@ fn a_file_is_read_as_the_python_host_reads_it() {
                 vector["blob"]
             ));
         }
+        // And read in one go, as a file that is handed in is: taken as that, or refused.
+        let whole = read(blob, name, declared);
+        let agrees = match &whole {
+            Ok(reading) => {
+                theirs.2
+                    && (&reading.name, &reading.mime, &reading.extension)
+                        == (&ours.0, &ours.1, &ours.4)
+                    && (reading.width, reading.height) == (width, height)
+            }
+            Err(refused) => !theirs.2 && *refused == Refused::Kind,
+        };
+        if !agrees {
+            wrong.push(format!(
+                "{} declared {declared:?} named {name:?}: handed in, it is {whole:?}",
+                vector["blob"]
+            ));
+        }
     }
     assert!(
         wrong.is_empty(),
         "{} of {} read differently:\n{}",
         wrong.len(),
-        read.len(),
+        readings.len(),
         wrong.join("\n")
     );
 }
@@ -149,11 +166,11 @@ fn a_file_is_kept_under_the_extension_the_python_host_keeps_it_under() {
     }
     // What a name's ending alone makes of a file whose bytes say nothing and that was
     // declared as nothing.
-    for (ending, read) in vectors["read_by_ending"].as_object().unwrap() {
+    for (ending, read_as) in vectors["read_by_ending"].as_object().unwrap() {
         let named = format!("x{ending}");
         assert_eq!(
             detect_mime(b"\x00\x01\x02", "", &named),
-            read.as_str().unwrap(),
+            read_as.as_str().unwrap(),
             "{named}"
         );
     }
@@ -177,6 +194,8 @@ fn a_published_file_is_told_as_the_python_host_tells_it() {
             asset_id: text("asset_id"),
             session: text("session"),
             source_name: text("source_name"),
+            sha256: text("sha256"),
+            extension: String::new(),
             mime_type: text("mime_type"),
             bytes: row["bytes"].as_u64().unwrap(),
             width: row["width"]
@@ -190,5 +209,57 @@ fn a_published_file_is_told_as_the_python_host_tells_it() {
             created_at: row["created_at"].as_i64().unwrap(),
         };
         assert_eq!(asset.public(), vector["public"], "{row}");
+    }
+}
+
+#[test]
+fn a_part_of_a_file_is_asked_for_as_the_python_host_reads_it() {
+    let vectors = vectors();
+    let ranges = vectors["ranges"].as_array().unwrap();
+    assert!(ranges.len() >= 200);
+    let mut wrong = Vec::new();
+    for vector in ranges {
+        let (header, total) = (
+            vector["header"].as_str().unwrap(),
+            vector["total"].as_u64().unwrap(),
+        );
+        let theirs = match vector["kind"].as_str().unwrap() {
+            "full" => Part::Whole,
+            "unsatisfiable" => Part::Missing,
+            "partial" => Part::Bytes {
+                first: vector["start"].as_u64().unwrap(),
+                last: vector["end"].as_u64().unwrap(),
+            },
+            other => panic!("a kind of range nobody knows: {other}"),
+        };
+        let ours = byte_range(header, total);
+        if ours != theirs {
+            let shown: String = header.chars().take(60).collect();
+            wrong.push(format!(
+                "{shown:?} of {total}: {ours:?}, the Python Host: {theirs:?}"
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of {} read differently:\n{}",
+        wrong.len(),
+        ranges.len(),
+        wrong.join("\n")
+    );
+}
+
+#[test]
+fn a_name_in_a_header_is_read_back_as_python_reads_it() {
+    let vectors = vectors();
+    let quoted = vectors["quoted"].as_array().unwrap();
+    assert!(quoted.len() >= 30);
+    for vector in quoted {
+        let text = vector["text"].as_str().unwrap();
+        assert_eq!(
+            unquoted(text),
+            vector["unquoted"].as_str().unwrap(),
+            "{text:?}"
+        );
     }
 }

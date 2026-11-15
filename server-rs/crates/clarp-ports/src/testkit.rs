@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::blobs::BlobEngine;
 use crate::codec::{CodecSet, Compressor};
 use crate::kv::KeyValueEngine;
 use crate::log::{Item, Kinds, LogEngine, NewItem, Seq};
@@ -424,4 +425,117 @@ pub fn key_value_conformance(engine: &dyn KeyValueEngine, path_a: &Path, path_b:
     assert!(store.get("agent", "a1").expect("get").as_deref() == Some(&big[..]));
     assert_eq!(store.list("agent").expect("list").len(), 2);
     assert_eq!(store.list("setting").expect("list").len(), 1);
+}
+
+/// The rules every store of whole files keeps. `path_a` and `path_b` are two places the
+/// engine has not opened before.
+pub fn blob_conformance(engine: &dyn BlobEngine, path_a: &Path, path_b: &Path) {
+    assert!(!engine.name().is_empty(), "an engine has a name");
+    let store = engine
+        .open(path_a)
+        .expect("an engine opens a store that is not there yet");
+    assert_eq!(
+        store.len("first.bin").expect("len"),
+        None,
+        "a new store keeps nothing"
+    );
+    assert!(
+        store.read("first.bin", 0, 10).expect("read").is_empty(),
+        "nothing is read from a name under which nothing is kept"
+    );
+
+    store.put("first.bin", b"first").expect("put");
+    assert_eq!(store.len("first.bin").expect("len"), Some(5));
+    assert_eq!(store.read("first.bin", 0, 100).expect("read"), b"first");
+    assert_eq!(
+        store.read("first.bin", 1, 3).expect("read"),
+        b"irs",
+        "a part is read from where it was asked, and no more than was asked"
+    );
+    assert!(
+        store.read("first.bin", 5, 10).expect("read").is_empty(),
+        "nothing is read at a file's end"
+    );
+    assert!(store.read("first.bin", 99, 1).expect("read").is_empty());
+    assert!(store.read("first.bin", 0, 0).expect("read").is_empty());
+
+    // A name stands for its bytes.
+    store
+        .put("first.bin", b"something else")
+        .expect("put again");
+    assert_eq!(
+        store.read("first.bin", 0, 100).expect("read"),
+        b"first",
+        "what is kept under a name is never written again"
+    );
+    store.put("empty", b"").expect("put an empty file");
+    assert_eq!(
+        store.len("empty").expect("len"),
+        Some(0),
+        "an empty file is a file"
+    );
+
+    // A file of some size comes back whole, read in parts.
+    let big = noise(300_000, 9);
+    store.put("big-file_1.bin", &big).expect("put");
+    assert_eq!(store.len("big-file_1.bin").expect("len"), Some(300_000));
+    let mut back = Vec::new();
+    loop {
+        let part = store
+            .read("big-file_1.bin", back.len() as u64, 65_536)
+            .expect("read");
+        if part.is_empty() {
+            break;
+        }
+        assert!(part.len() <= 65_536, "no more is read than was asked");
+        back.extend(part);
+    }
+    assert!(back == big, "a file is read back as it was kept");
+
+    // What could be read as a path is no name.
+    for name in ["", "..", "../outside", "a/b", ".hidden", "a b"] {
+        assert!(
+            store.put(name, b"x").is_err(),
+            "{name:?} is not kept: it is no name"
+        );
+        assert_eq!(store.len(name).expect("len"), None, "{name:?}");
+        assert!(
+            store.read(name, 0, 10).expect("read").is_empty(),
+            "{name:?}"
+        );
+    }
+
+    // Many keep at the same time, the same name among them.
+    std::thread::scope(|scope| {
+        for writer in 0..8u64 {
+            let store = &store;
+            scope.spawn(move || {
+                store.put("shared.bin", b"the same bytes").expect("put");
+                let own = noise(10_000, writer + 20);
+                let name = format!("own-{writer}.bin");
+                store.put(&name, &own).expect("put");
+                assert!(store.read(&name, 0, 20_000).expect("read") == own);
+            });
+        }
+    });
+    assert_eq!(
+        store.read("shared.bin", 0, 100).expect("read"),
+        b"the same bytes"
+    );
+    drop(store);
+
+    // Another path is another store.
+    let other = engine.open(path_b).expect("a second store opens");
+    assert_eq!(
+        other.len("first.bin").expect("len"),
+        None,
+        "one store's files never appear in another"
+    );
+    drop(other);
+
+    // Opening again finds what was kept.
+    let store = engine.open(path_a).expect("a store opens again");
+    assert_eq!(store.read("first.bin", 0, 100).expect("read"), b"first");
+    assert_eq!(store.len("big-file_1.bin").expect("len"), Some(300_000));
+    assert_eq!(store.len("own-7.bin").expect("len"), Some(10_000));
 }

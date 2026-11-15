@@ -24,6 +24,7 @@ use clarp_kernel::artifacts::{
 };
 use clarp_kernel::conversation::Message;
 use clarp_kernel::goals::GoalBook;
+use clarp_kernel::media::MediaBook;
 use clarp_kernel::push;
 use clarp_kernel::python;
 use clarp_kernel::turn::{Admission, Origin};
@@ -41,6 +42,8 @@ use crate::pusher::Requested;
 pub struct Books {
     pub artifacts: ArtifactBook,
     pub goals: GoalBook,
+    /// The files the agent published.
+    pub media: Arc<MediaBook>,
 }
 
 /// What is asked of one agent's artifacts.
@@ -105,8 +108,8 @@ pub struct Carried {
 
 fn kept(artifacts: &[Artifact]) -> Kept<'_> {
     Kept {
-        goal: None,
         artifacts,
+        ..Kept::default()
     }
 }
 

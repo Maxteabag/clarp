@@ -40,6 +40,7 @@ use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
+use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
 use clarp_kernel::turn::{
     Activity, Admission, Origin, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
@@ -184,6 +185,8 @@ pub struct Changed {
     pub goals: bool,
     /// Something the agent made for its user, or asks its user, changed.
     pub artifacts: bool,
+    /// The agent published a file.
+    pub media: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -358,12 +361,13 @@ pub struct Status {
     pub answered_by: Option<String>,
 }
 
-/// What changed in the agent's books together, to be written together: a goal, and
-/// artifacts as changes left them.
+/// What changed in the agent's books together, to be written together: a goal,
+/// artifacts as changes left them, and files the agent published.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Kept<'a> {
     pub goal: Option<&'a GoalChange>,
     pub artifacts: &'a [Artifact],
+    pub media: &'a [Asset],
 }
 
 /// Changes of the books on their way into the log: the items to append, and the records
@@ -372,6 +376,7 @@ struct Written {
     items: Vec<NewItem>,
     goal: Option<GoalRecord>,
     artifacts: Vec<ArtifactRecord>,
+    media: Vec<Asset>,
 }
 
 /// The turn that holds the agent, as the actor follows it.
@@ -422,6 +427,8 @@ pub struct Actor {
     goals: GoalBook,
     /// What the agent made for its user and what it asks its user, as the log has it.
     artifacts: ArtifactBook,
+    /// The files the agent published, as the log has them.
+    media: MediaBook,
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
@@ -681,6 +688,15 @@ impl Actor {
                 artifacts.apply(&record);
             },
         )?;
+        let mut media = MediaBook::new();
+        records(
+            recorder.log(),
+            kind::PUBLISHED,
+            kind::MEDIA,
+            |asset: Asset| {
+                media.apply(&asset);
+            },
+        )?;
         let mut actor = Self {
             profile,
             backend,
@@ -688,6 +704,7 @@ impl Actor {
             jobs,
             goals,
             artifacts,
+            media,
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
@@ -1020,6 +1037,11 @@ impl Actor {
         &self.artifacts
     }
 
+    /// The files the agent published.
+    pub fn media(&self) -> &MediaBook {
+        &self.media
+    }
+
     /// Writes what was decided on the agent's books, all of it in one append, and takes it.
     pub fn keep(&mut self, kept: &Kept<'_>, now_ms: i64) -> Result<Outputs, ActorError> {
         let mut written = self.written(kept, now_ms)?;
@@ -1050,10 +1072,15 @@ impl Actor {
             let key = format!("a-{}", record.artifact.artifact_id);
             items.push(record_item(kind::ARTIFACT, key, record, now_ms)?);
         }
+        for asset in kept.media {
+            let key = format!("m-{}", asset.asset_id);
+            items.push(record_item(kind::MEDIA, key, asset, now_ms)?);
+        }
         Ok(Written {
             items,
             goal,
             artifacts,
+            media: kept.media.to_vec(),
         })
     }
 
@@ -1066,6 +1093,10 @@ impl Actor {
         for record in &written.artifacts {
             self.artifacts.apply(record);
             out.changed.artifacts = true;
+        }
+        for asset in &written.media {
+            self.media.apply(asset);
+            out.changed.media = true;
         }
     }
 
