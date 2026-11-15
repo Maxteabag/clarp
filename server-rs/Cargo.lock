@@ -47,6 +47,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarp-kernel"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "clarp-ports"
 version = "0.0.1"
 
