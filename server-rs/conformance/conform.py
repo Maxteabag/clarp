@@ -242,7 +242,10 @@ def run_step(host, events, step, http, variables, clock=None):
         # Recorded under the step's own name, or its path as written: never a value a Host made up.
         named = {**step, 'name': step.get('name') or f"{op} {step['path']}", 'path': path}
         asked_at = int(time.time() * 1000)
-        replay._record(named, host.request(op.upper(), path, body, None, step.get('headers')), http, variables)
+        # A step may send a body as it is instead of JSON (`raw`: its text and its declared type):
+        # a file an agent publishes.
+        replay._record(named, host.request(op.upper(), path, body, step.get('raw'), step.get('headers')),
+                       http, variables)
         if clock is not None:
             clock.read(http[-1], asked_at)
     elif op == 'wait_reply':
@@ -372,6 +375,13 @@ CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at',
 ISSUED = re.compile(r'^(?:artifact|decision)-[0-9a-f]{12,64}$')
 # An id a preview cut short: `Decision ID: decision-7be0a016ae…`.
 CUT_ID = re.compile(r'((?:artifact|decision)-[0-9a-f]{4,})…$')
+# The id a Host gives a file an agent published: `asset_` and twenty-four signs of an alphabet
+# that has an underscore in it. The harness's normalizer names such an id under its own key only
+# when it happens to have no underscore, which about half of them do; and the id is also in what
+# a client is told to fetch (`url`, `uri`), in what an agent writes into a chat (`markdown`) and
+# in the path a client then asks for. So these are named here, before the normalizer reads the
+# capture, in the order a client first learns of them.
+ASSET = re.compile(r'asset_[A-Za-z0-9_]{24}')
 
 
 def settle(value, sessions):
@@ -585,8 +595,25 @@ def by_session(value, sessions: dict):
     return value
 
 
+def published(value, found: dict) -> dict:
+    """The ids of the files a capture's agents published, each with the name it is given here."""
+    if isinstance(value, list):
+        for item in value:
+            published(item, found)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key == 'asset_id' and isinstance(item, str) and ASSET.fullmatch(item):
+                found.setdefault(item, f'<asset:{len(found) + 1}>')
+            else:
+                published(item, found)
+    return found
+
+
 def seen_by_a_client(raw: dict) -> dict:
     """A capture, normalized, and cut down to the channels a client sees."""
+    assets = published([exchange['body'] for exchange in raw['http']], {})
+    if assets:
+        raw = {**raw, 'http': by_name(raw['http'], assets), 'sse': by_name(raw['sse'], assets)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})

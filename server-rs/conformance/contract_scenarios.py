@@ -658,4 +658,50 @@ SCENARIOS.append({
     ],
 })
 
+# A small picture in signs a body of text can carry. A Host reads of an image what its first
+# bytes say: that it is a GIF, and how large it is (2 by 3, and 5 by 7).
+GIF = 'GIF89a\x02\x00\x03\x00' + '\x00' * 6
+OLD_GIF = 'GIF87a\x05\x00\x07\x00' + '\x00' * 6
+
+
+def publish(text, declared, name, caption='', session=AGENT, step=None):
+    """An agent's tool publishes a file: the file is the body as it is, what it is called is in
+    the headers, written with %XX as the tool writes it."""
+    headers = {'X-Session': session, 'X-File-Name': name, 'X-Caption': caption}
+    return {'op': 'post', 'path': '/media', 'raw': {'bytes': text, 'content_type': declared},
+            'headers': headers, 'name': step or f'publish {name}'}
+
+
+SCENARIOS.append({
+    'id': 'media',
+    'what': 'a file an agent publishes: it is taken or refused, an image is in the agent\'s gallery, and what '
+            'was taken is fetched whole and in parts',
+    'steps': [
+        {**publish(GIF, 'image/gif', 'tiny picture.gif', 'A%20tiny%20picture%20%5Bone%5D'),
+         'save': {'gif': 'asset.asset_id'}},
+        {**publish('%PDF-1.4\n1 0 obj\n', 'application/pdf', 'report.pdf'), 'save': {'pdf': 'asset.asset_id'}},
+        # What is declared as nothing in particular is read by its name.
+        {**publish('# Synthetic notes\n\nSome text.\n', 'application/octet-stream', 'notes.md'),
+         'save': {'notes': 'asset.asset_id'}},
+        # And an image by its first bytes, whatever it is declared as and called.
+        publish(OLD_GIF, 'application/octet-stream', '', step='publish a picture that says nothing of itself'),
+        publish('#!/bin/sh\necho synthetic\n', 'application/x-sh', 'run.sh', step='publish a program'),
+        publish('not a pdf', 'application/pdf', 'fake.pdf', step='publish what is not what it says it is'),
+        publish('', 'image/gif', 'empty.gif', step='publish nothing'),
+        publish(GIF, 'image/gif', 'tiny.gif', session='nobody', step='publish for nobody'),
+        get(f'/media?session={AGENT}', 'the gallery'),
+        get(f'/media?session={AGENT}&limit=1', 'the gallery, one at most'),
+        get(f'/media?session={AGENT}&limit=many', 'the gallery, with a limit that is no number'),
+        get('/media?session=nobody', 'the gallery of nobody'),
+        get('/media/{gif}', 'fetch the picture'),
+        {**get('/media/{gif}', 'fetch a part of the picture'), 'headers': {'Range': 'bytes=0-5'}},
+        {**get('/media/{gif}', 'fetch the end of the picture'), 'headers': {'Range': 'bytes=-4'}},
+        {**get('/media/{gif}', 'fetch past the end of the picture'), 'headers': {'Range': 'bytes=100-'}},
+        {**get('/media/{gif}', 'fetch a part nobody can read as one'), 'headers': {'Range': 'bytes=4-2'}},
+        get('/media/{pdf}', 'fetch the report'),
+        get('/media/{notes}', 'fetch the notes'),
+        get('/media/asset_no_such_file', 'fetch what is not there'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

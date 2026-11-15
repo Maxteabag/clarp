@@ -17,10 +17,12 @@ use clarp_host::pusher;
 use clarp_host::relay::Relay;
 use clarp_host::revisions::Revisions;
 use clarp_kernel::presence::Presence;
+use clarp_ports::blobs::BlobEngine;
 use clarp_ports::clock::{Clock, SystemClock};
 use clarp_ports::kv::KeyValueEngine;
 use clarp_ports::log::LogEngine;
-use clarp_store_mem::{MemEngine, MemKeyValue};
+use clarp_store_files::FileBlobs;
+use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
 use clarp_store_sqlite::{SqliteEngine, SqliteKeyValue};
 
 const SERVER_ID: &str = "server_id";
@@ -33,6 +35,15 @@ fn engines(name: &str) -> Option<(Arc<dyn LogEngine>, Box<dyn KeyValueEngine>)> 
             Box::new(SqliteKeyValue::new()),
         )),
         "memory" => Some((Arc::new(MemEngine::new()), Box::new(MemKeyValue::new()))),
+        _ => None,
+    }
+}
+
+/// The store of the files agents publish with this name in configuration.
+fn blob_engine(name: &str) -> Option<Box<dyn BlobEngine>> {
+    match name {
+        "files" => Some(Box::new(FileBlobs::new())),
+        "memory" => Some(Box::new(MemBlobs::new())),
         _ => None,
     }
 }
@@ -52,6 +63,10 @@ async fn serve(config: Config) -> Result<(), String> {
 
     let mut store = tables
         .open(&config.data_dir.join("fleet.db"))
+        .map_err(|error| error.to_string())?;
+    let blobs = blob_engine(&config.blobs)
+        .ok_or_else(|| format!("there is no store of files named `{}`", config.blobs))?
+        .open(&config.data_dir.join("media"))
         .map_err(|error| error.to_string())?;
     // A Host is the same Host for as long as it has its data.
     let server_id = match store.get("setting", SERVER_ID).map_err(|e| e.to_string())? {
@@ -114,6 +129,7 @@ async fn serve(config: Config) -> Result<(), String> {
         revisions,
         pusher,
         desks,
+        blobs,
     };
     // Where someone else puts another account in place when one is out, turns that wait for
     // an account are tried as soon as the tool's login has changed.
@@ -140,11 +156,12 @@ async fn serve(config: Config) -> Result<(), String> {
     }
     eprintln!("clarp-host listens on {address}");
     eprintln!(
-        "clarp-host {} serves {} (engine {}, codec {}, launcher {})",
+        "clarp-host {} serves {} (engine {}, codec {}, files in {}, launcher {})",
         clarp_host::VERSION,
         config.data_dir.display(),
         config.engine,
         config.codec,
+        config.blobs,
         config.launcher
     );
     // The edge is told who connected: the administrator's token opens the Host only from here.

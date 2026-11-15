@@ -13,7 +13,7 @@ they are; what is new is a corpus that only does what a client can do, and a sec
 
 | File | What it is |
 |---|---|
-| `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would |
+| `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would. A step sends JSON, or a body as it is (`raw`: a file an agent publishes) |
 | `contract_plants.py` | Deliberate changes to a copy of the Python server that the suite must see. A reviewer adds their own |
 | `conform.py` | The driver: `record`, `plants`, `compare`, `cross` |
 | `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand |
@@ -69,7 +69,9 @@ choices. They are compared as what a client can rely on (`core` in `conform.py`,
 `../docs/differences.md`): a conversation's revisions by the cursors a client holds (a head as
 its place among the cursors the capture handed out, a row's revision as how many of them it is
 newer than), the ids of the rows an agent wrote as the order they are first read in, the ids of
-what agents make as the same name wherever they are written, a Host's version as "a version".
+what agents make as the same name wherever they are written, the id of a file an agent
+published as the order a client first learns of it (in the path it is fetched by and in the
+Markdown that shows it, too), a Host's version as "a version".
 A queue's revision is compared as the number it is. Fields and events of features the Rust Host
 does not have yet are left out of both sides.
 

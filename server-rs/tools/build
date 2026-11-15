@@ -51,8 +51,10 @@ rsync -a --delete --exclude target/ --exclude conformance/out/ --exclude dist/ -
 # The contract's schemas and fixtures sit beside server-rs in the repository; tests read them.
 rsync -a --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$remote/contract/"
 # So does the program an agent starts helpers with; a test runs it against the Rust Host.
-ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents"
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/scripts"
 rsync -a --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$remote/skills/clarp-sub-agents/"
+# And the program an agent publishes a file with; a test publishes with it.
+rsync -a -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$remote/scripts/"
 if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
     # The conformance driver is the replay harness run against the Rust Host: it needs the
     # harness, and the server's source for the words its report may print.
