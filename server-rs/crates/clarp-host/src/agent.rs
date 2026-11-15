@@ -154,6 +154,11 @@ pub enum Ask {
         limit: usize,
         answer: Answer<Vec<JobRecord>>,
     },
+    /// One thing of the conversation, by its id, as it is now.
+    Row {
+        id: String,
+        answer: Answer<Option<Versioned>>,
+    },
     /// From a turn's thread: the live turn's spool may have grown.
     SpoolChanged,
     /// From a turn's thread: nothing answers at the turn's shim any more.
@@ -321,6 +326,11 @@ impl AgentHandle {
     ) -> Result<Vec<JobRecord>, Unavailable> {
         self.ask(|answer| Ask::JobTimeline { id, limit, answer })
             .await
+    }
+
+    /// One thing of the agent's conversation, by its id. `None`: there is no such thing.
+    pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
+        self.ask(|answer| Ask::Row { id, answer }).await
     }
 
     /// What the agent is doing, as it last said.
@@ -903,6 +913,7 @@ impl Worker {
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
+            Ask::Row { id, answer } => return read(actor.row(&id), answer),
             // Answered above, where what they change is published first.
             Ask::Artifact { .. } | Ask::Goal { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
@@ -1402,6 +1413,7 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
             Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}

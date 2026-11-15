@@ -2290,6 +2290,271 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     );
 }
 
+#[test]
+fn an_agent_asks_another_for_something_that_comes_back_to_its_goal() {
+    let place = Place::new("request");
+    let host = place.start();
+    let (asker, worker) = (host.new_agent("Asker"), host.new_agent("Worker"));
+    let dir = place.root.clone();
+    let admin = |args: &[&str]| {
+        let mut all = vec!["clarp-admin"];
+        all.extend_from_slice(args);
+        tool(&host, &dir, None, &all)
+    };
+    let told = |session: &str, begins: &str| {
+        host.conversation(session)
+            .iter()
+            .filter(|(role, text)| role == "user" && text.starts_with(begins))
+            .count()
+    };
+
+    // The asker has a goal that is being worked, bound to the conversation it has.
+    host.send(&asker, r#"{"session": "s1"}"#, "bind");
+    wait_for("the first turn to end", || host.state(&asker) == "done");
+    let commitment = json!({
+        "outcome": "The log is live", "criteria": ["It runs"], "limits": "None", "enroll": true,
+    })
+    .to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &["create", &asker, "log", "Get the log", "[]", &commitment],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
+
+    // What cannot be done is refused before anything is sent.
+    let refused = |args: &[&str], why: &str| {
+        let said = admin(args);
+        assert_eq!(
+            (said.0, said.2.as_str()),
+            (
+                4,
+                format!("clarp-admin request: {why}; nothing was sent\n").as_str()
+            )
+        );
+    };
+    refused(
+        &[
+            "request",
+            "--to",
+            &worker,
+            "--from",
+            &asker,
+            "--text",
+            "x",
+            "--deadline",
+            "60",
+        ],
+        "--deadline needs --goal: without a goal nothing waits",
+    );
+    refused(
+        &["request", "--to", "nobody", "--from", &asker, "--text", "x"],
+        "no such recipient session: nobody",
+    );
+    refused(
+        &[
+            "request", "--to", &asker, "--from", &worker, "--goal", &plan_id, "--text", "x",
+        ],
+        &format!("goal {plan_id} belongs to {asker}, not {worker}"),
+    );
+    refused(
+        &[
+            "request",
+            "--to",
+            &worker,
+            "--from",
+            &asker,
+            "--goal",
+            &plan_id,
+            "--deadline",
+            "0",
+            "--text",
+            "x",
+        ],
+        "deadline must be 1 to 2592000 seconds",
+    );
+    assert_eq!(told(&worker, "[Request "), 0);
+
+    // The request: the worker is asked and told how to answer, and the asker's goal waits
+    // for the answer, with a deadline.
+    let (code, out, err) = admin(&[
+        "request",
+        "--to",
+        &worker,
+        "--from",
+        &asker,
+        "--goal",
+        &plan_id,
+        "--deadline",
+        "3600",
+        "--text",
+        "please add an event log",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let sent: Value = serde_json::from_str(&out).unwrap();
+    let request_id = sent["request_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (&sent["to"], &sent["goal"]),
+        (&json!(worker), &json!(plan_id))
+    );
+    let asked =
+        format!("[Request {request_id} from Asker ({asker}). Your answers in your own chat");
+    wait_for("the worker to be asked", || told(&worker, &asked) == 1);
+    let waiting = goal(&host, &dir, &["get", &plan_id]);
+    let wake = &waiting["goal"]["continuation"];
+    assert_eq!(
+        (&wake["state"], &wake["dependency_key"]),
+        (&json!("waiting"), &json!(format!("peer:{request_id}")))
+    );
+    assert!(
+        waiting["goal"]["checkpoint"]["next_work"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("When woken by request {request_id} to Worker"))
+    );
+
+    // Only the agent that was asked answers a request.
+    let stranger = admin(&[
+        "reply",
+        "--request",
+        &request_id,
+        "--from",
+        &asker,
+        "--kind",
+        "result",
+        "--text",
+        "x",
+    ]);
+    assert_eq!(
+        (stranger.0, stranger.2.as_str()),
+        (
+            4,
+            format!(
+                "clarp-admin reply: request {request_id} was not sent to {asker}; nothing was delivered\n"
+            )
+            .as_str()
+        )
+    );
+
+    // An update is a message to the asker. The goal keeps waiting, and the same update
+    // sent again is the same message.
+    let update = [
+        "reply",
+        "--request",
+        &request_id,
+        "--from",
+        &worker,
+        "--kind",
+        "progress",
+        "--text",
+        "half done",
+    ];
+    let (code, out, err) = admin(&update);
+    assert_eq!(code, 0, "{err}");
+    let said: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&said["via"], &said["to"], &said["kind"]),
+        (&json!("message"), &json!(asker), &json!("progress"))
+    );
+    let progress = format!(
+        "[Reply to request {request_id} from Worker ({worker}): progress. The request is still open"
+    );
+    wait_for("the asker to hear of the progress", || {
+        told(&asker, &progress) == 1
+    });
+    assert_eq!(admin(&update).0, 0);
+    wait_for("the asker's turn to be over", || {
+        host.state(&asker) == "done"
+    });
+    assert_eq!(told(&asker, &progress), 1);
+    assert_eq!(
+        goal(&host, &dir, &["get", &plan_id])["goal"]["continuation"]["state"],
+        "waiting"
+    );
+
+    // The result is what the goal waited for: the goal takes it, and its owner is woken
+    // with it.
+    let (code, out, err) = admin(&[
+        "reply",
+        "--request",
+        &request_id,
+        "--from",
+        &worker,
+        "--kind",
+        "result",
+        "--text",
+        "Live: the log is at the new route.",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let said: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(said["via"], format!("goal {plan_id}"));
+    wait_for("the asker to be woken with the answer", || {
+        host.conversation(&asker).iter().any(|(role, text)| {
+            role == "user"
+                && text.starts_with("Continue your durable outcome commitment.")
+                && text.contains("Live: the log is at the new route.")
+        })
+    });
+    // The same result again is known to be there already.
+    let (code, out, _) = admin(&[
+        "reply",
+        "--request",
+        &request_id,
+        "--from",
+        &worker,
+        "--kind",
+        "result",
+        "--text",
+        "Live: the log is at the new route.",
+    ]);
+    let said: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(code, 0);
+    assert_eq!(said["via"], format!("goal {plan_id} (already recorded)"));
+
+    // Without a goal a request is a message, and so is its answer.
+    let (code, out, err) = admin(&[
+        "request",
+        "--to",
+        &worker,
+        "--from",
+        &asker,
+        "--text",
+        "and the docs?",
+    ]);
+    assert_eq!(code, 0);
+    assert!(err.contains("no goal waits on it"), "{err}");
+    let second = serde_json::from_str::<Value>(&out).unwrap()["request_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(sent["goal"].is_string() && second != request_id);
+    wait_for("the worker to be asked again", || {
+        told(&worker, &format!("[Request {second} from Asker")) == 1
+    });
+    let (code, out, err) = admin(&[
+        "reply",
+        "--request",
+        &second,
+        "--from",
+        &worker,
+        "--kind",
+        "result",
+        "--text",
+        "The docs are written.",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&out).unwrap()["via"],
+        "message"
+    );
+    wait_for("the asker to be told the second answer", || {
+        told(
+            &asker,
+            &format!("[Reply to request {second} from Worker ({worker}): result.]"),
+        ) == 1
+    });
+}
+
 /// Pairs a device with this Host. Answers the device's token and its id.
 fn pair(host: &Host, name: &str, scope: &str) -> (String, String) {
     let issued = host.post(

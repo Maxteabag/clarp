@@ -1,0 +1,1266 @@
+{
+ "about": "Written by server-rs/tools/request-vectors.py from server/lib/peer_requests.py. Do not edit by hand.",
+ "limits": {
+  "kinds": [
+   "result",
+   "blocked",
+   "progress"
+  ],
+  "max_updates": 5,
+  "max_deadline_s": 2592000,
+  "default_deadline_s": 21600,
+  "max_evidence": 8000,
+  "not_delivered": "was not delivered"
+ },
+ "requests": [
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Request r0123456789ab from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "Two\nlines",
+   "said": "[Request r0123456789ab from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nTwo\nlines",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "",
+   "said": "[Request r0123456789ab from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "  padded  ",
+   "said": "[Request r0123456789ab from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n  padded  ",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Request r0123456789ab from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "Two\nlines",
+   "said": "[Request r0123456789ab from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nTwo\nlines",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "",
+   "said": "[Request r0123456789ab from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "  padded  ",
+   "said": "[Request r0123456789ab from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n  padded  ",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Request r0123456789ab from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "Two\nlines",
+   "said": "[Request r0123456789ab from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nTwo\nlines",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "",
+   "said": "[Request r0123456789ab from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "  padded  ",
+   "said": "[Request r0123456789ab from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request r0123456789ab --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n  padded  ",
+   "client_id": "peer-req-r0123456789ab",
+   "dependency": "peer:r0123456789ab"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Request rffffffffffff from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "Two\nlines",
+   "said": "[Request rffffffffffff from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nTwo\nlines",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "",
+   "said": "[Request rffffffffffff from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "text": "  padded  ",
+   "said": "[Request rffffffffffff from Vera (vera). Your answers in your own chat do not reach Vera. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n  padded  ",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Request rffffffffffff from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "Two\nlines",
+   "said": "[Request rffffffffffff from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nTwo\nlines",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "",
+   "said": "[Request rffffffffffff from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "text": "  padded  ",
+   "said": "[Request rffffffffffff from Omar the Second (omar-2). Your answers in your own chat do not reach Omar the Second. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n  padded  ",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Request rffffffffffff from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "Two\nlines",
+   "said": "[Request rffffffffffff from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\nTwo\nlines",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "",
+   "said": "[Request rffffffffffff from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "requester": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "text": "  padded  ",
+   "said": "[Request rffffffffffff from Ünïcödé (u). Your answers in your own chat do not reach Ünïcödé. When you have the result, or are blocked (for example waiting for an approval), say so with: clarp-admin reply --request rffffffffffff --from <your session> --kind result|blocked|progress --text '...'. No acknowledgement is needed.]\n\n  padded  ",
+   "client_id": "peer-req-rffffffffffff",
+   "dependency": "peer:rffffffffffff"
+  }
+ ],
+ "replies": [
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Vera (vera): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-d4bacf821554"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Vera (vera): result.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): result.]\n\nTwo\nlines",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-0b7e9d033467"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Vera (vera): result.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): result.]\n\n",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-d765e0d6f522"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Vera (vera): result.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): result.]\n\n  padded  ",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-2712cf9c75da"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-blocked-r0123456789ab-6a9d0f22fc8f",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-6a9d0f22fc8f"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-blocked-r0123456789ab-dc6768bdcc5a",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-dc6768bdcc5a"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-blocked-r0123456789ab-bf12eb69396b",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-bf12eb69396b"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-blocked-r0123456789ab-37a4b2c33088",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-37a4b2c33088"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-progress-r0123456789ab-83fa0fc5c1c3",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-83fa0fc5c1c3"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-progress-r0123456789ab-8b7e536457f3",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-8b7e536457f3"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-progress-r0123456789ab-5a1aebe37580",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-5a1aebe37580"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-progress-r0123456789ab-9cf25a19d262",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-9cf25a19d262"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-d4bacf821554"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\nTwo\nlines",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-0b7e9d033467"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\n",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-d765e0d6f522"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): result.]\n\n  padded  ",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-2712cf9c75da"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-blocked-r0123456789ab-6a9d0f22fc8f",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-6a9d0f22fc8f"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-blocked-r0123456789ab-dc6768bdcc5a",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-dc6768bdcc5a"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-blocked-r0123456789ab-bf12eb69396b",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-bf12eb69396b"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-blocked-r0123456789ab-37a4b2c33088",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-37a4b2c33088"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-progress-r0123456789ab-83fa0fc5c1c3",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-83fa0fc5c1c3"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-progress-r0123456789ab-8b7e536457f3",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-8b7e536457f3"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-progress-r0123456789ab-5a1aebe37580",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-5a1aebe37580"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-progress-r0123456789ab-9cf25a19d262",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-9cf25a19d262"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-d4bacf821554"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\nTwo\nlines",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-0b7e9d033467"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\n",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-d765e0d6f522"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): result.]\n\n  padded  ",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-2712cf9c75da"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-blocked-r0123456789ab-6a9d0f22fc8f",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-6a9d0f22fc8f"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-blocked-r0123456789ab-dc6768bdcc5a",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-dc6768bdcc5a"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-blocked-r0123456789ab-bf12eb69396b",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-bf12eb69396b"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-blocked-r0123456789ab-37a4b2c33088",
+   "client_id_when_another_came_first": "peer-blocked-r0123456789ab-37a4b2c33088"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-progress-r0123456789ab-83fa0fc5c1c3",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-83fa0fc5c1c3"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "Two\nlines",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-progress-r0123456789ab-8b7e536457f3",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-8b7e536457f3"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-progress-r0123456789ab-5a1aebe37580",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-5a1aebe37580"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "  padded  ",
+   "said": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request r0123456789ab from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-progress-r0123456789ab-9cf25a19d262",
+   "client_id_when_another_came_first": "peer-progress-r0123456789ab-9cf25a19d262"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Vera (vera): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-d4bacf821554"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Vera (vera): result.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): result.]\n\nTwo\nlines",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-0b7e9d033467"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Vera (vera): result.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): result.]\n\n",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-d765e0d6f522"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Vera (vera): result.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): result.]\n\n  padded  ",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-2712cf9c75da"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-blocked-rffffffffffff-6a9d0f22fc8f",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-6a9d0f22fc8f"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-blocked-rffffffffffff-dc6768bdcc5a",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-dc6768bdcc5a"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-blocked-rffffffffffff-bf12eb69396b",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-bf12eb69396b"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "blocked",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-blocked-rffffffffffff-37a4b2c33088",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-37a4b2c33088"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-progress-rffffffffffff-83fa0fc5c1c3",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-83fa0fc5c1c3"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-progress-rffffffffffff-8b7e536457f3",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-8b7e536457f3"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-progress-rffffffffffff-5a1aebe37580",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-5a1aebe37580"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "progress",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Vera (vera): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-progress-rffffffffffff-9cf25a19d262",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-9cf25a19d262"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-d4bacf821554"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\nTwo\nlines",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-0b7e9d033467"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\n",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-d765e0d6f522"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "result",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): result.]\n\n  padded  ",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-2712cf9c75da"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-blocked-rffffffffffff-6a9d0f22fc8f",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-6a9d0f22fc8f"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-blocked-rffffffffffff-dc6768bdcc5a",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-dc6768bdcc5a"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-blocked-rffffffffffff-bf12eb69396b",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-bf12eb69396b"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "blocked",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-blocked-rffffffffffff-37a4b2c33088",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-37a4b2c33088"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-progress-rffffffffffff-83fa0fc5c1c3",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-83fa0fc5c1c3"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-progress-rffffffffffff-8b7e536457f3",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-8b7e536457f3"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-progress-rffffffffffff-5a1aebe37580",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-5a1aebe37580"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Omar the Second",
+    "session": "omar-2"
+   },
+   "kind": "progress",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Omar the Second (omar-2): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-progress-rffffffffffff-9cf25a19d262",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-9cf25a19d262"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-d4bacf821554"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\nTwo\nlines",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-0b7e9d033467"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\n",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-d765e0d6f522"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "result",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): result.]\n\n  padded  ",
+   "client_id": "peer-res-rffffffffffff",
+   "client_id_when_another_came_first": "peer-res-rffffffffffff-2712cf9c75da"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-blocked-rffffffffffff-6a9d0f22fc8f",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-6a9d0f22fc8f"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-blocked-rffffffffffff-dc6768bdcc5a",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-dc6768bdcc5a"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-blocked-rffffffffffff-bf12eb69396b",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-bf12eb69396b"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "blocked",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): blocked. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-blocked-rffffffffffff-37a4b2c33088",
+   "client_id_when_another_came_first": "peer-blocked-rffffffffffff-37a4b2c33088"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "Please add an event log to forms; tell me when it is live.",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nPlease add an event log to forms; tell me when it is live.",
+   "client_id": "peer-progress-rffffffffffff-83fa0fc5c1c3",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-83fa0fc5c1c3"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "Two\nlines",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\nTwo\nlines",
+   "client_id": "peer-progress-rffffffffffff-8b7e536457f3",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-8b7e536457f3"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n",
+   "client_id": "peer-progress-rffffffffffff-5a1aebe37580",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-5a1aebe37580"
+  },
+  {
+   "request_id": "rffffffffffff",
+   "replier": {
+    "persona": "Ünïcödé",
+    "session": "u"
+   },
+   "kind": "progress",
+   "text": "  padded  ",
+   "said": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "evidence": "[Reply to request rffffffffffff from Ünïcödé (u): progress. The request is still open; its result will follow. No reply is needed.]\n\n  padded  ",
+   "client_id": "peer-progress-rffffffffffff-9cf25a19d262",
+   "client_id_when_another_came_first": "peer-progress-rffffffffffff-9cf25a19d262"
+  },
+  {
+   "request_id": "r0123456789ab",
+   "replier": {
+    "persona": "Vera",
+    "session": "vera"
+   },
+   "kind": "result",
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "said": "[Reply to request r0123456789ab from Vera (vera): result.]\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "evidence": "[Reply to request r0123456789ab from Vera (vera): result.]\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "client_id": "peer-res-r0123456789ab",
+   "client_id_when_another_came_first": "peer-res-r0123456789ab-aa8c9b376a05"
+  }
+ ],
+ "ids": [
+  {
+   "given": "r0123456789ab",
+   "is_one": true
+  },
+  {
+   "given": "r0123456789AB",
+   "is_one": false
+  },
+  {
+   "given": "r0123456789a",
+   "is_one": false
+  },
+  {
+   "given": "r0123456789abc",
+   "is_one": false
+  },
+  {
+   "given": "x0123456789ab",
+   "is_one": false
+  },
+  {
+   "given": "",
+   "is_one": false
+  },
+  {
+   "given": "r0123456789ab\n",
+   "is_one": false
+  },
+  {
+   "given": " r0123456789ab",
+   "is_one": false
+  }
+ ]
+}

@@ -16,5 +16,6 @@ pub mod notify;
 pub mod presence;
 pub mod push;
 pub mod python;
+pub mod requests;
 pub mod tools;
 pub mod turn;
