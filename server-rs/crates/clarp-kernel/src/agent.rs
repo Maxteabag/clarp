@@ -46,6 +46,9 @@ pub enum Command {
     Stop { by: String },
     /// Let the mailbox run again.
     Resume { by: String },
+    /// The agent says, in a few words, what it is busy with beyond its turns: work it left
+    /// running. An empty label takes that back.
+    Label { text: String },
     /// The shim: the tool process is up.
     TurnStarted { turn: TurnId },
     /// The shim: the tool process could not be started.
@@ -86,6 +89,11 @@ pub enum AgentEvent {
     },
     Resumed {
         by: String,
+        at_ms: i64,
+    },
+    /// The agent's own label for what it is busy with beyond its turns. Empty: none any more.
+    Labelled {
+        text: String,
         at_ms: i64,
     },
     /// The agent was taken over from another Host. Its next turn continues the tool's session
@@ -159,6 +167,19 @@ pub struct Agent {
     last: Option<Settled>,
     /// The tool's own session, as the tool last named it: where the next turn continues.
     backend_session: Option<String>,
+    /// What the agent says it is busy with beyond its turns. Empty: nothing.
+    label: String,
+    /// What the agent rests in since it last said so, until its next turn starts.
+    resting: Option<Rest>,
+}
+
+/// What an agent that runs no turn rests in, when it has said so itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rest {
+    /// Work it left running goes on in the background.
+    Background,
+    /// It took its label back: nothing goes on.
+    Idle,
 }
 
 impl Default for Agent {
@@ -175,6 +196,8 @@ impl Default for Agent {
             unheld: BTreeSet::new(),
             last: None,
             backend_session: None,
+            label: String::new(),
+            resting: None,
         }
     }
 }
@@ -215,6 +238,16 @@ impl Agent {
     /// The tool's own session, where the agent's next turn continues.
     pub fn backend_session(&self) -> Option<&str> {
         self.backend_session.as_deref()
+    }
+
+    /// What the agent says it is busy with beyond its turns. Empty: nothing.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// What the agent rests in since it last said so. `None` once a turn has started since.
+    pub fn resting(&self) -> Option<Rest> {
+        self.resting
     }
 
     /// The number the next accepted message's turn will have.
@@ -318,6 +351,12 @@ impl Agent {
                     return Err(Refusal::NotPaused);
                 }
                 work.record(AgentEvent::Resumed { by, at_ms: now_ms });
+            }
+            Command::Label { text } => {
+                work.record(AgentEvent::Labelled {
+                    text,
+                    at_ms: now_ms,
+                });
             }
             Command::Adopt {
                 from,
@@ -433,6 +472,14 @@ impl Agent {
             AgentEvent::Adopted {
                 backend_session, ..
             } => self.backend_session.clone_from(backend_session),
+            AgentEvent::Labelled { text, .. } => {
+                self.resting = Some(if text.is_empty() {
+                    Rest::Idle
+                } else {
+                    Rest::Background
+                });
+                self.label.clone_from(text);
+            }
             AgentEvent::Turn { turn, change } => self.apply_turn(*turn, change)?,
         }
         Ok(())
@@ -518,7 +565,11 @@ impl Agent {
         self.unheld.remove(&turn);
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(_) => self.settled += 1,
-            next => self.live = Some(next),
+            next => {
+                self.live = Some(next);
+                // A turn runs: what the agent rested in before is over.
+                self.resting = None;
+            }
         }
         Ok(())
     }
@@ -1036,6 +1087,36 @@ mod tests {
             }),
             Err(Refusal::NotPaused)
         );
+    }
+
+    #[test]
+    fn an_agent_says_what_it_is_busy_with_beyond_its_turns() {
+        let mut a = Driven::new();
+        a.user(10);
+        // In its turn it says that it left something running.
+        a.send(Command::Label {
+            text: "Building".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            (a.agent.label(), a.agent.resting()),
+            ("Building", Some(Rest::Background))
+        );
+        a.finish(1);
+        assert_eq!(
+            a.agent.resting(),
+            Some(Rest::Background),
+            "the turn is over and the work goes on"
+        );
+        // Its next turn is a turn like any other; the label stays until it is taken back.
+        a.user(11);
+        assert_eq!((a.agent.label(), a.agent.resting()), ("Building", None));
+        a.send(Command::Label {
+            text: String::new(),
+        })
+        .unwrap();
+        a.finish(2);
+        assert_eq!((a.agent.label(), a.agent.resting()), ("", Some(Rest::Idle)));
     }
 
     #[test]

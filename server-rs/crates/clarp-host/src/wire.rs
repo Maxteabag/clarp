@@ -7,6 +7,7 @@
 
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{LiveStatus, Status};
+use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::jobs::{Job, JobRecord, LOST_REASONS};
 use clarp_kernel::turn::{Activity, Origin, Outcome};
@@ -82,6 +83,9 @@ pub fn state_kind(status: &Status) -> AgentStateKind {
             Activity::Waiting => AgentStateKind::Waiting,
             Activity::Compacting => AgentStateKind::Compacting,
         },
+        // It said so itself: work it left running goes on, or no longer does.
+        (None, _) if status.resting == Some(Rest::Background) => AgentStateKind::Background,
+        (None, _) if status.resting == Some(Rest::Idle) => AgentStateKind::Idle,
         // An agent that came from another Host with its conversation, and has not run here yet.
         (None, None) if status.head_revision > 0 => AgentStateKind::Idle,
         // An agent that has never run a turn. The Python Host calls it `spawned`.
@@ -232,7 +236,7 @@ pub fn state(
         "kind": state_name(&kind),
         "ts": state_since(record, status),
         "detail": detail,
-        "status_text": "",
+        "status_text": status.label,
     })
 }
 
@@ -830,7 +834,7 @@ pub fn summary(
         "turn_started_at": turn_started_at,
         "last_activity": since / 1_000,
         "last_turn_end": completed.map_or(0, |last| last.ended_at_ms / 1_000),
-        "status_text": null,
+        "status_text": (!status.label.is_empty()).then_some(&status.label),
         "activity": activity(record, status),
         "live_activity": live_activity,
         "compacting": kind == AgentStateKind::Compacting,
@@ -936,6 +940,8 @@ mod tests {
             queue_revision: 7,
             head_revision: 42,
             backend_session: Some("sess-1".to_string()),
+            label: String::new(),
+            resting: None,
         }
     }
 

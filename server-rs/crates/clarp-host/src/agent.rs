@@ -106,6 +106,11 @@ pub enum Ask {
         limit: usize,
         answer: Answer<Option<Page>>,
     },
+    /// The agent's own label for what it is busy with beyond its turns. Empty takes it back.
+    Label {
+        text: String,
+        answer: Answer<()>,
+    },
     /// Something asked of one of the agent's background jobs. The inner error is a command
     /// that makes no sense.
     Job {
@@ -239,6 +244,11 @@ impl AgentHandle {
         self.ask(|answer| Ask::Before { id, limit, answer }).await
     }
 
+    /// Sets the agent's own label for what it is busy with beyond its turns.
+    pub async fn label(&self, text: String) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Label { text, answer }).await
+    }
+
     /// Asks something of one of the agent's background jobs.
     pub async fn job(
         &self,
@@ -278,6 +288,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         queue_revision: 0,
         head_revision: 0,
         backend_session: None,
+        label: String::new(),
+        resting: None,
     };
     let (view_tx, view) = watch::channel(Arc::new(View {
         status: idle,
@@ -483,6 +495,9 @@ impl Worker {
                 answer,
             } => return read(actor.after(revision, limit), answer),
             Ask::Before { id, limit, answer } => return read(actor.before(&id, limit), answer),
+            Ask::Label { text, answer } => {
+                answered(actor.label(&text, now).map(|out| ((), out)), answer)?
+            }
             Ask::Job { command, answer } => {
                 let revision = self.setup.revisions.next(now);
                 answered(actor.job(command, now, revision), answer)?
@@ -768,7 +783,7 @@ impl Worker {
 
 /// What a client is shown as an agent's state: which turn runs and what it does, or which
 /// turn ended last. A change in any of it is told.
-fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>) {
+fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>, String) {
     let live = status.live.as_ref();
     let tool = match live.map(|live| &live.activity) {
         Some(Activity::Tool { name }) => name.clone(),
@@ -779,6 +794,7 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
         wire::state_name(&wire::state_kind(status)),
         tool,
         status.last.as_ref().map(|last| last.id),
+        status.label.clone(),
     )
 }
 
@@ -840,6 +856,7 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
                 drop(answer.send(Err(refusal())));
             }
             Ok(Ask::Before { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}

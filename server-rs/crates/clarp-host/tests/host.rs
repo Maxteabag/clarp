@@ -787,6 +787,34 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
     );
     assert_eq!(tool(&host, &dir, None, &["clarp-agent-bg", &session]).0, 2);
 
+    // The agent says what it left running: shown with it while it rests, in a few words.
+    let row = |host: &Host| host.get("/agents/snapshot")["agents"][0].clone();
+    let on = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-agent-bg",
+            &session,
+            "on",
+            "Watching the long build go by",
+        ],
+    );
+    assert_eq!(
+        (on.0, on.2.as_str()),
+        (0, "agent_bg: shortened status to 'Watching the long'\n")
+    );
+    wait_for("the label to show", || {
+        row(&host)["status_text"] == "Watching the long"
+    });
+    assert_eq!(row(&host)["latest_state"], "background");
+    assert_eq!(
+        tool(&host, &dir, None, &["clarp-agent-bg", &session, "off"]).0,
+        0
+    );
+    wait_for("the label to go", || row(&host)["status_text"].is_null());
+    assert_eq!(row(&host)["latest_state"], "idle");
+
     // A tool this Host does not have yet says so, and does nothing.
     let absent = tool(&host, &dir, None, &["clarp-goal", "get", "some-plan"]);
     assert_eq!(absent.0, 69);

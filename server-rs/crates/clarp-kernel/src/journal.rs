@@ -163,7 +163,10 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     let mut item = NewItem::new(kind::AGENT_EVENT, ts_ms, body);
     item.turn = match event {
         AgentEvent::Turn { turn, .. } | AgentEvent::StopRequested { turn, .. } => Some(turn.0),
-        AgentEvent::Paused { .. } | AgentEvent::Resumed { .. } | AgentEvent::Adopted { .. } => None,
+        AgentEvent::Paused { .. }
+        | AgentEvent::Resumed { .. }
+        | AgentEvent::Adopted { .. }
+        | AgentEvent::Labelled { .. } => None,
     };
     Ok(item)
 }
