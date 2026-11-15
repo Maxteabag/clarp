@@ -14,6 +14,7 @@
 
 pub mod admin;
 pub mod agent;
+pub mod artifact_tool;
 pub mod config;
 pub mod edge;
 pub mod fleet;

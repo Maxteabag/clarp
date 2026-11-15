@@ -1,0 +1,643 @@
+//! `clarp-agent-artifacts`: an agent's own tool for what it makes and what it asks.
+//!
+//! The command line is the Python Host's `scripts/agent_artifacts.py`, argument for argument:
+//! skills call it by name. There the tool is a client of the Host's routes; here the Host
+//! answers it from the same functions its routes call ([`crate::library`]), so the tool and
+//! the routes cannot disagree.
+//!
+//! One thing it says more than the Python tool: when the Host refuses, the Python tool
+//! prints the status alone ("HTTP Error 409: Conflict"); this one adds why.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde_json::{Map, Value, json};
+
+use crate::edge::{ApiError, App};
+use crate::library;
+use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
+
+const USAGE: &str = "usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | \
+create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID | \
+create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | \
+form-events ARTIFACT_ID [--draft-key KEY] [--after N] [--limit N] [--output JSONL] [--overwrite] | \
+report-history ARTIFACT_ID [--version V] [--limit N] [--offset N] | \
+decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | \
+question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | \
+input SESSION TITLE PROMPT [--hint one_time_code] [--expires-in S] [OPTIONS] | \
+wait ARTIFACT_ID [--timeout S] | \
+attention [--session SESSION] [--include-archived] | withdraw SESSION DECISION_ID | \
+answer-on-behalf SESSION DECISION_ID EXPECTED_REVISION JSON_BODY | \
+update ARTIFACT_ID STATUS [JSON_PAYLOAD] | progress ARTIFACT_ID VALUE [CONTENT] | list SESSION";
+
+/// What the options every request to the user takes are called.
+const ASK_VALUED: [&str; 7] = [
+    "--context",
+    "--reference",
+    "--priority-reason",
+    "--urgency",
+    "--effort",
+    "--deadline-at",
+    "--expires-at",
+];
+
+/// A command line as it was read: what stands for itself, and what was said with a name.
+#[derive(Debug, Default, PartialEq)]
+struct Parsed {
+    positional: Vec<String>,
+    options: BTreeMap<String, String>,
+    flags: BTreeSet<String>,
+}
+
+impl Parsed {
+    fn option(&self, name: &str) -> Option<&str> {
+        self.options.get(name).map(String::as_str)
+    }
+
+    /// An option that has to be one of a few words.
+    fn choice(&self, name: &str, among: &[&str], otherwise: &str) -> Result<String, String> {
+        let given = self.option(name).unwrap_or(otherwise);
+        if among.contains(&given) {
+            return Ok(given.to_string());
+        }
+        let known: Vec<String> = among.iter().map(|word| format!("'{word}'")).collect();
+        Err(format!(
+            "argument {name}: invalid choice: '{given}' (choose from {})",
+            known.join(", ")
+        ))
+    }
+
+    /// An option that has to be a whole number.
+    fn whole(&self, name: &str) -> Result<Option<i64>, String> {
+        match self.option(name) {
+            None => Ok(None),
+            Some(given) => given
+                .trim()
+                .parse()
+                .map(Some)
+                .map_err(|_| format!("argument {name}: invalid int value: '{given}'")),
+        }
+    }
+}
+
+/// Reads a command line: options with a value, flags, and everything else in its order.
+/// `names` are what the things that stand for themselves are called, the ones that may be
+/// left out in brackets.
+fn parse(
+    args: &[String],
+    valued: &[&str],
+    flags: &[&str],
+    names: &[&str],
+) -> Result<Parsed, String> {
+    let mut parsed = Parsed::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let (name, attached) = match arg.split_once('=') {
+            Some((name, value)) if name.starts_with("--") => (name, Some(value.to_string())),
+            _ => (arg.as_str(), None),
+        };
+        if valued.contains(&name) {
+            let Some(value) = attached.or_else(|| args.next().cloned()) else {
+                return Err(format!("argument {name}: expected one argument"));
+            };
+            parsed.options.insert(name.to_string(), value);
+        } else if flags.contains(&name) && attached.is_none() {
+            parsed.flags.insert(name.to_string());
+        } else if arg.starts_with("--") {
+            return Err(format!("unrecognized arguments: {arg}"));
+        } else {
+            parsed.positional.push(arg.clone());
+        }
+    }
+    let required: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| !name.starts_with('['))
+        .collect();
+    if parsed.positional.len() < required.len() {
+        let missing = &required[parsed.positional.len()..];
+        return Err(format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        ));
+    }
+    if parsed.positional.len() > names.len() {
+        let extra = &parsed.positional[names.len()..];
+        return Err(format!("unrecognized arguments: {}", extra.join(" ")));
+    }
+    Ok(parsed)
+}
+
+/// A refusal of the Host as the tool says it: the status as the Python tool prints it, and
+/// why.
+fn refusal(error: &ApiError) -> String {
+    let status = error.status();
+    format!(
+        "HTTP Error {}: {}: {}",
+        status.as_u16(),
+        status.canonical_reason().unwrap_or("Error"),
+        error.message()
+    )
+}
+
+fn json_object(given: &str, what: &str) -> Result<Map<String, Value>, String> {
+    match serde_json::from_str(given).map_err(|error| error.to_string())? {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(format!("{what} must be a JSON object")),
+    }
+}
+
+/// The options of a question as the tool checks them before it asks.
+fn question_options(given: &str) -> Result<(Vec<Value>, Vec<String>), String> {
+    let options: Value = serde_json::from_str(given).map_err(|error| error.to_string())?;
+    let Some(list) = options
+        .as_array()
+        .filter(|list| (2..=3).contains(&list.len()))
+    else {
+        return Err("questions require two or three options".to_string());
+    };
+    let mut normalized = Vec::new();
+    let mut ids: Vec<String> = Vec::new();
+    for option in list {
+        let known = |key: &String| matches!(key.as_str(), "id" | "label" | "description");
+        let Some(fields) = option.as_object().filter(|fields| fields.keys().all(known)) else {
+            return Err("each option must contain id, label and optional description".to_string());
+        };
+        let mut entry = Map::new();
+        for key in ["id", "label", "description"] {
+            let none = json!("");
+            let value = fields.get(key).unwrap_or(&none).as_str();
+            let Some(value) =
+                value.filter(|value| key == "description" || !value.trim().is_empty())
+            else {
+                return Err("each option needs nonempty string id and label".to_string());
+            };
+            entry.insert(key.to_string(), json!(value.trim()));
+        }
+        let id = entry["id"].as_str().unwrap_or("").to_string();
+        if ids.contains(&id) {
+            return Err("option IDs must be unique".to_string());
+        }
+        ids.push(id);
+        normalized.push(Value::Object(entry));
+    }
+    Ok((normalized, ids))
+}
+
+/// `decision`, `question` and `input`: what is asked of the user, as a body for the Host.
+fn ask_body(cmd: &str, args: &[String], now_ms: i64) -> Result<(Map<String, Value>, bool), String> {
+    let mut valued: Vec<&str> = ASK_VALUED.to_vec();
+    valued.push("--expires-in");
+    let names: &[&str] = match cmd {
+        "decision" => &[
+            "session",
+            "title",
+            "question",
+            "yes_label",
+            "no_label",
+            "[payload_json]",
+        ],
+        "input" => {
+            valued.extend(["--hint", "--payload"]);
+            &["session", "title", "question"]
+        }
+        _ => {
+            valued.extend(["--recommend", "--payload"]);
+            &["session", "title", "question", "options_json"]
+        }
+    };
+    let parsed = parse(args, &valued, &["--blocks-progress", "--dry-run"], names)?;
+    let at = |index: usize| parsed.positional.get(index).map_or("", String::as_str);
+    let payload_json = match cmd {
+        "decision" => parsed.positional.get(5).map_or("{}", String::as_str),
+        _ => parsed.option("--payload").unwrap_or("{}"),
+    };
+    let hint = parsed.choice("--hint", &["text", "one_time_code"], "text")?;
+    let urgency = parsed.choice("--urgency", &["normal", "time_sensitive"], "normal")?;
+    let effort = parsed.choice("--effort", &["quick", "short", "review"], "review")?;
+    let deadline_at = parsed.whole("--deadline-at")?;
+    let mut expires_at = parsed.whole("--expires-at")?;
+    let expires_in = parsed.whole("--expires-in")?;
+    let payload = json_object(payload_json, "payload")?;
+    if at(2).trim().is_empty() {
+        return Err("question must not be blank".to_string());
+    }
+    let blocks_progress = parsed.flags.contains("--blocks-progress");
+    let priority_reason = parsed.option("--priority-reason").unwrap_or("");
+    if (blocks_progress || urgency != "normal") && priority_reason.trim().is_empty() {
+        return Err("blocking or time-sensitive requests require --priority-reason".to_string());
+    }
+    let mut body = Map::new();
+    for (key, value) in [
+        ("session", json!(at(0))),
+        ("title", json!(at(1))),
+        ("question", json!(at(2))),
+        ("payload", Value::Object(payload)),
+        ("context", json!(parsed.option("--context").unwrap_or(""))),
+        (
+            "reference_id",
+            json!(parsed.option("--reference").unwrap_or("")),
+        ),
+        ("blocks_progress", json!(blocks_progress)),
+        ("priority_reason", json!(priority_reason)),
+        ("urgency", json!(urgency)),
+        ("response_effort", json!(effort)),
+    ] {
+        body.insert(key.to_string(), value);
+    }
+    if let Some(seconds) = expires_in {
+        if expires_at.is_some() {
+            return Err("use --expires-in or --expires-at, not both".to_string());
+        }
+        if seconds <= 0 {
+            return Err("--expires-in must be positive seconds".to_string());
+        }
+        expires_at = Some(now_ms + seconds * 1_000);
+    }
+    for (key, value) in [("deadline_at", deadline_at), ("expires_at", expires_at)] {
+        if let Some(value) = value {
+            if value <= 0 {
+                return Err(format!("{key} must be positive epoch milliseconds"));
+            }
+            body.insert(key.to_string(), json!(value));
+        }
+    }
+    match cmd {
+        "decision" => {
+            body.insert("yes_label".to_string(), json!(at(3)));
+            body.insert("no_label".to_string(), json!(at(4)));
+        }
+        "input" => {
+            body.insert("response_type".to_string(), json!("text_input"));
+            body.insert("input_hint".to_string(), json!(hint));
+        }
+        _ => {
+            let (options, ids) = question_options(at(3))?;
+            let recommended = parsed.option("--recommend");
+            if recommended.is_some_and(|id| !ids.iter().any(|known| known == id)) {
+                return Err("--recommend must identify an existing option".to_string());
+            }
+            body.insert("response_type".to_string(), json!("single_choice"));
+            body.insert("options".to_string(), json!(options));
+            body.insert("allow_custom_text".to_string(), json!(true));
+            body.insert("recommended_option_id".to_string(), json!(recommended));
+        }
+    }
+    Ok((body, parsed.flags.contains("--dry-run")))
+}
+
+/// `wait ARTIFACT_ID [--timeout S] [--interval F]`: how the request on an artifact ended,
+/// once it has. While it has not, the tool is told to ask again in a moment, until its
+/// time is up: exit 0 for an answer, 3 for an end without one, 4 for time up.
+fn wait(app: &App, args: &[String], call: &ToolCall) -> Result<ToolAnswer, String> {
+    let parsed = parse(args, &["--timeout", "--interval"], &[], &["artifact_id"])?;
+    let artifact_id = parsed.positional[0].clone();
+    let timeout = parsed.whole("--timeout")?.unwrap_or(600).max(1);
+    let interval: f64 = match parsed.option("--interval") {
+        None => 2.0,
+        Some(given) => given
+            .trim()
+            .parse()
+            .map_err(|_| format!("argument --interval: invalid float value: '{given}'"))?,
+    };
+    let Some(artifact) = library::find(app, &artifact_id) else {
+        return Err("HTTP Error 404: Not Found: artifact not found".to_string());
+    };
+    let decision = &artifact["decision"];
+    let status = decision["status"].as_str().unwrap_or("");
+    if !status.is_empty() && status != "pending" {
+        let outcome = json!({
+            "status": status,
+            "answer": decision["answer"],
+            "resolved_choice": decision["resolved_choice"],
+            "decision_id": decision["decision_id"],
+            "artifact_id": artifact_id,
+        });
+        let answered = matches!(status, "answered" | "accepted" | "rejected");
+        return Ok(ToolAnswer::printed(
+            if answered { 0 } else { 3 },
+            outcome.to_string(),
+        ));
+    }
+    let now = app.clock.now_ms();
+    let started = if call.started_ms > 0 {
+        call.started_ms
+    } else {
+        now
+    };
+    if now >= started + timeout * 1_000 {
+        let pending = json!({ "status": "pending", "timeout": true, "artifact_id": artifact_id });
+        return Ok(ToolAnswer::printed(4, pending.to_string()));
+    }
+    let again_ms = (interval.max(0.5) * 1_000.0) as u64;
+    Ok(ToolAnswer::again(again_ms))
+}
+
+/// Answers the tool.
+pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
+    let failed = |why: String| ToolAnswer::said(1, format!("agent_artifacts: {why}"));
+    let Some((cmd, rest)) = call.argv.split_first() else {
+        return failed("list index out of range".to_string());
+    };
+    let printed = |value: &Value| ToolAnswer::printed(0, value.to_string());
+    let result: Result<Value, String> = match (cmd.as_str(), rest.len()) {
+        ("create-form" | "create-report" | "form-events" | "report-history", _) => {
+            return ToolAnswer::said(
+                NOT_HERE,
+                format!(
+                    "clarp-agent-artifacts {cmd}: not available on this Host yet (the Rust \
+                     Host). Nothing was done."
+                ),
+            );
+        }
+        ("create", 3..=5) => {
+            let payload = match rest.get(4) {
+                Some(given) => serde_json::from_str(given).map_err(|error| error.to_string()),
+                None => Ok(json!({})),
+            };
+            match payload {
+                Err(why) => Err(why),
+                Ok(payload) => {
+                    let body = json!({
+                        "session": rest[0], "type": rest[1], "title": rest[2],
+                        "summary": rest.get(3).map_or("", String::as_str), "payload": payload,
+                    });
+                    let body = body.as_object().cloned().unwrap_or_default();
+                    library::create(app, &body)
+                        .await
+                        .map_err(|error| refusal(&error))
+                }
+            }
+        }
+        ("decision" | "question" | "input", _) => match ask_body(cmd, rest, app.clock.now_ms()) {
+            Err(why) => Err(why),
+            Ok((body, true)) => Ok(json!({ "method": "POST", "path": "/decisions", "body": body })),
+            Ok((body, false)) => library::request(app, &body)
+                .await
+                .map_err(|error| refusal(&error)),
+        },
+        ("wait", _) => match wait(app, rest, call) {
+            Ok(answer) => return answer,
+            Err(why) => Err(why),
+        },
+        ("attention", _) => {
+            parse(rest, &["--session"], &["--include-archived"], &[]).map(|parsed| {
+                let mut inbox =
+                    library::inbox(app, true, parsed.flags.contains("--include-archived"));
+                if let Some(session) = parsed.option("--session") {
+                    let items = inbox["items"].as_array().cloned().unwrap_or_default();
+                    let of_session: Vec<Value> = items
+                        .into_iter()
+                        .filter(|item| item["session"] == session)
+                        .collect();
+                    inbox["count"] = json!(of_session.len());
+                    inbox["items"] = json!(of_session);
+                }
+                inbox
+            })
+        }
+        ("withdraw", 2) => {
+            let body = json!({ "session": rest[0] });
+            let body = body.as_object().cloned().unwrap_or_default();
+            let rest = format!("{}/withdraw", rest[1]);
+            match library::decide(app, &rest, false, &body).await {
+                Ok(done) => Ok(done["artifact"].clone()),
+                Err(error) => Err(refusal(&error)),
+            }
+        }
+        ("answer-on-behalf", _) => {
+            let names = ["session", "decision_id", "expected_revision", "body_json"];
+            parse(rest, &[], &[], &names).and_then(|parsed| {
+                let revision: i64 = parsed.positional[2].trim().parse().map_err(|_| {
+                    let given = &parsed.positional[2];
+                    format!("argument expected_revision: invalid int value: '{given}'")
+                })?;
+                let body = json_object(&parsed.positional[3], "answer body")?;
+                if body.contains_key("choice") == body.contains_key("answer") {
+                    return Err(
+                        "answer body needs exactly one of \"choice\" or \"answer\"".to_string()
+                    );
+                }
+                if revision < 1 {
+                    return Err("expected_revision must be positive".to_string());
+                }
+                Err(
+                    "this Host does not support answering on the user's behalf; relay the \
+                     answer and let the asking agent withdraw its card instead"
+                        .to_string(),
+                )
+            })
+        }
+        ("update", 2..=3) => {
+            let payload = match rest.get(2) {
+                Some(given) => serde_json::from_str::<Value>(given)
+                    .map(Some)
+                    .map_err(|error| error.to_string()),
+                None => Ok(None),
+            };
+            match payload {
+                Err(why) => Err(why),
+                Ok(payload) => {
+                    let mut body = Map::new();
+                    body.insert("status".to_string(), json!(rest[1]));
+                    if let Some(payload) = payload {
+                        body.insert("payload".to_string(), payload);
+                    }
+                    match library::change(app, &rest[0], body).await {
+                        Ok(done) => Ok(done["artifact"].clone()),
+                        Err(error) => Err(refusal(&error)),
+                    }
+                }
+            }
+        }
+        ("progress", 2..=3) => match rest[1].trim().parse::<f64>() {
+            Err(_) => Err(format!("could not convert string to float: '{}'", rest[1])),
+            Ok(progress) => {
+                let mut patch = Map::new();
+                patch.insert("progress".to_string(), json!(progress));
+                if let Some(content) = rest.get(2) {
+                    patch.insert("content".to_string(), json!(content));
+                }
+                let body = json!({ "status": "active", "payload_patch": patch });
+                let body = body.as_object().cloned().unwrap_or_default();
+                match library::change(app, &rest[0], body).await {
+                    Ok(done) => Ok(done["artifact"].clone()),
+                    Err(error) => Err(refusal(&error)),
+                }
+            }
+        },
+        ("list", 1) => Ok(library::of_session(app, &rest[0])),
+        _ => return ToolAnswer::said(2, USAGE),
+    };
+    match result {
+        Ok(value) => printed(&value),
+        Err(why) => failed(why),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn args(given: &[&str]) -> Vec<String> {
+        given.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn a_command_line_is_read_with_its_options_anywhere() {
+        let line = args(&[
+            "vera",
+            "--context",
+            "Why",
+            "Title",
+            "--blocks-progress",
+            "Q?",
+            "--effort=short",
+        ]);
+        let parsed = parse(
+            &line,
+            &["--context", "--effort"],
+            &["--blocks-progress"],
+            &["session", "title", "question", "[payload]"],
+        )
+        .unwrap();
+        assert_eq!(parsed.positional, ["vera", "Title", "Q?"]);
+        assert_eq!(parsed.option("--context"), Some("Why"));
+        assert_eq!(parsed.option("--effort"), Some("short"));
+        assert!(parsed.flags.contains("--blocks-progress"));
+        let names = ["session", "title"];
+        assert_eq!(
+            parse(&args(&["vera"]), &[], &[], &names).unwrap_err(),
+            "the following arguments are required: title"
+        );
+        assert_eq!(
+            parse(&args(&["a", "b", "c"]), &[], &[], &names).unwrap_err(),
+            "unrecognized arguments: c"
+        );
+        assert_eq!(
+            parse(&args(&["a", "b", "--what"]), &[], &[], &names).unwrap_err(),
+            "unrecognized arguments: --what"
+        );
+        assert_eq!(
+            parse(&args(&["a", "b", "--context"]), &["--context"], &[], &names).unwrap_err(),
+            "argument --context: expected one argument"
+        );
+    }
+
+    #[test]
+    fn what_is_asked_becomes_the_body_the_python_tool_sends() {
+        let options = r#"[{"id":"keep","label":"Keep it","description":"Smallest"},{"id":"new","label":" New "}]"#;
+        let line = args(&[
+            "vera",
+            "Choose",
+            "Which one?",
+            options,
+            "--recommend",
+            "keep",
+            "--blocks-progress",
+            "--effort",
+            "short",
+            "--priority-reason",
+            "Nothing else can go on",
+            "--expires-in",
+            "60",
+        ]);
+        let (body, dry) = ask_body("question", &line, 1_000_000).unwrap();
+        assert!(!dry);
+        assert_eq!(
+            Value::Object(body),
+            json!({
+                "session": "vera", "title": "Choose", "question": "Which one?", "payload": {},
+                "context": "", "reference_id": "", "blocks_progress": true,
+                "priority_reason": "Nothing else can go on", "urgency": "normal",
+                "response_effort": "short", "expires_at": 1_060_000,
+                "response_type": "single_choice",
+                "options": [
+                    { "id": "keep", "label": "Keep it", "description": "Smallest" },
+                    { "id": "new", "label": "New", "description": "" },
+                ],
+                "allow_custom_text": true, "recommended_option_id": "keep",
+            })
+        );
+        let line = args(&[
+            "vera",
+            "Deploy?",
+            "Deploy 1.2?",
+            "Deploy",
+            "Hold",
+            r#"{"version":"1.2"}"#,
+            "--dry-run",
+        ]);
+        let (body, dry) = ask_body("decision", &line, 0).unwrap();
+        assert!(dry);
+        assert_eq!(
+            (&body["yes_label"], &body["payload"]),
+            (&json!("Deploy"), &json!({ "version": "1.2" }))
+        );
+        let line = args(&["vera", "Code", "The code?", "--hint", "one_time_code"]);
+        let (body, _) = ask_body("input", &line, 0).unwrap();
+        assert_eq!(
+            (&body["response_type"], &body["input_hint"]),
+            (&json!("text_input"), &json!("one_time_code"))
+        );
+    }
+
+    #[test]
+    fn what_cannot_be_asked_is_said_before_anything_is_sent() {
+        let ask = |cmd: &str, line: &[&str]| ask_body(cmd, &args(line), 1_000).unwrap_err();
+        assert_eq!(
+            ask("decision", &["vera", "T", "  ", "Y", "N"]),
+            "question must not be blank"
+        );
+        assert_eq!(
+            ask(
+                "decision",
+                &["vera", "T", "Q?", "Y", "N", "--blocks-progress"]
+            ),
+            "blocking or time-sensitive requests require --priority-reason"
+        );
+        assert_eq!(
+            ask("decision", &["vera", "T", "Q?", "Y", "N", "[1]"]),
+            "payload must be a JSON object"
+        );
+        assert_eq!(
+            ask(
+                "decision",
+                &["vera", "T", "Q?", "Y", "N", "--urgency", "now"]
+            ),
+            "argument --urgency: invalid choice: 'now' (choose from 'normal', 'time_sensitive')"
+        );
+        assert_eq!(
+            ask(
+                "input",
+                &["vera", "T", "Q?", "--expires-in", "5", "--expires-at", "9"]
+            ),
+            "use --expires-in or --expires-at, not both"
+        );
+        assert_eq!(
+            ask("input", &["vera", "T", "Q?", "--expires-in", "0"]),
+            "--expires-in must be positive seconds"
+        );
+        assert_eq!(
+            ask(
+                "question",
+                &["vera", "T", "Q?", r#"[{"id":"a","label":"A"}]"#]
+            ),
+            "questions require two or three options"
+        );
+        let two = r#"[{"id":"a","label":"A"},{"id":"a","label":"B"}]"#;
+        assert_eq!(
+            ask("question", &["vera", "T", "Q?", two]),
+            "option IDs must be unique"
+        );
+        let ok = r#"[{"id":"a","label":"A"},{"id":"b","label":"B"}]"#;
+        assert_eq!(
+            ask("question", &["vera", "T", "Q?", ok, "--recommend", "c"]),
+            "--recommend must identify an existing option"
+        );
+        assert_eq!(
+            ask("question", &["vera", "T", "Q?"]),
+            "the following arguments are required: options_json"
+        );
+    }
+}

@@ -487,8 +487,13 @@ async fn create_artifact(
     State(app): State<App>,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
-    let data = object(&body)?;
-    let kind = said(&data, "type", "");
+    let artifact = create(&app, &object(&body)?).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "artifact": artifact }))).into_response())
+}
+
+/// Makes an artifact from what a request says. Answers the artifact as it is shown.
+pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value, ApiError> {
+    let kind = said(data, "type", "");
     if matches!(
         kind.trim().to_lowercase().as_str(),
         "decision" | "question" | "plan"
@@ -497,15 +502,15 @@ async fn create_artifact(
     }
     let new = New {
         kind,
-        title: said(&data, "title", ""),
-        summary: said(&data, "summary", ""),
-        status: said(&data, "status", "ready"),
-        reference_id: said(&data, "reference_id", ""),
+        title: said(data, "title", ""),
+        summary: said(data, "summary", ""),
+        status: said(data, "status", "ready"),
+        reference_id: said(data, "reference_id", ""),
         payload: data.get("payload").cloned(),
-        artifact_id: said(&data, "artifact_id", ""),
+        artifact_id: said(data, "artifact_id", ""),
     };
-    let fleet = Fleet::of(&app);
-    let session = said(&data, "session", "");
+    let fleet = Fleet::of(app);
+    let session = said(data, "session", "");
     let Some(member) = app.member(session.trim()) else {
         return Err(conflict(artifacts::create_of_nobody(&new)));
     };
@@ -519,12 +524,7 @@ async fn create_artifact(
         new,
         taken_elsewhere,
     };
-    let done = ask_agent(&member, want).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "artifact": done.artifact })),
-    )
-        .into_response())
+    Ok(ask_agent(&member, want).await?.artifact)
 }
 
 /// `POST /artifacts/<id>` and what a user does with an artifact: `/archive`, `/discard`,
@@ -534,14 +534,24 @@ async fn post_artifact(
     Path(rest): Path<String>,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
+    Ok(Json(change(&app, &rest, object(&body)?).await?))
+}
+
+/// Changes an artifact, or does with it what a user does. `rest` is what follows
+/// `/artifacts/`: the artifact's id, and `/archive`, `/discard` or `/pin` when it is one of
+/// those. Answers the body of the answer.
+pub(crate) async fn change(
+    app: &App,
+    rest: &str,
+    data: Map<String, Value>,
+) -> Result<Value, ApiError> {
     let rest = rest.trim_matches('/');
     let (artifact_id, action) = ["archive", "discard", "pin"]
         .iter()
         .find_map(|action| Some((rest.strip_suffix(&format!("/{action}"))?, *action)))
         .unwrap_or((rest, "update"));
     let artifact_id = artifact_id.trim_matches('/').to_string();
-    let data = object(&body)?;
-    let fleet = Fleet::of(&app);
+    let fleet = Fleet::of(app);
     let missing = || {
         conflict(Refused {
             why: Why::Value,
@@ -595,27 +605,33 @@ async fn post_artifact(
         });
     };
     let done = ask_agent(member, want).await?;
-    Ok(Json(if action == "update" {
+    Ok(if action == "update" {
         json!({ "artifact": done.artifact })
     } else {
         json!({ "artifact": done.artifact, "changed": done.changed })
-    }))
+    })
 }
 
 async fn create_decision(
     State(app): State<App>,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
-    let data = object(&body)?;
+    let artifact = request(&app, &object(&body)?).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "artifact": artifact }))).into_response())
+}
+
+/// Asks the user something for an agent, from what a request says. Answers the artifact
+/// the request is, as it is shown.
+pub(crate) async fn request(app: &App, data: &Map<String, Value>) -> Result<Value, ApiError> {
     let given = |key: &str, otherwise: Value| data.get(key).cloned().unwrap_or(otherwise);
     let ask = Ask {
-        title: said(&data, "title", "Decision"),
-        question: json!(said(&data, "question", "")),
-        context: json!(said(&data, "context", "")),
-        yes_label: json!(said(&data, "yes_label", "Yes")),
-        no_label: json!(said(&data, "no_label", "No")),
+        title: said(data, "title", "Decision"),
+        question: json!(said(data, "question", "")),
+        context: json!(said(data, "context", "")),
+        yes_label: json!(said(data, "yes_label", "Yes")),
+        no_label: json!(said(data, "no_label", "No")),
         payload: data.get("payload").cloned(),
-        reference_id: said(&data, "reference_id", ""),
+        reference_id: said(data, "reference_id", ""),
         expires_at: data.get("expires_at").cloned(),
         response_type: given("response_type", json!("approval")),
         options: data.get("options").cloned(),
@@ -628,16 +644,13 @@ async fn create_decision(
         deadline_at: data.get("deadline_at").cloned(),
         input_hint: data.get("input_hint").cloned(),
     };
-    let session = said(&data, "session", "");
+    let session = said(data, "session", "");
     let Some(member) = app.member(session.trim()) else {
         return Err(conflict(decisions::ask_of_nobody(&ask, app.clock.now_ms())));
     };
-    let done = ask_agent(&member, Want::Request(Box::new(ask))).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "artifact": done.artifact })),
-    )
-        .into_response())
+    Ok(ask_agent(&member, Want::Request(Box::new(ask)))
+        .await?
+        .artifact)
 }
 
 /// `POST /decisions/<id>/resolve`, `/dismiss` and `/withdraw`.
@@ -647,6 +660,19 @@ async fn post_decision(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
+    let as_turn = headers.contains_key("x-clarp-turn");
+    Ok(Json(decide(&app, &rest, as_turn, &object(&body)?).await?))
+}
+
+/// Ends a request: the user answers or discards it, the agent takes it back. `rest` is what
+/// follows `/decisions/`: the request's id and `/resolve`, `/dismiss` or `/withdraw`.
+/// `as_turn` says the caller claims to be an agent's turn. Answers the body of the answer.
+pub(crate) async fn decide(
+    app: &App,
+    rest: &str,
+    as_turn: bool,
+    data: &Map<String, Value>,
+) -> Result<Value, ApiError> {
     let rest = rest.trim_matches('/');
     let found = ["resolve", "dismiss", "withdraw"]
         .iter()
@@ -655,7 +681,6 @@ async fn post_decision(
         return Err(ApiError::plain(StatusCode::NOT_FOUND, "not found"));
     };
     let decision_id = decision_id.trim_matches('/').to_string();
-    let data = object(&body)?;
     let want = match action {
         "resolve" => {
             let on_behalf = data
@@ -683,10 +708,10 @@ async fn post_decision(
                 }
                 Some(_) => return Err(refused(StatusCode::BAD_REQUEST, "invalid decision choice")),
             };
-            let expected = whole(&data, "expected_revision")?;
+            let expected = whole(data, "expected_revision")?;
             // An agent's turn cannot be told from its request on this Host yet: one that
             // says it is a turn is not taken for the user.
-            if headers.contains_key("x-clarp-turn") {
+            if as_turn {
                 let why = "verified turn identity required";
                 return Err(refused(StatusCode::FORBIDDEN, why));
             }
@@ -700,7 +725,7 @@ async fn post_decision(
             }
         }
         "dismiss" => {
-            let expected = whole(&data, "expected_revision")?;
+            let expected = whole(data, "expected_revision")?;
             Want::Dismiss {
                 expected_revision: decisions::integer(&expected, "expected_revision", 1)
                     .map_err(conflict)?,
@@ -718,12 +743,12 @@ async fn post_decision(
             }
         }
     };
-    let fleet = Fleet::of(&app);
+    let fleet = Fleet::of(app);
     let Some(member) = fleet.asker(&decision_id) else {
         return Err(refused(StatusCode::CONFLICT, "decision not found"));
     };
     let done = ask_agent(member, want).await?;
-    Ok(Json(if action == "withdraw" {
+    Ok(if action == "withdraw" {
         json!({ "artifact": done.artifact, "changed": done.changed })
     } else {
         json!({
@@ -731,24 +756,47 @@ async fn post_decision(
             "changed": done.changed,
             "delivery_pending": done.delivery_pending,
         })
-    }))
+    })
 }
 
 async fn attention(State(app): State<App>, Query(query): Params) -> Json<Value> {
     let is = |key: &str, value: &str| query.get(key).is_some_and(|given| given == value);
-    let fleet = Fleet::of(&app);
-    let items = decisions::attention(
-        &fleet.shelves(),
+    Json(inbox(
+        &app,
         is("decision_format", "2"),
         is("include_archived", "1"),
-        app.clock.now_ms(),
-    );
-    Json(json!({
-        "count": items.len(),
+    ))
+}
+
+/// What waits for the user, as `GET /attention` answers it.
+pub(crate) fn inbox(app: &App, include_questions: bool, include_archived: bool) -> Value {
+    let fleet = Fleet::of(app);
+    let now = app.clock.now_ms();
+    let items = decisions::attention(&fleet.shelves(), include_questions, include_archived, now);
+    json!({
         "items": items,
+        "count": items.len(),
         "decision_format": 2,
         "janitor_items": [],
-    }))
+    })
+}
+
+/// One artifact by its id, as it is shown.
+pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
+    let fleet = Fleet::of(app);
+    artifacts::get(&fleet.shelves(), artifact_id, app.clock.now_ms())
+}
+
+/// The artifacts of one session, as `GET /artifacts?session=` answers them.
+pub(crate) fn of_session(app: &App, session: &str) -> Value {
+    let listing = Listing {
+        session: session.trim().to_string(),
+        limit: 100,
+        ..Listing::default()
+    };
+    let fleet = Fleet::of(app);
+    let rows = artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms());
+    json!({ "artifacts": rows })
 }
 
 /// The routes of the library and the inbox.

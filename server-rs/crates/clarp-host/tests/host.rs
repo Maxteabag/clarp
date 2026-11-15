@@ -1223,6 +1223,157 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
         "withdrawn"
     );
 
+    // The agent's own tool asks the same things of the same Host: a question, with the
+    // Python tool's command line. It waits for the answer while the user gives it.
+    let artifacts = |args: &[&str]| {
+        let mut all = vec!["clarp-agent-artifacts"];
+        all.extend_from_slice(args);
+        tool(&host, &dir, None, &all)
+    };
+    let options = r#"[{"id":"keep","label":"Keep it"},{"id":"new","label":"Make it new"}]"#;
+    let asked = artifacts(&[
+        "question",
+        &session,
+        "Choose",
+        "Which one?",
+        options,
+        "--recommend",
+        "keep",
+        "--effort",
+        "short",
+    ]);
+    assert_eq!(asked.0, 0, "{}", asked.2);
+    let asked: Value = serde_json::from_str(&asked.1).unwrap();
+    assert_eq!(
+        (&asked["type"], &asked["decision"]["response_type"]),
+        (&json!("question"), &json!("single_choice"))
+    );
+    assert_eq!(asked["decision"]["recommended_option_id"], "keep");
+    let asked_id = asked["artifact_id"].as_str().unwrap().to_string();
+    let request_id = asked["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let inbox = artifacts(&["attention", "--session", &session]);
+    let inbox: Value = serde_json::from_str(&inbox.1).unwrap();
+    assert_eq!(
+        (&inbox["count"], &inbox["items"][0]["decision_id"]),
+        (&json!(1), &json!(request_id))
+    );
+    let waiting = {
+        let (address, token, dir, id) = (
+            host.address.clone(),
+            host.token.clone(),
+            dir.clone(),
+            asked_id.clone(),
+        );
+        std::thread::spawn(move || {
+            Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+                .args([
+                    "tool",
+                    "clarp-agent-artifacts",
+                    "wait",
+                    &id,
+                    "--timeout",
+                    "20",
+                    "--interval",
+                    "0.5",
+                ])
+                .current_dir(dir)
+                .env("CLARP_HOST_ADDR", address)
+                .env("CLARP_HOST_TOKEN", token)
+                .output()
+                .unwrap()
+        })
+    };
+    std::thread::sleep(Duration::from_millis(700));
+    let answer = json!({ "answer": { "option_id": "new" }, "expected_revision": 1 });
+    let (status, _) = host.ask(
+        "POST",
+        &format!("/decisions/{request_id}/resolve"),
+        Some(&answer),
+    );
+    assert_eq!(status, 200);
+    let waited = waiting.join().unwrap();
+    assert_eq!(
+        waited.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&waited.stderr)
+    );
+    let outcome: Value = serde_json::from_slice(&waited.stdout).unwrap();
+    assert_eq!(
+        (&outcome["status"], &outcome["answer"]),
+        (
+            &json!("answered"),
+            &json!({ "option_id": "new", "label": "Make it new" })
+        )
+    );
+    wait_for("the agent to be told what was chosen", || {
+        host.conversation(&session).iter().any(|(_, text)| {
+            text.contains(
+                r#"answered this clarification: {"option_id": "new", "label": "Make it new"}"#,
+            )
+        })
+    });
+    // A wait whose time is up says so, with its own exit code; so does one for nothing.
+    let nothing = artifacts(&["wait", &document_id, "--timeout", "1", "--interval", "0.5"]);
+    assert_eq!(nothing.0, 4, "{}", nothing.1);
+    let missing = artifacts(&["wait", "no-such"]);
+    assert_eq!(
+        (missing.0, missing.2.as_str()),
+        (
+            1,
+            "agent_artifacts: HTTP Error 404: Not Found: artifact not found\n"
+        )
+    );
+    // The other verbs: an approval that is only looked at, a made artifact, its progress.
+    let dry = artifacts(&[
+        "decision",
+        &session,
+        "Deploy?",
+        "Deploy 1.4?",
+        "Deploy",
+        "Hold",
+        "--dry-run",
+    ]);
+    let dry: Value = serde_json::from_str(&dry.1).unwrap();
+    assert_eq!(
+        (&dry["path"], &dry["body"]["yes_label"]),
+        (&json!("/decisions"), &json!("Deploy"))
+    );
+    let run = r#"{"provider":"github","run_id":"7","run_url":"https://github.com/o/r/actions/runs/7","workflow_name":"Tests"}"#;
+    let made = artifacts(&["create", &session, "workflow_run", "CI", "The tests", run]);
+    assert_eq!(made.0, 0, "{}", made.2);
+    let made: Value = serde_json::from_str(&made.1).unwrap();
+    let run_id = made["artifact_id"].as_str().unwrap().to_string();
+    let progressed = artifacts(&["progress", &run_id, "0.5", "half way"]);
+    let progressed: Value = serde_json::from_str(&progressed.1).unwrap();
+    assert_eq!(
+        (&progressed["progress"], &progressed["status"]),
+        (&json!(0.5), &json!("active"))
+    );
+    let finished = artifacts(&["update", &run_id, "completed"]);
+    let finished: Value = serde_json::from_str(&finished.1).unwrap();
+    assert_eq!(finished["status"], "completed");
+    let listed = artifacts(&["list", &session]);
+    let listed: Value = serde_json::from_str(&listed.1).unwrap();
+    assert_eq!(listed["artifacts"].as_array().unwrap().len(), 7);
+    let refused = artifacts(&["create", &session, "poem", "A poem"]);
+    assert_eq!(
+        (refused.0, refused.2.as_str()),
+        (
+            1,
+            "agent_artifacts: HTTP Error 409: Conflict: unsupported artifact type\n"
+        )
+    );
+    assert_eq!(artifacts(&["frobnicate"]).0, 2);
+    assert_eq!(artifacts(&[]).0, 1);
+    assert_eq!(
+        artifacts(&["create-report", &session, "Report", "report.html"]).0,
+        69
+    );
+
     // What the user does with an artifact: archive it, pin it, discard it.
     let at = document["updated_at"].as_i64().unwrap();
     let archive = format!("/artifacts/{document_id}/archive");
@@ -1272,7 +1423,7 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
         }
     }
     assert_eq!(after, before);
-    assert_eq!(before["artifacts"].as_array().unwrap().len(), 5);
+    assert_eq!(before["artifacts"].as_array().unwrap().len(), 7);
     assert_eq!(host.conversation(&session).len(), told_before);
     let at = updated["artifact"]["updated_at"].as_i64().unwrap();
     let discard = format!("/artifacts/{document_id}/discard");

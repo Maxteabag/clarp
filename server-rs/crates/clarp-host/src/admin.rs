@@ -192,29 +192,45 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     let cwd = std::env::current_dir()
         .map(|dir| dir.display().to_string())
         .unwrap_or_default();
+    let started_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
     let asked = json!({
         "tool": name,
         "argv": args.collect::<Vec<_>>(),
         "cwd": cwd,
         "env": env,
         "ppid": std::os::unix::process::parent_id(),
+        "started_ms": started_ms,
     });
-    match post(&address, "/tools/run", token, &asked) {
-        Ok((200, answer)) => ToolOutcome {
+    loop {
+        let answer = match post(&address, "/tools/run", token, &asked) {
+            Ok((200, answer)) => answer,
+            Ok((status, answer)) => {
+                return unavailable(format!(
+                    "{name}: the Host at {address} refused ({status}): {}",
+                    answer["error"].as_str().unwrap_or("no reason given")
+                ));
+            }
+            Err(why) => {
+                return unavailable(format!(
+                    "{name}: the Host at {address} does not answer: {why}"
+                ));
+            }
+        };
+        // What the tool waits for has not happened yet: the Host says when to ask again.
+        if let Some(again_ms) = answer["again_ms"].as_u64() {
+            std::thread::sleep(Duration::from_millis(again_ms.clamp(100, 60_000)));
+            continue;
+        }
+        return ToolOutcome {
             exit: answer["exit"]
                 .as_i64()
                 .and_then(|code| u8::try_from(code).ok())
                 .unwrap_or(1),
             stdout: answer["stdout"].as_str().unwrap_or("").to_string(),
             stderr: answer["stderr"].as_str().unwrap_or("").to_string(),
-        },
-        Ok((status, answer)) => unavailable(format!(
-            "{name}: the Host at {address} refused ({status}): {}",
-            answer["error"].as_str().unwrap_or("no reason given")
-        )),
-        Err(why) => unavailable(format!(
-            "{name}: the Host at {address} does not answer: {why}"
-        )),
+        };
     }
 }
 
