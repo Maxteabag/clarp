@@ -11,12 +11,17 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 | Its conversation, every row as the apps show it, in the same order, under the same ids | read from `GET /log`, page by page |
 | The tool's own session (Claude's session, Codex's thread) | the next turn continues it: the agent remembers |
 | The conversation's name (`conversation_id`) | kept, so it is the same conversation to an app |
+| The files it published: its gallery (the newest 500 images), and every file its conversation names | read from `GET /media?session=` and `GET /media/<id>`, and published here under the ids they have, so that an image in an old reply still shows |
 
 ## What does not move yet
 
 - Its portrait and voice (stage 3).
-- Messages that wait in its queue, its goals, schedules and background jobs. Move an agent
-  when nothing waits for it.
+- Its library: what it made for its user (documents, reports, tables) and what it asked.
+  It stays readable on the Python Host. Not built yet.
+- Its goals and plans. An agent that works toward a goal loses it in the move: move it
+  between goals, or wait until goals move. Not built yet.
+- Messages that wait in its queue, schedules and background jobs. Move an agent when
+  nothing waits for it.
 - The details behind the tool cards of the old history. The cards arrive in their short
   form, as a list of a chat shows them. What the agent does after the move is kept in full.
 
@@ -37,9 +42,12 @@ CLARP_SOURCE_TOKEN=<the Python Host's token> CLARP_HOST_TOKEN=<the Rust Host's t
   clarp-host import --from 127.0.0.1:7682 --session <session name> --host 127.0.0.1:7690
 ```
 
-It answers with the number of rows that arrived. The conversation arrives in one write or not
-at all, and an agent whose conversation did not arrive does not stay on the Rust Host: the
-command can simply be run again.
+It answers with the number of rows and of files that arrived. The conversation arrives in one
+write or not at all, and an agent whose conversation did not arrive does not stay on the Rust
+Host: the command can simply be run again. The files follow the conversation. One that could
+not be read on the other Host (a file a reply names that is no longer there) is counted and
+does not undo the move; `clarp-host import --files` with the same words reads the files once
+more for an agent that is here already, and a file that arrived before does not arrive twice.
 
 An agent moves to a Rust Host once. One that went back and comes again is refused, because its
 history from the first time is still on the Rust Host's disk; taking that up again is not
@@ -65,7 +73,7 @@ there.
 
 | When | What | Result |
 |---|---|---|
-| 15 Nov 2026 | `an_agent_moves_from_one_host_to_another_with_its_conversation` (`crates/clarp-host/tests/host.rs`): two Rust Hosts, real binaries | The conversation arrives whole, the next turn continues the tool's session, a second move of the same agent is refused |
+| 15 Nov 2026 | `an_agent_moves_from_one_host_to_another_with_its_conversation` (`crates/clarp-host/tests/host.rs`): two Rust Hosts, real binaries | The conversation arrives whole, the next turn continues the tool's session, a second move of the same agent is refused. An image and a document the agent published arrive under their ids, byte for byte, the image in its gallery as it was; a file the conversation names that is gone is counted; asked for again, nothing arrives twice |
 | 15 Nov 2026 | Rehearsal against the live Python Host on elitebook (reads only), into a scratch Rust Host: one Claude agent (23 rows) and one Codex agent (179 rows) | Both arrived in under two seconds. Every row equal to the Python Host's in every field but its revision; same order; same `conversation_id`. No turn was run on the scratch Host and it was removed afterwards |
 
 | 15 Nov 2026 | The service arrangement, on elitebook: the Rust Host as a systemd user unit (`--launcher systemd`), six turns running, `systemctl --user restart` of the unit | Each turn's shim was in a scope of its own; all six scopes outlived the restart and all six turns finished, each answered once. (The first try found a defect: `systemd-run` rewrote `${...}` in a tool's arguments. Fixed, and `a_turn_in_a_systemd_scope_gets_its_tool_unchanged_and_outlives_the_host` holds it) |

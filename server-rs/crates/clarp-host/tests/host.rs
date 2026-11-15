@@ -3331,6 +3331,44 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     wait_for("the first Host's answer", || {
         old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
     });
+    // It published an image and a document there, and its conversation names both, and a
+    // file that is no longer anywhere.
+    let png: Vec<u8> = [
+        &b"\x89PNG\r\n\x1a\n"[..],
+        &13u32.to_be_bytes(),
+        b"IHDR",
+        &8u32.to_be_bytes(),
+        &6u32.to_be_bytes(),
+        &[8, 6, 0, 0, 0],
+    ]
+    .concat();
+    let pdf = b"%PDF-1.7\n1 0 obj\n".to_vec();
+    let publish = |bytes: &[u8], name: &str, kind: &str, caption: &str| -> Value {
+        let said = [
+            ("X-Session", session.as_str()),
+            ("X-File-Name", name),
+            ("X-Caption", caption),
+            ("Content-Type", kind),
+        ];
+        let answer = fetch(&old_host, "", "POST", "/media", &said, bytes);
+        assert_eq!(answer.status, 200, "{}", answer.text());
+        serde_json::from_slice(&answer.body).unwrap()
+    };
+    let image = publish(&png, "chart.png", "image/png", "A%20chart%20%5Bone%5D");
+    let paper = publish(&pdf, "report.pdf", "application/pdf", "");
+    let (image_id, paper_id) = (
+        image["asset_id"].as_str().unwrap().to_string(),
+        paper["asset_id"].as_str().unwrap().to_string(),
+    );
+    let naming = format!(
+        "see {} and the paper at {} and /media/asset_gone_long_ago",
+        image["markdown"].as_str().unwrap(),
+        paper["url"].as_str().unwrap()
+    );
+    old_host.send(&session, &naming, "old-2");
+    wait_for("the first Host's second answer", || {
+        old_host.conversation(&session).len() == 4 && old_host.state(&session) == "done"
+    });
     let before = old_host.conversation(&session);
 
     // The move, as its owner would run it.
@@ -3346,7 +3384,79 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         "{}",
         String::from_utf8_lossy(&moved.stderr)
     );
-    assert!(String::from_utf8_lossy(&moved.stdout).contains("with the 2 rows"));
+    let told = String::from_utf8_lossy(&moved.stdout).into_owned();
+    assert!(
+        told.contains("with the 4 rows of its conversation and 2 files it published (1 more"),
+        "{told}"
+    );
+
+    // What it published came with it, under the ids its conversation names: the image in
+    // its gallery as it was, the bytes of both as they were.
+    let gallery = new_host.get(&format!("/media?session={session}"));
+    let shown = gallery["assets"].as_array().unwrap();
+    assert_eq!(shown.len(), 1, "{gallery}");
+    for field in [
+        "asset_id",
+        "source_name",
+        "caption",
+        "created_at",
+        "width",
+        "height",
+        "markdown",
+    ] {
+        assert_eq!(shown[0][field], image[field], "{field}");
+    }
+    assert_eq!(shown[0]["caption"], "A chart [one]");
+    let came = fetch(
+        &new_host,
+        "",
+        "GET",
+        &format!("/media/{image_id}"),
+        &[],
+        b"",
+    );
+    assert_eq!(
+        (came.status, came.header("content-type")),
+        (200, "image/png")
+    );
+    assert!(came.body == png);
+    let came = fetch(
+        &new_host,
+        "",
+        "GET",
+        &format!("/media/{paper_id}"),
+        &[],
+        b"",
+    );
+    assert_eq!(
+        (came.status, came.header("content-type")),
+        (200, "application/pdf")
+    );
+    assert!(came.body == pdf);
+    // Asked for again, the files are the same files: nothing arrives twice.
+    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["import", "--files", "--from", &old_host.address])
+        .args(["--session", &session, "--host", &new_host.address])
+        .env_remove("CLARP_HOST_TOKEN")
+        .env_remove("CLARP_SOURCE_TOKEN")
+        .output()
+        .unwrap();
+    let told = String::from_utf8_lossy(&again.stdout).into_owned();
+    assert!(
+        again.status.success() && told.contains("has 2 files it published"),
+        "{told}"
+    );
+    let gallery = new_host.get(&format!("/media?session={session}"));
+    assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 2);
+    // Only the administrator says which id a file has, and an id is one file's.
+    let taken = [
+        ("X-Session", session.as_str()),
+        ("X-Asset-Id", image_id.as_str()),
+        ("Content-Type", "application/pdf"),
+    ];
+    let other = fetch(&new_host, "", "POST", "/media", &taken, &pdf);
+    assert_eq!(other.status, 409, "{}", other.text());
 
     // On the second Host it is the same agent, with the conversation it had, row for row.
     let snapshot = new_host.get("/agents/snapshot");
@@ -3363,10 +3473,10 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // And it goes on there.
     new_host.send(&session, "and now?", "new-1");
     wait_for("the second Host's answer", || {
-        new_host.conversation(&session).len() == 4 && new_host.state(&session) == "done"
+        new_host.conversation(&session).len() == 6 && new_host.state(&session) == "done"
     });
     assert_eq!(
-        new_host.conversation(&session)[3],
+        new_host.conversation(&session)[5],
         said("assistant", "and now?")
     );
     // The first Host was read, not changed; and an agent arrives once.
@@ -3382,7 +3492,16 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // After a restart of the second Host it is all still there.
     new_host.kill();
     let new_host = new_place.start();
-    assert_eq!(new_host.conversation(&session).len(), 4);
+    assert_eq!(new_host.conversation(&session).len(), 6);
+    let came = fetch(
+        &new_host,
+        "",
+        "GET",
+        &format!("/media/{image_id}"),
+        &[],
+        b"",
+    );
+    assert!(came.status == 200 && came.body == png);
 }
 
 #[test]
