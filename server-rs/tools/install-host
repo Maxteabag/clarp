@@ -3,13 +3,18 @@
 # (server-rs/tools/build release): the Host and its shim, a token of its own, and a systemd user
 # unit. Nothing here compiles.
 #
-#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--start] [--files-only]
+#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH]
+#                                [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
 #   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
 #                  whatever the phone reaches in front of it: the Host's own token is only taken
 #                  from the loopback
 #   --name         what the apps call this Host (default: "<hostname> Rust")
+#   --claude, --codex   the programs to run for a turn. Default: the ones the Python Host on this
+#                  machine runs (read from its unit, clarp-runtime.service), so that an agent
+#                  that moves is run by the same tool it was run by; without a Python Host, the
+#                  ones on the path. Run this again after the Python Host changed its tools
 #   --start        enable the unit and start it, or restart it when it runs (turns that are running
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
@@ -21,15 +26,17 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-from="$here/dist"; listen="127.0.0.1:7690"; name="$(hostname) Rust"; start=0; files_only=0
+from="$here/dist"; listen="127.0.0.1:7690"; name="$(hostname) Rust"; start=0; files_only=0; claude=""; codex=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
         --listen) listen="$2"; shift 2 ;;
         --name) name="$2"; shift 2 ;;
+        --claude) claude="$2"; shift 2 ;;
+        --codex) codex="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -37,6 +44,13 @@ share="${XDG_DATA_HOME:-$HOME/.local/share}/clarp-host"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/clarp-host"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 port="${listen##*:}"; address="${listen%:*}"
+
+# The world an agent's commands run in: the one the Python Host on this machine gives them, so
+# that an agent that moves finds what it found before. Without a Python Host, a plain one.
+tools_path="$(systemctl --user show clarp-runtime.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^PATH=//p' | head -1)"
+tools_path="${tools_path:-$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin}"
+claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
+codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
 
 for binary in clarp-host clarp-shim; do
     [ -x "$from/$binary" ] || { echo "install-host: $from/$binary is not there: build it with server-rs/tools/build release" >&2; exit 1; }
@@ -76,8 +90,10 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=$config/env
-# Where the tools are: the user's own programs (claude, codex), then the system's.
-Environment="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# The world an agent's commands run in, and the programs that run a turn.
+Environment="PATH=$tools_path"
+${claude:+Environment="CLARP_CLAUDE_PROGRAM=$claude"}
+${codex:+Environment="CLARP_CODEX_PROGRAM=$codex"}
 # The fence: an agent's Clarp tools are pointed at this Host, never at a Python Host's files.
 Environment="CLARP_CONFIG_DIR=$config"
 Environment="CLAUDE_PWA_CONFIG=$config/config.toml"
@@ -92,6 +108,7 @@ WantedBy=default.target
 EOF
 
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
+echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
 [ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
 systemctl --user daemon-reload
 if [ "$start" = 1 ]; then
