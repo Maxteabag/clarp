@@ -4,6 +4,7 @@ members = [
     "crates/clarp-ports",
     "crates/clarp-protocol",
     "crates/clarp-codec",
+    "crates/clarp-kernel",
     "crates/clarp-store-mem",
     "crates/clarp-store-sqlite",
 ]
