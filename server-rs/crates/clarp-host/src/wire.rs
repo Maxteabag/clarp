@@ -170,9 +170,21 @@ const RECONNECTING: &str = "Reconnecting… Your message is saved.";
 fn reconnecting(live: &LiveStatus) -> Option<(u32, i64)> {
     let parked = live.parked.as_ref()?;
     match parked.wait {
-        Wait::Retry { until_ms } => Some((parked.attempts + 1, until_ms - parked.since_ms)),
-        Wait::Account => None,
+        Wait::Retry { until_ms } => Some((
+            // Waits for an account are no tries against a bad line.
+            parked.attempts - parked.account.count + 1,
+            until_ms - parked.since_ms,
+        )),
+        Wait::Account { .. } => None,
     }
+}
+
+/// What a live turn that waits for an account says it waits for: when it waits for one.
+fn waiting_for_account(live: &LiveStatus, backend: &str) -> Option<String> {
+    live.parked
+        .as_ref()
+        .filter(|parked| parked.wait.is_for_an_account())
+        .map(|_| failures::account_wait_message(backend, Some("")))
 }
 
 /// What the user is told of a turn that failed: its kind, and the Python Host's words for it
@@ -202,7 +214,8 @@ fn ending_detail(last: &Settled, backend: &str, model: &str) -> Value {
         Outcome::Failed { reason, kind } => {
             let (kind, told) = failure(reason, kind, model);
             json!({
-                "attempts": last.attempts.max(1),
+                // Tries against failures that pass: a wait for an account is none.
+                "attempts": last.attempts.saturating_sub(last.account_waits).max(1),
                 "dispatch": backend,
                 "error": told.error,
                 "message": told.message,
@@ -252,6 +265,14 @@ pub fn state(
                 "summary": RECONNECTING,
             })
         }
+        // It waits for an account: it keeps its place, and says what it waits for.
+        (Some(live), _) if waiting_for_account(live, backend).is_some() => json!({
+            "account_recovery": "waiting",
+            "dispatch": backend,
+            "message": waiting_for_account(live, backend).unwrap_or_default(),
+            "origin": live.origin.name(),
+            "trace_id": live.trace_id.clone().unwrap_or_default(),
+        }),
         (Some(live), _) => json!({
             "backend_session_id": session_name(record, status),
             "dispatch": backend,
@@ -406,6 +427,18 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
     let summary = failed
         .as_ref()
         .map_or(summary, |told| told.summary.as_str());
+    // A turn that waits for an account keeps its place and is not thinking: it makes no
+    // progress until an account is there. The line says what it waits for.
+    let waiting = running.and_then(|live| waiting_for_account(live, &record.backend));
+    let (action, phase, state, summary) = match &waiting {
+        Some(message) => (
+            "waiting for account",
+            "account_recovery",
+            "limited",
+            message.as_str(),
+        ),
+        None => (action, phase, state, summary),
+    };
     let mut activity = json!({
         "type": "agent-activity",
         "agent_id": record.agent_id,
@@ -1035,7 +1068,10 @@ pub fn summary(
         let line = |name: &str, category: &str, label: &str| {
             Some(clarp_kernel::tools::headline(name, category, label))
         };
+        let waiting = live.and_then(|live| waiting_for_account(live, backend));
         let (state, headline) = match (live.map(|live| &live.activity), tools.last(), completed) {
+            // A turn that waits for an account: limited, and what it waits for.
+            (Some(_), ..) if waiting.is_some() => ("limited", waiting),
             (Some(_), Some(tool), _) => ("tool", line(&tool.name, tool.category, &tool.label)),
             // A tool this Host was told of by its name alone.
             (Some(Activity::Tool { name }), None, _) => {
@@ -1252,6 +1288,7 @@ mod tests {
                 ended_at_ms: 4_000,
                 tool_count: 0,
                 attempts: 1,
+                account_waits: 0,
             }),
             waiting: vec![TurnId(3)],
             paused: true,

@@ -4878,6 +4878,154 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
 }
 
 #[test]
+fn a_turn_whose_account_is_out_waits_and_is_taken_up_when_the_login_has_changed() {
+    let place = Place::new("account");
+    // A stand-in for Claude Code whose account is out for as long as a file says so. It
+    // writes down what it was given, each time.
+    let (out_of_usage, given) = (place.root.join("out"), place.root.join("given"));
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\n",
+        &format!("printf '%s\\n' \"$message\" >> \"{}\"\n", given.display()),
+        &format!("times=$(wc -l < \"{}\")\n", given.display()),
+        &format!("if [ -e \"{}\" ]; then\n", out_of_usage.display()),
+        init,
+        "printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
+        "exit 1\nfi\n",
+        init,
+        "printf '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_%s\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}\\n' \"$times\"\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    // The login of the tool, where the Host looks for it: in its user's home.
+    let home = place.root.join("home");
+    let login = home.join(".claude").join(".credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(&login, "the first account").unwrap();
+    let host = place.start_in(
+        "",
+        &["--accounts", "follow", "--logins-checked-every-ms", "100"],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("HOME", home.to_str().unwrap()),
+        ],
+    );
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let events = host.listen();
+    let row = || -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == agent)
+            .cloned()
+            .unwrap()
+    };
+    let started = || -> usize {
+        std::fs::read_to_string(&given)
+            .map(|said| said.lines().count())
+            .unwrap_or(0)
+    };
+    let waits = || row()["live_activity"]["state"] == "limited";
+
+    // The account is out. The turn does not end: it keeps its place and says what it
+    // waits for.
+    std::fs::write(&out_of_usage, "").unwrap();
+    host.send(&agent, "work on this", "uniform");
+    wait_for("the turn to wait for an account", waits);
+    let shown = row();
+    assert_eq!(
+        (
+            &shown["busy"],
+            &shown["latest_state"],
+            &shown["activity"]["action"],
+            &shown["activity"]["phase"],
+            &shown["activity"]["state"],
+            &shown["activity"]["summary"],
+            &shown["live_activity"]["headline"],
+        ),
+        (
+            &json!(true),
+            &json!("thinking"),
+            &json!("waiting for account"),
+            &json!("account_recovery"),
+            &json!("limited"),
+            &json!("Waiting for a claude account with available usage"),
+            &json!("Waiting for a claude account with available usage"),
+        )
+    );
+    let told = events
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|event| {
+            event["type"] == "agent-state" && event["detail"]["account_recovery"] == "waiting"
+        })
+        .cloned()
+        .expect("the apps were told the turn waits");
+    assert_eq!(
+        (
+            &told["kind"],
+            &told["detail"]["dispatch"],
+            &told["detail"]["message"]
+        ),
+        (
+            &json!("thinking"),
+            &json!("claude"),
+            &json!("Waiting for a claude account with available usage")
+        )
+    );
+    // Nothing in the conversation says the turn failed: it has not.
+    assert_eq!(host.turns(&agent).len(), 1);
+    assert_eq!(started(), 1);
+
+    // Someone puts another account in place. The turn is taken up on it: the tool, which
+    // has the turn in its session, is told so and is not given the message a second time.
+    std::fs::remove_file(&out_of_usage).unwrap();
+    std::fs::write(&login, "another account").unwrap();
+    wait_for("the answer", || {
+        host.turns(&agent).len() == 2 && host.state(&agent) == "done"
+    });
+    assert_eq!(started(), 2);
+    let said = std::fs::read_to_string(&given).unwrap();
+    let again = said.lines().nth(1).unwrap();
+    assert!(
+        again.contains("<clarp-account-recovery>")
+            && again.contains("Clarp recovered from a claude account usage limit")
+            && again.contains("Original request:")
+            && again.contains("work on this"),
+        "{again}"
+    );
+    let rows = host.turns(&agent);
+    assert_eq!(
+        (&rows[0]["id"], &rows[0]["text"], &rows[1]["turn"]["status"]),
+        (
+            &json!("u-uniform"),
+            &json!("work on this"),
+            &json!("completed")
+        )
+    );
+    assert!(!waits());
+
+    // A turn that waits for an account and is stopped ends there, and a login that changes
+    // afterwards starts nothing.
+    std::fs::write(&out_of_usage, "").unwrap();
+    host.send(&agent, "and this", "victor");
+    wait_for("the turn to wait for an account", waits);
+    let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": agent })));
+    assert_eq!(status, 200);
+    wait_for("the stop", || host.state(&agent) == "interrupted");
+    std::fs::write(&login, "a third account").unwrap();
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(started(), 3, "a stopped turn is not taken up");
+}
+
+#[test]
 fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
     // no Host anything itself: it calls clarp-admin and clarp-agent-bg by name. Here those

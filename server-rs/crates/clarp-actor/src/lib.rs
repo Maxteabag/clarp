@@ -80,6 +80,8 @@ pub struct Profile {
     pub stop_grace_ms: u64,
     /// Keep a turn's spool when the turn is over and in the log.
     pub keep_spools: bool,
+    /// Whether a turn whose account is out waits for one (`recovery::Accounts`).
+    pub accounts: recovery::Accounts,
 }
 
 impl Profile {
@@ -1532,12 +1534,25 @@ impl Actor {
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
         let backend_session = self.recorder.agent().backend_session().map(str::to_string);
+        // A turn that waited for an account is taken up again: the tool, which has the turn
+        // in its own session, is told so. One whose tool never got as far as a session is
+        // given the message, as if for the first time.
+        let recovering = match self.recorder.agent().live() {
+            Some(Turn::Starting(starting)) if starting.recovering && backend_session.is_some() => {
+                Some(starting.account.count > 1)
+            }
+            _ => None,
+        };
+        let prompt = match recovering {
+            Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
+            None => message.text,
+        };
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
             turn: turn.0,
             cwd: self.profile.cwd.clone(),
-            prompt: message.text,
+            prompt,
             // The first turn starts the tool's session under the conversation's own name.
             new_session: Some(self.profile.conversation_id.clone())
                 .filter(|name| backend_session.is_none() && !name.is_empty()),
@@ -1740,23 +1755,34 @@ impl Actor {
     /// waits for that.
     pub fn retry_at(&self) -> Option<i64> {
         match self.recorder.agent().live() {
-            Some(Turn::Parked(parked)) => match parked.wait {
-                Wait::Retry { until_ms } => Some(until_ms),
-                Wait::Account => None,
-            },
+            Some(Turn::Parked(parked)) => Some(parked.wait.until_ms()),
             _ => None,
         }
     }
 
     /// Starts the next attempt of a turn whose wait is over. Nothing happens before then.
     pub fn retry_due(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        if self.retry_at().is_none_or(|at| at > now_ms) {
+            return Ok(Outputs::default());
+        }
+        self.retry(now_ms)
+    }
+
+    /// The login of the agent's tool has changed: a turn that waits for an account is tried
+    /// on the one that is there now. A turn that waits for anything else goes on waiting.
+    pub fn login_changed(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) if parked.wait.is_for_an_account() => self.retry(now_ms),
+            _ => Ok(Outputs::default()),
+        }
+    }
+
+    /// Starts the next attempt of the turn that waits for one.
+    fn retry(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
         let mut out = Outputs::default();
         let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
             return Ok(out);
         };
-        if self.retry_at().is_none_or(|at| at > now_ms) {
-            return Ok(out);
-        }
         let turn = parked.id;
         let mut batch = self.recorder.batch();
         if batch
@@ -1790,6 +1816,7 @@ impl Actor {
             out.damaged_lines += read.damaged.len();
 
             let model = self.profile.model.clone().unwrap_or_default();
+            let accounts = self.profile.accounts;
             let mut batch = self.recorder.batch();
             let mut signals = Vec::new();
             let mut shown: Vec<String> = Vec::new();
@@ -1853,14 +1880,30 @@ impl Actor {
                                 && batch.agent().stopping().is_none()
                             {
                                 let kind = failures::classify_error(reason);
-                                if let recovery::Next::Retry { after_ms } =
-                                    recovery::after_failed_attempt(kind, live.attempt)
-                                {
+                                let waits = batch.agent().live().map(Turn::account_waits);
+                                let waits = waits.unwrap_or_default();
+                                let wait = match recovery::after_failed_attempt(
+                                    recovery::Failed {
+                                        kind,
+                                        attempt: live.attempt,
+                                        account_waits: waits.count,
+                                        account_wait_since_ms: waits.since_ms,
+                                        now_ms: t,
+                                    },
+                                    accounts,
+                                ) {
+                                    recovery::Next::Retry { after_ms } => Some(Wait::Retry {
+                                        until_ms: t + after_ms,
+                                    }),
+                                    recovery::Next::Account { until_ms } => {
+                                        Some(Wait::Account { until_ms })
+                                    }
+                                    recovery::Next::Fail => None,
+                                };
+                                if let Some(wait) = wait {
                                     let parked = Command::TurnParked {
                                         turn,
-                                        wait: Wait::Retry {
-                                            until_ms: t + after_ms,
-                                        },
+                                        wait,
                                         kind: kind.to_string(),
                                         reason: reason.clone(),
                                     };

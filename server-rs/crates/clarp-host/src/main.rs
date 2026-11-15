@@ -115,6 +115,16 @@ async fn serve(config: Config) -> Result<(), String> {
         pusher,
         desks,
     };
+    // Where someone else puts another account in place when one is out, turns that wait for
+    // an account are tried as soon as the tool's login has changed.
+    if config.accounts == clarp_kernel::recovery::Accounts::Follow {
+        let home = std::env::var_os("HOME").map_or_else(|| "/".into(), std::path::PathBuf::from);
+        clarp_host::logins::follow(
+            app.fleet.clone(),
+            home,
+            std::time::Duration::from_millis(config.logins_checked_every_ms),
+        );
+    }
     // The Host answers when it knows its agents: what they are doing, what runs for them. A
     // request that comes earlier waits at the door for that moment, it is not given half a view.
     let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);

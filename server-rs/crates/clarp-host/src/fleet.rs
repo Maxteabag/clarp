@@ -668,6 +668,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         tool_env: works.tool_env.clone(),
         stop_grace_ms: STOP_GRACE_MS,
         keep_spools: works.config.keep_spools,
+        accounts: works.config.accounts,
     };
     Ok(Setup {
         record: record.clone(),

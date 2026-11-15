@@ -22,6 +22,7 @@
 //! Codex remarking on its own configuration, and it is left out.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::turn::{Activity, RunOutcome};
@@ -108,6 +109,15 @@ impl Backend for Codex {
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
             stdin: spec.prompt.clone().into_bytes(),
         }
+    }
+
+    /// Codex's own directory (`CODEX_HOME`, else `.codex` at home) holds the login it runs
+    /// with.
+    fn login_file(&self, home: &Path) -> Option<PathBuf> {
+        let dir = std::env::var_os("CODEX_HOME")
+            .filter(|dir| !dir.is_empty())
+            .map_or_else(|| home.join(".codex"), PathBuf::from);
+        Some(dir.join("auth.json"))
     }
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
