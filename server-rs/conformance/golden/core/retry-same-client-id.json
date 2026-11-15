@@ -46,7 +46,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 2,
+    "latest_revision": 1,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -62,7 +62,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 1,
+      "revision": 0,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -84,7 +84,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 2,
+      "revision": 0,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -151,6 +151,21 @@
   {
    "data": {
     "agent_id": "<id:4>",
+    "client_msg_id": "charlie",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -191,21 +206,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "charlie",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {

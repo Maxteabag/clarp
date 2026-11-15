@@ -65,7 +65,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 3,
+    "latest_revision": 1,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -81,7 +81,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 1,
+      "revision": 0,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -111,7 +111,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 2,
+      "revision": 0,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -133,7 +133,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 3,
+      "revision": 0,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -224,7 +224,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 3,
+      "head_revision": 1,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -343,6 +343,40 @@
    "data": {
     "agent_id": "<id:4>",
     "detail": {
+     "message": "Turn stopped",
+     "source": "user_stop",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    },
+    "event_id": "<eid:agent-state#1@7da00e>",
+    "kind": "interrupted",
+    "persona": "Claire",
+    "session": "claire",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@7da00e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "event_id": "<eid:queue-updated#1@4e1693>",
+    "queue_depth": 0,
+    "queue_paused": true,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@4e1693>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
      "origin": "user",
@@ -382,40 +416,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "detail": {
-     "message": "Turn stopped",
-     "source": "user_stop",
-     "stop_actor": "user",
-     "stop_actor_verified": false,
-     "stop_reason": ""
-    },
-    "event_id": "<eid:agent-state#1@7da00e>",
-    "kind": "interrupted",
-    "persona": "Claire",
-    "session": "claire",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@7da00e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "event_id": "<eid:queue-updated#1@4e1693>",
-    "queue_depth": 0,
-    "queue_paused": true,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@4e1693>"
   },
   {
    "data": {

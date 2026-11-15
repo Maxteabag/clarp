@@ -37,6 +37,34 @@
   },
   {
    "body": {
+    "<bytes>": 10,
+    "<sha256>": "36f2522dd02c3f77514915f42074d6dc2d789208cafe2707405537c9ade26545"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 400,
+   "step": "send nothing to nobody"
+  },
+  {
+   "body": {
+    "<bytes>": 10,
+    "<sha256>": "36f2522dd02c3f77514915f42074d6dc2d789208cafe2707405537c9ade26545"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 400,
+   "step": "send nothing"
+  },
+  {
+   "body": {
     "ok": true,
     "stop_actor": "user",
     "stop_actor_verified": false,
