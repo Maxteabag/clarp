@@ -1,0 +1,15 @@
+[package]
+name = "clarp-speech"
+description = "What of a reply is spoken and what is shown: the voice markup, and the ports to the engines that speak and listen"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

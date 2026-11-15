@@ -12,6 +12,7 @@ members = [
     "crates/clarp-kernel",
     "crates/clarp-store-mem",
     "crates/clarp-store-sqlite",
+    "crates/clarp-speech",
 ]
 
 [workspace.package]
@@ -29,11 +30,13 @@ clarp-actor = { path = "crates/clarp-actor" }
 clarp-protocol = { path = "crates/clarp-protocol" }
 clarp-shim = { path = "crates/clarp-shim" }
 clarp-store-sqlite = { path = "crates/clarp-store-sqlite" }
+clarp-speech = { path = "crates/clarp-speech" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 clarp-spool = { path = "crates/clarp-spool" }
 nix = { version = "0.29", features = ["signal", "process"] }
+regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
