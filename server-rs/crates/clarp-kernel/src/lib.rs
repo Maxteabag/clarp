@@ -6,9 +6,11 @@
 //! writes to are given to it through `clarp-ports`.
 
 pub mod agent;
+pub mod artifacts;
 pub mod conversation;
 pub mod goals;
 pub mod jobs;
 pub mod journal;
+pub mod python;
 pub mod tools;
 pub mod turn;

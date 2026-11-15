@@ -184,6 +184,7 @@ version = "0.0.1"
 dependencies = [
  "clarp-codec",
  "clarp-ports",
+ "clarp-speech",
  "clarp-store-mem",
  "serde",
  "serde_json",
