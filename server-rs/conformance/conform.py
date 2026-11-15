@@ -236,6 +236,10 @@ def run_step(host, events, step, http, variables, clock=None):
             path_values[name] = urllib.parse.quote(str(dig(last, dotted, name)), safe='')
         path = replay.fill(step['path'], path_values)
         body = replay.fill(step.get('body'), variables)
+        # A body may say when it is sent (`body_now`: the names of its fields): an app says
+        # when it sent what it says, and a Host does not take what is old.
+        for name in step.get('body_now') or ():
+            body = {**(body or {}), name: int(time.time() * 1000)}
         if step.get('body_from_last'):
             body = {**(body or {}), **{name: dig(last, dotted, name)
                                        for name, dotted in step['body_from_last'].items()}}

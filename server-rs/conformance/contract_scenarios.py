@@ -927,4 +927,49 @@ SCENARIOS.append({
     ],
 })
 
+# What an app says of itself: one running copy of it (an id it made), counting what it reports.
+ACTIVITY = {'instance_id': '0a1b2c3d-0000-4000-8000-0000000000aa', 'sequence': 1, 'foreground': True, 'input_age_ms': 0}
+
+
+def activity(name, sent=True, **changed):
+    """An app reports whether it is in front. It says when it sent the report."""
+    step = post('/application-activity', {**ACTIVITY, **changed}, name)
+    return {**step, 'body_now': ['sent_at_ms']} if sent else step
+
+
+SCENARIOS.append({
+    'id': 'app-asks',
+    'what': 'what an app asks of any Host, whatever the Host says it has: whether it is up, which agent its user '
+            'is looking at, whether the app is in front, the lines of its own log, and the lists its screens are '
+            'made of',
+    'steps': [
+        get('/status', 'is the Host up'),
+        get(f'/status?session={AGENT}', 'is the agent busy'),
+        get('/status?session=nobody-here', 'is nobody busy'),
+        post('/focus', {'session': AGENT}, 'the user looks at the agent'),
+        SNAPSHOT,
+        post('/focus', {}, 'the user looks at nothing'),
+        post('/focus', {'session': 'nobody-here'}, 'the user looks at nobody'),
+        activity('the app is in front'),
+        activity('the same report again'),
+        activity('the app is behind', sequence=2, foreground=False),
+        activity('a report of long ago', sent=False, sequence=3, sent_at_ms=1),
+        activity('a report of what has no id', instance_id='not-an-id'),
+        activity('a report without its place', sequence=0),
+        activity('a report that says neither front nor behind', sequence=4, foreground='yes'),
+        activity('a report with an input that is no number', sequence=5, input_age_ms='now'),
+        post('/application-activity', ['front'], 'a report that is a list'),
+        post('/clog', {'event': 'synthetic-event', 'detail': 'a synthetic line'}, 'a line of the log of the app'),
+        post('/clog', {'events': [{'event': 'synthetic-one', 'detail': {'k': 1}}, {'event': 'synthetic-two'}]},
+             'lines of the log of the app'),
+        get('/teams', 'the teams'),
+        get('/janitors', 'the janitors'),
+        get('/automation-settings', 'what the Host does by itself'),
+        get('/transcription-capabilities', 'what the Host transcribes with'),
+        get('/transcription-providers', 'who transcribes'),
+        get('/voice-catalog', 'the voices'),
+        get('/agent-model-options', 'the models an agent can be given'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
