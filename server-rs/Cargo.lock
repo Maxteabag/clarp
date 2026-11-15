@@ -170,6 +170,7 @@ dependencies = [
  "clarp-store-mem",
  "clarp-store-sqlite",
  "futures-util",
+ "nix",
  "serde",
  "serde_json",
  "sha2",

@@ -19,10 +19,12 @@ pub mod edge;
 pub mod fleet;
 pub mod hub;
 pub mod ids;
+pub mod joblog;
 pub mod launcher;
 pub mod pairing;
 pub mod process;
 pub mod revisions;
+pub mod tools;
 pub mod wire;
 
 /// The version this Host reports.

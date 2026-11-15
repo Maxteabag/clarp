@@ -26,8 +26,9 @@
 # (clarp-goal, clarp-agent-bg and the rest in ~/.local/share/clarp/bin, also linked from
 # ~/.local/bin) write straight into that Host's database, whatever the environment says. Skills
 # call them by name, so this Host's own directory of tools (~/.local/share/clarp-host/tools)
-# comes first on the path an agent's commands run with, and for every tool of the Python Host
-# that this Host does not have yet it holds one of the same name that says so and does nothing.
+# comes first on the path an agent's commands run with. It holds every one of those names; each
+# is a pipe to this Host, which answers the tools it has and says of the others that it does not
+# have them yet.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -73,26 +74,20 @@ for binary in clarp-host clarp-shim; do
     install -m 755 "$from/$binary" "$share/bin/.$binary.new"
     mv -f "$share/bin/.$binary.new" "$share/bin/$binary"
 done
-# For every Clarp tool of the Python Host that this Host has none of: one of the same name
-# that refuses. A tool this Host does have is left as it is.
-stubs=0
-for tool in "$python_share"/bin/clarp-*; do
-    [ -e "$tool" ] || continue
-    name="$(basename "$tool")"
-    if [ -e "$share/tools/$name" ] && ! grep -q '^# clarp-host: not here yet$' "$share/tools/$name" 2>/dev/null; then
-        continue
-    fi
-    cat > "$share/tools/$name" <<EOF
+# An agent's own tools: each is the Host's binary under the tool's name, a pipe to the Host the
+# agent runs on. There is one for every tool the Host answers and for every tool of the Python
+# Host on this machine, so that the name is never looked for further along the path. What the
+# Host does not have yet it says so itself, and does nothing.
+tools=0
+for name in $( { echo clarp-agent-bg; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
+    cat > "$share/tools/.$name.new" <<EOF
 #!/bin/sh
-# clarp-host: not here yet
-# Written by install-host. This agent runs on the Rust Host, which does not have $name yet.
-# The tool of the same name further along the path belongs to the Python Host and writes its
-# database: it must not be reached from here.
-echo "$name: not available on this Host yet (the Rust Host). Nothing was done." >&2
-exit 69
+# Written by install-host: one of an agent's own tools on the Rust Host.
+exec "$share/bin/clarp-host" tool $name "\$@"
 EOF
-    chmod 755 "$share/tools/$name"
-    stubs=$((stubs + 1))
+    chmod 755 "$share/tools/.$name.new"
+    mv -f "$share/tools/.$name.new" "$share/tools/$name"
+    tools=$((tools + 1))
 done
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
@@ -141,7 +136,7 @@ EOF
 
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
-echo "Clarp tools of the Python Host that refuse here: $stubs"
+echo "the agents' own tools: $tools names in $share/tools"
 [ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
 systemctl --user daemon-reload
 if [ "$start" = 1 ]; then

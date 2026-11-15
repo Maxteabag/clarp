@@ -28,6 +28,8 @@ pub struct Config {
     /// Where a new agent works when nobody says.
     pub default_cwd: PathBuf,
     pub keep_spools: bool,
+    /// How often an agent with running background jobs looks whether somebody still runs them.
+    pub jobs_checked_every_ms: u64,
     /// What an installer stamped this installation with: the content of `DEPLOYED_VERSION` in
     /// the data directory. Empty for a Host that was not installed by one.
     pub deployed_version: String,
@@ -35,7 +37,7 @@ pub struct Config {
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
 [--engine sqlite|memory] [--codec zstd|none] [--launcher direct|systemd] [--shim PATH] \
-[--name NAME] [--cwd DIR] [--keep-spools]
+[--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N]
 The token the apps must present is read from CLARP_HOST_TOKEN.";
 
 fn home() -> PathBuf {
@@ -62,6 +64,7 @@ impl Config {
             .unwrap_or_else(|| "Clarp Host".to_string());
         let mut default_cwd = home();
         let mut keep_spools = false;
+        let mut jobs_checked_every_ms = 30_000;
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
             match arg.as_str() {
@@ -75,6 +78,11 @@ impl Config {
                 "--name" => name = value("a name")?,
                 "--cwd" => default_cwd = PathBuf::from(value("a directory")?),
                 "--keep-spools" => keep_spools = true,
+                "--jobs-checked-every-ms" => {
+                    jobs_checked_every_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--jobs-checked-every-ms needs a number".to_string())?;
+                }
                 other => return Err(format!("unknown argument {other}")),
             }
         }
@@ -102,6 +110,7 @@ impl Config {
             name,
             default_cwd,
             keep_spools,
+            jobs_checked_every_ms,
             deployed_version: std::fs::read_to_string(data_dir.join("DEPLOYED_VERSION"))
                 .map(|version| version.trim().to_string())
                 .unwrap_or_default(),

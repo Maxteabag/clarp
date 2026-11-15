@@ -34,6 +34,7 @@ const FOCUS: &str = "focus";
 const CODES: &str = "pairing-code";
 /// Paired devices, by device id.
 const DEVICES: &str = "device";
+const JOBS: &str = "job";
 
 /// How long a tool gets to end by itself when its turn is stopped.
 const STOP_GRACE_MS: u64 = 5_000;
@@ -141,6 +142,17 @@ enum Ask {
         device_id: String,
         answer: Answer<bool>,
     },
+    /// An agent registers a background job under an id. The inner error is the agent that
+    /// has the id already.
+    ClaimJob {
+        job_id: String,
+        agent_id: String,
+        answer: Answer<Result<(), String>>,
+    },
+    JobOwner {
+        job_id: String,
+        answer: Answer<Option<String>>,
+    },
 }
 
 /// The way to the fleet's thread, and the fleet as anyone may read it.
@@ -242,6 +254,26 @@ impl FleetHandle {
     pub async fn revoke(&self, device_id: String) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::Revoke { device_id, answer }).await
     }
+
+    /// Gives a background job's id to an agent. A job's id is one name on the whole Host:
+    /// the inner error is the agent that has it already.
+    pub async fn claim_job(
+        &self,
+        job_id: String,
+        agent_id: String,
+    ) -> Result<Result<(), String>, Unavailable> {
+        self.ask(|answer| Ask::ClaimJob {
+            job_id,
+            agent_id,
+            answer,
+        })
+        .await
+    }
+
+    /// The agent a background job's id belongs to.
+    pub async fn job_owner(&self, job_id: String) -> Result<Option<String>, Unavailable> {
+        self.ask(|answer| Ask::JobOwner { job_id, answer }).await
+    }
 }
 
 struct Fleet {
@@ -251,6 +283,9 @@ struct Fleet {
     focus: Option<String>,
     /// The devices that may speak, by the digest of their token.
     devices: HashMap<String, Arc<Device>>,
+    /// Which agent each background job's id belongs to. The job itself is in that agent's
+    /// log; this is only the way to it.
+    jobs: HashMap<String, String>,
     directory: watch::Sender<Arc<Directory>>,
 }
 
@@ -285,6 +320,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         clock: works.clock.clone(),
         hub: works.hub.clone(),
         revisions: works.revisions.clone(),
+        jobs_checked_every: std::time::Duration::from_millis(works.config.jobs_checked_every_ms),
     })
 }
 
@@ -325,6 +361,10 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
             devices.insert(device.token_hash.clone(), Arc::new(device));
         }
     }
+    let mut jobs = HashMap::new();
+    for (job_id, stored) in store.list(JOBS).map_err(|error| error.to_string())? {
+        jobs.insert(job_id, String::from_utf8_lossy(&stored).into_owned());
+    }
     let (directory, read) = watch::channel(Arc::new(Directory {
         members: members.clone(),
         focus: focus.clone(),
@@ -337,6 +377,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         members,
         focus,
         devices,
+        jobs,
         directory,
     };
     std::thread::Builder::new()
@@ -387,6 +428,34 @@ impl Fleet {
                 Ask::Revoke { device_id, answer } => {
                     let _ = answer.send(self.revoke(&device_id));
                 }
+                Ask::ClaimJob {
+                    job_id,
+                    agent_id,
+                    answer,
+                } => {
+                    let _ = answer.send(self.claim_job(job_id, agent_id));
+                }
+                Ask::JobOwner { job_id, answer } => {
+                    let _ = answer.send(Ok(self.jobs.get(&job_id).cloned()));
+                }
+            }
+        }
+    }
+
+    fn claim_job(
+        &mut self,
+        job_id: String,
+        agent_id: String,
+    ) -> Result<Result<(), String>, Unavailable> {
+        match self.jobs.get(&job_id) {
+            Some(owner) if *owner != agent_id => Ok(Err(owner.clone())),
+            Some(_) => Ok(Ok(())),
+            None => {
+                self.store
+                    .put(JOBS, &job_id, agent_id.as_bytes())
+                    .map_err(|error| Unavailable(error.to_string()))?;
+                self.jobs.insert(job_id, agent_id);
+                Ok(Ok(()))
             }
         }
     }

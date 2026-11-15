@@ -37,8 +37,6 @@ use crate::{process, wire};
 /// grows is told a few times a second, and once more when it stops growing.
 const TRANSCRIPT_EVERY: Duration = Duration::from_millis(250);
 
-/// How often an agent that has running jobs looks whether somebody still runs them.
-const JOBS_CHECKED_EVERY: Duration = Duration::from_secs(30);
 /// A job nobody is named for is remarked on after this long without a sign of life, and
 /// given up after twice as long: the Python Host's `job_stale_after_minutes` and its grace.
 const JOB_STALE_AFTER_MS: i64 = 15 * 60_000;
@@ -47,6 +45,9 @@ const JOB_LOST_AFTER_MS: i64 = 30 * 60_000;
 pub const JOB_SHOWN_FOR_MS: i64 = 24 * 60 * 60_000;
 /// The wall clock went this much further than the time that passed here: the machine slept.
 const CLOCK_JUMP_MS: i64 = 5_000;
+
+/// What an agent's view says before its thread has opened it for the first time.
+pub const OPENING: &str = "the agent is being opened";
 
 const REOPEN_FIRST: Duration = Duration::from_millis(200);
 const REOPEN_MOST: Duration = Duration::from_secs(30);
@@ -158,6 +159,8 @@ pub struct Setup {
     pub clock: Arc<dyn Clock + Send + Sync>,
     pub hub: Arc<Hub>,
     pub revisions: Arc<Revisions>,
+    /// How often an agent that has running jobs looks whether somebody still runs them.
+    pub jobs_checked_every: Duration,
 }
 
 /// The way to an agent's thread.
@@ -282,7 +285,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         ended: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
-        broken: Some("the agent is being opened".to_string()),
+        broken: Some(OPENING.to_string()),
     }));
     let now_ms = setup.clock.now_ms();
     let worker = Worker {
@@ -362,7 +365,7 @@ impl Worker {
                 .actor
                 .as_ref()
                 .is_some_and(|actor| actor.jobs().active().next().is_some());
-            let jobs_due = has_jobs.then(|| self.jobs_checked + JOBS_CHECKED_EVERY);
+            let jobs_due = has_jobs.then(|| self.jobs_checked + self.setup.jobs_checked_every);
             let due = match (self.transcript_due, jobs_due) {
                 (Some(transcript), Some(jobs)) => Some(transcript.min(jobs)),
                 (transcript, jobs) => transcript.or(jobs),

@@ -409,6 +409,394 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
     wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
+/// Runs one of an agent's own tools the way a worker would: the Host's binary under the tool's
+/// name, told where the Host is. Answers the exit code and what was printed.
+fn tool(
+    host: &Host,
+    dir: &std::path::Path,
+    worker: Option<u32>,
+    args: &[&str],
+) -> (i32, String, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+    command
+        .arg("tool")
+        .args(args)
+        .current_dir(dir)
+        .env("CLARP_HOST_ADDR", &host.address)
+        .env("CLARP_HOST_TOKEN", &host.token)
+        .env_remove("CLARP_BACKGROUND_WORKER_PID");
+    if let Some(pid) = worker {
+        command.env("CLARP_BACKGROUND_WORKER_PID", pid.to_string());
+    }
+    let out = command.output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see_it() {
+    let place = Place::new("jobs");
+    let fast = ["--jobs-checked-every-ms", "200"];
+    let host = place.start_with("", &fast);
+    let session = host.new_agent("Builder");
+    let dir = place.root.clone();
+    let job = |host: &Host, id: &str| {
+        host.get("/background-jobs")["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|job| job["job_id"] == id)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let count = |host: &Host| {
+        host.get("/agents/snapshot")["agents"][0]["background_jobs"]["count"]
+            .as_u64()
+            .unwrap()
+    };
+
+    // A worker is a process the agent left running. It names itself, and registers its job.
+    let mut worker = Command::new("sleep").arg("60").spawn().unwrap();
+    let pid = worker.id();
+    let (code, handle, _) = tool(
+        &host,
+        &dir,
+        Some(pid),
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            "build-1",
+            "build",
+            "Build it",
+            "the whole thing",
+        ],
+    );
+    assert_eq!((code, handle.as_str()), (0, "bg1:1:build-1\n"));
+    let seen = job(&host, "build-1");
+    assert_eq!(
+        (
+            &seen["status"],
+            &seen["session"],
+            &seen["worker_pid"],
+            &seen["generation"]
+        ),
+        (&json!("running"), &json!(session), &json!(pid), &json!(1))
+    );
+    assert_eq!(
+        (
+            &seen["worker_freshness"],
+            &seen["can_cancel"],
+            &seen["outcome_state"],
+            &seen["agent_name"]
+        ),
+        (
+            &json!("fresh"),
+            &json!(true),
+            &json!("pending"),
+            &json!("Builder")
+        )
+    );
+    assert_eq!(count(&host), 1);
+
+    // It says how far it is and where its log is; whoever looks at the job is shown both.
+    std::fs::write(dir.join("build.log"), "compiling\nlinking\n").unwrap();
+    let log = dir.join("build.log");
+    let said = |args: &[&str]| tool(&host, &dir, Some(pid), args).0;
+    assert_eq!(
+        said(&[
+            "clarp-agent-bg",
+            &session,
+            "job-progress",
+            "bg1:1:build-1",
+            "step  1/2"
+        ]),
+        0
+    );
+    assert_eq!(
+        said(&[
+            "clarp-agent-bg",
+            &session,
+            "job-log",
+            "bg1:1:build-1",
+            log.to_str().unwrap()
+        ]),
+        0
+    );
+    assert_eq!(
+        said(&[
+            "clarp-agent-bg",
+            &session,
+            "job-log",
+            "bg1:1:build-1",
+            "build.log"
+        ]),
+        2
+    );
+    assert_eq!(
+        said(&["clarp-agent-bg", &session, "job-heartbeat", "bg1:1:build-1"]),
+        0
+    );
+    assert_eq!(
+        said(&["clarp-agent-bg", &session, "job-active", "bg1:1:build-1"]),
+        0
+    );
+    let detail = host.get("/background-jobs/build-1");
+    assert_eq!(
+        (
+            &detail["handle"],
+            &detail["owner_session"],
+            &detail["progress"]["text"]
+        ),
+        (&json!("bg1:1:build-1"), &json!(session), &json!("step 1/2"))
+    );
+    assert_eq!(
+        (&detail["log"]["available"], &detail["log"]["text"]),
+        (&json!(true), &json!("compiling\nlinking\n"))
+    );
+    let changes: Vec<(&str, &str)> = detail["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                entry["change"].as_str().unwrap(),
+                entry["note"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(changes, vec![("status", ""), ("progress", "step 1/2")]);
+
+    // Another process does not speak for this run, and neither does another run.
+    assert_eq!(
+        tool(
+            &host,
+            &dir,
+            None,
+            &["clarp-agent-bg", &session, "job-finish", "bg1:1:build-1"]
+        )
+        .0,
+        1
+    );
+    assert_eq!(
+        said(&["clarp-agent-bg", &session, "job-finish", "bg1:2:build-1"]),
+        1
+    );
+    assert_eq!(job(&host, "build-1")["status"], "running");
+
+    // The worker dies without a word. The Host notices that its process is gone.
+    worker.kill().unwrap();
+    worker.wait().unwrap();
+    wait_for("the job to be given up", || {
+        job(&host, "build-1")["status"] == "failed"
+    });
+    let lost = job(&host, "build-1");
+    assert_eq!(
+        (
+            &lost["terminal_reason"],
+            &lost["outcome_state"],
+            &lost["worker_freshness"]
+        ),
+        (
+            &json!("worker_vanished"),
+            &json!("unknown"),
+            &json!("stale")
+        ),
+        "lost, which is not the same as failed"
+    );
+    assert_eq!(
+        said(&["clarp-agent-bg", &session, "job-active", "bg1:1:build-1"]),
+        1
+    );
+    assert_eq!(count(&host), 0);
+
+    // The id is used again: a new run, and the Host that is started again still knows it.
+    let mut second = Command::new("sleep").arg("60").spawn().unwrap();
+    let (code, handle, _) = tool(
+        &host,
+        &dir,
+        Some(second.id()),
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            "build-1",
+            "build",
+            "Build it again",
+        ],
+    );
+    assert_eq!((code, handle.as_str()), (0, "bg1:2:build-1\n"));
+    host.kill();
+    let host = place.start_with("", &fast);
+    assert_eq!(
+        (
+            &job(&host, "build-1")["status"],
+            &job(&host, "build-1")["generation"]
+        ),
+        (&json!("running"), &json!(2))
+    );
+    assert_eq!(
+        tool(
+            &host,
+            &dir,
+            Some(second.id()),
+            &["clarp-agent-bg", &session, "job-finish", "bg1:2:build-1"]
+        )
+        .0,
+        0
+    );
+    assert_eq!(job(&host, "build-1")["status"], "succeeded");
+    second.kill().unwrap();
+    second.wait().unwrap();
+    // What is over is not cancelled, and a cancel names the run it means.
+    let (status, refused) = host.ask(
+        "DELETE",
+        "/background-jobs/build-1?expected_generation=1",
+        None,
+    );
+    assert_eq!(
+        (status, &refused["error"]),
+        (409, &json!("generation_mismatch"))
+    );
+    assert_eq!(refused["current_generation"], 2);
+    let (status, refused) = host.ask("DELETE", "/background-jobs/build-1", None);
+    assert_eq!(
+        (status, &refused["error"]),
+        (409, &json!("job already succeeded"))
+    );
+    assert_eq!(host.ask("DELETE", "/background-jobs/nobody", None).0, 404);
+
+    // The user cancels a job that runs: it is closed for its worker at once, and its owner
+    // is told, so that it can clean up.
+    let (code, handle, _) = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            "watch-1",
+            "watch",
+            "Watch the build",
+        ],
+    );
+    assert_eq!((code, handle.as_str()), (0, "bg1:1:watch-1\n"));
+    let (status, receipt) = host.ask(
+        "DELETE",
+        "/background-jobs/watch-1?expected_generation=1",
+        None,
+    );
+    assert_eq!(
+        (
+            status,
+            &receipt["ok"],
+            &receipt["changed"],
+            &receipt["job"]["status"]
+        ),
+        (200, &json!(true), &json!(true), &json!("cancelled"))
+    );
+    assert_eq!(
+        tool(
+            &host,
+            &dir,
+            None,
+            &["clarp-agent-bg", &session, "job-cancelled", "bg1:1:watch-1"]
+        )
+        .0,
+        0
+    );
+    assert_eq!(
+        tool(
+            &host,
+            &dir,
+            None,
+            &["clarp-agent-bg", &session, "job-active", "bg1:1:watch-1"]
+        )
+        .0,
+        1
+    );
+    wait_for("the owner to be told", || {
+        host.conversation(&session).iter().any(|(role, text)| {
+            role == "user" && text.starts_with("the user cancelled background job watch-1")
+        })
+    });
+    // A cancelled job stays cancelled when its worker registers again, until it is restarted.
+    let again = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            "watch-1",
+            "watch",
+            "Watch",
+        ],
+    );
+    assert_eq!((again.0, again.1.as_str()), (1, "bg1:1:watch-1\n"));
+    let again = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-restart",
+            "watch-1",
+            "watch",
+            "Watch",
+        ],
+    );
+    assert_eq!((again.0, again.1.as_str()), (0, "bg1:2:watch-1\n"));
+
+    // A job's id is one name on the whole Host.
+    let other = host.new_agent("Other");
+    let taken = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-agent-bg",
+            &other,
+            "job-upsert",
+            "watch-1",
+            "watch",
+            "Mine",
+        ],
+    );
+    assert_eq!(taken.0, 1);
+    assert!(
+        taken.2.contains("already belongs to another agent"),
+        "{}",
+        taken.2
+    );
+    let unknown = tool(
+        &host,
+        &dir,
+        None,
+        &["clarp-agent-bg", "nobody", "job-upsert", "x", "k", "t"],
+    );
+    assert_eq!(
+        (unknown.0, unknown.2.as_str()),
+        (1, "agent_bg: unknown session: nobody\n")
+    );
+    assert_eq!(tool(&host, &dir, None, &["clarp-agent-bg", &session]).0, 2);
+
+    // A tool this Host does not have yet says so, and does nothing.
+    let absent = tool(&host, &dir, None, &["clarp-goal", "get", "some-plan"]);
+    assert_eq!(absent.0, 69);
+    assert!(
+        absent.2.contains("not available on this Host yet"),
+        "{}",
+        absent.2
+    );
+}
+
 #[test]
 fn a_host_that_is_killed_in_the_middle_of_turns_comes_back_and_every_turn_finishes() {
     let place = Place::new("kill");
