@@ -29,6 +29,7 @@ use crate::media::MediaBook;
 use crate::python;
 
 pub mod decisions;
+pub mod reports;
 
 pub use decisions::{Decision, Delivery};
 
