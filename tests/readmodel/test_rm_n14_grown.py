@@ -146,6 +146,49 @@ def test_a_file_that_did_more_than_grow_is_refused_as_before(tmp_path, backend, 
             assert seen[True][0] == "full_file_moved_during_parse"
 
 
+@pytest.mark.parametrize("when", ["read", "parse", "store"])
+@BACKENDS
+def test_a_file_that_is_longer_and_older_than_it_was_did_not_only_grow(tmp_path, backend, when):
+    """An append moves the mtime forward. A file that is longer and whose
+    mtime is EARLIER than when the tail began was written by something that
+    sets its times, so "longer" says nothing about the bytes that were
+    there: refused, as without the switch, at each of the three moments.
+    (From the review of #340: the mtime half of "only grew" had no test.)"""
+    seen = {}
+    for switch in (True, False):
+        where = tmp_path / ("on" if switch else "off")
+        where.mkdir()
+        reference, candidate, transcript, full, actual = _stood(where, backend, switch)
+        with full, actual:
+            full.tick(0)
+            actual.tick(0, faults=_how(switch))
+            _append(transcript, backend, 40)
+            full.tick(1)
+            assert _decision(actual.tick(1, faults=_how(switch))) == "tail_applied"
+            earlier = _checkpoint(candidate)
+            if when == "read":
+                _several_reads(transcript, backend, 41)
+            else:
+                _append(transcript, backend, 41)
+            began = transcript.stat()
+            moved = actual.tick(2, faults=_how(switch, **_moves(when, "grow_older")))
+            now = transcript.stat()
+            assert now.st_size > began.st_size and now.st_mtime_ns < began.st_mtime_ns
+            kept = "frontier_kept_source_grew" in _retentions(moved)
+            published = _checkpoint(candidate)
+            full.tick(3)
+            after = actual.tick(3, faults=_how(switch))
+            assert _texts(candidate) == _texts(reference)
+            seen[switch] = (_decision(moved), kept, published == earlier, _decision(after))
+    assert seen[True] == seen[False]
+    assert seen[True][1] is False
+    if when == "store":
+        assert seen[True] == ("deferred_tail_source_changed", False, True,
+                              "full_no_frontier(publication_file_moved)")
+    else:
+        assert seen[True][0] == "full_file_moved_during_parse"
+
+
 @BACKENDS
 def test_bytes_rewritten_between_the_hash_and_the_parse_are_caught_by_the_second_hash(
         tmp_path, backend):

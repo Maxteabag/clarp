@@ -398,7 +398,9 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 # "before_parse" (its bytes were hashed, the parser has not
                 # opened it yet) or "store" (parsed, about to be stored and
                 # published). "how":
-                # "grow" (a record is appended), "touch" (only the mtime
+                # "grow" (a record is appended), "grow_older" (a record is
+                # appended and the mtime is put a second BEFORE what it was),
+                # "touch" (only the mtime
                 # moves), "rewrite" (a record is appended AND a byte of the
                 # last old record changes in place), "rewrite_at" (the
                 # same, the byte where "words" begin: a record an earlier
@@ -411,8 +413,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                         return
                     moved.append(True)
                     stat, how = transcript.stat(), moves["how"]
-                    if how in ("grow", "rewrite", "rewrite_at"):
-                        if how != "grow":
+                    if how in ("grow", "grow_older", "rewrite", "rewrite_at"):
+                        if how.startswith("rewrite"):
                             data = transcript.read_bytes()
                             at = data.rindex(b"synthetic") if how == "rewrite" \
                                 else data.index(moves["words"].encode())
@@ -421,6 +423,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                                 output.write(b"S")
                         with transcript.open("ab") as output:
                             output.write(append_bytes(backend, 900 + tick))
+                        if how == "grow_older":
+                            os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns - 1_000_000_000))
                     elif how == "touch":
                         os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
                     elif how == "replace":
