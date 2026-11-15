@@ -460,28 +460,6 @@
   {
    "data": {
     "agent_id": "<id:7>",
-    "detail": {
-     "dispatch": "clarp",
-     "duration_ms": "<duration>",
-     "origin": "user",
-     "tokens_in": 5,
-     "tokens_out": 7,
-     "trace_id": "<id:2>"
-    },
-    "event_id": "<eid:agent-state#7@0952e1>",
-    "kind": "done",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#7@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
     "badge": true,
     "cause_message_id": "u-slow",
     "done_ts": "<time>",
@@ -500,6 +478,28 @@
    },
    "event": null,
    "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:2>"
+    },
+    "event_id": "<eid:agent-state#7@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#7@0952e1>"
   },
   {
    "data": {
