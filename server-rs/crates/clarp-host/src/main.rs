@@ -91,7 +91,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
         hub: hub.clone(),
         revisions: revisions.clone(),
-        tool_env: vec![(clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string())],
+        tool_env: tool_env(&address.to_string(), &config.auth_token),
         pusher: pusher.clone(),
     };
     let fleet = fleet::start(works, store)?;
@@ -163,6 +163,17 @@ async fn told_to_stop() {
     }
 }
 
+/// What every turn is told of its Host: where it listens, and the token its agent's tools
+/// present. Never the administrator's token.
+fn tool_env(address: &str, administrators: &str) -> Vec<(String, String)> {
+    let mut env = vec![(clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string())];
+    let token = clarp_host::tool_token(administrators);
+    if !token.is_empty() {
+        env.push((clarp_host::TOOL_TOKEN_ENV.to_string(), token));
+    }
+    env
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1).peekable();
     if args.peek().map(String::as_str) == Some("pair") {
@@ -202,7 +213,13 @@ fn main() -> ExitCode {
     }
     if args.peek().map(String::as_str) == Some("tool") {
         args.next();
-        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        // What the turn was given for its agent's tools; the administrator's, when the
+        // administrator calls a tool by hand.
+        let token = std::env::var(clarp_host::TOOL_TOKEN_ENV)
+            .ok()
+            .filter(|token| !token.is_empty())
+            .or_else(|| std::env::var("CLARP_HOST_TOKEN").ok())
+            .unwrap_or_default();
         let outcome = clarp_host::admin::tool(args, &token);
         print!("{}", outcome.stdout);
         eprint!("{}", outcome.stderr);

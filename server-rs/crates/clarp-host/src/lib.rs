@@ -41,6 +41,51 @@ pub mod wire;
 /// The version this Host reports.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The environment variable that tells an agent's own tools where their Host listens. The
-/// Host's token is in the Host's own environment, which every turn inherits.
+/// The environment variable that tells an agent's own tools where their Host listens.
 pub const TOOL_ADDR_ENV: &str = "CLARP_HOST_ADDR";
+
+/// The environment variable that carries the token an agent's own tools present: see
+/// [`tool_token`].
+pub const TOOL_TOKEN_ENV: &str = "CLARP_TOOL_TOKEN";
+
+/// What in the Host's environment is the Host's alone. Nothing the Host starts is given these:
+/// a turn's environment is read by every command an agent runs, and what an agent prints is in
+/// its conversation.
+pub const OWN_SECRETS: &[&str] = &[
+    "CLARP_HOST_TOKEN",
+    "CLARP_PUSH_CREDENTIAL",
+    "CLARP_SOURCE_TOKEN",
+    "CLARP_PEER_TOKEN",
+];
+
+/// The token an agent's own tools present, on a Host whose administrator has this token.
+///
+/// It follows from the administrator's token, so it is the same after the Host is started
+/// again and a turn that went on meanwhile still reaches its Host; and it does not give the
+/// administrator's token away. It opens the agents' tools (`/tools/`) from this machine and
+/// nothing else: not the conversations, not the devices, not the pairing. A Host without a
+/// token gives its turns none.
+pub fn tool_token(administrators: &str) -> String {
+    if administrators.is_empty() {
+        return String::new();
+    }
+    pairing::digest(&format!(
+        "clarp-host: the token of an agent's own tools\0{administrators}"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tools_token_follows_from_the_administrators_and_is_not_it() {
+        let token = tool_token("the-administrators-token");
+        assert_eq!(token.len(), 64);
+        assert_eq!(token, tool_token("the-administrators-token"));
+        assert_ne!(token, tool_token("another-token"));
+        assert!(!token.contains("the-administrators-token"));
+        // A Host that asks nobody for a token has none to give its turns.
+        assert_eq!(tool_token(""), "");
+    }
+}

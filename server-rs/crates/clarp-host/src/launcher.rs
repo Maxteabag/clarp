@@ -111,6 +111,10 @@ impl Launcher {
             .arg("--")
             .arg(&order.program)
             .args(&order.args);
+        // The Host's own secrets stay with the Host. A turn is given what its tools need.
+        for name in crate::OWN_SECRETS {
+            command.env_remove(name);
+        }
         for (name, value) in &order.env {
             command.env(name, value);
         }
@@ -250,8 +254,34 @@ mod tests {
             ]
         );
         let command = direct.command(&order());
-        let env: Vec<_> = command.get_envs().collect();
-        assert_eq!(env.len(), 1, "the tool is told which agent it works for");
+        let given: Vec<_> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_some())
+            .collect();
+        assert_eq!(given.len(), 1, "the tool is told which agent it works for");
+    }
+
+    #[test]
+    fn a_shim_is_never_given_the_hosts_own_secrets() {
+        assert!(crate::OWN_SECRETS.contains(&"CLARP_HOST_TOKEN"));
+        assert!(crate::OWN_SECRETS.contains(&"CLARP_PUSH_CREDENTIAL"));
+        for launcher in ["direct", "systemd"] {
+            let command = Launcher::by_name(launcher, PathBuf::from("/bin/clarp-shim"))
+                .unwrap()
+                .command(&order());
+            // Taken out of what the shim inherits, whatever the Host's environment holds.
+            let removed: Vec<String> = command
+                .get_envs()
+                .filter(|(_, value)| value.is_none())
+                .map(|(key, _)| key.to_string_lossy().into_owned())
+                .collect();
+            for secret in crate::OWN_SECRETS {
+                assert!(
+                    removed.iter().any(|key| key == secret),
+                    "{launcher}: {secret}"
+                );
+            }
+        }
     }
 
     #[test]

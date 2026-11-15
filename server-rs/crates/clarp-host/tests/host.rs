@@ -4333,6 +4333,106 @@ fn on_path(name: &str) -> Option<PathBuf> {
     })
 }
 
+/// What a stand-in for Claude Code prints for a turn: it began, it answered one line, it ended.
+const STAND_IN_ANSWERS: &str = "\
+printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
+printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
+printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n";
+
+#[test]
+fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
+    let place = Place::new("tool-token");
+    let token = "the-administrators-token";
+    // A stand-in for Claude Code that writes down what it was given, calls one of its
+    // agent's tools the way a command of the agent would, and answers.
+    let seen = place.root.join("seen");
+    let claude = place.root.join("claude");
+    let script = [
+        "#!/bin/sh\nread message\n{\n",
+        "echo \"host_token=${CLARP_HOST_TOKEN+given}\"\n",
+        "echo \"push_credential=${CLARP_PUSH_CREDENTIAL+given}\"\n",
+        "echo \"tool_token=$CLARP_TOOL_TOKEN\"\n",
+        &format!(
+            "\"{}\" tool clarp-admin sessions > /dev/null 2>&1\n",
+            env!("CARGO_BIN_EXE_clarp-host")
+        ),
+        "echo \"tool_exit=$?\"\n",
+        &format!("}} > \"{}\"\n", seen.display()),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    let host = place.start_in(
+        token,
+        &[],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_PUSH_CREDENTIAL", "the-relays-credential"),
+        ],
+    );
+    // An agent that Claude Code runs: its turns are the stand-in above.
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    host.send(&agent, "what were you given?", "m1");
+    wait_for("the turn's answer", || {
+        host.conversation(&agent).len() == 2 && host.state(&agent) == "done"
+    });
+
+    let seen = std::fs::read_to_string(&seen).unwrap();
+    let said = |key: &str| -> String {
+        seen.lines()
+            .find_map(|line| line.strip_prefix(&format!("{key}=")))
+            .unwrap_or("not said")
+            .to_string()
+    };
+    // Nothing of the Host's own is in what a turn inherits.
+    assert_eq!(said("host_token"), "", "{seen}");
+    assert_eq!(said("push_credential"), "", "{seen}");
+    // What it has instead follows from the administrator's token and is not it, and the
+    // agent's tools reach their Host with it.
+    let tools = clarp_host::tool_token(token);
+    assert_ne!(tools, token);
+    assert_eq!(said("tool_token"), tools, "{seen}");
+    assert_eq!(said("tool_exit"), "0", "{seen}");
+
+    // That token opens the tools, from this machine, and nothing the apps read or do.
+    let by_hand = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["tool", "clarp-admin", "sessions"])
+        .current_dir(&place.root)
+        .env("CLARP_HOST_ADDR", &host.address)
+        .env("CLARP_TOOL_TOKEN", &tools)
+        .env_remove("CLARP_HOST_TOKEN")
+        .output()
+        .unwrap();
+    assert_eq!(
+        by_hand.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&by_hand.stderr)
+    );
+    let log = format!("/log?session={agent}");
+    for (method, path) in [
+        ("GET", "/agents/snapshot"),
+        ("GET", log.as_str()),
+        ("POST", "/send"),
+        ("POST", "/agents"),
+        ("POST", "/pairing/issue"),
+        ("GET", "/paired-devices"),
+        ("GET", "/peers"),
+    ] {
+        let (status, refused) = host.ask_as(&tools, method, path, None);
+        assert_eq!(status, 403, "{method} {path}: {refused}");
+    }
+    let (_, refused) = host.ask_as(&tools, "GET", "/agents/snapshot", None);
+    assert_eq!(refused["error"], "an agent's tools may ask for tools only");
+    // The administrator still calls a tool by hand with the administrator's token.
+    let (code, _, err) = tool(&host, &place.root, None, &["clarp-admin", "sessions"]);
+    assert_eq!(code, 0, "{err}");
+    // And a token that is neither opens nothing.
+    let (status, _) = host.ask_as("neither", "GET", "/agents/snapshot", None);
+    assert_eq!(status, 401);
+}
+
 #[test]
 fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
@@ -4353,10 +4453,7 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     let claude = place.root.join("claude");
     program(
         &claude,
-        "#!/bin/sh\nread message\n\
-         printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
-         printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
-         printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+        &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
     );
     let host = place.start_in(
         token,

@@ -21,11 +21,32 @@ Nothing of the Python Host is written: not its units, its database, its configur
 installer reads two things from the Python Host's unit, to give a turn the same world it has there: the path
 its tools are found on, and with it the pinned `claude` and `codex` programs.
 
+On that path, every tool of the Python Host has this Host's tool of the same name in front of it. Other
+programs whose names begin with `clarp` may be on it too: on elitebook, ten helpers of the owner's own
+(`clarp-prompt`, `clarp-contacts`, `clarpd`, `clarp-master` and others, linked into `~/.local/bin` from his
+dotfiles). They are not a Host's tools and are left as they are; `clarp-prompt` calls `clarp-admin` by name,
+which is this Host's.
+
+A turn is given the address of its Host and a token for its agent's tools, which opens the tools and nothing
+else. The administrator's token (`~/.config/clarp-host/env`) is not in a turn's environment.
+
 Both Hosts run their turns with the same logins of Claude Code and Codex. While the Rust Host has no
 account recovery of its own, a turn there that meets a usage limit ends as failed, and says so.
 
 The Host is on the loopback. A phone reaches it only once something is put in front of it (a Tailscale
-serve entry) and the phone is paired (`clarp-host pair`): neither is done by the installer.
+serve entry) and the phone is paired (`clarp-host pair`): neither is done by the installer. While no phone is
+paired the Host is installed with `--push-relay off`, so that it speaks to nobody outside the machine. The
+installer keeps what an installation was told (`~/.config/clarp-host/install.conf`), so an update leaves the
+relay off; `--push-relay default` turns it on when a phone is paired.
+
+## The installation on elitebook
+
+Installed on 15 Nov 2026 at 17:14 CET from the release build of `d9868bea`, with
+`tools/install-host --push-relay off --start`. One agent lives there: `Soak` (session `soak`), Claude Code on
+the model `haiku`, in `~/clarp-host-soak`, muted. The soak has run since 17:15 as a background job of the
+lead's own agent on the Python Host (`rust-host-soak-1`), so that the owner sees it and can stop it. That job
+does not come back by itself after the machine is started again: the lead looks after it, and a run that is
+started again goes on counting where the evidence ends.
 
 ## Installing, updating, removing
 
