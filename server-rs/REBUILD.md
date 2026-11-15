@@ -191,8 +191,19 @@ scheme word for word.
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first.
 
-Not there yet: the first kept move (stage 2's gate), and stage 3, which is what makes an agent livable on this
-Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
+**Stage 3 has begun, on the agent's side first** (15 Nov 2026). An agent on this Host has its background jobs
+(`clarp-agent-bg`, the apps' view of them and the cancel), its own status label, and its goals: `clarp-goal`
+with the Python Host's rules and words (`crates/clarp-kernel/src/goals.rs`, held to
+`scripts/agent_tasks.py` by 75 recorded steps), kept in the agent's own log as what each change set, and the
+wakes (`goals/wake.rs`): a goal that is due wakes its owner when the owner rests, a goal that waits for a job
+is woken when the job ends, a wake no checkpoint follows is tried again later each time, a Stop pauses the
+agent's goals. The message is the Python Host's word for word (41 recorded cases). Not there of goals: the
+ledger, subgoals and the Goal keeper's verbs (`ledger`, `subgoal`, `receipts`, `bookkeeping` answer that they
+are not here yet), what an account's usage limit does to a wake (accounts come later), and the apps' view of a
+plan, which the Python Host serves as an artifact.
+
+Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
+livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
 other feature out of `capabilities.features`. The owner declined an install on 15 Nov: a Host an agent cannot
 live on is not put on his machine. It is proposed again when stage 3's first surfaces are there.
 
