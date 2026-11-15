@@ -9,6 +9,7 @@ pub mod agent;
 pub mod artifacts;
 pub mod conversation;
 pub mod devices;
+pub mod failures;
 pub mod goals;
 pub mod helpers;
 pub mod jobs;

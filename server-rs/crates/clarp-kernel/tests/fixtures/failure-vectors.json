@@ -1,0 +1,5430 @@
+{
+ "absent": {
+  "account_wait": false,
+  "explained": "",
+  "kind": "unknown",
+  "provider_message": "",
+  "resets": false
+ },
+ "kinds": [
+  "account_plan",
+  "auth",
+  "clean",
+  "connection",
+  "interrupted",
+  "muse_session_locked",
+  "not_started",
+  "runner_exit",
+  "timeout",
+  "transient",
+  "unknown",
+  "usage_limit"
+ ],
+ "notify": [
+  "account_plan",
+  "auth",
+  "connection",
+  "interrupted",
+  "muse_session_locked",
+  "not_started",
+  "runner_exit",
+  "timeout",
+  "transient",
+  "usage_limit"
+ ],
+ "quota_unconfirmed": "Codex could not complete this request. Try again",
+ "results": [
+  {
+   "event": null,
+   "kind": "clean"
+  },
+  {
+   "event": "text",
+   "kind": "clean"
+  },
+  {
+   "event": 7,
+   "kind": "clean"
+  },
+  {
+   "event": [],
+   "kind": "clean"
+  },
+  {
+   "event": {},
+   "kind": "clean"
+  },
+  {
+   "event": {
+    "is_error": false,
+    "result": "done",
+    "subtype": "success",
+    "type": "result"
+   },
+   "kind": "clean"
+  },
+  {
+   "event": {
+    "is_error": true,
+    "result": "Claude usage limit reached",
+    "subtype": "success",
+    "type": "result"
+   },
+   "kind": "usage_limit"
+  },
+  {
+   "event": {
+    "subtype": "error_during_execution",
+    "type": "result"
+   },
+   "kind": "transient"
+  },
+  {
+   "event": {
+    "result": "",
+    "subtype": "error_max_turns",
+    "type": "result"
+   },
+   "kind": "transient"
+  },
+  {
+   "event": {
+    "is_error": true,
+    "type": "result"
+   },
+   "kind": "transient"
+  },
+  {
+   "event": {
+    "error": "ECONNRESET",
+    "is_error": true,
+    "type": "result"
+   },
+   "kind": "connection"
+  },
+  {
+   "event": {
+    "is_error": true,
+    "message": "Failed to authenticate: OAuth session expired",
+    "type": "result"
+   },
+   "kind": "auth"
+  },
+  {
+   "event": {
+    "is_error": 1,
+    "result": "Overloaded",
+    "type": "result"
+   },
+   "kind": "transient"
+  },
+  {
+   "event": {
+    "error": null,
+    "is_error": true,
+    "message": "turn_aborted",
+    "result": null,
+    "type": "result"
+   },
+   "kind": "interrupted"
+  },
+  {
+   "event": {
+    "result": "something nobody has a word for",
+    "subtype": "Error",
+    "type": "result"
+   },
+   "kind": "transient"
+  },
+  {
+   "event": {
+    "is_error": "yes",
+    "result": "not available on your plan",
+    "type": "result"
+   },
+   "kind": "account_plan"
+  }
+ ],
+ "texts": [
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "",
+   "resets": false,
+   "text": ""
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "",
+   "resets": false,
+   "text": "   "
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "something else entirely",
+   "resets": false,
+   "text": "something else entirely"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "SOMETHING ELSE ENTIRELY",
+   "resets": false,
+   "text": "SOMETHING ELSE ENTIRELY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: something else entirely",
+   "resets": false,
+   "text": "claude exited rc=1: something else entirely"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "ok",
+   "resets": false,
+   "text": "ok"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "OK",
+   "resets": false,
+   "text": "OK"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: ok",
+   "resets": false,
+   "text": "claude exited rc=1: ok"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Claude usage limit reached",
+   "resets": true,
+   "text": "Claude usage limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "CLAUDE USAGE LIMIT REACHED",
+   "resets": true,
+   "text": "CLAUDE USAGE LIMIT REACHED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Claude usage limit reached",
+   "resets": true,
+   "text": "claude exited rc=1: Claude usage limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your session limit · resets 3pm",
+   "resets": true,
+   "text": "You've hit your session limit · resets 3pm"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR SESSION LIMIT · RESETS 3PM",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR SESSION LIMIT · RESETS 3PM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your session limit · resets 3pm",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your session limit · resets 3pm"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You are out of usage",
+   "resets": true,
+   "text": "You are out of usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU ARE OUT OF USAGE",
+   "resets": true,
+   "text": "YOU ARE OUT OF USAGE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You are out of usage",
+   "resets": true,
+   "text": "claude exited rc=1: You are out of usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "usage limit reached. Your limit will reset at 3pm (Europe/Oslo)",
+   "resets": true,
+   "text": "usage limit reached. Your limit will reset at 3pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "USAGE LIMIT REACHED. YOUR LIMIT WILL RESET AT 3PM (EUROPE/OSLO)",
+   "resets": true,
+   "text": "USAGE LIMIT REACHED. YOUR LIMIT WILL RESET AT 3PM (EUROPE/OSLO)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: usage limit reached. Your limit will reset at 3pm (Europe/Oslo)",
+   "resets": true,
+   "text": "claude exited rc=1: usage limit reached. Your limit will reset at 3pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Usage cap exceeded",
+   "resets": true,
+   "text": "Usage cap exceeded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "USAGE CAP EXCEEDED",
+   "resets": true,
+   "text": "USAGE CAP EXCEEDED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Usage cap exceeded",
+   "resets": true,
+   "text": "claude exited rc=1: Usage cap exceeded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "usage quota",
+   "resets": true,
+   "text": "usage quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "USAGE QUOTA",
+   "resets": true,
+   "text": "USAGE QUOTA"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: usage quota",
+   "resets": true,
+   "text": "claude exited rc=1: usage quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You have hit your weekly limit, it resets Monday",
+   "resets": true,
+   "text": "You have hit your weekly limit, it resets Monday"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU HAVE HIT YOUR WEEKLY LIMIT, IT RESETS MONDAY",
+   "resets": true,
+   "text": "YOU HAVE HIT YOUR WEEKLY LIMIT, IT RESETS MONDAY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You have hit your weekly limit, it resets Monday",
+   "resets": true,
+   "text": "claude exited rc=1: You have hit your weekly limit, it resets Monday"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "hit your limit",
+   "resets": false,
+   "text": "hit your limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "HIT YOUR LIMIT",
+   "resets": false,
+   "text": "HIT YOUR LIMIT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: hit your limit",
+   "resets": false,
+   "text": "claude exited rc=1: hit your limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Subscription quota exhausted. Your usage window resets at 14:00",
+   "resets": true,
+   "text": "Subscription quota exhausted. Your usage window resets at 14:00"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "SUBSCRIPTION QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 14:00",
+   "resets": true,
+   "text": "SUBSCRIPTION QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 14:00"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Subscription quota exhausted. Your usage window resets at 14:00",
+   "resets": true,
+   "text": "claude exited rc=1: Subscription quota exhausted. Your usage window resets at 14:00"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "quota exhausted",
+   "resets": false,
+   "text": "quota exhausted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXHAUSTED",
+   "resets": false,
+   "text": "QUOTA EXHAUSTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: quota exhausted",
+   "resets": false,
+   "text": "claude exited rc=1: quota exhausted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Subscription quota exhausted. Your credits reset at 14:00",
+   "resets": false,
+   "text": "Subscription quota exhausted. Your credits reset at 14:00"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "SUBSCRIPTION QUOTA EXHAUSTED. YOUR CREDITS RESET AT 14:00",
+   "resets": false,
+   "text": "SUBSCRIPTION QUOTA EXHAUSTED. YOUR CREDITS RESET AT 14:00"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Subscription quota exhausted. Your credits reset at 14:00",
+   "resets": false,
+   "text": "claude exited rc=1: Subscription quota exhausted. Your credits reset at 14:00"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Your trial quota resets in 3 days",
+   "resets": false,
+   "text": "Your trial quota resets in 3 days"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOUR TRIAL QUOTA RESETS IN 3 DAYS",
+   "resets": false,
+   "text": "YOUR TRIAL QUOTA RESETS IN 3 DAYS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Your trial quota resets in 3 days",
+   "resets": false,
+   "text": "claude exited rc=1: Your trial quota resets in 3 days"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Grok Build usage balance exhausted",
+   "resets": false,
+   "text": "Grok Build usage balance exhausted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "GROK BUILD USAGE BALANCE EXHAUSTED",
+   "resets": false,
+   "text": "GROK BUILD USAGE BALANCE EXHAUSTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Grok Build usage balance exhausted",
+   "resets": false,
+   "text": "claude exited rc=1: Grok Build usage balance exhausted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "insufficient credit balance",
+   "resets": false,
+   "text": "insufficient credit balance"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "INSUFFICIENT CREDIT BALANCE",
+   "resets": false,
+   "text": "INSUFFICIENT CREDIT BALANCE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: insufficient credit balance",
+   "resets": false,
+   "text": "claude exited rc=1: insufficient credit balance"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You exceeded your current quota",
+   "resets": false,
+   "text": "You exceeded your current quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU EXCEEDED YOUR CURRENT QUOTA",
+   "resets": false,
+   "text": "YOU EXCEEDED YOUR CURRENT QUOTA"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You exceeded your current quota",
+   "resets": false,
+   "text": "claude exited rc=1: You exceeded your current quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Your workspace is out of credits",
+   "resets": false,
+   "text": "Your workspace is out of credits"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOUR WORKSPACE IS OUT OF CREDITS",
+   "resets": false,
+   "text": "YOUR WORKSPACE IS OUT OF CREDITS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Your workspace is out of credits",
+   "resets": false,
+   "text": "claude exited rc=1: Your workspace is out of credits"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "billing hard limit reached",
+   "resets": false,
+   "text": "billing hard limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "BILLING HARD LIMIT REACHED",
+   "resets": false,
+   "text": "BILLING HARD LIMIT REACHED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: billing hard limit reached",
+   "resets": false,
+   "text": "claude exited rc=1: billing hard limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Monthly limit reached",
+   "resets": false,
+   "text": "Monthly limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "MONTHLY LIMIT REACHED",
+   "resets": false,
+   "text": "MONTHLY LIMIT REACHED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Monthly limit reached",
+   "resets": false,
+   "text": "claude exited rc=1: Monthly limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Account acme is suspended, possibly due to reaching the monthly spending limit",
+   "resets": false,
+   "text": "Account acme is suspended, possibly due to reaching the monthly spending limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ACCOUNT ACME IS SUSPENDED, POSSIBLY DUE TO REACHING THE MONTHLY SPENDING LIMIT",
+   "resets": false,
+   "text": "ACCOUNT ACME IS SUSPENDED, POSSIBLY DUE TO REACHING THE MONTHLY SPENDING LIMIT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Account acme is suspended, possibly due to reaching the monthly spending limit",
+   "resets": false,
+   "text": "claude exited rc=1: Account acme is suspended, possibly due to reaching the monthly spending limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "free tier can only be used from within OpenCode",
+   "resets": false,
+   "text": "free tier can only be used from within OpenCode"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "FREE TIER CAN ONLY BE USED FROM WITHIN OPENCODE",
+   "resets": false,
+   "text": "FREE TIER CAN ONLY BE USED FROM WITHIN OPENCODE"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: free tier can only be used from within OpenCode",
+   "resets": false,
+   "text": "claude exited rc=1: free tier can only be used from within OpenCode"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Payment required",
+   "resets": false,
+   "text": "Payment required"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "PAYMENT REQUIRED",
+   "resets": false,
+   "text": "PAYMENT REQUIRED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Payment required",
+   "resets": false,
+   "text": "claude exited rc=1: Payment required"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "status code 402",
+   "resets": false,
+   "text": "status code 402"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "STATUS CODE 402",
+   "resets": false,
+   "text": "STATUS CODE 402"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: status code 402",
+   "resets": false,
+   "text": "claude exited rc=1: status code 402"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "error 402 payment",
+   "resets": false,
+   "text": "error 402 payment"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ERROR 402 PAYMENT",
+   "resets": false,
+   "text": "ERROR 402 PAYMENT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: error 402 payment",
+   "resets": false,
+   "text": "claude exited rc=1: error 402 payment"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "room 402",
+   "resets": false,
+   "text": "room 402"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "ROOM 402",
+   "resets": false,
+   "text": "ROOM 402"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: room 402",
+   "resets": false,
+   "text": "claude exited rc=1: room 402"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "RESOURCE_EXHAUSTED",
+   "resets": false,
+   "text": "RESOURCE_EXHAUSTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: RESOURCE_EXHAUSTED",
+   "resets": false,
+   "text": "claude exited rc=1: RESOURCE_EXHAUSTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "no credits remaining",
+   "resets": false,
+   "text": "no credits remaining"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "NO CREDITS REMAINING",
+   "resets": false,
+   "text": "NO CREDITS REMAINING"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: no credits remaining",
+   "resets": false,
+   "text": "claude exited rc=1: no credits remaining"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Your AI credits balance is too low to continue.",
+   "resets": false,
+   "text": "Your AI credits balance is too low to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOUR AI CREDITS BALANCE IS TOO LOW TO CONTINUE.",
+   "resets": false,
+   "text": "YOUR AI CREDITS BALANCE IS TOO LOW TO CONTINUE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Your AI credits balance is too low to continue.",
+   "resets": false,
+   "text": "claude exited rc=1: Your AI credits balance is too low to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "The model is not supported when using Codex with a ChatGPT account",
+   "resets": false,
+   "text": "The model is not supported when using Codex with a ChatGPT account"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "THE MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT",
+   "resets": false,
+   "text": "THE MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: The model is not supported when using Codex with a ChatGPT account",
+   "resets": false,
+   "text": "claude exited rc=1: The model is not supported when using Codex with a ChatGPT account"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "gpt-6 is not available on your plan",
+   "resets": false,
+   "text": "gpt-6 is not available on your plan"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "GPT-6 IS NOT AVAILABLE ON YOUR PLAN",
+   "resets": false,
+   "text": "GPT-6 IS NOT AVAILABLE ON YOUR PLAN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: gpt-6 is not available on your plan",
+   "resets": false,
+   "text": "claude exited rc=1: gpt-6 is not available on your plan"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "Your current plan does not include this model",
+   "resets": false,
+   "text": "Your current plan does not include this model"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "YOUR CURRENT PLAN DOES NOT INCLUDE THIS MODEL",
+   "resets": false,
+   "text": "YOUR CURRENT PLAN DOES NOT INCLUDE THIS MODEL"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: Your current plan does not include this model",
+   "resets": false,
+   "text": "claude exited rc=1: Your current plan does not include this model"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "not included in your current plan",
+   "resets": false,
+   "text": "not included in your current plan"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "NOT INCLUDED IN YOUR CURRENT PLAN",
+   "resets": false,
+   "text": "NOT INCLUDED IN YOUR CURRENT PLAN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: not included in your current plan",
+   "resets": false,
+   "text": "claude exited rc=1: not included in your current plan"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "Failed to authenticate: OAuth session expired",
+   "resets": false,
+   "text": "Failed to authenticate: OAuth session expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "FAILED TO AUTHENTICATE: OAUTH SESSION EXPIRED",
+   "resets": false,
+   "text": "FAILED TO AUTHENTICATE: OAUTH SESSION EXPIRED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: Failed to authenticate: OAuth session expired",
+   "resets": false,
+   "text": "claude exited rc=1: Failed to authenticate: OAuth session expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "OAuth token could not be refreshed",
+   "resets": false,
+   "text": "OAuth token could not be refreshed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "OAUTH TOKEN COULD NOT BE REFRESHED",
+   "resets": false,
+   "text": "OAUTH TOKEN COULD NOT BE REFRESHED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: OAuth token could not be refreshed",
+   "resets": false,
+   "text": "claude exited rc=1: OAuth token could not be refreshed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "Not logged in",
+   "resets": false,
+   "text": "Not logged in"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "NOT LOGGED IN",
+   "resets": false,
+   "text": "NOT LOGGED IN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: Not logged in",
+   "resets": false,
+   "text": "claude exited rc=1: Not logged in"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "invalid_grant",
+   "resets": false,
+   "text": "invalid_grant"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "INVALID_GRANT",
+   "resets": false,
+   "text": "INVALID_GRANT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: invalid_grant",
+   "resets": false,
+   "text": "claude exited rc=1: invalid_grant"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "token has expired",
+   "resets": false,
+   "text": "token has expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "TOKEN HAS EXPIRED",
+   "resets": false,
+   "text": "TOKEN HAS EXPIRED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: token has expired",
+   "resets": false,
+   "text": "claude exited rc=1: token has expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "token expired",
+   "resets": false,
+   "text": "token expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "TOKEN EXPIRED",
+   "resets": false,
+   "text": "TOKEN EXPIRED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: token expired",
+   "resets": false,
+   "text": "claude exited rc=1: token expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "401 Unauthorized",
+   "resets": false,
+   "text": "401 Unauthorized"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "401 UNAUTHORIZED",
+   "resets": false,
+   "text": "401 UNAUTHORIZED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: 401 Unauthorized",
+   "resets": false,
+   "text": "claude exited rc=1: 401 Unauthorized"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "unauthorised (401)",
+   "resets": false,
+   "text": "unauthorised (401)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "UNAUTHORISED (401)",
+   "resets": false,
+   "text": "UNAUTHORISED (401)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: unauthorised (401)",
+   "resets": false,
+   "text": "claude exited rc=1: unauthorised (401)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "Please run /login",
+   "resets": false,
+   "text": "Please run /login"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "PLEASE RUN /LOGIN",
+   "resets": false,
+   "text": "PLEASE RUN /LOGIN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: Please run /login",
+   "resets": false,
+   "text": "claude exited rc=1: Please run /login"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "run `claude login`",
+   "resets": false,
+   "text": "run `claude login`"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "RUN `CLAUDE LOGIN`",
+   "resets": false,
+   "text": "RUN `CLAUDE LOGIN`"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: run `claude login`",
+   "resets": false,
+   "text": "claude exited rc=1: run `claude login`"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "Request had insufficient authentication scopes.. Please log out (/logout) and log back in (/login).",
+   "resets": false,
+   "text": "Request had insufficient authentication scopes.. Please log out (/logout) and log back in (/login)."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "REQUEST HAD INSUFFICIENT AUTHENTICATION SCOPES.. PLEASE LOG OUT (/LOGOUT) AND LOG BACK IN (/LOGIN).",
+   "resets": false,
+   "text": "REQUEST HAD INSUFFICIENT AUTHENTICATION SCOPES.. PLEASE LOG OUT (/LOGOUT) AND LOG BACK IN (/LOGIN)."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: Request had insufficient authentication scopes.. Please log out (/logout) and log back in (/login).",
+   "resets": false,
+   "text": "claude exited rc=1: Request had insufficient authentication scopes.. Please log out (/logout) and log back in (/login)."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "socket connection was closed unexpectedly",
+   "resets": false,
+   "text": "socket connection was closed unexpectedly"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "SOCKET CONNECTION WAS CLOSED UNEXPECTEDLY",
+   "resets": false,
+   "text": "SOCKET CONNECTION WAS CLOSED UNEXPECTEDLY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: socket connection was closed unexpectedly",
+   "resets": false,
+   "text": "claude exited rc=1: socket connection was closed unexpectedly"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "socket hang up",
+   "resets": false,
+   "text": "socket hang up"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "SOCKET HANG UP",
+   "resets": false,
+   "text": "SOCKET HANG UP"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: socket hang up",
+   "resets": false,
+   "text": "claude exited rc=1: socket hang up"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "ECONNRESET",
+   "resets": false,
+   "text": "ECONNRESET"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: ECONNRESET",
+   "resets": false,
+   "text": "claude exited rc=1: ECONNRESET"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "EPIPE",
+   "resets": false,
+   "text": "EPIPE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: EPIPE",
+   "resets": false,
+   "text": "claude exited rc=1: EPIPE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "read ETIMEDOUT",
+   "resets": false,
+   "text": "read ETIMEDOUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "READ ETIMEDOUT",
+   "resets": false,
+   "text": "READ ETIMEDOUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: read ETIMEDOUT",
+   "resets": false,
+   "text": "claude exited rc=1: read ETIMEDOUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "getaddrinfo ETIMEOUT api.example",
+   "resets": false,
+   "text": "getaddrinfo ETIMEOUT api.example"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "GETADDRINFO ETIMEOUT API.EXAMPLE",
+   "resets": false,
+   "text": "GETADDRINFO ETIMEOUT API.EXAMPLE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: getaddrinfo ETIMEOUT api.example",
+   "resets": false,
+   "text": "claude exited rc=1: getaddrinfo ETIMEOUT api.example"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "EAI_AGAIN",
+   "resets": false,
+   "text": "EAI_AGAIN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: EAI_AGAIN",
+   "resets": false,
+   "text": "claude exited rc=1: EAI_AGAIN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "ENOTFOUND",
+   "resets": false,
+   "text": "ENOTFOUND"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: ENOTFOUND",
+   "resets": false,
+   "text": "claude exited rc=1: ENOTFOUND"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "fetch failed",
+   "resets": false,
+   "text": "fetch failed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "FETCH FAILED",
+   "resets": false,
+   "text": "FETCH FAILED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: fetch failed",
+   "resets": false,
+   "text": "claude exited rc=1: fetch failed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "network error",
+   "resets": false,
+   "text": "network error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "NETWORK ERROR",
+   "resets": false,
+   "text": "NETWORK ERROR"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: network error",
+   "resets": false,
+   "text": "claude exited rc=1: network error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "network timeout",
+   "resets": false,
+   "text": "network timeout"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "NETWORK TIMEOUT",
+   "resets": false,
+   "text": "NETWORK TIMEOUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: network timeout",
+   "resets": false,
+   "text": "claude exited rc=1: network timeout"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "stream disconnected before completion",
+   "resets": false,
+   "text": "stream disconnected before completion"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "STREAM DISCONNECTED BEFORE COMPLETION",
+   "resets": false,
+   "text": "STREAM DISCONNECTED BEFORE COMPLETION"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: stream disconnected before completion",
+   "resets": false,
+   "text": "claude exited rc=1: stream disconnected before completion"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "Connection error.",
+   "resets": false,
+   "text": "Connection error."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "CONNECTION ERROR.",
+   "resets": false,
+   "text": "CONNECTION ERROR."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: Connection error.",
+   "resets": false,
+   "text": "claude exited rc=1: Connection error."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "premature close",
+   "resets": false,
+   "text": "premature close"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "PREMATURE CLOSE",
+   "resets": false,
+   "text": "PREMATURE CLOSE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: premature close",
+   "resets": false,
+   "text": "claude exited rc=1: premature close"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "terminated unexpectedly",
+   "resets": false,
+   "text": "terminated unexpectedly"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "TERMINATED UNEXPECTEDLY",
+   "resets": false,
+   "text": "TERMINATED UNEXPECTEDLY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: terminated unexpectedly",
+   "resets": false,
+   "text": "claude exited rc=1: terminated unexpectedly"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "connection reset by peer",
+   "resets": false,
+   "text": "connection reset by peer"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "CONNECTION RESET BY PEER",
+   "resets": false,
+   "text": "CONNECTION RESET BY PEER"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: connection reset by peer",
+   "resets": false,
+   "text": "claude exited rc=1: connection reset by peer"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "Overloaded",
+   "resets": false,
+   "text": "Overloaded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "OVERLOADED",
+   "resets": false,
+   "text": "OVERLOADED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Overloaded",
+   "resets": false,
+   "text": "claude exited rc=1: Overloaded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "rate limit exceeded",
+   "resets": false,
+   "text": "rate limit exceeded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "RATE LIMIT EXCEEDED",
+   "resets": false,
+   "text": "RATE LIMIT EXCEEDED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: rate limit exceeded",
+   "resets": false,
+   "text": "claude exited rc=1: rate limit exceeded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "rate_limit_error",
+   "resets": false,
+   "text": "rate_limit_error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "RATE_LIMIT_ERROR",
+   "resets": false,
+   "text": "RATE_LIMIT_ERROR"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: rate_limit_error",
+   "resets": false,
+   "text": "claude exited rc=1: rate_limit_error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "Too Many Requests",
+   "resets": false,
+   "text": "Too Many Requests"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "TOO MANY REQUESTS",
+   "resets": false,
+   "text": "TOO MANY REQUESTS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Too Many Requests",
+   "resets": false,
+   "text": "claude exited rc=1: Too Many Requests"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "HTTP 429",
+   "resets": false,
+   "text": "HTTP 429"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: HTTP 429",
+   "resets": false,
+   "text": "claude exited rc=1: HTTP 429"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "error 503",
+   "resets": false,
+   "text": "error 503"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "ERROR 503",
+   "resets": false,
+   "text": "ERROR 503"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: error 503",
+   "resets": false,
+   "text": "claude exited rc=1: error 503"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "Internal Server Error",
+   "resets": false,
+   "text": "Internal Server Error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "INTERNAL SERVER ERROR",
+   "resets": false,
+   "text": "INTERNAL SERVER ERROR"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Internal Server Error",
+   "resets": false,
+   "text": "claude exited rc=1: Internal Server Error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "Service Unavailable",
+   "resets": false,
+   "text": "Service Unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "SERVICE UNAVAILABLE",
+   "resets": false,
+   "text": "SERVICE UNAVAILABLE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Service Unavailable",
+   "resets": false,
+   "text": "claude exited rc=1: Service Unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "Bad Gateway",
+   "resets": false,
+   "text": "Bad Gateway"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "BAD GATEWAY",
+   "resets": false,
+   "text": "BAD GATEWAY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Bad Gateway",
+   "resets": false,
+   "text": "claude exited rc=1: Bad Gateway"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "gateway timeout",
+   "resets": false,
+   "text": "gateway timeout"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "GATEWAY TIMEOUT",
+   "resets": false,
+   "text": "GATEWAY TIMEOUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: gateway timeout",
+   "resets": false,
+   "text": "claude exited rc=1: gateway timeout"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "Gateway Time-out",
+   "resets": false,
+   "text": "Gateway Time-out"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "GATEWAY TIME-OUT",
+   "resets": false,
+   "text": "GATEWAY TIME-OUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Gateway Time-out",
+   "resets": false,
+   "text": "claude exited rc=1: Gateway Time-out"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "API error: please retry",
+   "resets": false,
+   "text": "API error: please retry"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "API ERROR: PLEASE RETRY",
+   "resets": false,
+   "text": "API ERROR: PLEASE RETRY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: API error: please retry",
+   "resets": false,
+   "text": "claude exited rc=1: API error: please retry"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "api timeout, temporarily failing",
+   "resets": false,
+   "text": "api timeout, temporarily failing"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "API TIMEOUT, TEMPORARILY FAILING",
+   "resets": false,
+   "text": "API TIMEOUT, TEMPORARILY FAILING"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: api timeout, temporarily failing",
+   "resets": false,
+   "text": "claude exited rc=1: api timeout, temporarily failing"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "temporarily unavailable",
+   "resets": false,
+   "text": "temporarily unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "TEMPORARILY UNAVAILABLE",
+   "resets": false,
+   "text": "TEMPORARILY UNAVAILABLE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: temporarily unavailable",
+   "resets": false,
+   "text": "claude exited rc=1: temporarily unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "upstream request failed",
+   "resets": false,
+   "text": "upstream request failed"
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "UPSTREAM REQUEST FAILED",
+   "resets": false,
+   "text": "UPSTREAM REQUEST FAILED"
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: upstream request failed",
+   "resets": false,
+   "text": "claude exited rc=1: upstream request failed"
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "The endpoint is unavailable",
+   "resets": false,
+   "text": "The endpoint is unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "THE ENDPOINT IS UNAVAILABLE",
+   "resets": false,
+   "text": "THE ENDPOINT IS UNAVAILABLE"
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: The endpoint is unavailable",
+   "resets": false,
+   "text": "claude exited rc=1: The endpoint is unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "port 5000 is busy",
+   "resets": false,
+   "text": "port 5000 is busy"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "PORT 5000 IS BUSY",
+   "resets": false,
+   "text": "PORT 5000 IS BUSY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: port 5000 is busy",
+   "resets": false,
+   "text": "claude exited rc=1: port 5000 is busy"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "took 500ms",
+   "resets": false,
+   "text": "took 500ms"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "TOOK 500MS",
+   "resets": false,
+   "text": "TOOK 500MS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: took 500ms",
+   "resets": false,
+   "text": "claude exited rc=1: took 500ms"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "turn_aborted",
+   "resets": false,
+   "text": "turn_aborted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "TURN_ABORTED",
+   "resets": false,
+   "text": "TURN_ABORTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: turn_aborted",
+   "resets": false,
+   "text": "claude exited rc=1: turn_aborted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "turn aborted",
+   "resets": false,
+   "text": "turn aborted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "TURN ABORTED",
+   "resets": false,
+   "text": "TURN ABORTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: turn aborted",
+   "resets": false,
+   "text": "claude exited rc=1: turn aborted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "deliberately interrupted",
+   "resets": false,
+   "text": "deliberately interrupted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "DELIBERATELY INTERRUPTED",
+   "resets": false,
+   "text": "DELIBERATELY INTERRUPTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: deliberately interrupted",
+   "resets": false,
+   "text": "claude exited rc=1: deliberately interrupted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "user interrupted the run",
+   "resets": false,
+   "text": "user interrupted the run"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "USER INTERRUPTED THE RUN",
+   "resets": false,
+   "text": "USER INTERRUPTED THE RUN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: user interrupted the run",
+   "resets": false,
+   "text": "claude exited rc=1: user interrupted the run"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "received SIGTERM",
+   "resets": false,
+   "text": "received SIGTERM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "RECEIVED SIGTERM",
+   "resets": false,
+   "text": "RECEIVED SIGTERM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: received SIGTERM",
+   "resets": false,
+   "text": "claude exited rc=1: received SIGTERM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "SIGINT",
+   "resets": false,
+   "text": "SIGINT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: SIGINT",
+   "resets": false,
+   "text": "claude exited rc=1: SIGINT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "killed by signal 15",
+   "resets": false,
+   "text": "killed by signal 15"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "KILLED BY SIGNAL 15",
+   "resets": false,
+   "text": "KILLED BY SIGNAL 15"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: killed by signal 15",
+   "resets": false,
+   "text": "claude exited rc=1: killed by signal 15"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "aborted by user",
+   "resets": false,
+   "text": "aborted by user"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "ABORTED BY USER",
+   "resets": false,
+   "text": "ABORTED BY USER"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: aborted by user",
+   "resets": false,
+   "text": "claude exited rc=1: aborted by user"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "You interrupted the previous turn",
+   "resets": false,
+   "text": "You interrupted the previous turn"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "YOU INTERRUPTED THE PREVIOUS TURN",
+   "resets": false,
+   "text": "YOU INTERRUPTED THE PREVIOUS TURN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: You interrupted the previous turn",
+   "resets": false,
+   "text": "claude exited rc=1: You interrupted the previous turn"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "The operation was aborted",
+   "resets": false,
+   "text": "The operation was aborted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "THE OPERATION WAS ABORTED",
+   "resets": false,
+   "text": "THE OPERATION WAS ABORTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: The operation was aborted",
+   "resets": false,
+   "text": "claude exited rc=1: The operation was aborted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "SIGTERM: socket connection was closed",
+   "resets": false,
+   "text": "SIGTERM: socket connection was closed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "SIGTERM: SOCKET CONNECTION WAS CLOSED",
+   "resets": false,
+   "text": "SIGTERM: SOCKET CONNECTION WAS CLOSED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: SIGTERM: socket connection was closed",
+   "resets": false,
+   "text": "claude exited rc=1: SIGTERM: socket connection was closed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "turn timed out",
+   "resets": false,
+   "text": "turn timed out"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "TURN TIMED OUT",
+   "resets": false,
+   "text": "TURN TIMED OUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "claude exited rc=1: turn timed out",
+   "resets": false,
+   "text": "claude exited rc=1: turn timed out"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "watchdog killed the turn (SIGTERM)",
+   "resets": false,
+   "text": "watchdog killed the turn (SIGTERM)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "WATCHDOG KILLED THE TURN (SIGTERM)",
+   "resets": false,
+   "text": "WATCHDOG KILLED THE TURN (SIGTERM)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "claude exited rc=1: watchdog killed the turn (SIGTERM)",
+   "resets": false,
+   "text": "claude exited rc=1: watchdog killed the turn (SIGTERM)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "idle timeout",
+   "resets": false,
+   "text": "idle timeout"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "IDLE TIMEOUT",
+   "resets": false,
+   "text": "IDLE TIMEOUT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "claude exited rc=1: idle timeout",
+   "resets": false,
+   "text": "claude exited rc=1: idle timeout"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "no output for 600 s",
+   "resets": false,
+   "text": "no output for 600 s"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "NO OUTPUT FOR 600 S",
+   "resets": false,
+   "text": "NO OUTPUT FOR 600 S"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "claude exited rc=1: no output for 600 s",
+   "resets": false,
+   "text": "claude exited rc=1: no output for 600 s"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "timeout waiting for response",
+   "resets": false,
+   "text": "timeout waiting for response"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "TIMEOUT WAITING FOR RESPONSE",
+   "resets": false,
+   "text": "TIMEOUT WAITING FOR RESPONSE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "claude exited rc=1: timeout waiting for response",
+   "resets": false,
+   "text": "claude exited rc=1: timeout waiting for response"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1",
+   "resets": false,
+   "text": "claude exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "CLAUDE EXITED RC=1",
+   "resets": false,
+   "text": "CLAUDE EXITED RC=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: claude exited rc=1",
+   "resets": false,
+   "text": "claude exited rc=1: claude exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "codex exited rc=137",
+   "resets": false,
+   "text": "codex exited rc=137"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "CODEX EXITED RC=137",
+   "resets": false,
+   "text": "CODEX EXITED RC=137"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: codex exited rc=137",
+   "resets": false,
+   "text": "claude exited rc=1: codex exited rc=137"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "agent exited rc=2",
+   "resets": false,
+   "text": "agent exited rc=2"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "AGENT EXITED RC=2",
+   "resets": false,
+   "text": "AGENT EXITED RC=2"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: agent exited rc=2",
+   "resets": false,
+   "text": "claude exited rc=1: agent exited rc=2"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "opencode exited rc=1",
+   "resets": false,
+   "text": "opencode exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "OPENCODE EXITED RC=1",
+   "resets": false,
+   "text": "OPENCODE EXITED RC=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: opencode exited rc=1",
+   "resets": false,
+   "text": "claude exited rc=1: opencode exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "exit status 3",
+   "resets": false,
+   "text": "exit status 3"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "EXIT STATUS 3",
+   "resets": false,
+   "text": "EXIT STATUS 3"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: exit status 3",
+   "resets": false,
+   "text": "claude exited rc=1: exit status 3"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "exited with code 1",
+   "resets": false,
+   "text": "exited with code 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "EXITED WITH CODE 1",
+   "resets": false,
+   "text": "EXITED WITH CODE 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: exited with code 1",
+   "resets": false,
+   "text": "claude exited rc=1: exited with code 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "process exited unexpectedly, code=9",
+   "resets": false,
+   "text": "process exited unexpectedly, code=9"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "PROCESS EXITED UNEXPECTEDLY, CODE=9",
+   "resets": false,
+   "text": "PROCESS EXITED UNEXPECTEDLY, CODE=9"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: process exited unexpectedly, code=9",
+   "resets": false,
+   "text": "claude exited rc=1: process exited unexpectedly, code=9"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "process exited with rc 1",
+   "resets": false,
+   "text": "process exited with rc 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "PROCESS EXITED WITH RC 1",
+   "resets": false,
+   "text": "PROCESS EXITED WITH RC 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: process exited with rc 1",
+   "resets": false,
+   "text": "claude exited rc=1: process exited with rc 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "clarp exited rc=0",
+   "resets": false,
+   "text": "clarp exited rc=0"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "CLARP EXITED RC=0",
+   "resets": false,
+   "text": "CLARP EXITED RC=0"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: clarp exited rc=0",
+   "resets": false,
+   "text": "claude exited rc=1: clarp exited rc=0"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "muse_session_locked",
+   "provider_message": "muse_session_locked: another turn holds the session",
+   "resets": false,
+   "text": "muse_session_locked: another turn holds the session"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "MUSE_SESSION_LOCKED: ANOTHER TURN HOLDS THE SESSION",
+   "resets": false,
+   "text": "MUSE_SESSION_LOCKED: ANOTHER TURN HOLDS THE SESSION"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: muse_session_locked: another turn holds the session",
+   "resets": false,
+   "text": "claude exited rc=1: muse_session_locked: another turn holds the session"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "muse_session_locked",
+   "resets": false,
+   "text": "muse_session_locked"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "MUSE_SESSION_LOCKED",
+   "resets": false,
+   "text": "MUSE_SESSION_LOCKED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: muse_session_locked",
+   "resets": false,
+   "text": "claude exited rc=1: muse_session_locked"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Codex could not complete this request. Try again",
+   "resets": false,
+   "text": "Codex could not complete this request. Try again"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "CODEX COULD NOT COMPLETE THIS REQUEST. TRY AGAIN",
+   "resets": false,
+   "text": "CODEX COULD NOT COMPLETE THIS REQUEST. TRY AGAIN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Codex could not complete this request. Try again",
+   "resets": false,
+   "text": "claude exited rc=1: Codex could not complete this request. Try again"
+  },
+  {
+   "account_wait": true,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for a claude account with available usage",
+   "resets": false,
+   "text": "Waiting for a claude account with available usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR A CLAUDE ACCOUNT WITH AVAILABLE USAGE",
+   "resets": false,
+   "text": "WAITING FOR A CLAUDE ACCOUNT WITH AVAILABLE USAGE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for a claude account with available usage",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for a claude account with available usage"
+  },
+  {
+   "account_wait": true,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for a codex account with available usage",
+   "resets": false,
+   "text": "Waiting for a codex account with available usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR A CODEX ACCOUNT WITH AVAILABLE USAGE",
+   "resets": false,
+   "text": "WAITING FOR A CODEX ACCOUNT WITH AVAILABLE USAGE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for a codex account with available usage",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for a codex account with available usage"
+  },
+  {
+   "account_wait": true,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for a claude account that serves claude-opus-5-5; the active one does not right now",
+   "resets": false,
+   "text": "Waiting for a claude account that serves claude-opus-5-5; the active one does not right now"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR A CLAUDE ACCOUNT THAT SERVES CLAUDE-OPUS-5-5; THE ACTIVE ONE DOES NOT RIGHT NOW",
+   "resets": false,
+   "text": "WAITING FOR A CLAUDE ACCOUNT THAT SERVES CLAUDE-OPUS-5-5; THE ACTIVE ONE DOES NOT RIGHT NOW"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for a claude account that serves claude-opus-5-5; the active one does not right now",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for a claude account that serves claude-opus-5-5; the active one does not right now"
+  },
+  {
+   "account_wait": true,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for a claude account that serves this model; the active one does not right now",
+   "resets": false,
+   "text": "Waiting for a claude account that serves this model; the active one does not right now"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR A CLAUDE ACCOUNT THAT SERVES THIS MODEL; THE ACTIVE ONE DOES NOT RIGHT NOW",
+   "resets": false,
+   "text": "WAITING FOR A CLAUDE ACCOUNT THAT SERVES THIS MODEL; THE ACTIVE ONE DOES NOT RIGHT NOW"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for a claude account that serves this model; the active one does not right now",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for a claude account that serves this model; the active one does not right now"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for a claude account",
+   "resets": false,
+   "text": "Waiting for a claude account"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR A CLAUDE ACCOUNT",
+   "resets": false,
+   "text": "WAITING FOR A CLAUDE ACCOUNT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for a claude account",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for a claude account"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "waiting for a claude account with available usage",
+   "resets": false,
+   "text": "waiting for a claude account with available usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: waiting for a claude account with available usage",
+   "resets": false,
+   "text": "claude exited rc=1: waiting for a claude account with available usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for a claude account with available usage.",
+   "resets": false,
+   "text": "Waiting for a claude account with available usage."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR A CLAUDE ACCOUNT WITH AVAILABLE USAGE.",
+   "resets": false,
+   "text": "WAITING FOR A CLAUDE ACCOUNT WITH AVAILABLE USAGE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for a claude account with available usage.",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for a claude account with available usage."
+  },
+  {
+   "account_wait": true,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Waiting for an agy account with available usage",
+   "resets": false,
+   "text": "Waiting for an agy account with available usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WAITING FOR AN AGY ACCOUNT WITH AVAILABLE USAGE",
+   "resets": false,
+   "text": "WAITING FOR AN AGY ACCOUNT WITH AVAILABLE USAGE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Waiting for an agy account with available usage",
+   "resets": false,
+   "text": "claude exited rc=1: Waiting for an agy account with available usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "stream error: Overloaded",
+   "resets": false,
+   "text": "stream error: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "STREAM ERROR: {\"TYPE\":\"ERROR\",\"ERROR\":{\"TYPE\":\"OVERLOADED_ERROR\",\"MESSAGE\":\"OVERLOADED\"}}",
+   "resets": false,
+   "text": "STREAM ERROR: {\"TYPE\":\"ERROR\",\"ERROR\":{\"TYPE\":\"OVERLOADED_ERROR\",\"MESSAGE\":\"OVERLOADED\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: stream error: Overloaded",
+   "resets": false,
+   "text": "claude exited rc=1: stream error: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "unexpected status 429: You exceeded your current quota, please check your plan",
+   "resets": false,
+   "text": "unexpected status 429: {\"error\": {\"message\": \"You exceeded your current quota, please check your plan\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "UNEXPECTED STATUS 429: {\"ERROR\": {\"MESSAGE\": \"YOU EXCEEDED YOUR CURRENT QUOTA, PLEASE CHECK YOUR PLAN\"}}",
+   "resets": false,
+   "text": "UNEXPECTED STATUS 429: {\"ERROR\": {\"MESSAGE\": \"YOU EXCEEDED YOUR CURRENT QUOTA, PLEASE CHECK YOUR PLAN\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: unexpected status 429: You exceeded your current quota, please check your plan",
+   "resets": false,
+   "text": "claude exited rc=1: unexpected status 429: {\"error\": {\"message\": \"You exceeded your current quota, please check your plan\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "request failed: the \"last\" one\nwins",
+   "resets": false,
+   "text": "request failed: {\"message\": \"first\"} then {\"message\": \"the \\\"last\\\" one\\nwins\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "REQUEST FAILED: {\"MESSAGE\": \"FIRST\"} THEN {\"MESSAGE\": \"THE \\\"LAST\\\" ONE\\NWINS\"}",
+   "resets": false,
+   "text": "REQUEST FAILED: {\"MESSAGE\": \"FIRST\"} THEN {\"MESSAGE\": \"THE \\\"LAST\\\" ONE\\NWINS\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: request failed: the \"last\" one\nwins",
+   "resets": false,
+   "text": "claude exited rc=1: request failed: {\"message\": \"first\"} then {\"message\": \"the \\\"last\\\" one\\nwins\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "prefix only {\"detail\": \"no message here\"}",
+   "resets": false,
+   "text": "prefix only {\"detail\": \"no message here\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "PREFIX ONLY {\"DETAIL\": \"NO MESSAGE HERE\"}",
+   "resets": false,
+   "text": "PREFIX ONLY {\"DETAIL\": \"NO MESSAGE HERE\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: prefix only {\"detail\": \"no message here\"}",
+   "resets": false,
+   "text": "claude exited rc=1: prefix only {\"detail\": \"no message here\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "bare body",
+   "resets": false,
+   "text": "{\"message\": \"bare body\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "{\"MESSAGE\": \"BARE BODY\"}",
+   "resets": false,
+   "text": "{\"MESSAGE\": \"BARE BODY\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: bare body",
+   "resets": false,
+   "text": "claude exited rc=1: {\"message\": \"bare body\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "{\"message\": \"bad \\x escape\"}",
+   "resets": false,
+   "text": "{\"message\": \"bad \\x escape\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "{\"MESSAGE\": \"BAD \\X ESCAPE\"}",
+   "resets": false,
+   "text": "{\"MESSAGE\": \"BAD \\X ESCAPE\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: {\"message\": \"bad \\x escape\"}",
+   "resets": false,
+   "text": "claude exited rc=1: {\"message\": \"bad \\x escape\"}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "no body at all",
+   "resets": false,
+   "text": "no body at all"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "NO BODY AT ALL",
+   "resets": false,
+   "text": "NO BODY AT ALL"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: no body at all",
+   "resets": false,
+   "text": "claude exited rc=1: no body at all"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "padded text",
+   "resets": false,
+   "text": "   padded text   "
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "PADDED TEXT",
+   "resets": false,
+   "text": "   PADDED TEXT   "
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1:    padded text",
+   "resets": false,
+   "text": "claude exited rc=1:    padded text   "
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "Error running remote compact task: {\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "ERROR RUNNING REMOTE COMPACT TASK: {\"TYPE\":\"ERROR\",\"STATUS\":400,\"ERROR\":{\"TYPE\":\"INVALID_REQUEST_ERROR\",\"MESSAGE\":\"THE 'GPT-6-ASTRA' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT.\"}}",
+   "resets": false,
+   "text": "ERROR RUNNING REMOTE COMPACT TASK: {\"TYPE\":\"ERROR\",\"STATUS\":400,\"ERROR\":{\"TYPE\":\"INVALID_REQUEST_ERROR\",\"MESSAGE\":\"THE 'GPT-6-ASTRA' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT.\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "claude exited rc=1: Error running remote compact task: {\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. (rate_limit_error)",
+   "resets": true,
+   "text": "Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. (rate_limit_error)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "MUSE CODE FAILED: API ERROR 429 [REQUEST_ID=00000000-0000-0000-0000-000000000000]: SUBSCRIPTION QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 2026-11-16T00:00:00Z. (RATE_LIMIT_ERROR)",
+   "resets": true,
+   "text": "MUSE CODE FAILED: API ERROR 429 [REQUEST_ID=00000000-0000-0000-0000-000000000000]: SUBSCRIPTION QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 2026-11-16T00:00:00Z. (RATE_LIMIT_ERROR)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. (rate_limit_error)",
+   "resets": true,
+   "text": "claude exited rc=1: Muse Code failed: API error 429 [request_id=00000000-0000-0000-0000-000000000000]: Subscription quota exhausted. Your usage window resets at 2026-11-16T00:00:00Z. (rate_limit_error)"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "Error from provider (Console): OpenCode's free tier can only be used from within OpenCode",
+   "resets": false,
+   "text": "Error from provider (Console): OpenCode's free tier can only be used from within OpenCode"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "ERROR FROM PROVIDER (CONSOLE): OPENCODE'S FREE TIER CAN ONLY BE USED FROM WITHIN OPENCODE",
+   "resets": false,
+   "text": "ERROR FROM PROVIDER (CONSOLE): OPENCODE'S FREE TIER CAN ONLY BE USED FROM WITHIN OPENCODE"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Error from provider (Console): OpenCode's free tier can only be used from within OpenCode",
+   "resets": false,
+   "text": "claude exited rc=1: Error from provider (Console): OpenCode's free tier can only be used from within OpenCode"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Retried as CONNECTION, a down free model kept the user on\n    \"Reconnecting\" for four minutes and re-sent the prompt twice.",
+   "resets": false,
+   "text": "Retried as CONNECTION, a down free model kept the user on\n    \"Reconnecting\" for four minutes and re-sent the prompt twice."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "RETRIED AS CONNECTION, A DOWN FREE MODEL KEPT THE USER ON\n    \"RECONNECTING\" FOR FOUR MINUTES AND RE-SENT THE PROMPT TWICE.",
+   "resets": false,
+   "text": "RETRIED AS CONNECTION, A DOWN FREE MODEL KEPT THE USER ON\n    \"RECONNECTING\" FOR FOUR MINUTES AND RE-SENT THE PROMPT TWICE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Retried as CONNECTION, a down free model kept the user on\n    \"Reconnecting\" for four minutes and re-sent the prompt twice.",
+   "resets": false,
+   "text": "claude exited rc=1: Retried as CONNECTION, a down free model kept the user on\n    \"Reconnecting\" for four minutes and re-sent the prompt twice."
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "Error from provider (Console): Upstream request failed: Endpoint is unavailable.",
+   "resets": false,
+   "text": "Error from provider (Console): Upstream request failed: Endpoint is unavailable."
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "ERROR FROM PROVIDER (CONSOLE): UPSTREAM REQUEST FAILED: ENDPOINT IS UNAVAILABLE.",
+   "resets": false,
+   "text": "ERROR FROM PROVIDER (CONSOLE): UPSTREAM REQUEST FAILED: ENDPOINT IS UNAVAILABLE."
+  },
+  {
+   "account_wait": false,
+   "explained": "This model's provider is unavailable right now. Try again later or choose another model",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: Error from provider (Console): Upstream request failed: Endpoint is unavailable.",
+   "resets": false,
+   "text": "claude exited rc=1: Error from provider (Console): Upstream request failed: Endpoint is unavailable."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at 3:29 PM.",
+   "resets": true,
+   "text": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at 3:29 PM."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR USAGE LIMIT. UPGRADE TO PRO (HTTPS://CHATGPT.COM/EXPLORE/PRO) OR TRY AGAIN AT 3:29 PM.",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR USAGE LIMIT. UPGRADE TO PRO (HTTPS://CHATGPT.COM/EXPLORE/PRO) OR TRY AGAIN AT 3:29 PM."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at 3:29 PM.",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro) or try again at 3:29 PM."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "out of usage",
+   "resets": true,
+   "text": "out of usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "OUT OF USAGE",
+   "resets": true,
+   "text": "OUT OF USAGE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: out of usage",
+   "resets": true,
+   "text": "claude exited rc=1: out of usage"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Usage limit reached for this account",
+   "resets": true,
+   "text": "Usage limit reached for this account"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "USAGE LIMIT REACHED FOR THIS ACCOUNT",
+   "resets": true,
+   "text": "USAGE LIMIT REACHED FOR THIS ACCOUNT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Usage limit reached for this account",
+   "resets": true,
+   "text": "claude exited rc=1: Usage limit reached for this account"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your session limit · resets 3:20pm (Europe/Oslo)",
+   "resets": true,
+   "text": "You've hit your session limit · resets 3:20pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR SESSION LIMIT · RESETS 3:20PM (EUROPE/OSLO)",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR SESSION LIMIT · RESETS 3:20PM (EUROPE/OSLO)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your session limit · resets 3:20pm (Europe/Oslo)",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your session limit · resets 3:20pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your usage limit. Upgrade to Pro or try again at 5:08 PM.",
+   "resets": true,
+   "text": "You've hit your usage limit. Upgrade to Pro or try again at 5:08 PM."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR USAGE LIMIT. UPGRADE TO PRO OR TRY AGAIN AT 5:08 PM.",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR USAGE LIMIT. UPGRADE TO PRO OR TRY AGAIN AT 5:08 PM."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your usage limit. Upgrade to Pro or try again at 5:08 PM.",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your usage limit. Upgrade to Pro or try again at 5:08 PM."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Claude usage limit reached. Your limit will reset at 1pm",
+   "resets": true,
+   "text": "Claude usage limit reached. Your limit will reset at 1pm"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "CLAUDE USAGE LIMIT REACHED. YOUR LIMIT WILL RESET AT 1PM",
+   "resets": true,
+   "text": "CLAUDE USAGE LIMIT REACHED. YOUR LIMIT WILL RESET AT 1PM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Claude usage limit reached. Your limit will reset at 1pm",
+   "resets": true,
+   "text": "claude exited rc=1: Claude usage limit reached. Your limit will reset at 1pm"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You have hit your weekly limit, which resets Friday",
+   "resets": true,
+   "text": "You have hit your weekly limit, which resets Friday"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU HAVE HIT YOUR WEEKLY LIMIT, WHICH RESETS FRIDAY",
+   "resets": true,
+   "text": "YOU HAVE HIT YOUR WEEKLY LIMIT, WHICH RESETS FRIDAY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You have hit your weekly limit, which resets Friday",
+   "resets": true,
+   "text": "claude exited rc=1: You have hit your weekly limit, which resets Friday"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "agy exited rc=1: Your AI credits balance is too low to continue.",
+   "resets": false,
+   "text": "agy exited rc=1: Your AI credits balance is too low to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "AGY EXITED RC=1: YOUR AI CREDITS BALANCE IS TOO LOW TO CONTINUE.",
+   "resets": false,
+   "text": "AGY EXITED RC=1: YOUR AI CREDITS BALANCE IS TOO LOW TO CONTINUE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: agy exited rc=1: Your AI credits balance is too low to continue.",
+   "resets": false,
+   "text": "claude exited rc=1: agy exited rc=1: Your AI credits balance is too low to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+   "resets": false,
+   "text": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOUR WORKSPACE IS OUT OF CREDITS. ASK YOUR WORKSPACE OWNER TO REFILL IN ORDER TO CONTINUE.",
+   "resets": false,
+   "text": "YOUR WORKSPACE IS OUT OF CREDITS. ASK YOUR WORKSPACE OWNER TO REFILL IN ORDER TO CONTINUE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+   "resets": false,
+   "text": "claude exited rc=1: Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "out of credit",
+   "resets": false,
+   "text": "out of credit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "OUT OF CREDIT",
+   "resets": false,
+   "text": "OUT OF CREDIT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: out of credit",
+   "resets": false,
+   "text": "claude exited rc=1: out of credit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "API error (status 402 Payment Required)",
+   "resets": false,
+   "text": "API error (status 402 Payment Required)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "API ERROR (STATUS 402 PAYMENT REQUIRED)",
+   "resets": false,
+   "text": "API ERROR (STATUS 402 PAYMENT REQUIRED)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: API error (status 402 Payment Required)",
+   "resets": false,
+   "text": "claude exited rc=1: API error (status 402 Payment Required)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "402 Payment",
+   "resets": false,
+   "text": "402 Payment"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "402 PAYMENT",
+   "resets": false,
+   "text": "402 PAYMENT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: 402 Payment",
+   "resets": false,
+   "text": "claude exited rc=1: 402 Payment"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Account acct-1 is suspended, possibly due to reaching the monthly spending limit",
+   "resets": false,
+   "text": "Account acct-1 is suspended, possibly due to reaching the monthly spending limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ACCOUNT ACCT-1 IS SUSPENDED, POSSIBLY DUE TO REACHING THE MONTHLY SPENDING LIMIT",
+   "resets": false,
+   "text": "ACCOUNT ACCT-1 IS SUSPENDED, POSSIBLY DUE TO REACHING THE MONTHLY SPENDING LIMIT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Account acct-1 is suspended, possibly due to reaching the monthly spending limit",
+   "resets": false,
+   "text": "claude exited rc=1: Account acct-1 is suspended, possibly due to reaching the monthly spending limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You have used your monthly included credits",
+   "resets": false,
+   "text": "You have used your monthly included credits"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU HAVE USED YOUR MONTHLY INCLUDED CREDITS",
+   "resets": false,
+   "text": "YOU HAVE USED YOUR MONTHLY INCLUDED CREDITS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You have used your monthly included credits",
+   "resets": false,
+   "text": "claude exited rc=1: You have used your monthly included credits"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You have reached your billing hard limit",
+   "resets": false,
+   "text": "You have reached your billing hard limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU HAVE REACHED YOUR BILLING HARD LIMIT",
+   "resets": false,
+   "text": "YOU HAVE REACHED YOUR BILLING HARD LIMIT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You have reached your billing hard limit",
+   "resets": false,
+   "text": "claude exited rc=1: You have reached your billing hard limit"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Your trial quota is used up for this model",
+   "resets": false,
+   "text": "Your trial quota is used up for this model"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOUR TRIAL QUOTA IS USED UP FOR THIS MODEL",
+   "resets": false,
+   "text": "YOUR TRIAL QUOTA IS USED UP FOR THIS MODEL"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Your trial quota is used up for this model",
+   "resets": false,
+   "text": "claude exited rc=1: Your trial quota is used up for this model"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "free tier can only be used from within opencode",
+   "resets": false,
+   "text": "free tier can only be used from within opencode"
+  },
+  {
+   "account_wait": false,
+   "explained": "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: free tier can only be used from within opencode",
+   "resets": false,
+   "text": "claude exited rc=1: free tier can only be used from within opencode"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "insufficient credits",
+   "resets": false,
+   "text": "insufficient credits"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "INSUFFICIENT CREDITS",
+   "resets": false,
+   "text": "INSUFFICIENT CREDITS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: insufficient credits",
+   "resets": false,
+   "text": "claude exited rc=1: insufficient credits"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "insufficient quota",
+   "resets": false,
+   "text": "insufficient quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "INSUFFICIENT QUOTA",
+   "resets": false,
+   "text": "INSUFFICIENT QUOTA"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: insufficient quota",
+   "resets": false,
+   "text": "claude exited rc=1: insufficient quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "credit balance depleted",
+   "resets": false,
+   "text": "credit balance depleted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "CREDIT BALANCE DEPLETED",
+   "resets": false,
+   "text": "CREDIT BALANCE DEPLETED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: credit balance depleted",
+   "resets": false,
+   "text": "claude exited rc=1: credit balance depleted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "account balance exhausted",
+   "resets": false,
+   "text": "account balance exhausted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ACCOUNT BALANCE EXHAUSTED",
+   "resets": false,
+   "text": "ACCOUNT BALANCE EXHAUSTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: account balance exhausted",
+   "resets": false,
+   "text": "claude exited rc=1: account balance exhausted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "RESOURCE_EXHAUSTED: exceeded your current quota",
+   "resets": false,
+   "text": "RESOURCE_EXHAUSTED: exceeded your current quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "RESOURCE_EXHAUSTED: EXCEEDED YOUR CURRENT QUOTA",
+   "resets": false,
+   "text": "RESOURCE_EXHAUSTED: EXCEEDED YOUR CURRENT QUOTA"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: RESOURCE_EXHAUSTED: exceeded your current quota",
+   "resets": false,
+   "text": "claude exited rc=1: RESOURCE_EXHAUSTED: exceeded your current quota"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "quota exceeded",
+   "resets": false,
+   "text": "quota exceeded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXCEEDED",
+   "resets": false,
+   "text": "QUOTA EXCEEDED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: quota exceeded",
+   "resets": false,
+   "text": "claude exited rc=1: quota exceeded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "monthly limit reached",
+   "resets": false,
+   "text": "monthly limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: monthly limit reached",
+   "resets": false,
+   "text": "claude exited rc=1: monthly limit reached"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Usage limit reached. Your credits balance is too low to continue.",
+   "resets": false,
+   "text": "Usage limit reached. Your credits balance is too low to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "USAGE LIMIT REACHED. YOUR CREDITS BALANCE IS TOO LOW TO CONTINUE.",
+   "resets": false,
+   "text": "USAGE LIMIT REACHED. YOUR CREDITS BALANCE IS TOO LOW TO CONTINUE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Usage limit reached. Your credits balance is too low to continue.",
+   "resets": false,
+   "text": "claude exited rc=1: Usage limit reached. Your credits balance is too low to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Quota exhausted. Resets at 15:00.",
+   "resets": true,
+   "text": "Quota exhausted. Resets at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXHAUSTED. RESETS AT 15:00.",
+   "resets": true,
+   "text": "QUOTA EXHAUSTED. RESETS AT 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Quota exhausted. Resets at 15:00.",
+   "resets": true,
+   "text": "claude exited rc=1: Quota exhausted. Resets at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "quota exceeded; your usage window resets in 3 hours",
+   "resets": true,
+   "text": "quota exceeded; your usage window resets in 3 hours"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXCEEDED; YOUR USAGE WINDOW RESETS IN 3 HOURS",
+   "resets": true,
+   "text": "QUOTA EXCEEDED; YOUR USAGE WINDOW RESETS IN 3 HOURS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: quota exceeded; your usage window resets in 3 hours",
+   "resets": true,
+   "text": "claude exited rc=1: quota exceeded; your usage window resets in 3 hours"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Monthly limit reached. It will reset on the 1st.",
+   "resets": true,
+   "text": "Monthly limit reached. It will reset on the 1st."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "MONTHLY LIMIT REACHED. IT WILL RESET ON THE 1ST.",
+   "resets": true,
+   "text": "MONTHLY LIMIT REACHED. IT WILL RESET ON THE 1ST."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Monthly limit reached. It will reset on the 1st.",
+   "resets": true,
+   "text": "claude exited rc=1: Monthly limit reached. It will reset on the 1st."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Quota exhausted. Limits reset at 15:00.",
+   "resets": true,
+   "text": "Quota exhausted. Limits reset at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXHAUSTED. LIMITS RESET AT 15:00.",
+   "resets": true,
+   "text": "QUOTA EXHAUSTED. LIMITS RESET AT 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Quota exhausted. Limits reset at 15:00.",
+   "resets": true,
+   "text": "claude exited rc=1: Quota exhausted. Limits reset at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Quota exhausted. It will reset tomorrow.",
+   "resets": true,
+   "text": "Quota exhausted. It will reset tomorrow."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXHAUSTED. IT WILL RESET TOMORROW.",
+   "resets": true,
+   "text": "QUOTA EXHAUSTED. IT WILL RESET TOMORROW."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Quota exhausted. It will reset tomorrow.",
+   "resets": true,
+   "text": "claude exited rc=1: Quota exhausted. It will reset tomorrow."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Quota exhausted. Your credits reset at midnight.",
+   "resets": false,
+   "text": "Quota exhausted. Your credits reset at midnight."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "QUOTA EXHAUSTED. YOUR CREDITS RESET AT MIDNIGHT.",
+   "resets": false,
+   "text": "QUOTA EXHAUSTED. YOUR CREDITS RESET AT MIDNIGHT."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Quota exhausted. Your credits reset at midnight.",
+   "resets": false,
+   "text": "claude exited rc=1: Quota exhausted. Your credits reset at midnight."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Payment required. Your usage window resets at 2026-11-16T00:00:00Z.",
+   "resets": false,
+   "text": "Payment required. Your usage window resets at 2026-11-16T00:00:00Z."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "PAYMENT REQUIRED. YOUR USAGE WINDOW RESETS AT 2026-11-16T00:00:00Z.",
+   "resets": false,
+   "text": "PAYMENT REQUIRED. YOUR USAGE WINDOW RESETS AT 2026-11-16T00:00:00Z."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Payment required. Your usage window resets at 2026-11-16T00:00:00Z.",
+   "resets": false,
+   "text": "claude exited rc=1: Payment required. Your usage window resets at 2026-11-16T00:00:00Z."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Account suspended: quota exhausted. Your usage window resets at 15:00.",
+   "resets": false,
+   "text": "Account suspended: quota exhausted. Your usage window resets at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ACCOUNT SUSPENDED: QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 15:00.",
+   "resets": false,
+   "text": "ACCOUNT SUSPENDED: QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Account suspended: quota exhausted. Your usage window resets at 15:00.",
+   "resets": false,
+   "text": "claude exited rc=1: Account suspended: quota exhausted. Your usage window resets at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You have reached your billing hard limit. It resets at the next period.",
+   "resets": false,
+   "text": "You have reached your billing hard limit. It resets at the next period."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU HAVE REACHED YOUR BILLING HARD LIMIT. IT RESETS AT THE NEXT PERIOD.",
+   "resets": false,
+   "text": "YOU HAVE REACHED YOUR BILLING HARD LIMIT. IT RESETS AT THE NEXT PERIOD."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You have reached your billing hard limit. It resets at the next period.",
+   "resets": false,
+   "text": "claude exited rc=1: You have reached your billing hard limit. It resets at the next period."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Your trial quota is used up. Your usage window resets at 15:00.",
+   "resets": false,
+   "text": "Your trial quota is used up. Your usage window resets at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOUR TRIAL QUOTA IS USED UP. YOUR USAGE WINDOW RESETS AT 15:00.",
+   "resets": false,
+   "text": "YOUR TRIAL QUOTA IS USED UP. YOUR USAGE WINDOW RESETS AT 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Your trial quota is used up. Your usage window resets at 15:00.",
+   "resets": false,
+   "text": "claude exited rc=1: Your trial quota is used up. Your usage window resets at 15:00."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Free tier quota exhausted. Your usage window resets at 00:00 UTC.",
+   "resets": false,
+   "text": "Free tier quota exhausted. Your usage window resets at 00:00 UTC."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "FREE TIER QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 00:00 UTC.",
+   "resets": false,
+   "text": "FREE TIER QUOTA EXHAUSTED. YOUR USAGE WINDOW RESETS AT 00:00 UTC."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Free tier quota exhausted. Your usage window resets at 00:00 UTC.",
+   "resets": false,
+   "text": "claude exited rc=1: Free tier quota exhausted. Your usage window resets at 00:00 UTC."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Whatever else it calls the allowance, unless it also names credits,\n    payment, suspension, billing, a trial or the free tier.",
+   "resets": false,
+   "text": "Whatever else it calls the allowance, unless it also names credits,\n    payment, suspension, billing, a trial or the free tier."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WHATEVER ELSE IT CALLS THE ALLOWANCE, UNLESS IT ALSO NAMES CREDITS,\n    PAYMENT, SUSPENSION, BILLING, A TRIAL OR THE FREE TIER.",
+   "resets": false,
+   "text": "WHATEVER ELSE IT CALLS THE ALLOWANCE, UNLESS IT ALSO NAMES CREDITS,\n    PAYMENT, SUSPENSION, BILLING, A TRIAL OR THE FREE TIER."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Whatever else it calls the allowance, unless it also names credits,\n    payment, suspension, billing, a trial or the free tier.",
+   "resets": false,
+   "text": "claude exited rc=1: Whatever else it calls the allowance, unless it also names credits,\n    payment, suspension, billing, a trial or the free tier."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "One word list, in two named parts: nothing is a usage limit that is in\n    neither, and the split cannot drift from the category.",
+   "resets": true,
+   "text": "One word list, in two named parts: nothing is a usage limit that is in\n    neither, and the split cannot drift from the category."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ONE WORD LIST, IN TWO NAMED PARTS: NOTHING IS A USAGE LIMIT THAT IS IN\n    NEITHER, AND THE SPLIT CANNOT DRIFT FROM THE CATEGORY.",
+   "resets": true,
+   "text": "ONE WORD LIST, IN TWO NAMED PARTS: NOTHING IS A USAGE LIMIT THAT IS IN\n    NEITHER, AND THE SPLIT CANNOT DRIFT FROM THE CATEGORY."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: One word list, in two named parts: nothing is a usage limit that is in\n    neither, and the split cannot drift from the category.",
+   "resets": true,
+   "text": "claude exited rc=1: One word list, in two named parts: nothing is a usage limit that is in\n    neither, and the split cannot drift from the category."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "API Error: The socket connection was closed unexpectedly.",
+   "resets": false,
+   "text": "API Error: The socket connection was closed unexpectedly."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "API ERROR: THE SOCKET CONNECTION WAS CLOSED UNEXPECTEDLY.",
+   "resets": false,
+   "text": "API ERROR: THE SOCKET CONNECTION WAS CLOSED UNEXPECTEDLY."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: API Error: The socket connection was closed unexpectedly.",
+   "resets": false,
+   "text": "claude exited rc=1: API Error: The socket connection was closed unexpectedly."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "read ECONNRESET",
+   "resets": false,
+   "text": "read ECONNRESET"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "READ ECONNRESET",
+   "resets": false,
+   "text": "READ ECONNRESET"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: read ECONNRESET",
+   "resets": false,
+   "text": "claude exited rc=1: read ECONNRESET"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "stream disconnected",
+   "resets": false,
+   "text": "stream disconnected"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "STREAM DISCONNECTED",
+   "resets": false,
+   "text": "STREAM DISCONNECTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: stream disconnected",
+   "resets": false,
+   "text": "claude exited rc=1: stream disconnected"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "write EPIPE",
+   "resets": false,
+   "text": "write EPIPE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "WRITE EPIPE",
+   "resets": false,
+   "text": "WRITE EPIPE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: write EPIPE",
+   "resets": false,
+   "text": "claude exited rc=1: write EPIPE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "overloaded_error: Overloaded",
+   "resets": false,
+   "text": "overloaded_error: Overloaded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "OVERLOADED_ERROR: OVERLOADED",
+   "resets": false,
+   "text": "OVERLOADED_ERROR: OVERLOADED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: overloaded_error: Overloaded",
+   "resets": false,
+   "text": "claude exited rc=1: overloaded_error: Overloaded"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "rate_limit_error: rate limited",
+   "resets": false,
+   "text": "rate_limit_error: rate limited"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "RATE_LIMIT_ERROR: RATE LIMITED",
+   "resets": false,
+   "text": "RATE_LIMIT_ERROR: RATE LIMITED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: rate_limit_error: rate limited",
+   "resets": false,
+   "text": "claude exited rc=1: rate_limit_error: rate limited"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "HTTP 429 Too Many Requests",
+   "resets": false,
+   "text": "HTTP 429 Too Many Requests"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "HTTP 429 TOO MANY REQUESTS",
+   "resets": false,
+   "text": "HTTP 429 TOO MANY REQUESTS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: HTTP 429 Too Many Requests",
+   "resets": false,
+   "text": "claude exited rc=1: HTTP 429 Too Many Requests"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "503 Service Unavailable",
+   "resets": false,
+   "text": "503 Service Unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "503 SERVICE UNAVAILABLE",
+   "resets": false,
+   "text": "503 SERVICE UNAVAILABLE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: 503 Service Unavailable",
+   "resets": false,
+   "text": "claude exited rc=1: 503 Service Unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "502 Bad Gateway",
+   "resets": false,
+   "text": "502 Bad Gateway"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "502 BAD GATEWAY",
+   "resets": false,
+   "text": "502 BAD GATEWAY"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "transient",
+   "provider_message": "claude exited rc=1: 502 Bad Gateway",
+   "resets": false,
+   "text": "claude exited rc=1: 502 Bad Gateway"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Internal error: API error (status 402 Payment Required): Grok Build usage balance exhausted",
+   "resets": false,
+   "text": "Internal error: {\n  \"message\": \"API error (status 402 Payment Required): Grok Build usage balance exhausted\",\n  \"http_status\": 402\n}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "INTERNAL ERROR: {\n  \"MESSAGE\": \"API ERROR (STATUS 402 PAYMENT REQUIRED): GROK BUILD USAGE BALANCE EXHAUSTED\",\n  \"HTTP_STATUS\": 402\n}",
+   "resets": false,
+   "text": "INTERNAL ERROR: {\n  \"MESSAGE\": \"API ERROR (STATUS 402 PAYMENT REQUIRED): GROK BUILD USAGE BALANCE EXHAUSTED\",\n  \"HTTP_STATUS\": 402\n}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Internal error: API error (status 402 Payment Required): Grok Build usage balance exhausted",
+   "resets": false,
+   "text": "claude exited rc=1: Internal error: {\n  \"message\": \"API error (status 402 Payment Required): Grok Build usage balance exhausted\",\n  \"http_status\": 402\n}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "codex exited rc=1",
+   "resets": false,
+   "text": "codex exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "CODEX EXITED RC=1",
+   "resets": false,
+   "text": "CODEX EXITED RC=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: codex exited rc=1",
+   "resets": false,
+   "text": "claude exited rc=1: codex exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "clarp exited rc=2",
+   "resets": false,
+   "text": "clarp exited rc=2"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "CLARP EXITED RC=2",
+   "resets": false,
+   "text": "CLARP EXITED RC=2"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: clarp exited rc=2",
+   "resets": false,
+   "text": "claude exited rc=1: clarp exited rc=2"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "agy exited rc=1",
+   "resets": false,
+   "text": "agy exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "AGY EXITED RC=1",
+   "resets": false,
+   "text": "AGY EXITED RC=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: agy exited rc=1",
+   "resets": false,
+   "text": "claude exited rc=1: agy exited rc=1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "process exited code 1",
+   "resets": false,
+   "text": "process exited code 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "PROCESS EXITED CODE 1",
+   "resets": false,
+   "text": "PROCESS EXITED CODE 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: process exited code 1",
+   "resets": false,
+   "text": "claude exited rc=1: process exited code 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "exit status 1",
+   "resets": false,
+   "text": "exit status 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "EXIT STATUS 1",
+   "resets": false,
+   "text": "EXIT STATUS 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: exit status 1",
+   "resets": false,
+   "text": "claude exited rc=1: exit status 1"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Choose another model",
+   "resets": false,
+   "text": "Choose another model"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "CHOOSE ANOTHER MODEL",
+   "resets": false,
+   "text": "CHOOSE ANOTHER MODEL"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Choose another model",
+   "resets": false,
+   "text": "claude exited rc=1: Choose another model"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "provider is unavailable",
+   "resets": false,
+   "text": "provider is unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "PROVIDER IS UNAVAILABLE",
+   "resets": false,
+   "text": "PROVIDER IS UNAVAILABLE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: provider is unavailable",
+   "resets": false,
+   "text": "claude exited rc=1: provider is unavailable"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "THE 'GPT-5.6-SOL' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT.",
+   "resets": false,
+   "text": "THE 'GPT-5.6-SOL' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "claude exited rc=1: The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "unexpected status 400 Bad Request: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "unexpected status 400 Bad Request: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "UNEXPECTED STATUS 400 BAD REQUEST: THE 'GPT-6-ASTRA' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT.",
+   "resets": false,
+   "text": "UNEXPECTED STATUS 400 BAD REQUEST: THE 'GPT-6-ASTRA' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: unexpected status 400 Bad Request: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "claude exited rc=1: unexpected status 400 Bad Request: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "This model is not available on your current plan.",
+   "resets": false,
+   "text": "This model is not available on your current plan."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "THIS MODEL IS NOT AVAILABLE ON YOUR CURRENT PLAN.",
+   "resets": false,
+   "text": "THIS MODEL IS NOT AVAILABLE ON YOUR CURRENT PLAN."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: This model is not available on your current plan.",
+   "resets": false,
+   "text": "claude exited rc=1: This model is not available on your current plan."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "Your plan does not include access to gpt-6-astra.",
+   "resets": false,
+   "text": "Your plan does not include access to gpt-6-astra."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "YOUR PLAN DOES NOT INCLUDE ACCESS TO GPT-6-ASTRA.",
+   "resets": false,
+   "text": "YOUR PLAN DOES NOT INCLUDE ACCESS TO GPT-6-ASTRA."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: Your plan does not include access to gpt-6-astra.",
+   "resets": false,
+   "text": "claude exited rc=1: Your plan does not include access to gpt-6-astra."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "The model 'gpt-9' does not exist or you do not have access to it",
+   "resets": false,
+   "text": "The model 'gpt-9' does not exist or you do not have access to it"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "THE MODEL 'GPT-9' DOES NOT EXIST OR YOU DO NOT HAVE ACCESS TO IT",
+   "resets": false,
+   "text": "THE MODEL 'GPT-9' DOES NOT EXIST OR YOU DO NOT HAVE ACCESS TO IT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: The model 'gpt-9' does not exist or you do not have access to it",
+   "resets": false,
+   "text": "claude exited rc=1: The model 'gpt-9' does not exist or you do not have access to it"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "context_length_exceeded",
+   "resets": false,
+   "text": "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"context_length_exceeded\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "{\"ERROR\":{\"TYPE\":\"INVALID_REQUEST_ERROR\",\"MESSAGE\":\"CONTEXT_LENGTH_EXCEEDED\"}}",
+   "resets": false,
+   "text": "{\"ERROR\":{\"TYPE\":\"INVALID_REQUEST_ERROR\",\"MESSAGE\":\"CONTEXT_LENGTH_EXCEEDED\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: context_length_exceeded",
+   "resets": false,
+   "text": "claude exited rc=1: {\"error\":{\"type\":\"invalid_request_error\",\"message\":\"context_length_exceeded\"}}"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "Unsupported parameter: 'reasoning.effort' is not supported with this model.",
+   "resets": false,
+   "text": "Unsupported parameter: 'reasoning.effort' is not supported with this model."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "UNSUPPORTED PARAMETER: 'REASONING.EFFORT' IS NOT SUPPORTED WITH THIS MODEL.",
+   "resets": false,
+   "text": "UNSUPPORTED PARAMETER: 'REASONING.EFFORT' IS NOT SUPPORTED WITH THIS MODEL."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: Unsupported parameter: 'reasoning.effort' is not supported with this model.",
+   "resets": false,
+   "text": "claude exited rc=1: Unsupported parameter: 'reasoning.effort' is not supported with this model."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "the plan step is not supported by this tool",
+   "resets": false,
+   "text": "the plan step is not supported by this tool"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "THE PLAN STEP IS NOT SUPPORTED BY THIS TOOL",
+   "resets": false,
+   "text": "THE PLAN STEP IS NOT SUPPORTED BY THIS TOOL"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: the plan step is not supported by this tool",
+   "resets": false,
+   "text": "claude exited rc=1: the plan step is not supported by this tool"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "ERROR RUNNING REMOTE COMPACT TASK: THE 'GPT-6-ASTRA' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT.",
+   "resets": false,
+   "text": "ERROR RUNNING REMOTE COMPACT TASK: THE 'GPT-6-ASTRA' MODEL IS NOT SUPPORTED WHEN USING CODEX WITH A CHATGPT ACCOUNT."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "account_plan",
+   "provider_message": "claude exited rc=1: Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.",
+   "resets": false,
+   "text": "claude exited rc=1: Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "plain failure",
+   "resets": false,
+   "text": "plain failure"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "PLAIN FAILURE",
+   "resets": false,
+   "text": "PLAIN FAILURE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: plain failure",
+   "resets": false,
+   "text": "claude exited rc=1: plain failure"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "boom: {\"message\": \"unterminated",
+   "resets": false,
+   "text": "boom: {\"message\": \"unterminated"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "BOOM: {\"MESSAGE\": \"UNTERMINATED",
+   "resets": false,
+   "text": "BOOM: {\"MESSAGE\": \"UNTERMINATED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: boom: {\"message\": \"unterminated",
+   "resets": false,
+   "text": "claude exited rc=1: boom: {\"message\": \"unterminated"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "muse_session_locked",
+   "provider_message": "muse_session_locked: Session is held by pid 123; close it and resend.",
+   "resets": false,
+   "text": "muse_session_locked: Session is held by pid 123; close it and resend."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "MUSE_SESSION_LOCKED: SESSION IS HELD BY PID 123; CLOSE IT AND RESEND.",
+   "resets": false,
+   "text": "MUSE_SESSION_LOCKED: SESSION IS HELD BY PID 123; CLOSE IT AND RESEND."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: muse_session_locked: Session is held by pid 123; close it and resend.",
+   "resets": false,
+   "text": "claude exited rc=1: muse_session_locked: Session is held by pid 123; close it and resend."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "muse_session_locked",
+   "provider_message": "muse_session_locked: holder unverifiable; network error timeout waiting for response",
+   "resets": false,
+   "text": "muse_session_locked: holder unverifiable; network error timeout waiting for response"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "MUSE_SESSION_LOCKED: HOLDER UNVERIFIABLE; NETWORK ERROR TIMEOUT WAITING FOR RESPONSE",
+   "resets": false,
+   "text": "MUSE_SESSION_LOCKED: HOLDER UNVERIFIABLE; NETWORK ERROR TIMEOUT WAITING FOR RESPONSE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "timeout",
+   "provider_message": "claude exited rc=1: muse_session_locked: holder unverifiable; network error timeout waiting for response",
+   "resets": false,
+   "text": "claude exited rc=1: muse_session_locked: holder unverifiable; network error timeout waiting for response"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "wrote 402 tokens to the log",
+   "resets": false,
+   "text": "wrote 402 tokens to the log"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "WROTE 402 TOKENS TO THE LOG",
+   "resets": false,
+   "text": "WROTE 402 TOKENS TO THE LOG"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: wrote 402 tokens to the log",
+   "resets": false,
+   "text": "claude exited rc=1: wrote 402 tokens to the log"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "server",
+   "resets": false,
+   "text": "server"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "SERVER",
+   "resets": false,
+   "text": "SERVER"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: server",
+   "resets": false,
+   "text": "claude exited rc=1: server"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "turn_aborted reason=interrupted",
+   "resets": false,
+   "text": "turn_aborted reason=interrupted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "TURN_ABORTED REASON=INTERRUPTED",
+   "resets": false,
+   "text": "TURN_ABORTED REASON=INTERRUPTED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: turn_aborted reason=interrupted",
+   "resets": false,
+   "text": "claude exited rc=1: turn_aborted reason=interrupted"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "The user interrupted the previous turn; socket hang up",
+   "resets": false,
+   "text": "The user interrupted the previous turn; socket hang up"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "THE USER INTERRUPTED THE PREVIOUS TURN; SOCKET HANG UP",
+   "resets": false,
+   "text": "THE USER INTERRUPTED THE PREVIOUS TURN; SOCKET HANG UP"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: The user interrupted the previous turn; socket hang up",
+   "resets": false,
+   "text": "claude exited rc=1: The user interrupted the previous turn; socket hang up"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "killed by signal SIGTERM",
+   "resets": false,
+   "text": "killed by signal SIGTERM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "KILLED BY SIGNAL SIGTERM",
+   "resets": false,
+   "text": "KILLED BY SIGNAL SIGTERM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: killed by signal SIGTERM",
+   "resets": false,
+   "text": "claude exited rc=1: killed by signal SIGTERM"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "some unexpected parser crash",
+   "resets": false,
+   "text": "some unexpected parser crash"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "SOME UNEXPECTED PARSER CRASH",
+   "resets": false,
+   "text": "SOME UNEXPECTED PARSER CRASH"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: some unexpected parser crash",
+   "resets": false,
+   "text": "claude exited rc=1: some unexpected parser crash"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "not a dict",
+   "resets": false,
+   "text": "not a dict"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "NOT A DICT",
+   "resets": false,
+   "text": "NOT A DICT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: not a dict",
+   "resets": false,
+   "text": "claude exited rc=1: not a dict"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "Failed to authenticate: OAuth session expired and could not be refreshed",
+   "resets": false,
+   "text": "Failed to authenticate: OAuth session expired and could not be refreshed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "FAILED TO AUTHENTICATE: OAUTH SESSION EXPIRED AND COULD NOT BE REFRESHED",
+   "resets": false,
+   "text": "FAILED TO AUTHENTICATE: OAUTH SESSION EXPIRED AND COULD NOT BE REFRESHED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: Failed to authenticate: OAuth session expired and could not be refreshed",
+   "resets": false,
+   "text": "claude exited rc=1: Failed to authenticate: OAuth session expired and could not be refreshed"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "Not logged in. Please run /login",
+   "resets": false,
+   "text": "Not logged in. Please run /login"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "NOT LOGGED IN. PLEASE RUN /LOGIN",
+   "resets": false,
+   "text": "NOT LOGGED IN. PLEASE RUN /LOGIN"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: Not logged in. Please run /login",
+   "resets": false,
+   "text": "claude exited rc=1: Not logged in. Please run /login"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "token refresh failed: invalid_grant",
+   "resets": false,
+   "text": "token refresh failed: invalid_grant"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "TOKEN REFRESH FAILED: INVALID_GRANT",
+   "resets": false,
+   "text": "TOKEN REFRESH FAILED: INVALID_GRANT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "auth",
+   "provider_message": "claude exited rc=1: token refresh failed: invalid_grant",
+   "resets": false,
+   "text": "claude exited rc=1: token refresh failed: invalid_grant"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your usage limit; token expired",
+   "resets": true,
+   "text": "You've hit your usage limit; token expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR USAGE LIMIT; TOKEN EXPIRED",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR USAGE LIMIT; TOKEN EXPIRED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your usage limit; token expired",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your usage limit; token expired"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Account peter-x is suspended, possibly due to reaching the monthly spending limit or failure to pay past invoices.",
+   "resets": false,
+   "text": "Account peter-x is suspended, possibly due to reaching the monthly spending limit or failure to pay past invoices."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "ACCOUNT PETER-X IS SUSPENDED, POSSIBLY DUE TO REACHING THE MONTHLY SPENDING LIMIT OR FAILURE TO PAY PAST INVOICES.",
+   "resets": false,
+   "text": "ACCOUNT PETER-X IS SUSPENDED, POSSIBLY DUE TO REACHING THE MONTHLY SPENDING LIMIT OR FAILURE TO PAY PAST INVOICES."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Account peter-x is suspended, possibly due to reaching the monthly spending limit or failure to pay past invoices.",
+   "resets": false,
+   "text": "claude exited rc=1: Account peter-x is suspended, possibly due to reaching the monthly spending limit or failure to pay past invoices."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "Payment Required: You have depleted your monthly included credits.",
+   "resets": false,
+   "text": "Payment Required: You have depleted your monthly included credits."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "PAYMENT REQUIRED: YOU HAVE DEPLETED YOUR MONTHLY INCLUDED CREDITS.",
+   "resets": false,
+   "text": "PAYMENT REQUIRED: YOU HAVE DEPLETED YOUR MONTHLY INCLUDED CREDITS."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: Payment Required: You have depleted your monthly included credits.",
+   "resets": false,
+   "text": "claude exited rc=1: Payment Required: You have depleted your monthly included credits."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "getaddrinfo ETIMEOUT router.huggingface.co",
+   "resets": false,
+   "text": "getaddrinfo ETIMEOUT router.huggingface.co"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "GETADDRINFO ETIMEOUT ROUTER.HUGGINGFACE.CO",
+   "resets": false,
+   "text": "GETADDRINFO ETIMEOUT ROUTER.HUGGINGFACE.CO"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: getaddrinfo ETIMEOUT router.huggingface.co",
+   "resets": false,
+   "text": "claude exited rc=1: getaddrinfo ETIMEOUT router.huggingface.co"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "The operation was aborted.",
+   "resets": false,
+   "text": "The operation was aborted."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "THE OPERATION WAS ABORTED.",
+   "resets": false,
+   "text": "THE OPERATION WAS ABORTED."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "interrupted",
+   "provider_message": "claude exited rc=1: The operation was aborted.",
+   "resets": false,
+   "text": "claude exited rc=1: The operation was aborted."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "plain failure",
+   "resets": false,
+   "text": "  plain failure\n"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "PLAIN FAILURE",
+   "resets": false,
+   "text": "  PLAIN FAILURE\n"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1:   plain failure",
+   "resets": false,
+   "text": "claude exited rc=1:   plain failure\n"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "some text mentions muse_session_locked",
+   "resets": false,
+   "text": "some text mentions muse_session_locked"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "SOME TEXT MENTIONS MUSE_SESSION_LOCKED",
+   "resets": false,
+   "text": "SOME TEXT MENTIONS MUSE_SESSION_LOCKED"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: some text mentions muse_session_locked",
+   "resets": false,
+   "text": "claude exited rc=1: some text mentions muse_session_locked"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "The preview server resets at midnight",
+   "resets": false,
+   "text": "The preview server resets at midnight"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "THE PREVIEW SERVER RESETS AT MIDNIGHT",
+   "resets": false,
+   "text": "THE PREVIEW SERVER RESETS AT MIDNIGHT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: The preview server resets at midnight",
+   "resets": false,
+   "text": "claude exited rc=1: The preview server resets at midnight"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "Connection reset by peer",
+   "resets": false,
+   "text": "Connection reset by peer"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "connection",
+   "provider_message": "claude exited rc=1: Connection reset by peer",
+   "resets": false,
+   "text": "claude exited rc=1: Connection reset by peer"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "duration_ms",
+   "resets": false,
+   "text": "duration_ms"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "DURATION_MS",
+   "resets": false,
+   "text": "DURATION_MS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: duration_ms",
+   "resets": false,
+   "text": "claude exited rc=1: duration_ms"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "subtype",
+   "resets": false,
+   "text": "subtype"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "SUBTYPE",
+   "resets": false,
+   "text": "SUBTYPE"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: subtype",
+   "resets": false,
+   "text": "claude exited rc=1: subtype"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "is_error",
+   "resets": false,
+   "text": "is_error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "IS_ERROR",
+   "resets": false,
+   "text": "IS_ERROR"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: is_error",
+   "resets": false,
+   "text": "claude exited rc=1: is_error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "success",
+   "resets": false,
+   "text": "success"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "SUCCESS",
+   "resets": false,
+   "text": "SUCCESS"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: success",
+   "resets": false,
+   "text": "claude exited rc=1: success"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "result",
+   "resets": false,
+   "text": "result"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "RESULT",
+   "resets": false,
+   "text": "RESULT"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: result",
+   "resets": false,
+   "text": "claude exited rc=1: result"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "error",
+   "resets": false,
+   "text": "error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "ERROR",
+   "resets": false,
+   "text": "ERROR"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: error",
+   "resets": false,
+   "text": "claude exited rc=1: error"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "error_during_execution",
+   "resets": false,
+   "text": "error_during_execution"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "ERROR_DURING_EXECUTION",
+   "resets": false,
+   "text": "ERROR_DURING_EXECUTION"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: error_during_execution",
+   "resets": false,
+   "text": "claude exited rc=1: error_during_execution"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "unknown",
+   "provider_message": "???",
+   "resets": false,
+   "text": "???"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "runner_exit",
+   "provider_message": "claude exited rc=1: ???",
+   "resets": false,
+   "text": "claude exited rc=1: ???"
+  }
+ ],
+ "waits": [
+  {
+   "backend": "claude",
+   "message": "Waiting for a claude account with available usage",
+   "model": ""
+  },
+  {
+   "backend": "codex",
+   "message": "Waiting for a codex account with available usage",
+   "model": ""
+  },
+  {
+   "backend": "claude",
+   "message": "Waiting for a claude account that serves claude-opus-5-5; the active one does not right now",
+   "model": "claude-opus-5-5"
+  },
+  {
+   "backend": "claude",
+   "message": "Waiting for a claude account that serves this model; the active one does not right now",
+   "model": null
+  },
+  {
+   "backend": "agy",
+   "message": "Waiting for a agy account that serves gemini-4; the active one does not right now",
+   "model": "gemini-4"
+  },
+  {
+   "backend": "",
+   "message": "Waiting for a  account with available usage",
+   "model": ""
+  }
+ ]
+}

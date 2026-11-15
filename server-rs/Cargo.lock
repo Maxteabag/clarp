@@ -193,6 +193,7 @@ dependencies = [
  "clarp-ports",
  "clarp-speech",
  "clarp-store-mem",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
