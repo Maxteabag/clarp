@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Installs the Rust Host for the user who runs this, from binaries that were built elsewhere
+# (server-rs/tools/build release): the Host and its shim, a token of its own, and a systemd user
+# unit. Nothing here compiles.
+#
+#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--start] [--files-only]
+#
+#   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
+#   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
+#                  whatever the phone reaches in front of it: the Host's own token is only taken
+#                  from the loopback
+#   --name         what the apps call this Host (default: "<hostname> Rust")
+#   --start        enable the unit and start it, or restart it when it runs (turns that are running
+#                  go on: each is in a scope of its own)
+#   --files-only   write the files and ask systemd nothing: to look at what would be installed
+#
+# It installs beside a Python Host and touches nothing of it: its own directories
+# (~/.local/share/clarp-host, ~/.config/clarp-host), its own port, its own unit (clarp-host.service).
+# An agent on this Host is fenced from the Python Host's state: its tools are told this Host's
+# address and files, so a Clarp tool this Host does not serve yet fails here and does not act there.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+from="$here/dist"; listen="127.0.0.1:7690"; name="$(hostname) Rust"; start=0; files_only=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --from) from="$2"; shift 2 ;;
+        --listen) listen="$2"; shift 2 ;;
+        --name) name="$2"; shift 2 ;;
+        --start) start=1; shift ;;
+        --files-only) files_only=1; shift ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--start] [--files-only]" >&2; exit 2 ;;
+    esac
+done
+
+share="${XDG_DATA_HOME:-$HOME/.local/share}/clarp-host"
+config="${XDG_CONFIG_HOME:-$HOME/.config}/clarp-host"
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+port="${listen##*:}"; address="${listen%:*}"
+
+for binary in clarp-host clarp-shim; do
+    [ -x "$from/$binary" ] || { echo "install-host: $from/$binary is not there: build it with server-rs/tools/build release" >&2; exit 1; }
+done
+(cd "$from" && sha256sum --quiet -c SHA256SUMS) || { echo "install-host: the binaries in $from are not the ones that were built" >&2; exit 1; }
+
+mkdir -p "$share/bin" "$share/data" "$config" "$units"
+# Put in place under another name and moved: a Host that is running keeps the file it has open.
+for binary in clarp-host clarp-shim; do
+    install -m 755 "$from/$binary" "$share/bin/.$binary.new"
+    mv -f "$share/bin/.$binary.new" "$share/bin/$binary"
+done
+version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
+printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
+
+# The administrator's token: made once, kept. The Host reads it from its environment.
+if [ ! -s "$config/env" ]; then
+    (umask 077; printf 'CLARP_HOST_TOKEN=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-48)" > "$config/env")
+fi
+token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
+# What the agents' Clarp tools read to find their Host: this one.
+(umask 077; cat > "$config/config.toml" <<EOF
+# Written by install-host. An agent on the Rust Host finds its Host here.
+[server]
+bind_addr = "$address"
+port = $port
+auth_token = "$token"
+EOF
+)
+
+cat > "$units/clarp-host.service" <<EOF
+# Written by server-rs/tools/install-host. The Rust Clarp Host, version $version.
+[Unit]
+Description=Clarp Host (Rust)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=$config/env
+# Where the tools are: the user's own programs (claude, codex), then the system's.
+Environment="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# The fence: an agent's Clarp tools are pointed at this Host, never at a Python Host's files.
+Environment="CLARP_CONFIG_DIR=$config"
+Environment="CLAUDE_PWA_CONFIG=$config/config.toml"
+Environment="CLARP_SHARE_DIR=$share"
+Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name"
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
+[ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
+systemctl --user daemon-reload
+if [ "$start" = 1 ]; then
+    systemctl --user enable --quiet clarp-host.service
+    systemctl --user restart clarp-host.service
+    for _ in $(seq 1 50); do
+        curl -fsS -m 2 -H "Authorization: Bearer $token" "http://$listen/server-info" > /dev/null 2>&1 && break
+        sleep 0.2
+    done
+    if curl -fsS -m 2 -H "Authorization: Bearer $token" "http://$listen/server-info" > /dev/null 2>&1; then
+        echo "running: the Host answers on $listen"
+    else
+        echo "install-host: the unit was started and the Host does not answer on $listen" >&2
+        journalctl --user -u clarp-host.service --no-pager -n 8 >&2 || true
+        exit 1
+    fi
+else
+    echo "not started: systemctl --user enable --now clarp-host.service starts it"
+fi
+echo "to pair a phone: CLARP_HOST_TOKEN=\$(sed -n 's/^CLARP_HOST_TOKEN=//p' $config/env) $share/bin/clarp-host pair --url <the address the phone reaches this Host at> --host $listen"
