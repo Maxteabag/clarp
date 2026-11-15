@@ -25,8 +25,10 @@ Names another Host this one may write to: an agent here then writes to an agent 
 Host's from CLARP_HOST_TOKEN.";
 
 pub const IMPORT_USAGE: &str =
-    "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT]
-Reads the agent NAME and its conversation from the Host at --from and gives them to this Host.
+    "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
+Reads the agent NAME, its conversation and the files it published from the Host at --from and
+gives them to this Host. With --files only the files are read, for an agent that is here
+already: a move whose files did not all arrive is finished that way.
 The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN.";
 
 /// How many rows of a conversation are asked for at a time.
@@ -75,6 +77,153 @@ fn request(
     Ok((status, serde_json::from_str(body).unwrap_or(Value::Null)))
 }
 
+/// One request whose body and answer are bytes: a file on its way from one Host to another.
+/// Returns the status, the answer's declared type and its body.
+fn exchange(
+    method: &str,
+    address: &str,
+    path: &str,
+    token: &str,
+    said: &[(&str, String)],
+    body: &[u8],
+) -> Result<(u16, String, Vec<u8>), String> {
+    let address = address.trim_start_matches("http://").trim_end_matches('/');
+    let mut stream = TcpStream::connect(address)
+        .map_err(|error| format!("no Host answers at {address}: {error}"))?;
+    let timeout = Some(Duration::from_secs(120));
+    stream
+        .set_read_timeout(timeout)
+        .and_then(|()| stream.set_write_timeout(timeout))
+        .map_err(|error| error.to_string())?;
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    if !token.is_empty() {
+        head.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
+    for (name, value) in said {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    stream
+        .write_all(head.as_bytes())
+        .and_then(|()| stream.write_all(body))
+        .map_err(|error| error.to_string())?;
+    let mut answer = Vec::new();
+    stream
+        .read_to_end(&mut answer)
+        .map_err(|error| error.to_string())?;
+    let end = answer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or("the Host's answer was not an HTTP response")?;
+    let head = String::from_utf8_lossy(&answer[..end]).into_owned();
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .ok_or("the Host's answer was not an HTTP response")?;
+    let declared = head
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-type"))
+        .map_or("", |(_, value)| value.trim())
+        .to_string();
+    Ok((status, declared, answer.split_off(end + 4)))
+}
+
+/// The ids of the published files a conversation names: in the Markdown that shows an
+/// image (`clarp-media://asset/<id>`) and in the address a file is fetched by
+/// (`/media/<id>`). In the order they are first named, each once.
+fn named_files(rows: &[Value]) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for text in rows.iter().filter_map(|row| row["text"].as_str()) {
+        for marker in ["clarp-media://asset/", "/media/"] {
+            for after in text.split(marker).skip(1) {
+                let plain =
+                    |sign: &char| sign.is_ascii_alphanumeric() || *sign == '_' || *sign == '-';
+                let id: String = after.chars().take_while(plain).collect();
+                if !id.is_empty() && !found.contains(&id) {
+                    found.push(id);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The files an agent published come with it: its gallery, and every file its conversation
+/// names. Each is read from the Host it is on and given to this one under the id it has,
+/// which the conversation names it by. Returns how many arrived and how many did not.
+fn files(
+    from: &str,
+    source_token: &str,
+    host: &str,
+    token: &str,
+    session: &str,
+    rows: &[Value],
+) -> Result<(usize, usize), String> {
+    let gallery = get(
+        from,
+        &format!("/media?session={}&limit=500", ids::in_a_link(session)),
+        source_token,
+    )?;
+    let listed = gallery["assets"].as_array().cloned().unwrap_or_default();
+    let known = |id: &str| listed.iter().find(|asset| asset["asset_id"] == id);
+    let mut wanted: Vec<String> = listed
+        .iter()
+        .rev()
+        .filter_map(|asset| asset["asset_id"].as_str().map(str::to_string))
+        .collect();
+    for id in named_files(rows) {
+        if !wanted.contains(&id) {
+            wanted.push(id);
+        }
+    }
+    let (mut arrived, mut missing) = (0, 0);
+    for id in wanted {
+        let path = format!("/media/{}", ids::in_a_link(&id));
+        let (status, declared, bytes) = exchange("GET", from, &path, source_token, &[], &[])?;
+        if status != 200 {
+            // Named in the conversation and no longer there, or never a file at all.
+            missing += 1;
+            continue;
+        }
+        let row = known(&id);
+        let of = |field: &str| row.and_then(|row| row[field].as_str()).unwrap_or("");
+        // Who published it is said as it is, when it is a word a header can carry.
+        let plain = |text: &str| {
+            let fits = text
+                .bytes()
+                .all(|byte| byte == b' ' || byte.is_ascii_graphic());
+            if fits { text } else { "" }.to_string()
+        };
+        let mut said = vec![
+            ("X-Session", ids::in_a_link(session)),
+            ("X-Asset-Id", id.clone()),
+            ("X-File-Name", ids::in_a_link(of("source_name"))),
+            ("X-Caption", ids::in_a_link(of("caption"))),
+            ("X-Created-By", plain(of("created_by"))),
+            (
+                "Content-Type",
+                match of("mime_type") {
+                    "" => declared,
+                    kind => kind.to_string(),
+                },
+            ),
+        ];
+        if let Some(at) = row.and_then(|row| row["created_at"].as_i64()) {
+            said.push(("X-Created-At", at.to_string()));
+        }
+        match exchange("POST", host, "/media", token, &said, &bytes)? {
+            (200, _, _) => arrived += 1,
+            _ => missing += 1,
+        }
+    }
+    Ok((arrived, missing))
+}
+
 pub fn post(address: &str, path: &str, token: &str, body: &Value) -> Result<(u16, Value), String> {
     request("POST", address, path, token, Some(body))
 }
@@ -99,7 +248,7 @@ pub fn import(
     source_token: &str,
     token: &str,
 ) -> Result<String, String> {
-    let (mut from, mut session) = (None, None);
+    let (mut from, mut session, mut only_files) = (None, None, false);
     let mut host = "127.0.0.1:7690".to_string();
     while let Some(arg) = args.next() {
         let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
@@ -107,6 +256,7 @@ pub fn import(
             "--from" => from = Some(value("an address")?),
             "--session" => session = Some(value("a session name")?),
             "--host" => host = value("an address")?,
+            "--files" => only_files = true,
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -123,7 +273,7 @@ pub fn import(
         })
         .ok_or(format!("the Host at {from} has no agent called {session}"))?
         .clone();
-    if agent["busy"] == true {
+    if agent["busy"] == true && !only_files {
         return Err(format!(
             "{session} is in the middle of a turn on the Host at {from}: let it end first"
         ));
@@ -148,14 +298,39 @@ pub fn import(
         }
     }
     let count = turns.len();
+    let came_with = |arrived: usize, missing: usize| {
+        let files = match arrived {
+            1 => "1 file it published".to_string(),
+            arrived => format!("{arrived} files it published"),
+        };
+        match missing {
+            0 => files,
+            missing => format!(
+                "{files} ({missing} more that its conversation names could not be read \
+                 there or were not taken here: `clarp-host import --files` tries them again)"
+            ),
+        }
+    };
+    if only_files {
+        let (arrived, missing) = files(&from, source_token, &host, token, &session, &turns)?;
+        return Ok(format!(
+            "{session} has {} here.",
+            came_with(arrived, missing)
+        ));
+    }
     let asked = json!({ "agent": agent, "from": format!("http://{from}"), "turns": turns });
     let (status, answer) = post(&host, "/agents/import", token, &asked)?;
     if status != 200 {
         let why = answer["error"].as_str().unwrap_or("no reason given");
         return Err(format!("this Host refused ({status}): {why}"));
     }
+    // The agent is here. Its files follow: one that does not arrive does not undo the move.
+    let followed = match files(&from, source_token, &host, token, &session, &turns) {
+        Ok((arrived, missing)) => came_with(arrived, missing),
+        Err(why) => format!("none of its files ({why}): `clarp-host import --files` brings them"),
+    };
     Ok(format!(
-        "{session} is on this Host now, with the {count} rows of its conversation.\n\
+        "{session} is on this Host now, with the {count} rows of its conversation and {followed}.\n\
          It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns."
     ))
 }

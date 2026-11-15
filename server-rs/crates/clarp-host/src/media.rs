@@ -11,11 +11,16 @@
 //! Publishing has two doors with one handler behind them: `/media`, which the
 //! administrator's token opens, and `/tools/media`, which the token a turn was given for
 //! its agent's tools opens too.
+//!
+//! A file that moves here with its agent keeps the id it had on the Host it came from
+//! (`X-Asset-Id`, with `X-Created-At`): the agent's conversation names it by that id. Only
+//! the administrator says so, and the same file under the same id is taken once, however
+//! often it comes.
 
 use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{Extension, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -27,7 +32,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::ids;
 
 /// How much of a file is read and sent at a time: what a response holds in memory, however
@@ -57,9 +62,30 @@ fn bad(why: &str) -> ApiError {
 /// `POST /media`: an agent publishes a file. The body is the file; `X-Session` says whose
 /// it is, `X-File-Name` and `X-Caption` what it is called (written with `%XX`),
 /// `Content-Type` what it is declared as.
-async fn publish(State(app): State<App>, request: Request) -> Result<Json<Value>, ApiError> {
+async fn publish(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    request: Request,
+) -> Result<Json<Value>, ApiError> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
+    // A file that comes with an agent that moves here says which id it had.
+    let (moved_id, moved_at) = (
+        header_text(headers, "x-asset-id"),
+        header_text(headers, "x-created-at"),
+    );
+    if !moved_id.is_empty() {
+        if principal != Principal::Administrator {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "only the administrator says which id a file has",
+            ));
+        }
+        let plain = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-';
+        if moved_id.len() > 180 || !moved_id.bytes().all(plain) {
+            return Err(bad("bad asset id"));
+        }
+    }
     // How long the file is has to be said before it is read, and within what is taken.
     let length = header_text(headers, "content-length")
         .parse::<usize>()
@@ -114,9 +140,26 @@ async fn publish(State(app): State<App>, request: Request) -> Result<Json<Value>
             ));
         }
     };
+    if !moved_id.is_empty()
+        && let Some(known) = published(&app, &moved_id)
+    {
+        // It came before: the same file for the same agent is answered again, and nothing
+        // is written. Anything else under this id is another file.
+        if known.sha256 == sha256 && known.session == session {
+            return Ok(Json(answered(&known)));
+        }
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "another file has this id",
+        ));
+    }
     // Then what is known of it, in the log of the agent it is for.
     let asset = Asset {
-        asset_id: format!("asset_{}", ids::secret(18).replace('-', "_")),
+        asset_id: if moved_id.is_empty() {
+            format!("asset_{}", ids::secret(18).replace('-', "_"))
+        } else {
+            moved_id
+        },
         session,
         source_name: reading.name,
         sha256,
@@ -127,17 +170,25 @@ async fn publish(State(app): State<App>, request: Request) -> Result<Json<Value>
         height: reading.height,
         caption: media::kept_caption(&caption),
         created_by: media::kept_publisher(&created_by),
-        created_at: app.clock.now_ms(),
+        created_at: moved_at
+            .parse::<i64>()
+            .ok()
+            .filter(|at| *at > 0)
+            .unwrap_or_else(|| app.clock.now_ms()),
     };
     member.agent.publish(asset.clone()).await?;
+    Ok(Json(answered(&asset)))
+}
 
-    // The row twice, as the Python Host answers: under `asset`, and field for field beside it.
+/// What publishing is answered with: the row twice, as the Python Host answers, under
+/// `asset` and field for field beside it.
+fn answered(asset: &Asset) -> Value {
     let row = asset.public();
     let mut answer = json!({ "ok": true, "asset": row });
     if let (Some(answer), Some(fields)) = (answer.as_object_mut(), row.as_object()) {
         answer.extend(fields.clone());
     }
-    Ok(Json(answer))
+    answer
 }
 
 #[derive(Debug, Deserialize)]
