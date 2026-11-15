@@ -59,6 +59,11 @@ import contract_scenarios as scenarios  # noqa: E402
 FAKE_CLAUDE = HERE / 'fake_claude.py'
 SCRATCH = Path(os.environ.get('CLARP_CONFORM_SCRATCH', '/var/tmp/cfm'))
 HTTP_OPS = ('get', 'post', 'put', 'delete', 'patch')
+# How long a conversation must stay as it is before it counts as settled. The Python Host goes on
+# working after a turn has ended: it imports the tool's own transcript and folds it into the rows
+# it wrote while the turn ran. A read before that is done sees a state no client is meant to keep.
+SETTLED_S = 3.0
+SETTLE_TIMEOUT_S = 30
 # What a normalized capture holds besides the two channels a client sees. Both sides get the
 # same empty values, so the differ compares nothing there.
 NO_STATE = {'schema': [], 'tables': {}, 'files': [], 'cli': [], 'sse_log': []}
@@ -173,6 +178,19 @@ def run_step(host, events, step, http, variables):
             row = agent(host, session)
             return row.get('busy') is False and (step.get('held') or not row.get('queued_turn_count'))
         replay._poll('the agent idle', idle)
+        replay._poll('the stream quiet', lambda: time.monotonic() - events.last_at >= replay.QUIET_S)
+        # And the conversation has stopped changing, as has what the snapshot says of the agent.
+        last = {'seen': None, 'since': time.monotonic()}
+
+        def settled():
+            row = agent(host, session)
+            seen = json.dumps([turns(host, session), row.get('head_revision'), row.get('latest_state')],
+                              sort_keys=True)
+            if seen != last['seen']:
+                last['seen'], last['since'] = seen, time.monotonic()
+                return False
+            return time.monotonic() - last['since'] >= SETTLED_S
+        replay._poll('the conversation settled', settled, timeout=SETTLE_TIMEOUT_S)
         replay._poll('the stream quiet', lambda: time.monotonic() - events.last_at >= replay.QUIET_S)
     else:
         raise replay.StepFailed(f'unknown step op {op!r}')
@@ -336,7 +354,7 @@ def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
     lines = [diff.render(report, set(), 'the Python Host against itself', errors)]
     ok = not errors and not report.items
     lines.append('REFERENCE REPRODUCIBLE' if ok else 'REFERENCE NOT REPRODUCIBLE: nothing below can be trusted')
-    return first, lines, ok
+    return first, lines, ok, second
 
 
 def planted_copy(build: Path, change: dict, where: Path) -> Path:
@@ -428,7 +446,7 @@ def main(argv=None) -> int:
     ok, lines = True, []
     try:
         if args.mode == 'record':
-            seen, lines, ok = record(build, chosen, run, args.jobs)
+            seen, lines, ok, _ = record(build, chosen, run, args.jobs)
             if ok:
                 write_golden(args.golden, seen)
                 lines.append(f'written down: {len(seen)} scenario(s) in {args.golden}')
@@ -439,15 +457,20 @@ def main(argv=None) -> int:
                                         load_intended(args.intended), run, args.jobs)
         else:
             args.out.mkdir(parents=True, exist_ok=True)
-            seen, lines, ok = record(build, chosen, run, args.jobs)
+            seen, lines, ok, again = record(build, chosen, run, args.jobs)
             write_golden(args.out / 'golden', seen)
-            if ok:
+            if not ok:
+                # Both runs, so that what differs between them can be looked at.
+                write_golden(args.out / 'golden-again', again)
+            # The Rust Host is compared even with a reference that is not steady yet: the
+            # report says which it was, and most of what differs does not depend on it.
+            if True:
                 proof, proved = prove(build, seen, chosen, plants.CHANGES, run, args.jobs)
                 rust_lines, conforms, rust_seen = against_rust(
                     rust, seen, chosen, load_intended(args.intended), run, args.jobs)
                 write_golden(args.out / 'rust', rust_seen)
                 lines += ['', *proof, '', *rust_lines]
-                ok = proved and conforms
+                ok = ok and proved and conforms
             (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
     finally:
         run.close(args.keep or not ok)
