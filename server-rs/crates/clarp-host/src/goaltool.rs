@@ -80,6 +80,14 @@ pub enum Ask {
         action: String,
         data: Value,
     },
+    /// What the user does to a goal, through an app: everything its owner may do, and
+    /// setting a criterion aside. No command line reads as this.
+    UserAct {
+        plan_id: String,
+        revision: i64,
+        action: String,
+        data: Value,
+    },
     /// A document of a goal.
     Read {
         plan_id: String,
@@ -117,6 +125,7 @@ impl Ask {
             | Self::Step { plan_id, .. }
             | Self::Finish { plan_id, .. }
             | Self::Act { plan_id, .. }
+            | Self::UserAct { plan_id, .. }
             | Self::Read { plan_id, .. } => About::Plan(plan_id),
             Self::NotHere { .. } => About::Nobody,
         }
@@ -292,11 +301,23 @@ pub fn answer(
             action,
             data,
         } => book.act(plan_id, *revision, action, data, world),
+        Ask::UserAct {
+            plan_id,
+            revision,
+            action,
+            data,
+        } => book.act_for_user(plan_id, *revision, action, data, world),
     };
     match changed {
         Ok(change) => (printed(&book.shown(&change, now)), Some(change)),
         Err(why) => (refused(why), None),
     }
+}
+
+/// Why the tool refused, without the tool's name before it: what a route answers with.
+pub fn refusal(said: &ToolAnswer) -> &str {
+    let said = said.stderr.trim();
+    said.strip_prefix("agent_tasks: ").unwrap_or(said)
 }
 
 /// What the tool says when there is nobody to ask: no agent has that session name, or no

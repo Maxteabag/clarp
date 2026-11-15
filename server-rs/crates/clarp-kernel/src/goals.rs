@@ -1188,6 +1188,31 @@ impl GoalBook {
         data: &Value,
         world: &mut World<'_>,
     ) -> Result<Change, Refused> {
+        self.act_by(false, plan_id, revision, action, data, world)
+    }
+
+    /// What the user does to a goal, through an app. The user may do what the owner may, and
+    /// one thing the owner may not: set a criterion aside, or take that back.
+    pub fn act_for_user(
+        &self,
+        plan_id: &str,
+        revision: i64,
+        action: &str,
+        data: &Value,
+        world: &mut World<'_>,
+    ) -> Result<Change, Refused> {
+        self.act_by(true, plan_id, revision, action, data, world)
+    }
+
+    fn act_by(
+        &self,
+        by_user: bool,
+        plan_id: &str,
+        revision: i64,
+        action: &str,
+        data: &Value,
+        world: &mut World<'_>,
+    ) -> Result<Change, Refused> {
         let now = world.now_ms;
         let Some(known) = self.plans.get(plan_id) else {
             return refuse("task plan not found");
@@ -1661,10 +1686,42 @@ impl GoalBook {
                     );
                 }
             }
-            // Only the user sets a criterion aside: an agent that could waive its own
-            // criteria could complete any goal without evidence.
+            // A criterion that will not be met as it was written can be set aside, with a
+            // reason, so that the goal can end honestly instead of being cancelled. The
+            // waiver is shown, never hidden. Only the user sets one: an agent that could
+            // waive its own criteria could complete any goal without evidence.
             "waive" | "unwaive" => {
-                return refuse("only the user can waive or restore a criterion");
+                if !by_user {
+                    return refuse("only the user can waive or restore a criterion");
+                }
+                let wanted = plain(data.get("criterion_id"));
+                let criterion = goal
+                    .fields
+                    .get_mut("criteria")
+                    .and_then(Value::as_array_mut)
+                    .and_then(|criteria| {
+                        criteria
+                            .iter_mut()
+                            .find(|criterion| criterion["id"].as_str() == Some(wanted.as_str()))
+                    })
+                    .and_then(Value::as_object_mut);
+                let Some(criterion) = criterion else {
+                    return refuse("unknown criterion");
+                };
+                if action == "waive" {
+                    if reason.is_empty() {
+                        return refuse("waiving a criterion requires a reason");
+                    }
+                    criterion.insert(
+                        "waived".to_string(),
+                        json!({ "at": now, "reason": clip(&reason, 2000), "by": "user" }),
+                    );
+                } else {
+                    if !truthy(criterion.get("waived")) {
+                        return refuse("criterion is not waived");
+                    }
+                    criterion.shift_remove("waived");
+                }
             }
             "add_step" => {
                 if reason.is_empty() {

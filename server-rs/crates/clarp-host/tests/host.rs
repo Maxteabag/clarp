@@ -949,6 +949,224 @@ fn an_agent_keeps_a_goal_with_its_own_tool_and_still_has_it_after_the_host_is_ki
 }
 
 #[test]
+fn the_apps_read_an_agents_plans_and_the_user_sets_a_criterion_aside() {
+    let place = Place::new("plans");
+    let host = place.start();
+    let session = host.new_agent("Planner");
+    let dir = place.root.clone();
+    let events = host.listen();
+
+    // Nothing is planned yet, and the routes say so the way the Python Host does.
+    assert_eq!(
+        host.get(&format!("/task-plan?session={session}")),
+        json!({ "plan": null })
+    );
+    assert_eq!(
+        host.get(&format!("/task-plans?session={session}")),
+        json!({ "plans": [] })
+    );
+    assert_eq!(
+        host.get("/task-plan?session=nobody"),
+        json!({ "plan": null })
+    );
+    assert_eq!(
+        host.ask("GET", "/task-plan", None),
+        (400, json!({ "error": "session required" }))
+    );
+    assert_eq!(
+        host.ask("GET", "/task-plans?session=", None),
+        (400, json!({ "error": "session required" }))
+    );
+
+    // The agent makes a goal with its own tool. The apps read it.
+    let items = json!([{ "id": "build", "title": "Build it" }]).to_string();
+    let commitment = json!({
+        "outcome": "The thing is shipped",
+        "criteria": ["It runs", "It is documented"],
+        "limits": "No publication",
+    })
+    .to_string();
+    let made = goal(
+        &host,
+        &dir,
+        &[
+            "create",
+            &session,
+            "ship",
+            "Ship the thing",
+            &items,
+            &commitment,
+        ],
+    );
+    let plan_id = made["plan_id"].as_str().unwrap().to_string();
+    let read = host.get(&format!("/task-plan?session={session}"));
+    assert_eq!(read["plan"]["plan_id"], plan_id.as_str());
+    assert_eq!(
+        read["plan"]["goal"]["criteria"][1]["text"],
+        "It is documented"
+    );
+    let all = host.get(&format!("/task-plans?session={session}"));
+    assert_eq!(all["plans"].as_array().unwrap().len(), 1);
+    assert_eq!(all["plans"][0]["plan_id"], plan_id.as_str());
+
+    // The user sets a criterion aside. The agent cannot: it could complete anything so.
+    let waive = json!({ "criterion_id": "criterion-2", "reason": "Not needed after all" });
+    let own = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-goal",
+            "act",
+            &plan_id,
+            "0",
+            "waive",
+            &waive.to_string(),
+        ],
+    );
+    assert_eq!(
+        (own.0, own.2.as_str()),
+        (
+            1,
+            "agent_tasks: only the user can waive or restore a criterion\n"
+        )
+    );
+    let act = |revision: Value, action: &str, data: Value| {
+        host.ask(
+            "POST",
+            "/task-plan/action",
+            Some(&json!({
+                "plan_id": plan_id, "revision": revision, "action": action, "data": data,
+            })),
+        )
+    };
+    let heard_before = events.lock().unwrap().len();
+    let (status, answer) = act(json!(0), "waive", waive.clone());
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["plan"]["revision"], 1);
+    let waived = &answer["plan"]["goal"]["criteria"][1]["waived"];
+    assert_eq!(
+        (&waived["by"], &waived["reason"]),
+        (&json!("user"), &json!("Not needed after all"))
+    );
+    // The plan is something the agent made: the apps hear that it changed.
+    wait_for("the apps to hear of the changed plan", || {
+        events.lock().unwrap()[heard_before..]
+            .iter()
+            .any(|event| event["type"] == "artifact-updated")
+    });
+
+    // What the rules refuse is answered 409 with the rule, as the Python Host answers it.
+    assert_eq!(
+        act(json!(0), "waive", waive.clone()),
+        (
+            409,
+            json!({ "error": "plan changed; reload before editing" })
+        )
+    );
+    assert_eq!(
+        act(json!(1), "waive", json!({ "criterion_id": "criterion-2" })),
+        (
+            409,
+            json!({ "error": "waiving a criterion requires a reason" })
+        )
+    );
+    assert_eq!(
+        act(
+            json!(1),
+            "unwaive",
+            json!({ "criterion_id": "criterion-1" })
+        ),
+        (409, json!({ "error": "criterion is not waived" }))
+    );
+    assert_eq!(
+        act(json!(null), "pause", json!({ "reason": "x" })),
+        (409, json!({ "error": "revision required" }))
+    );
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/task-plan/action",
+            Some(&json!({
+                "plan_id": "nobody:ship:01", "revision": 0, "action": "pause",
+                "data": { "reason": "x" },
+            })),
+        ),
+        (409, json!({ "error": "task plan not found" }))
+    );
+
+    // A document of the goal, as the plan screen opens it.
+    let note = json!({
+        "name": "working-notes.md", "format": "markdown", "content": "# Notes\nFirst.",
+        "document_revision": 0, "reason": "Initial findings",
+    })
+    .to_string();
+    goal(&host, &dir, &["document", &plan_id, "1", &note]);
+    let document = host.get(&format!(
+        "/task-plan/document?plan_id={plan_id}&name=working-notes.md"
+    ));
+    assert_eq!(document["document"]["text"], "# Notes\nFirst.");
+    assert_eq!(document["document"]["revision"], 1);
+    assert_eq!(
+        host.ask(
+            "GET",
+            &format!("/task-plan/document?plan_id={plan_id}&name=nothing.md"),
+            None
+        ),
+        (404, json!({ "error": "goal document not found" }))
+    );
+    assert_eq!(
+        host.ask(
+            "GET",
+            &format!("/task-plan/document?plan_id={plan_id}&name=working-notes.md&revision=two"),
+            None
+        ),
+        (
+            404,
+            json!({ "error": "invalid literal for int() with base 10: 'two'" })
+        )
+    );
+
+    // The Host is killed. What the user decided is there when it is back, and the goal can
+    // end with one criterion shown and the other set aside.
+    host.kill();
+    let host = place.start();
+    let read = host.get(&format!("/task-plan?session={session}"));
+    assert_eq!(read["plan"]["goal"]["criteria"][1]["waived"]["by"], "user");
+    let revision = read["plan"]["revision"].clone();
+    let (status, answer) = host.ask(
+        "POST",
+        "/task-plan/action",
+        Some(&json!({
+            "plan_id": plan_id, "revision": revision, "action": "checkpoint",
+            "data": {
+                "progress": "Seen by the user", "next_work": "Finish",
+                "evidence": { "criterion-1": "ran it" },
+            },
+        })),
+    );
+    assert_eq!(status, 200, "{answer}");
+    let revision = answer["plan"]["revision"].to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &["step", &plan_id, &revision, "build", "completed"],
+    );
+    let revision = plan["revision"].to_string();
+    let plan = goal(&host, &dir, &["complete", &plan_id, &revision]);
+    assert_eq!(plan["status"], "completed");
+    assert_eq!(
+        host.get(&format!("/task-plan?session={session}")),
+        json!({ "plan": null }),
+        "a plan that ended is not the one being worked"
+    );
+    assert_eq!(
+        host.get(&format!("/task-plans?session={session}"))["plans"][0]["status"],
+        "completed"
+    );
+}
+
+#[test]
 fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_library() {
     let place = Place::new("library");
     let host = place.start();
