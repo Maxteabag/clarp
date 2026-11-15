@@ -1607,10 +1607,12 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
     );
     assert_eq!(artifacts(&["frobnicate"]).0, 2);
     assert_eq!(artifacts(&[]).0, 1);
+    // A form that takes answers is not here yet, and its verbs say so.
     assert_eq!(
-        artifacts(&["create-report", &session, "Report", "report.html"]).0,
+        artifacts(&["create-form", &session, "Form", "form.html", "schema.json"]).0,
         69
     );
+    assert_eq!(artifacts(&["form-events", "no-such"]).0, 69);
 
     // What the user does with an artifact: archive it, pin it, discard it.
     let at = document["updated_at"].as_i64().unwrap();
@@ -5283,8 +5285,14 @@ fn fetch(
     stream
         .set_read_timeout(Some(Duration::from_secs(20)))
         .unwrap();
+    // No token: nothing is presented in a header.
+    let authorization = if token.is_empty() {
+        String::new()
+    } else {
+        format!("Authorization: Bearer {token}\r\n")
+    };
     let mut request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n{authorization}Content-Length: {}\r\n",
         body.len()
     );
     for (name, value) in headers {
@@ -5718,4 +5726,294 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
     );
     let text = fetch(&host, token, "GET", &format!("/media/{notes_id}"), &[], b"");
     assert_eq!(text.text(), "# Notes\n\nSome *text*.\n");
+}
+
+#[test]
+fn an_agent_hands_its_user_a_report_and_revises_it() {
+    use sha2::{Digest, Sha256};
+    let place = Place::new("report");
+    let token = "report-token";
+    let host = place.start_with_token(token);
+    let maker = host.new_agent("Maker");
+    let other = host.new_agent("Other");
+    let work = place.root.join("work");
+    let page_one = "<h1>Findings</h1><p>Day one: æøå.</p><script>document.title = 'one'</script>";
+    let page_two = "<h1>Findings</h1><p>Day two.</p>";
+    std::fs::write(work.join("report.html"), page_one).unwrap();
+    let artifacts = |args: &[&str]| {
+        let mut all = vec!["clarp-agent-artifacts"];
+        all.extend_from_slice(args);
+        tool(&host, &work, None, &all)
+    };
+    let library = |host: &Host, how: &str| -> Vec<Value> {
+        let listed = host.get(&format!("/artifacts?session={maker}{how}"));
+        listed["artifacts"].as_array().unwrap().clone()
+    };
+
+    // What would be sent, without sending it. A report that is given no id gets one made
+    // of its title and its page.
+    let (code, out, err) = artifacts(&[
+        "create-report",
+        &maker,
+        "The findings: day 1!",
+        "report.html",
+        "--dry-run",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    let dry: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&dry["method"], &dry["path"]),
+        (&json!("POST"), &json!("/artifacts"))
+    );
+    let body = &dry["body"];
+    assert_eq!(
+        (
+            &body["type"],
+            &body["payload"]["read_only"],
+            &body["payload"]["version"]
+        ),
+        (&json!("html_form"), &json!(true), &json!("1"))
+    );
+    let id = body["artifact_id"].as_str().unwrap();
+    let digest = id.strip_prefix("report-the-findings-day-1-").unwrap_or("");
+    assert!(
+        digest.len() == 12 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "{id}"
+    );
+    assert!(library(&host, "").is_empty(), "a dry run makes nothing");
+
+    // The report, under an id of the agent's own, with what its page may reach.
+    let (code, out, err) = artifacts(&[
+        "create-report",
+        &maker,
+        "The findings",
+        "report.html",
+        "--summary",
+        "Day one",
+        "--artifact-id",
+        "findings",
+        "--connect",
+        "https://API.example.org:443",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    let made: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (
+            &made["type"],
+            &made["version"],
+            &made["read_only"],
+            &made["summary"]
+        ),
+        (
+            &json!("html_form"),
+            &json!("1"),
+            &json!(true),
+            &json!("Day one")
+        )
+    );
+    assert_eq!(made["content"], page_one);
+    assert_eq!(made["connect_origins"], json!(["https://api.example.org"]));
+    assert!(
+        !out.contains("$page"),
+        "nothing of the Host's own keeping is answered: {out}"
+    );
+
+    // What the apps read: the report whole, and in a list a summary that names its page
+    // instead of carrying it.
+    let whole = host.get("/artifacts/findings")["artifact"].clone();
+    assert_eq!(whole["content"], page_one);
+    assert_eq!(whole["payload"]["content"], page_one);
+    assert_eq!(whole["payload"]["answer_schema"]["type"], "object");
+    let flat = host.get("/artifacts/findings?representation=flat-v1")["artifact"].clone();
+    assert_eq!(flat["content"], page_one);
+    assert!(flat.get("payload").is_none());
+    assert_eq!(library(&host, "")[0]["content"], page_one);
+    let summed = library(&host, "&representation=summary-v1");
+    assert!(summed[0].get("content").is_none() && summed[0].get("payload").is_none());
+    let digest: String = Sha256::digest(page_one.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        summed[0]["content_omitted"],
+        json!({
+            "reason": "summary", "bytes": page_one.len(), "sha256": format!("c1:{digest}"),
+            "version": "1", "updated_at": whole["updated_at"],
+        })
+    );
+    for answered in [&whole, &flat, &summed[0]] {
+        assert!(answered.get("$page").is_none(), "{answered}");
+    }
+
+    // A browser is given the page behind the policy that keeps it from reaching anything
+    // the report does not name.
+    let page = fetch(&host, token, "GET", "/artifacts/findings/html", &[], b"");
+    assert_eq!(page.status, 200, "{}", page.text());
+    assert_eq!(page.header("content-type"), "text/html; charset=utf-8");
+    let policy = page.header("content-security-policy");
+    assert!(
+        policy.starts_with("sandbox allow-scripts; default-src 'none';")
+            && policy.contains("connect-src https://api.example.org;"),
+        "{policy}"
+    );
+    assert_eq!(page.header("x-content-type-options"), "nosniff");
+    assert_eq!(page.header("referrer-policy"), "no-referrer");
+    assert_eq!(page.header("cache-control"), "no-store");
+    let served = page.text();
+    assert!(
+        served.starts_with("<!doctype html>") && served.contains(page_one),
+        "{served}"
+    );
+    assert!(served.contains("<summary>Network access</summary>https://api.example.org</details>"));
+    // The page's own scripts can read the address it was fetched by: a token there is
+    // refused. And a device that may only read and send is given no page that runs.
+    let in_the_address = fetch(
+        &host,
+        "",
+        "GET",
+        &format!("/artifacts/findings/html?token={token}"),
+        &[],
+        b"",
+    );
+    assert_eq!(in_the_address.status, 403, "{}", in_the_address.text());
+    assert!(in_the_address.text().contains("not the URL"));
+    let (phone, _) = pair(&host, "phone", "limited");
+    let kept_out = fetch(&host, &phone, "GET", "/artifacts/findings/html", &[], b"");
+    assert_eq!(kept_out.status, 403);
+    assert!(kept_out.text().contains("full device access required"));
+    assert_eq!(
+        fetch(&host, &phone, "GET", "/artifacts/findings", &[], b"").status,
+        200
+    );
+    let (tablet, _) = pair(&host, "tablet", "full");
+    assert_eq!(
+        fetch(&host, &tablet, "GET", "/artifacts/findings/html", &[], b"").status,
+        200
+    );
+    let nothing = fetch(&host, token, "GET", "/artifacts/no-such/html", &[], b"");
+    assert_eq!(nothing.status, 404);
+
+    // The agent revises its report with the same command: the tool finds the version the
+    // new one follows.
+    std::fs::write(work.join("report.html"), page_two).unwrap();
+    let revise = |version: &str| {
+        artifacts(&[
+            "create-report",
+            &maker,
+            "The findings",
+            "report.html",
+            "--summary",
+            "Day two",
+            "--artifact-id",
+            "findings",
+            "--version",
+            version,
+        ])
+    };
+    let (code, out, err) = revise("2");
+    assert_eq!(code, 0, "{out}{err}");
+    let revised: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (
+            &revised["version"],
+            &revised["summary"],
+            &revised["content"]
+        ),
+        (&json!("2"), &json!("Day two"), &json!(page_two))
+    );
+    // What it may reach was not said this time: the new version reaches nothing.
+    assert!(revised.get("connect_origins").is_none(), "{revised}");
+    // The same again is answered with the report as it is.
+    let (code, out, err) = revise("2");
+    assert_eq!(code, 0, "{out}{err}");
+    let again: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(again["updated_at"], revised["updated_at"]);
+    // Another page under the version it has is refused, and the tool says why.
+    std::fs::write(work.join("report.html"), "<p>Another page.</p>").unwrap();
+    let (code, _, err) = revise("2");
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("409") && err.contains("report version already used for different content"),
+        "{err}"
+    );
+    // And another agent's report is not revised under its id.
+    let (code, _, err) = artifacts(&[
+        "create-report",
+        &other,
+        "Theirs",
+        "report.html",
+        "--artifact-id",
+        "findings",
+        "--version",
+        "9",
+    ]);
+    assert_eq!(code, 1, "{err}");
+    assert!(
+        err.contains("does not identify this agent's read-only report"),
+        "{err}"
+    );
+    // A page that is not there, and one that is empty, are said so before anything is asked.
+    let (code, _, err) = artifacts(&["create-report", &maker, "Gone", "no-such.html"]);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("No such file or directory: 'no-such.html'"),
+        "{err}"
+    );
+    std::fs::write(work.join("empty.html"), "  \n").unwrap();
+    let (code, _, err) = artifacts(&["create-report", &maker, "Empty", "empty.html"]);
+    assert_eq!(
+        (code, err.trim()),
+        (1, "agent_artifacts: report HTML is empty")
+    );
+
+    // What the report was, version by version.
+    let (code, out, err) = artifacts(&["report-history", "findings"]);
+    assert_eq!(code, 0, "{err}");
+    let history: Value = serde_json::from_str(&out).unwrap();
+    let versions: Vec<&str> = history["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|revision| revision["version"].as_str().unwrap())
+        .collect();
+    assert_eq!(versions, ["2", "1"]);
+    let (code, out, err) = artifacts(&["report-history", "findings", "--version", "1"]);
+    assert_eq!(code, 0, "{err}");
+    let first: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(first["revision"]["payload"]["content"], page_one);
+    assert_eq!(first["revision"]["summary"], "Day one");
+    assert!(!out.contains("$page"), "{out}");
+    let second = host.get("/artifacts/findings/revisions?version=2");
+    assert_eq!(second["revision"]["payload"]["content"], page_two);
+    let (status, none) = host.ask("GET", "/artifacts/findings/revisions?version=7", None);
+    assert_eq!(
+        (status, &none["error"]),
+        (404, &json!("report revision not found"))
+    );
+    let (status, none) = host.ask("GET", "/artifacts/no-such/revisions", None);
+    assert_eq!(
+        (status, &none["error"]),
+        (404, &json!("read-only report not found"))
+    );
+
+    // The two pages lie beside the log, each once. The page that was refused was not kept.
+    assert_eq!(files_under(&place.root.join("data").join("media")), 2);
+
+    // The Host is killed. The report is there when it is back: what is known of it from
+    // the agent's log, its pages from the disk.
+    host.kill();
+    let host = place.start_with_token(token);
+    let whole = host.get("/artifacts/findings")["artifact"].clone();
+    assert_eq!(
+        (&whole["version"], &whole["content"]),
+        (&json!("2"), &json!(page_two))
+    );
+    let first = host.get("/artifacts/findings/revisions?version=1");
+    assert_eq!(first["revision"]["payload"]["content"], page_one);
+    let page = fetch(&host, token, "GET", "/artifacts/findings/html", &[], b"");
+    assert!(page.status == 200 && page.text().contains(page_two));
+    assert!(
+        page.header("content-security-policy")
+            .contains("connect-src 'none';")
+    );
 }

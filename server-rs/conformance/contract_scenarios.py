@@ -721,4 +721,65 @@ SCENARIOS.append({
     ],
 })
 
+PAGE_ONE = '<h1>Synthetic report</h1><p>Day one.</p>'
+PAGE_TWO = '<h1>Synthetic report</h1><p>Day two, with a script.</p><script>document.title = "two"</script>'
+
+
+def report(page, version, name, **more):
+    """An agent publishes a report: a page of HTML that takes no answers, under an id of its own."""
+    payload = {'content': page, 'version': version, 'read_only': True}
+    return post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic report',
+                               'artifact_id': 'report-1', 'payload': payload, **more}, name)
+
+
+SCENARIOS.append({
+    'id': 'reports',
+    'what': 'a report, a page of HTML an agent hands its user: it is published, read whole and in a summary, '
+            'served to a browser, revised, and what it was is read back version by version',
+    'steps': [
+        report(PAGE_ONE, 'v1', 'publish a report', summary='Day one'),
+        get('/artifacts/report-1', 'the report'),
+        get('/artifacts/report-1?representation=flat-v1', 'the report, flat'),
+        get(f'/artifacts?session={AGENT}&representation=summary-v1', 'the library, summed up'),
+        get(f'/artifacts?session={AGENT}', 'the library'),
+        get('/artifacts/report-1/html', 'the page as a browser is given it'),
+        get('/artifacts/report-1/revisions', 'what the report was'),
+        # Published again under its id: a revision, which says the version it follows.
+        report(PAGE_TWO, 'v2', 'publish it again without the version it follows', summary='Day two'),
+        report(PAGE_TWO, 'v2', 'publish it again after a version it does not have', summary='Day two',
+               expected_version='v0'),
+        report(PAGE_TWO, 'v2', 'publish it again', summary='Day two', expected_version='v1'),
+        report(PAGE_ONE, 'v2', 'publish another page under a version it had', expected_version='v2'),
+        # Changed in place: its page, what it may reach, what is said beside it.
+        post('/artifacts/report-1', {'payload_patch': {'content': '<p>Day three.</p>', 'version': 'v3',
+                                                       'connect_origins': ['https://EXAMPLE.org:443']},
+                                     'summary': 'Day three'}, 'change the page'),
+        post('/artifacts/report-1', {'payload_patch': {'version': 'v1'}}, 'back to a version that was another page'),
+        post('/artifacts/report-1', {'payload_patch': {'read_only': False}}, 'a report that would take answers'),
+        post('/artifacts/report-1', {'payload_patch': {'connect_origins': ['https://example.org/path'], 'version': 'v4'}},
+             'a page that would reach what is not an origin'),
+        post('/artifacts/report-1', {'status': 'completed'}, 'complete it'),
+        get('/artifacts/report-1', 'the report, after'),
+        get('/artifacts/report-1/revisions', 'what the report was, after'),
+        get('/artifacts/report-1/revisions?version=v1', 'its first version'),
+        get('/artifacts/report-1/revisions?version=nothing', 'a version it never had'),
+        get('/artifacts/report-1/revisions?limit=1&offset=1', 'one of its versions'),
+        get('/artifacts/report-1/revisions?limit=many', 'its versions, with a limit that is no number'),
+        get('/artifacts/no-such/revisions', 'the versions of nothing'),
+        get('/artifacts/report-1/html', 'the page as a browser is given it, after'),
+        get('/artifacts/no-such/html', 'the page of nothing'),
+        get(f'/artifacts?session={AGENT}&representation=summary-v1', 'the library, summed up, after'),
+        # What is no report.
+        post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic',
+                            'payload': {'content': PAGE_ONE, 'version': 'v 1', 'read_only': True}},
+             'a version that is no name'),
+        post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic',
+                            'payload': {'content': '', 'version': 'v1', 'read_only': True}}, 'a report without a page'),
+        post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic',
+                            'payload': {'content': PAGE_ONE, 'version': 'v1', 'read_only': True,
+                                        'answer_schema': {'type': 'object', 'properties': {'a': {'type': 'string'}}}}},
+             'a report that declares answers'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

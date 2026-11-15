@@ -10,7 +10,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use axum::http::StatusCode;
+use clarp_kernel::artifacts::reports;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::edge::{ApiError, App};
 use crate::library;
@@ -337,6 +340,153 @@ fn wait(app: &App, args: &[String], call: &ToolCall) -> Result<ToolAnswer, Strin
     Ok(ToolAnswer::again(again_ms))
 }
 
+/// The id a report gets when the agent names none: its title in plain signs, and a number
+/// only this title with this page has. The same report published again is the same report.
+fn report_id(title: &str, content: &str) -> String {
+    let mut slug = String::new();
+    let mut gap = false;
+    for sign in title.to_lowercase().chars() {
+        if sign.is_ascii_lowercase() || sign.is_ascii_digit() {
+            if gap && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(sign);
+            gap = false;
+        } else {
+            gap = true;
+        }
+    }
+    let slug: String = slug.chars().take(48).collect();
+    let slug = match slug.trim_matches('-') {
+        "" => "report",
+        slug => slug,
+    };
+    let digest: String = Sha256::digest(format!("{title}\0{content}").as_bytes())
+        .iter()
+        .take(6)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("report-{slug}-{digest}")
+}
+
+/// Why a file could not be read, as the Python tool says it.
+fn unread(error: &std::io::Error, file: &str) -> String {
+    let said = error.to_string();
+    let what = said.split(" (os error").next().unwrap_or(&said);
+    match error.raw_os_error() {
+        Some(code) => format!("[Errno {code}] {what}: '{file}'"),
+        None => format!("{what}: '{file}'"),
+    }
+}
+
+/// `create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V]
+/// [--connect HTTPS_ORIGIN]... [--dry-run]`: a page of HTML is handed to the user. The Host
+/// reads the page where the tool was called: the file is the agent's, on this machine.
+/// Under an id that is this agent's report already, the report is revised.
+async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Value, String> {
+    // What a page may reach can be said several times.
+    let (mut connect, mut others) = (Vec::new(), Vec::new());
+    let mut args = rest.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--connect" {
+            let Some(origin) = args.next() else {
+                return Err("argument --connect: expected one argument".to_string());
+            };
+            connect.push(origin.clone());
+        } else if let Some(origin) = arg.strip_prefix("--connect=") {
+            connect.push(origin.to_string());
+        } else {
+            others.push(arg.clone());
+        }
+    }
+    let parsed = parse(
+        &others,
+        &["--summary", "--artifact-id", "--version"],
+        &["--dry-run"],
+        &["session", "title", "html_file"],
+    )?;
+    let network = reports::connect_origins(&json!(connect)).map_err(|refused| refused.message)?;
+    let (session, title, file) = (
+        &parsed.positional[0],
+        &parsed.positional[1],
+        &parsed.positional[2],
+    );
+    let content = std::fs::read(std::path::Path::new(&call.cwd).join(file))
+        .map_err(|error| unread(&error, file))?;
+    let content = String::from_utf8(content)
+        .map_err(|_| format!("the report's HTML is not text in UTF-8: '{file}'"))?;
+    if content.trim().is_empty() {
+        return Err("report HTML is empty".to_string());
+    }
+    let version = parsed.option("--version").unwrap_or("1");
+    let artifact_id = match parsed.option("--artifact-id") {
+        Some(given) if !given.is_empty() => given.to_string(),
+        _ => report_id(title, &content),
+    };
+    let mut payload = json!({ "content": content, "version": version, "read_only": true });
+    if !connect.is_empty() {
+        payload["connect_origins"] = json!(network);
+    }
+    let mut body = json!({
+        "session": session, "title": title, "type": "html_form",
+        "summary": parsed.option("--summary").unwrap_or(""),
+        "artifact_id": artifact_id, "payload": payload,
+    });
+    if parsed.flags.contains("--dry-run") {
+        return Ok(json!({ "method": "POST", "path": "/artifacts", "body": body }));
+    }
+    let asked = |body: &Value| body.as_object().cloned().unwrap_or_default();
+    let taken = match library::create(app, &asked(&body)).await {
+        Ok(made) => return Ok(made),
+        Err(error) if error.status() == StatusCode::CONFLICT => error,
+        Err(error) => return Err(refusal(&error)),
+    };
+    // The id is taken. By this agent's report: then this is its next version, which follows
+    // the one it has now. One try: a change that came in between is not written over.
+    let Some(current) = library::find(app, &artifact_id) else {
+        let gone = ApiError::new(StatusCode::NOT_FOUND, "artifact not found");
+        return Err(refusal(&gone));
+    };
+    if current["session"] != session.as_str() || current["read_only"] != true {
+        return Err("the artifact ID does not identify this agent's read-only report".to_string());
+    }
+    if current["version"] == version {
+        return Err(refusal(&taken));
+    }
+    body["expected_version"] = current["version"].clone();
+    library::create(app, &asked(&body))
+        .await
+        .map_err(|error| refusal(&error))
+}
+
+/// `report-history ARTIFACT_ID [--version V] [--limit N] [--offset N]`: what a report was.
+async fn report_history(app: &App, rest: &[String]) -> Result<Value, String> {
+    let parsed = parse(
+        rest,
+        &["--version", "--limit", "--offset"],
+        &[],
+        &["artifact_id"],
+    )?;
+    let number = |name: &str, otherwise: i64| match parsed.option(name) {
+        None => Ok(otherwise),
+        Some(given) => given
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| format!("argument {name}: invalid int value: '{given}'")),
+    };
+    let (limit, offset) = (number("--limit", 50)?, number("--offset", 0)?);
+    let version = parsed.option("--version");
+    library::report_history(
+        app,
+        &parsed.positional[0],
+        version,
+        limit.clamp(1, 100),
+        offset.max(0),
+    )
+    .await
+    .map_err(|error| refusal(&error))
+}
+
 /// Answers the tool.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     let failed = |why: String| ToolAnswer::said(1, format!("agent_artifacts: {why}"));
@@ -345,7 +495,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     };
     let printed = |value: &Value| ToolAnswer::printed(0, value.to_string());
     let result: Result<Value, String> = match (cmd.as_str(), rest.len()) {
-        ("create-form" | "create-report" | "form-events" | "report-history", _) => {
+        ("create-form" | "form-events", _) => {
             return ToolAnswer::said(
                 NOT_HERE,
                 format!(
@@ -354,6 +504,8 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                 ),
             );
         }
+        ("create-report", _) => create_report(app, call, rest).await,
+        ("report-history", _) => report_history(app, rest).await,
         ("create", 3..=5) => {
             let payload = match rest.get(4) {
                 Some(given) => serde_json::from_str(given).map_err(|error| error.to_string()),

@@ -89,4 +89,8 @@ it covers that exact difference and nothing else.
 | `POST /tools/media` | not there | the same as `POST /media`, for the token a turn is given for its agent's tools | That token opens `/tools/` and nothing else, and publishing a file is a tool's act |
 | An artifact that names a published file, after its agent's session has another name | not found for this session: the file is looked up by the session name it was published under | found: an agent's files are in the agent's own log | A file belongs to the agent that published it, whatever the agent is called |
 | An artifact with a `podcast` in its payload | read as an episode (`podcast_live`) | refused: podcast episodes are not available on this Host yet | Not built. What is not there says so |
+| An HTML form that takes answers (`html_form` without `read_only`), its submissions and its events | made, answered, its answers held to its JSON Schema | refused: not available on this Host yet. The tool's `create-form` and `form-events` say so | Not built: four a week on the live Host against thirty reports. It needs a reader of JSON Schema |
+| A summary of a report (`representation=summary-v1`) in a list so large that the Host's budget for hashing runs out | `content_omitted` without its digest, marked `hash_pending` | always with its digest and length | This Host keeps a page under its digest: it has nothing to compute |
+| A report whose revision is published again as it is, or as it once was | answered with the report as it stands, and announced as changed (`artifact-updated`) | answered the same, and nothing is announced | Nothing changed |
+| A report's revision that names no version | `revision-` and the 32 hex digits of a random UUID | `revision-` and 32 random hex digits | Random on both |
 

@@ -657,6 +657,20 @@ async fn revisions(
     };
     let (limit, offset) = (number("limit", 50)?, number("offset", 0)?);
     let version = query.get("version").map(String::as_str);
+    let answer = report_history(app, artifact_id, version, limit, offset).await?;
+    Ok(Json(answer).into_response())
+}
+
+/// What a report was, as `GET /artifacts/<id>/revisions` answers it: its versions, or one
+/// of them with its page.
+pub(crate) async fn report_history(
+    app: &App,
+    artifact_id: &str,
+    version: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<Value, ApiError> {
+    let not_found = |why: String| refused(StatusCode::NOT_FOUND, why);
     let asked = {
         let fleet = Fleet::of(app);
         let held = fleet.holder(artifact_id, false);
@@ -674,14 +688,14 @@ async fn revisions(
         })
     });
     match asked.map_err(|why| not_found(why.message))? {
-        Revisions::Listed(listed) => Ok(Json(json!({ "revisions": listed })).into_response()),
+        Revisions::Listed(listed) => Ok(json!({ "revisions": listed })),
         Revisions::One(mut one) => {
             // The page of that version, back in its payload.
             if let Some(page) = one.get_mut("payload").and_then(reports::named_page) {
                 let content = page_of(app, &page).await.unwrap_or_default();
                 one["payload"]["content"] = json!(content);
             }
-            Ok(Json(json!({ "revision": one })).into_response())
+            Ok(json!({ "revision": one }))
         }
     }
 }
