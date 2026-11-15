@@ -1,0 +1,5882 @@
+{
+ "about": "Written by server-rs/tools/device-vectors.py from server/lib/apns.py. Do not edit by hand.",
+ "phone": "device_phone",
+ "scenarios": [
+  {
+   "name": "a_phone_registers_and_its_token_rotates",
+   "calls": [
+    {
+     "op": "register",
+     "at": 1794986401000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera",
+      "environment": "production",
+      "platform": "ios",
+      "owner": "device_phone",
+      "base_url": "https://host.example:7682/",
+      "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986401000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986401000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986401000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1794986402000,
+     "args": {
+      "token": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
+      "session": "vera",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "the same token in capitals: one token"
+    },
+    {
+     "op": "pushed",
+     "at": 1794986403000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": null,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1794986404000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "session": "omar",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986404000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986404000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986404000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "a new token of the same phone retires the old one"
+    },
+    {
+     "op": "register",
+     "at": 1794986405000,
+     "args": {
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "session": "vera",
+      "environment": "sandbox",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986404000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986404000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986404000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "another environment: both stay"
+    },
+    {
+     "op": "register",
+     "at": 1794986406000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "owner": "device_phone",
+      "base_url": "",
+      "push_grant": ""
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986406000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986406000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986406000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "no grant and no address sent: what it had stays"
+    },
+    {
+     "op": "register",
+     "at": 1794986407000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "owner": "device_phone",
+      "base_url": "http://100.80.1.2:7682",
+      "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "dead",
+     "at": 1794986408000,
+     "args": {
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "reason": "Unregistered"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": 1794986408000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": 1794986408000,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986405000,
+       "last_push_at": null,
+       "disabled_at": 1794986408000,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1794986409000,
+     "args": {
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "environment": "sandbox",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "pg1.4444444444444444444444444444444444444444444444444444444444444444.5555555555555555.6666666666666666666666666666666666666666666666666666666666666666",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "registered again: it lives again"
+    },
+    {
+     "op": "grant_revoked",
+     "at": 1794986410000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "disable",
+     "at": 1794986411000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "only_owner": "device_phone",
+      "reason": "unregistered-by-device"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": 1
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": 1794986411000,
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": 1794986411000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": 1794986411000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "disable",
+     "at": 1794986412000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "only_owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": 0
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "base_url": "https://host.example:7682",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": 1794986411000,
+       "base_url": "http://100.80.1.2:7682",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": 1794986411000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "device_phone",
+       "created_at": 1794986405000,
+       "updated_at": 1794986409000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986404000,
+       "updated_at": 1794986407000,
+       "last_push_at": null,
+       "disabled_at": 1794986411000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1794986401000,
+       "updated_at": 1794986402000,
+       "last_push_at": 1794986403000,
+       "disabled_at": 1794986404000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "nothing left to disable"
+    }
+   ]
+  },
+  {
+   "name": "tokens_have_owners",
+   "calls": [
+    {
+     "op": "register",
+     "at": 1795072801000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1795072802000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera",
+      "owner": "device_tablet"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "owned_elsewhere"
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "refused: the phone owns it"
+    },
+    {
+     "op": "register",
+     "at": 1795072803000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "owned_elsewhere"
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "refused: nobody takes an owned token"
+    },
+    {
+     "op": "register",
+     "at": 1795072804000,
+     "args": {
+      "token": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
+      "session": "vera",
+      "owner": "device_tablet"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "owned_elsewhere"
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "refused in capitals too"
+    },
+    {
+     "op": "register",
+     "at": 1795072805000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "session": "vera",
+      "owner": "device_tablet"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_tablet"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "disable",
+     "at": 1795072806000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "only_owner": "device_tablet"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": 0
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_tablet"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "the tablet cannot unregister the phone"
+    },
+    {
+     "op": "disable",
+     "at": 1795072807000,
+     "args": {
+      "owner": "device_tablet",
+      "reason": "unregistered-by-administrator"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": 1
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1795072808000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera"
+     },
+     "paired": [
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "owned_elsewhere"
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": false
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795072801000,
+       "updated_at": 1795072801000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": false
+      }
+     ],
+     "note": "still refused for nobody after the phone was revoked"
+    },
+    {
+     "op": "register",
+     "at": 1795072809000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera",
+      "owner": "device_tablet"
+     },
+     "paired": [
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_tablet"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [],
+     "note": "a device takes over what a revoked device owned"
+    },
+    {
+     "op": "disable",
+     "at": 1795072810000,
+     "args": {},
+     "paired": [
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "value",
+      "why": "a token or an owner is required"
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_tablet"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [],
+     "note": "refused: a token or an owner is needed"
+    },
+    {
+     "op": "disable",
+     "at": 1795072811000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+     },
+     "paired": [
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": 1
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": 1795072811000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_tablet",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072801000,
+       "updated_at": 1795072809000,
+       "last_push_at": null,
+       "disabled_at": 1795072811000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_tablet",
+       "created_at": 1795072805000,
+       "updated_at": 1795072805000,
+       "last_push_at": null,
+       "disabled_at": 1795072807000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": []
+    }
+   ]
+  },
+  {
+   "name": "registrations_without_a_device",
+   "calls": [
+    {
+     "op": "register",
+     "at": 1795159201000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "vera",
+      "platform": "ios"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": []
+    },
+    {
+     "op": "register",
+     "at": 1795159202000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "session": "vera",
+      "platform": "ios"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [],
+     "note": "the same session and platform: the older is retired"
+    },
+    {
+     "op": "register",
+     "at": 1795159203000,
+     "args": {
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "session": "vera",
+      "platform": "desktop",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [],
+     "note": "not a phone: binds no owner"
+    },
+    {
+     "op": "register",
+     "at": 1795159204000,
+     "args": {
+      "token": "not-hex-but-accepted",
+      "session": "omar",
+      "platform": "web"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": []
+    },
+    {
+     "op": "register",
+     "at": 1795159205000,
+     "args": {
+      "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+      "session": "omar",
+      "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159201000,
+       "updated_at": 1795159201000,
+       "last_push_at": null,
+       "disabled_at": 1795159202000,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": []
+    },
+    {
+     "op": "register",
+     "at": 1795159206000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "session": "zoe",
+      "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "zoe",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159206000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": "zoe",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159201000,
+       "updated_at": 1795159206000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [],
+     "note": "a grant follows the phone: the other row is retired"
+    },
+    {
+     "op": "register",
+     "at": 1795159207000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159202000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "an unbound row becomes the phone that registers it"
+    },
+    {
+     "op": "register",
+     "at": 1795159208000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "session": "vera",
+      "platform": "ios"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159208000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159208000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159203000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "does not retire what a device owns"
+    },
+    {
+     "op": "register",
+     "at": 1795159209000,
+     "args": {
+      "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "session": null,
+      "platform": "desktop"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159208000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159209000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159209000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159208000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1795159210000,
+     "args": {
+      "token": "  f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6  ",
+      "session": "  spaced  ",
+      "environment": "  SANDBOX  ",
+      "platform": "  "
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159202000,
+       "updated_at": 1795159208000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "platform": "desktop",
+       "environment": "production",
+       "created_at": 1795159203000,
+       "updated_at": 1795159209000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": "omar",
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+       "session": "spaced",
+       "platform": "ios",
+       "environment": "sandbox",
+       "created_at": 1795159210000,
+       "updated_at": 1795159210000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "platform": "web",
+       "environment": "production",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "not-hex-but-accepted",
+       "session": "omar",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "pg1.1111111111111111111111111111111111111111111111111111111111111111.2222222222222222.3333333333333333333333333333333333333333333333333333333333333333",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": "vera",
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      },
+      {
+       "token": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+       "session": "spaced",
+       "environment": "sandbox",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": ""
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "sandbox",
+       "owner": "",
+       "created_at": 1795159210000,
+       "updated_at": 1795159210000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "f6f6f6f6f6f6",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "desktop",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159203000,
+       "updated_at": 1795159209000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "c3c3c3c3c3c3",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159202000,
+       "updated_at": 1795159208000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159205000,
+       "updated_at": 1795159205000,
+       "last_push_at": null,
+       "disabled_at": 1795159206000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "web",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "",
+       "created_at": 1795159204000,
+       "updated_at": 1795159204000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "not-hex-but-",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795159201000,
+       "updated_at": 1795159207000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "trimmed"
+    }
+   ]
+  },
+  {
+   "name": "what_is_refused",
+   "calls": [
+    {
+     "op": "register",
+     "at": 1795245601000,
+     "args": {
+      "token": "",
+      "session": "vera",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "value",
+      "why": "empty device token"
+     },
+     "register": [],
+     "active": [],
+     "shown": [],
+     "shown_to_phone": [],
+     "note": "empty"
+    },
+    {
+     "op": "register",
+     "at": 1795245602000,
+     "args": {
+      "token": "   "
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "value",
+      "why": "empty device token"
+     },
+     "register": [],
+     "active": [],
+     "shown": [],
+     "shown_to_phone": [],
+     "note": "empty"
+    },
+    {
+     "op": "register",
+     "at": 1795245603000,
+     "args": {
+      "token": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "device token must be 64-200 hex digits"
+     },
+     "register": [],
+     "active": [],
+     "shown": [],
+     "shown_to_phone": [],
+     "note": "a device binds only a real token: 64 to 200 hex digits"
+    },
+    {
+     "op": "register",
+     "at": 1795245604000,
+     "args": {
+      "token": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "device token must be 64-200 hex digits"
+     },
+     "register": [],
+     "active": [],
+     "shown": [],
+     "shown_to_phone": []
+    },
+    {
+     "op": "register",
+     "at": 1795245605000,
+     "args": {
+      "token": "not hex at all",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "device token must be 64-200 hex digits"
+     },
+     "register": [],
+     "active": [],
+     "shown": [],
+     "shown_to_phone": []
+    },
+    {
+     "op": "register",
+     "at": 1795245606000,
+     "args": {
+      "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+      "owner": "device_phone"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "the longest that is taken"
+    },
+    {
+     "op": "register",
+     "at": 1795245607000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "owner": "device_phone",
+      "provider": "carrier-pigeon"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "unknown push provider 'carrier-pigeon'"
+     },
+     "register": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "no such push service"
+    },
+    {
+     "op": "register",
+     "at": 1795245608000,
+     "args": {
+      "token": "no token, this!",
+      "owner": "device_phone",
+      "platform": "android"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "not an FCM registration token"
+     },
+     "register": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "android means FCM, and this is no FCM token"
+    },
+    {
+     "op": "register",
+     "at": 1795245609000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "owner": "device_phone",
+      "platform": "android"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "hex digits are a well-formed FCM token too"
+    },
+    {
+     "op": "register",
+     "at": 1795245610000,
+     "args": {
+      "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "owner": "device_phone",
+      "platform": "ios"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "token is registered for another push provider, not apns"
+     },
+     "register": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "refused: it is an FCM row now"
+    },
+    {
+     "op": "register",
+     "at": 1795245611000,
+     "args": {
+      "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+      "owner": "device_phone",
+      "platform": "android",
+      "conversation_modes": [
+       "agent_live_v1",
+       "agent_live_v1"
+      ]
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245611000,
+       "updated_at": 1795245611000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": "[\"agent_live_v1\"]"
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245611000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245611000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ]
+    },
+    {
+     "op": "register",
+     "at": 1795245612000,
+     "args": {
+      "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+      "owner": "device_phone",
+      "platform": "android",
+      "provider": "apns"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "refused": "invalid",
+      "why": "device token must be 64-200 hex digits"
+     },
+     "register": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245611000,
+       "updated_at": 1795245611000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": "[\"agent_live_v1\"]"
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245611000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245611000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "a token stays with its service"
+    },
+    {
+     "op": "register",
+     "at": 1795245613000,
+     "args": {
+      "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+      "owner": "device_phone",
+      "platform": "android"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "registered again without modes: none are kept"
+    },
+    {
+     "op": "register",
+     "at": 1795245614000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "owner": "device_phone",
+      "base_url": "http://8.8.8.8:7682"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245614000,
+       "updated_at": 1795245614000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245614000,
+       "updated_at": 1795245614000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245614000,
+       "updated_at": 1795245614000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "a public address without TLS is not kept"
+    },
+    {
+     "op": "register",
+     "at": 1795245615000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "owner": "device_phone",
+      "base_url": "https://user:secret@host.example/",
+      "push_grant": "pg1.short"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245614000,
+       "updated_at": 1795245615000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245614000,
+       "updated_at": 1795245615000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245614000,
+       "updated_at": 1795245615000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "no credentials in an address; a malformed grant is no grant"
+    },
+    {
+     "op": "register",
+     "at": 1795245616000,
+     "args": {
+      "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "owner": "device_phone",
+      "base_url": "http://printer.local:7682/path/"
+     },
+     "paired": [
+      "device_phone",
+      "device_tablet"
+     ],
+     "answer": {
+      "ok": null
+     },
+     "register": [
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245614000,
+       "updated_at": 1795245616000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "http://printer.local:7682/path",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+       "session": null,
+       "platform": "ios",
+       "environment": "production",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "apns",
+       "supported_conversation_modes": ""
+      },
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "platform": "android",
+       "environment": "production",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "base_url": "",
+       "push_grant": "",
+       "principal": "device_phone",
+       "provider": "fcm",
+       "supported_conversation_modes": ""
+      }
+     ],
+     "active": [
+      {
+       "token": "fcm_Token-01:Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-Zz09_-",
+       "session": null,
+       "environment": "production",
+       "base_url": "",
+       "push_grant": "",
+       "provider": "fcm",
+       "owner": "device_phone"
+      },
+      {
+       "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+       "session": null,
+       "environment": "production",
+       "base_url": "http://printer.local:7682/path",
+       "push_grant": "",
+       "provider": "apns",
+       "owner": "device_phone"
+      }
+     ],
+     "shown": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245614000,
+       "updated_at": 1795245616000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "shown_to_phone": [
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245614000,
+       "updated_at": 1795245616000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "a1a1a1a1a1a1",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245611000,
+       "updated_at": 1795245613000,
+       "last_push_at": null,
+       "disabled_at": null,
+       "token_prefix": "fcm_Token-01",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "android",
+       "provider": "fcm",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245609000,
+       "updated_at": 1795245609000,
+       "last_push_at": null,
+       "disabled_at": 1795245611000,
+       "token_prefix": "b2b2b2b2b2b2",
+       "owner_can_receive": true
+      },
+      {
+       "platform": "ios",
+       "provider": "apns",
+       "environment": "production",
+       "owner": "device_phone",
+       "created_at": 1795245606000,
+       "updated_at": 1795245606000,
+       "last_push_at": null,
+       "disabled_at": 1795245614000,
+       "token_prefix": "d4d4d4d4d4d4",
+       "owner_can_receive": true
+      }
+     ],
+     "note": "a name on the local network"
+    }
+   ]
+  }
+ ]
+}
