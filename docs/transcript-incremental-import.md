@@ -415,6 +415,14 @@ is read again as before, because growth cannot be told from a rewrite
 without reading; a rewrite that puts the modification time back still moves
 the change time, which cannot be set. Off by default.
 
+Every full import that reaches its digest says in the journal which it was:
+`transcriptFullDigest code=saved count=1 backend=claude size=lt256m`. The
+word is `saved`, or why the second read was made: `switch_off`, `grew`,
+`touched`, `identity_changed` (another file under the name, a shorter one,
+or none), `earlier_import_moved` (the earlier import's size is not the one
+the parse was told to mark) or `not_observed` (the parser did not read the
+file in one whole pass). No session, path or id.
+
 Rolling back to a 123 release: the schema guard refuses older code on the
 newer database unless the rollback is asked for. With the override, the 123
 release never reads the new table and imports as it always did; the rows in
