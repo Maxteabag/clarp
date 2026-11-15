@@ -35,6 +35,7 @@ pub mod decisions;
 pub mod forms;
 pub mod moved;
 pub mod reports;
+pub mod updates;
 
 pub use decisions::{Decision, Delivery};
 

@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
 use clarp_kernel::artifacts::forms;
 use clarp_kernel::artifacts::reports::{self, Revisions};
+use clarp_kernel::artifacts::updates;
 use clarp_kernel::artifacts::{
     self, Artifact, ArtifactBook, Ctx, Listing, Made, Maker, New, Refused, Shelf, Why,
 };
@@ -82,6 +83,8 @@ struct Fleet {
     /// The pages of reports, kept beside the books under their names, as the Host keeps
     /// them beside the log.
     pages: HashMap<String, String>,
+    /// The cursors pages of Updates ended with, by the names a scenario keeps them under.
+    cursors: HashMap<String, String>,
 }
 
 type Said = Result<Value, Refused>;
@@ -574,6 +577,58 @@ impl Fleet {
                 );
                 Ok(json!(items))
             }
+            // A page of Updates. A cursor is each Host's own: a scenario names the page it
+            // goes on from, and what is compared of a cursor is whether there is one.
+            "inbox" => {
+                let representation = text(args, "representation");
+                if !["", "flat-v1", "summary-v1"].contains(&representation.as_str()) {
+                    return refused(Why::Value, "unsupported artifact representation");
+                }
+                let limit = given("limit").and_then(Value::as_i64).unwrap_or(100);
+                let cursor = match given("after").and_then(Value::as_str) {
+                    Some(name) => self.cursors.get(name).cloned().unwrap_or_default(),
+                    None => text(args, "cursor"),
+                };
+                let page = updates::page(&self.shelves(), limit, &cursor, now)?;
+                if let Some(name) = given("keep").and_then(Value::as_str) {
+                    let next = page.next_cursor.clone().unwrap_or_default();
+                    self.cursors.insert(name.to_string(), next);
+                }
+                let rows: Vec<Value> = page
+                    .artifacts
+                    .into_iter()
+                    .map(|mut row| {
+                        let named = reports::named_page(&mut row);
+                        if representation.is_empty() {
+                            return match named {
+                                Some(named) => {
+                                    reports::with_page(&mut row, &self.pages[&named.blob()]);
+                                    row
+                                }
+                                None => row,
+                            };
+                        }
+                        if let Some(fields) = row.as_object_mut() {
+                            fields.remove("payload");
+                        }
+                        match named {
+                            Some(named) if representation == "summary-v1" => {
+                                reports::without_page(&mut row, &named);
+                            }
+                            Some(named) => {
+                                reports::with_page(&mut row, &self.pages[&named.blob()]);
+                            }
+                            None => {}
+                        }
+                        row
+                    })
+                    .collect();
+                Ok(json!({
+                    "artifacts": rows, "next_cursor": page.next_cursor.is_some(),
+                    "snapshot_revision": "<revision>", "total": page.total,
+                    "index_version": updates::INDEX_VERSION,
+                }))
+            }
             // A user's answers to a form: an id that was used is looked for on the whole
             // Host before the form is.
             "submit" => {
@@ -765,6 +820,7 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
             ids: 0,
             files: 0,
             pages: HashMap::new(),
+            cursors: HashMap::new(),
         };
         for (number, call) in scenario["calls"].as_array().unwrap().iter().enumerate() {
             let what = call["call"].as_str().unwrap();
@@ -790,6 +846,8 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
                         Why::Value if what == "publish" => "MediaError",
                         // And so has a report that is sent answers.
                         Why::Value if ours.message == forms::READ_ONLY => "ReadOnlyForm",
+                        // And a cursor of a list that is no longer the list.
+                        Why::Value if ours.message == updates::STALE => "StaleCursor",
                         Why::Value => "ValueError",
                         Why::Permission => "PermissionError",
                         Why::Integrity => "IntegrityError",
@@ -834,5 +892,5 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
         wrong.len(),
         shown.join("\n")
     );
-    assert!(compared >= 450, "only {compared} calls were compared");
+    assert!(compared >= 500, "only {compared} calls were compared");
 }

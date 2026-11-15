@@ -18685,6 +18685,4135 @@
      "ids": 0
     }
    ]
+  },
+  {
+   "name": "what_the_user_is_shown_in_updates",
+   "agents": [
+    {
+     "agent_id": "0b01aaaabbbbcccc",
+     "session": "vera11",
+     "persona": "Vera"
+    },
+    {
+     "agent_id": "0b02aaaabbbbcccc",
+     "session": "omar11",
+     "persona": "Omar"
+    }
+   ],
+   "calls": [
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304001000,
+     "result": {
+      "artifacts": [],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 0,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "nothing was made yet"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "document",
+      "title": "Notes",
+      "status": "ready",
+      "artifact_id": "",
+      "payload": {
+       "content": "# Notes"
+      }
+     },
+     "at": 1804304002000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "document",
+      "title": "Notes",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304002000,
+      "updated_at": 1804304002000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "# Notes"
+      },
+      "content": "# Notes"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "research",
+      "title": "Research, done",
+      "status": "completed",
+      "artifact_id": "",
+      "payload": {
+       "content": "Findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      }
+     },
+     "at": 1804304003000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000002",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "research",
+      "title": "Research, done",
+      "summary": "",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304003000,
+      "updated_at": 1804304003000,
+      "completed_at": 1804304003000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "Findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "content": "Findings",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ]
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "data",
+      "title": "A table, in the making",
+      "status": "active",
+      "artifact_id": "",
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      }
+     },
+     "at": 1804304004000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "data",
+      "title": "A table, in the making",
+      "summary": "",
+      "status": "active",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304004000,
+      "updated_at": 1804304004000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "columns": [
+       "a"
+      ],
+      "rows": [
+       [
+        1
+       ]
+      ]
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "code_change",
+      "title": "A change that failed",
+      "status": "failed",
+      "artifact_id": "",
+      "payload": {
+       "repository": "owner/repo"
+      }
+     },
+     "at": 1804304005000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000004",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "code_change",
+      "title": "A change that failed",
+      "summary": "",
+      "status": "failed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304005000,
+      "updated_at": 1804304005000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "repository": "owner/repo"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "release",
+      "title": "A draft",
+      "status": "draft",
+      "artifact_id": "",
+      "payload": {
+       "version": "0.1"
+      }
+     },
+     "at": 1804304006000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000005",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "release",
+      "title": "A draft",
+      "summary": "",
+      "status": "draft",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304006000,
+      "updated_at": 1804304006000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "version": "0.1"
+      },
+      "version": "0.1"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "directory",
+      "title": "Called off",
+      "status": "cancelled",
+      "artifact_id": "",
+      "payload": {
+       "root": "workspace",
+       "relative_path": "src"
+      }
+     },
+     "at": 1804304007000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000006",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "directory",
+      "title": "Called off",
+      "summary": "",
+      "status": "cancelled",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304007000,
+      "updated_at": 1804304007000,
+      "completed_at": 1804304007000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "root": "workspace",
+       "relative_path": "src"
+      },
+      "root": "workspace",
+      "relative_path": "src"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar11",
+      "type": "document",
+      "title": "Too late",
+      "status": "expired",
+      "artifact_id": "",
+      "payload": {
+       "content": "x"
+      }
+     },
+     "at": 1804304008000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000007",
+      "agent_id": "0b02aaaabbbbcccc",
+      "session": "omar11",
+      "type": "document",
+      "title": "Too late",
+      "summary": "",
+      "status": "expired",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304008000,
+      "updated_at": 1804304008000,
+      "completed_at": 1804304008000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "payload": {
+       "content": "x"
+      },
+      "content": "x"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar11",
+      "type": "document",
+      "title": "Omar's notes",
+      "status": "ready",
+      "artifact_id": "",
+      "payload": {
+       "content": "y"
+      }
+     },
+     "at": 1804304009000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000008",
+      "agent_id": "0b02aaaabbbbcccc",
+      "session": "omar11",
+      "type": "document",
+      "title": "Omar's notes",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304009000,
+      "updated_at": 1804304009000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "payload": {
+       "content": "y"
+      },
+      "content": "y"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "workflow_run",
+      "title": "CI",
+      "status": "active",
+      "artifact_id": "",
+      "payload": {
+       "provider": "github",
+       "run_id": "42",
+       "run_url": "https://github.com/owner/repo/actions/runs/42",
+       "workflow_name": "Tests"
+      }
+     },
+     "at": 1804304010000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000009",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "workflow_run",
+      "title": "CI",
+      "summary": "",
+      "status": "active",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304010000,
+      "updated_at": 1804304010000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "provider": "github",
+       "run_id": "42",
+       "run_url": "https://github.com/owner/repo/actions/runs/42",
+       "workflow_name": "Tests"
+      },
+      "provider": "github",
+      "run_id": "42",
+      "run_url": "https://github.com/owner/repo/actions/runs/42",
+      "workflow_name": "Tests"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "html_form",
+      "title": "A report",
+      "status": "ready",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<p>Read me.</p>",
+       "version": "1",
+       "read_only": true
+      }
+     },
+     "at": 1804304011000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304011000,
+      "updated_at": 1804304011000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Read me.</p>",
+       "version": "1",
+       "read_only": true,
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<p>Read me.</p>",
+      "version": "1",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera11",
+      "type": "html_form",
+      "title": "A form",
+      "status": "ready",
+      "artifact_id": "form-1",
+      "payload": {
+       "content": "<form></form>",
+       "version": "1",
+       "answer_schema": {
+        "type": "object"
+       }
+      }
+     },
+     "at": 1804304012000,
+     "result": {
+      "artifact_id": "form-1",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "html_form",
+      "title": "A form",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304012000,
+      "updated_at": 1804304012000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<form></form>",
+       "version": "1",
+       "answer_schema": {
+        "type": "object"
+       }
+      },
+      "content": "<form></form>",
+      "version": "1"
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar11",
+      "type": "document",
+      "title": "Said to be a janitor's",
+      "status": "ready",
+      "artifact_id": "",
+      "payload": {
+       "attention_kind": "janitor_failure",
+       "content": "z"
+      }
+     },
+     "at": 1804304013000,
+     "result": {
+      "artifact_id": "artifact-00000000000000000000000a",
+      "agent_id": "0b02aaaabbbbcccc",
+      "session": "omar11",
+      "type": "document",
+      "title": "Said to be a janitor's",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304013000,
+      "updated_at": 1804304013000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "payload": {
+       "attention_kind": "janitor_failure",
+       "content": "z"
+      },
+      "content": "z"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar11",
+      "type": "release",
+      "title": "Released",
+      "status": "completed",
+      "artifact_id": "",
+      "payload": {
+       "version": "1.0"
+      }
+     },
+     "at": 1804304014000,
+     "result": {
+      "artifact_id": "artifact-00000000000000000000000b",
+      "agent_id": "0b02aaaabbbbcccc",
+      "session": "omar11",
+      "type": "release",
+      "title": "Released",
+      "summary": "",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304014000,
+      "updated_at": 1804304014000,
+      "completed_at": 1804304014000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "payload": {
+       "version": "1.0"
+      },
+      "version": "1.0"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create_decision",
+     "args": {
+      "session": "vera11",
+      "title": "Ship?",
+      "question": "Ship it?"
+     },
+     "at": 1804304015000,
+     "result": {
+      "artifact_id": "artifact-00000000000000000000000c",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "decision",
+      "title": "Ship?",
+      "summary": "Ship it?",
+      "status": "active",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304015000,
+      "updated_at": 1804304015000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {},
+      "decision": {
+       "decision_id": "decision-00000000000000000000000d",
+       "artifact_id": "artifact-00000000000000000000000c",
+       "question": "Ship it?",
+       "context": "",
+       "yes_label": "Yes",
+       "no_label": "No",
+       "status": "pending",
+       "resolved_choice": "",
+       "resolved_at": null,
+       "resolved_by": "",
+       "revision": 1,
+       "expires_at": null,
+       "response_type": "approval",
+       "allow_custom_text": false,
+       "recommended_option_id": null,
+       "blocks_progress": false,
+       "priority_reason": "",
+       "urgency": "normal",
+       "response_effort": "review",
+       "deadline_at": null,
+       "options": [],
+       "answer": null,
+       "priority": 100,
+       "archived_at": null,
+       "delivery_pending": false
+      }
+     },
+     "ids": 2
+    },
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304016000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304011000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304012000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "active",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304004000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "columns": [
+          "a"
+         ],
+         "rows": [
+          [
+           1
+          ]
+         ]
+        },
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "working"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "what failed, what is ready, what is in the making; each oldest first"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "representation": "summary-v1"
+     },
+     "at": 1804304017000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304011000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "version": "1",
+        "read_only": true,
+        "content_omitted": {
+         "reason": "summary",
+         "bytes": 15,
+         "sha256": "c1:cd2e759a3d8b68c8b834eb754e12be43db5224d72c249154feef6eb52d2d5703",
+         "version": "1",
+         "updated_at": 1804304011000
+        },
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304012000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "version": "1",
+        "content_omitted": {
+         "reason": "summary",
+         "bytes": 13,
+         "sha256": "c1:46f23df52252563e36e3f2f30f7f67a199ab8a2574883c343106b1db5754ae8f",
+         "version": "1",
+         "updated_at": 1804304012000
+        },
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "version": "1.0",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "active",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304004000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "working"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "representation": "flat-v1"
+     },
+     "at": 1804304018000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304011000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304012000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "version": "1.0",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "active",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304004000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "working"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "representation": "nothing-of-the-kind"
+     },
+     "at": 1804304019000,
+     "error": {
+      "kind": "ValueError",
+      "message": "unsupported artifact representation"
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 3,
+      "keep": "first"
+     },
+     "at": 1804304020000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 3,
+      "after": "first",
+      "keep": "second"
+     },
+     "at": 1804304021000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304011000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304012000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 3,
+      "after": "second",
+      "keep": "third"
+     },
+     "at": 1804304022000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "active",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304004000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "columns": [
+          "a"
+         ],
+         "rows": [
+          [
+           1
+          ]
+         ]
+        },
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "working"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 0,
+      "keep": "one"
+     },
+     "at": 1804304023000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "at least one"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 1000
+     },
+     "at": 1804304024000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304011000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304012000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "active",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304004000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "columns": [
+          "a"
+         ],
+         "rows": [
+          [
+           1
+          ]
+         ]
+        },
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "working"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "at most two hundred"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": -5
+     },
+     "at": 1804304025000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "not a cursor"
+     },
+     "at": 1804304026000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "bm90IGpzb24="
+     },
+     "at": 1804304027000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0,
+     "note": "not JSON"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "eyJvZmZzZXQiOiAwfQ=="
+     },
+     "at": 1804304028000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0,
+     "note": "an offset without a snapshot"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IC0xfQ=="
+     },
+     "at": 1804304029000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0,
+     "note": "an offset before the beginning"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6ICIxIn0="
+     },
+     "at": 1804304030000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0,
+     "note": "an offset that is text"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IDAsICJtb3JlIjogMX0="
+     },
+     "at": 1804304031000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0,
+     "note": "with more than a cursor has"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IDB9"
+     },
+     "at": 1804304032000,
+     "error": {
+      "kind": "StaleCursor",
+      "message": "attention snapshot changed; restart pagination"
+     },
+     "ids": 0,
+     "note": "of a snapshot that never was"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "cursor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     },
+     "at": 1804304033000,
+     "error": {
+      "kind": "ValueError",
+      "message": "invalid attention cursor"
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "keep": "before"
+     },
+     "at": 1804304034000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "archive",
+     "args": {
+      "artifact_id": "report-1",
+      "archived": true,
+      "expected_updated_at": 1804304011000
+     },
+     "at": 1804304035000,
+     "result": [
+      {
+       "artifact_id": "report-1",
+       "agent_id": "0b01aaaabbbbcccc",
+       "session": "vera11",
+       "type": "html_form",
+       "title": "A report",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1804304011000,
+       "updated_at": 1804304035000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": 1804304035000,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        }
+       },
+       "content": "<p>Read me.</p>",
+       "version": "1",
+       "read_only": true
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "after": "before"
+     },
+     "at": 1804304036000,
+     "error": {
+      "kind": "StaleCursor",
+      "message": "attention snapshot changed; restart pagination"
+     },
+     "ids": 0,
+     "note": "put away in between"
+    },
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304037000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304035000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": 1804304035000,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304012000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "active",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304004000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "columns": [
+          "a"
+         ],
+         "rows": [
+          [
+           1
+          ]
+         ]
+        },
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "working"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "put away, it is still shown, as put away"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "keep": "before"
+     },
+     "at": 1804304038000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "pin",
+     "args": {
+      "artifact_id": "form-1",
+      "pinned": true
+     },
+     "at": 1804304039000,
+     "result": [
+      {
+       "artifact_id": "form-1",
+       "agent_id": "0b01aaaabbbbcccc",
+       "session": "vera11",
+       "type": "html_form",
+       "title": "A form",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1804304012000,
+       "updated_at": 1804304012000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": 1804304039000,
+       "agent_name": "Vera",
+       "pinned": true,
+       "payload": {
+        "content": "<form></form>",
+        "version": "1",
+        "answer_schema": {
+         "type": "object"
+        }
+       },
+       "content": "<form></form>",
+       "version": "1"
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "after": "before"
+     },
+     "at": 1804304040000,
+     "error": {
+      "kind": "StaleCursor",
+      "message": "attention snapshot changed; restart pagination"
+     },
+     "ids": 0,
+     "note": "pinned in between"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "keep": "before"
+     },
+     "at": 1804304041000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "form-1",
+      "data": {
+       "summary": "Said of it"
+      }
+     },
+     "at": 1804304042000,
+     "result": {
+      "artifact_id": "form-1",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "html_form",
+      "title": "A form",
+      "summary": "Said of it",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304012000,
+      "updated_at": 1804304042000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": 1804304039000,
+      "agent_name": "Vera",
+      "pinned": true,
+      "payload": {
+       "content": "<form></form>",
+       "version": "1",
+       "answer_schema": {
+        "type": "object"
+       }
+      },
+      "content": "<form></form>",
+      "version": "1"
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "after": "before"
+     },
+     "at": 1804304043000,
+     "error": {
+      "kind": "StaleCursor",
+      "message": "attention snapshot changed; restart pagination"
+     },
+     "ids": 0,
+     "note": "changed in between"
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "keep": "before"
+     },
+     "at": 1804304044000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {
+      "limit": 2,
+      "after": "before"
+     },
+     "at": 1804304045000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": true,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "nothing in between"
+    },
+    {
+     "call": "list",
+     "args": {
+      "session": "vera11",
+      "type": "data"
+     },
+     "at": 1804304046000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000003",
+       "agent_id": "0b01aaaabbbbcccc",
+       "session": "vera11",
+       "type": "data",
+       "title": "A table, in the making",
+       "summary": "",
+       "status": "active",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1804304004000,
+       "updated_at": 1804304004000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ]
+       },
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "status": "completed"
+      }
+     },
+     "at": 1804304047000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "data",
+      "title": "A table, in the making",
+      "summary": "",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304004000,
+      "updated_at": 1804304047000,
+      "completed_at": 1804304047000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "columns": [
+       "a"
+      ],
+      "rows": [
+       [
+        1
+       ]
+      ]
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304048000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304047000,
+        "completed_at": 1804304047000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "columns": [
+          "a"
+         ],
+         "rows": [
+          [
+           1
+          ]
+         ]
+        },
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304035000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": 1804304035000,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "Said of it",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304042000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": 1804304039000,
+        "agent_name": "Vera",
+        "pinned": true,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "status": "failed"
+      }
+     },
+     "at": 1804304049000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "data",
+      "title": "A table, in the making",
+      "summary": "",
+      "status": "failed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304004000,
+      "updated_at": 1804304049000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "columns": [
+       "a"
+      ],
+      "rows": [
+       [
+        1
+       ]
+      ]
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304050000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000003",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "data",
+        "title": "A table, in the making",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304004000,
+        "updated_at": 1804304049000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "columns": [
+          "a"
+         ],
+         "rows": [
+          [
+           1
+          ]
+         ]
+        },
+        "columns": [
+         "a"
+        ],
+        "rows": [
+         [
+          1
+         ]
+        ],
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304035000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": 1804304035000,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "Said of it",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304042000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": 1804304039000,
+        "agent_name": "Vera",
+        "pinned": true,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 8,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "status": "expired"
+      }
+     },
+     "at": 1804304051000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0b01aaaabbbbcccc",
+      "session": "vera11",
+      "type": "data",
+      "title": "A table, in the making",
+      "summary": "",
+      "status": "expired",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1804304004000,
+      "updated_at": 1804304051000,
+      "completed_at": 1804304051000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "columns": [
+       "a"
+      ],
+      "rows": [
+       [
+        1
+       ]
+      ]
+     },
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304052000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "report-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A report",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304011000,
+        "updated_at": 1804304035000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": 1804304035000,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "<p>Read me.</p>",
+         "version": "1",
+         "read_only": true,
+         "answer_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+         }
+        },
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "Said of it",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304042000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": 1804304039000,
+        "agent_name": "Vera",
+        "pinned": true,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 7,
+      "index_version": 1
+     },
+     "ids": 0
+    },
+    {
+     "call": "discard",
+     "args": {
+      "artifact_id": "report-1",
+      "expected_updated_at": 1804304035000
+     },
+     "at": 1804304053000,
+     "result": [
+      {
+       "artifact_id": "report-1",
+       "agent_id": "0b01aaaabbbbcccc",
+       "session": "vera11",
+       "type": "html_form",
+       "title": "A report",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1804304011000,
+       "updated_at": 1804304053000,
+       "completed_at": null,
+       "deleted_at": 1804304053000,
+       "archived_at": 1804304035000,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "content": "<p>Read me.</p>",
+        "version": "1",
+        "read_only": true,
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        }
+       },
+       "content": "<p>Read me.</p>",
+       "version": "1",
+       "read_only": true
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "inbox",
+     "args": {},
+     "at": 1804304054000,
+     "result": {
+      "artifacts": [
+       {
+        "artifact_id": "artifact-000000000000000000000004",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "code_change",
+        "title": "A change that failed",
+        "summary": "",
+        "status": "failed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304005000,
+        "updated_at": 1804304005000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "repository": "owner/repo"
+        },
+        "repository": "owner/repo",
+        "attention_bucket": "blocking"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000001",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "document",
+        "title": "Notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304002000,
+        "updated_at": 1804304002000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "# Notes"
+        },
+        "content": "# Notes",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000002",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "research",
+        "title": "Research, done",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304003000,
+        "updated_at": 1804304003000,
+        "completed_at": 1804304003000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Vera",
+        "pinned": false,
+        "payload": {
+         "content": "Findings",
+         "sources": [
+          {
+           "title": "A source",
+           "url": "https://example.org/a"
+          }
+         ]
+        },
+        "content": "Findings",
+        "sources": [
+         {
+          "title": "A source",
+          "url": "https://example.org/a"
+         }
+        ],
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-000000000000000000000008",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "document",
+        "title": "Omar's notes",
+        "summary": "",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304009000,
+        "updated_at": 1804304009000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "content": "y"
+        },
+        "content": "y",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "form-1",
+        "agent_id": "0b01aaaabbbbcccc",
+        "session": "vera11",
+        "type": "html_form",
+        "title": "A form",
+        "summary": "Said of it",
+        "status": "ready",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304012000,
+        "updated_at": 1804304042000,
+        "completed_at": null,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": 1804304039000,
+        "agent_name": "Vera",
+        "pinned": true,
+        "payload": {
+         "content": "<form></form>",
+         "version": "1",
+         "answer_schema": {
+          "type": "object"
+         }
+        },
+        "content": "<form></form>",
+        "version": "1",
+        "attention_bucket": "review"
+       },
+       {
+        "artifact_id": "artifact-00000000000000000000000b",
+        "agent_id": "0b02aaaabbbbcccc",
+        "session": "omar11",
+        "type": "release",
+        "title": "Released",
+        "summary": "",
+        "status": "completed",
+        "reference_id": "",
+        "payload_version": 1,
+        "source_message_id": "",
+        "source_trace_id": "",
+        "created_at": 1804304014000,
+        "updated_at": 1804304014000,
+        "completed_at": 1804304014000,
+        "deleted_at": null,
+        "archived_at": null,
+        "pinned_at": null,
+        "agent_name": "Omar",
+        "pinned": false,
+        "payload": {
+         "version": "1.0"
+        },
+        "version": "1.0",
+        "attention_bucket": "review"
+       }
+      ],
+      "next_cursor": false,
+      "snapshot_revision": "<revision>",
+      "total": 6,
+      "index_version": 1
+     },
+     "ids": 0,
+     "note": "thrown away, it is gone"
+    }
+   ]
   }
  ]
 }

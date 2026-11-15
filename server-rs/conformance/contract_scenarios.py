@@ -867,4 +867,64 @@ SCENARIOS.append({
     ],
 })
 
+def made(kind, title, status, name, **payload):
+    """An agent makes something for its user."""
+    return post('/artifacts', {'session': AGENT, 'type': kind, 'title': title, 'status': status, 'payload': payload}, name)
+
+
+UPDATES = '/attention/inbox'
+SCENARIOS.append({
+    'id': 'updates',
+    'what': 'Updates, what agents made that their user may want to look at: what failed first, then what is ready, '
+            'then what is in the making, a page at a time, with a cursor that goes on from where a page ended as '
+            'long as nothing that is shown has changed',
+    'steps': [
+        get(UPDATES, 'nothing was made yet'),
+        made('document', 'Synthetic notes', 'ready', 'make notes', content='# Synthetic notes'),
+        made('data', 'Synthetic table', 'active', 'make a table', columns=['a'], rows=[[1]]),
+        made('code_change', 'Synthetic change', 'failed', 'make a change that failed', repository='owner/repo'),
+        made('release', 'Synthetic draft', 'draft', 'make a draft', version='0.1'),
+        made('directory', 'Synthetic folder', 'cancelled', 'make what is called off', root='workspace',
+             relative_path='src'),
+        made('workflow_run', 'Synthetic run', 'active', 'make a run of a workflow', provider='github', run_id='42',
+             run_url='https://github.com/owner/repo/actions/runs/42', workflow_name='Tests'),
+        post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic report', 'artifact_id': 'report-1',
+                            'payload': {'content': PAGE_ONE, 'version': 'v1', 'read_only': True}}, 'publish a report'),
+        # (The request stands between two things that are ready: of two made in the same
+        # thousandth of a second, which comes first is the order of their ids, each Host's own.)
+        post('/decisions', {'session': AGENT, 'title': 'Synthetic approval', 'question': 'Proceed with the synthetic step?'},
+             'ask for an approval'),
+        made('research', 'Synthetic research', 'completed', 'make research that is done', content='Synthetic findings',
+             sources=[{'title': 'A source', 'url': 'https://example.org/a'}]),
+        get(UPDATES, 'the list'),
+        get(f'{UPDATES}?representation=summary-v1', 'the list, summed up'),
+        get(f'{UPDATES}?representation=flat-v1', 'the list, flat'),
+        # A page at a time.
+        get(f'{UPDATES}?limit=2', 'the first page'),
+        {'op': 'get', 'path': UPDATES + '?limit=2&cursor={cursor}', 'from_last': {'cursor': 'next_cursor'},
+         'name': 'the second page'},
+        {'op': 'get', 'path': UPDATES + '?limit=2&cursor={cursor}', 'from_last': {'cursor': 'next_cursor'},
+         'name': 'the third page'},
+        get(f'{UPDATES}?limit=0', 'a page of nothing is a page of one'),
+        get(f'{UPDATES}?limit=1000', 'a page of a thousand'),
+        # What is no query.
+        get(f'{UPDATES}?limit=many', 'a limit that is no number'),
+        get(f'{UPDATES}?representation=nothing', 'a representation there is none of'),
+        get(f'{UPDATES}?cursor=not-a-cursor', 'what is no cursor'),
+        get(f'{UPDATES}?cursor=eyJvZmZzZXQiOiAwfQ==', 'a cursor without the list it is of'),
+        get(f'{UPDATES}?cursor=eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IDB9', 'a cursor of a list that never was'),
+        # What a user does with what is shown changes the list: a cursor of before is stale.
+        # (`save` keeps something of an answer for a later step under a name of the scenario's own.)
+        {**get(f'{UPDATES}?limit=2', 'the first page, before a change'), 'save': {'before': 'next_cursor'}},
+        get(UPDATES + '?limit=2&cursor={before}', 'the second page, with nothing changed'),
+        post('/artifacts/report-1/pin', {'pinned': True}, 'pin the report'),
+        get(UPDATES + '?limit=2&cursor={before}', 'the second page, with a cursor of before the pin'),
+        get(UPDATES, 'the list, with the report pinned'),
+        post('/artifacts/report-1', {'status': 'failed'}, 'the report fails'),
+        get(UPDATES, 'the list, with the report first'),
+        post('/artifacts/report-1', {'status': 'expired'}, 'the report runs out'),
+        get(UPDATES, 'the list, without the report'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

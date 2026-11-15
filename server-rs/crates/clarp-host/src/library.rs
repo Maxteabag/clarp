@@ -21,6 +21,7 @@ use clarp_actor::{Actor, ActorError, Kept, Outputs};
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
 use clarp_kernel::artifacts::forms::{self, Sent};
 use clarp_kernel::artifacts::reports::{self, Page, Revisions};
+use clarp_kernel::artifacts::updates;
 use clarp_kernel::artifacts::{
     self, Artifact, ArtifactBook, Ctx, Listing, Made, Maker, New, Refused, Shelf, Why,
 };
@@ -1116,6 +1117,37 @@ async fn attention(State(app): State<App>, Query(query): Params) -> Json<Value> 
     ))
 }
 
+/// `GET /attention/inbox?limit=&cursor=&representation=`: a page of Updates, what agents
+/// made that their user may want to look at. A cursor of a list that has changed since is
+/// answered 409: the client begins again.
+async fn updates_page(
+    State(app): State<App>,
+    Query(query): Params,
+) -> Result<Json<Value>, ApiError> {
+    let wrong = || refused(StatusCode::BAD_REQUEST, "invalid attention query");
+    let limit = query
+        .get("limit")
+        .map_or(Ok(100), |given| given.trim().parse::<i64>());
+    let limit = limit.map_err(|_| wrong())?;
+    let cursor = query.get("cursor").map_or("", String::as_str);
+    let representation = representation(&query).map_err(|_| wrong())?;
+    let page = {
+        let fleet = Fleet::of(&app);
+        updates::page(&fleet.shelves(), limit, cursor, app.clock.now_ms())
+    };
+    let page = page.map_err(|no| match no.message.as_str() {
+        updates::STALE => refused(StatusCode::CONFLICT, no.message),
+        _ => wrong(),
+    })?;
+    Ok(Json(json!({
+        "artifacts": all_shown(&app, page.artifacts, representation).await,
+        "next_cursor": page.next_cursor,
+        "snapshot_revision": page.snapshot_revision,
+        "total": page.total,
+        "index_version": updates::INDEX_VERSION,
+    })))
+}
+
 /// What waits for the user, as `GET /attention` answers it.
 pub(crate) fn inbox(app: &App, include_questions: bool, include_archived: bool) -> Value {
     let fleet = Fleet::of(app);
@@ -1158,6 +1190,7 @@ pub fn routes() -> Router<App> {
         .route("/decisions", post(create_decision))
         .route("/decisions/{*rest}", post(post_decision))
         .route("/attention", get(attention))
+        .route("/attention/inbox", get(updates_page))
 }
 
 #[cfg(test)]

@@ -138,7 +138,7 @@ class World:
             'plan_create': task_plans.create, 'plan_step': self.plan_step, 'plan_act': self.plan_act,
             'plan_finish': task_plans.finish, 'publish': self.publish, 'revisions': self.revisions,
             'represent': self.represent, 'submit': self.submit, 'pending_submissions': self.pending_submissions,
-            'mark_submission_delivered': self.mark_submission_delivered,
+            'mark_submission_delivered': self.mark_submission_delivered, 'inbox': self.inbox,
         }[name]
         entry = {'call': name, 'args': args, 'at': self.now}
         ids_before = self.ids
@@ -156,6 +156,18 @@ class World:
             entry['note'] = note
         self.calls.append(entry)
         return entry.get('result')
+
+    def inbox(self, limit=100, cursor: str = '', after: str = '', keep: str = '', representation: str = ''):
+        """A page of what the user is shown in Updates (`attention_index.page`). A cursor is each
+        Host's own: `after` names the page it goes on from, `keep` the name this page is kept
+        under. What is written of a cursor is whether there is one; of the snapshot, that it is
+        the same as or another than the one before under the same name."""
+        from lib import attention_index
+        page = attention_index.page(limit=limit, cursor=self.kept[f'cursor:{after}'] if after else cursor,
+                                    representation=representation)
+        if keep:
+            self.kept[f'cursor:{keep}'] = page['next_cursor'] or ''
+        return {**page, 'next_cursor': page['next_cursor'] is not None, 'snapshot_revision': '<revision>'}
 
     def submit(self, artifact_id: str, data: dict):
         """A user sends answers to a form (`html_forms.submit`)."""
@@ -816,10 +828,81 @@ def a_form_and_its_answers(w: World) -> None:
     w.call('get', artifact_id='form-1')
 
 
+def what_the_user_is_shown_in_updates(w: World) -> None:
+    """Updates is a page at a time of what agents made that a user may want to look at: what failed
+    first, then what is ready, then what is being worked on, each oldest first. A cursor goes on
+    from where a page ended, as long as nothing that is shown has changed."""
+    def made(session, kind, title, status='ready', artifact_id='', **payload):
+        return w.call('create', session=session, type=kind, title=title, status=status, artifact_id=artifact_id,
+                      payload=payload)
+
+    w.call('inbox', note='nothing was made yet')
+    made(w.vera, 'document', 'Notes', content='# Notes')
+    made(w.vera, 'research', 'Research, done', status='completed', content='Findings',
+         sources=[{'title': 'A source', 'url': 'https://example.org/a'}])
+    made(w.vera, 'data', 'A table, in the making', status='active', columns=['a'], rows=[[1]])
+    made(w.vera, 'code_change', 'A change that failed', status='failed', repository='owner/repo')
+    made(w.vera, 'release', 'A draft', status='draft', version='0.1')
+    made(w.vera, 'directory', 'Called off', status='cancelled', root='workspace', relative_path='src')
+    made(w.omar, 'document', 'Too late', status='expired', content='x')
+    made(w.omar, 'document', "Omar's notes", content='y')
+    made(w.vera, 'workflow_run', 'CI', status='active', provider='github', run_id='42',
+         run_url='https://github.com/owner/repo/actions/runs/42', workflow_name='Tests')
+    made(w.vera, 'html_form', 'A report', artifact_id='report-1', content='<p>Read me.</p>', version='1', read_only=True)
+    made(w.vera, 'html_form', 'A form', artifact_id='form-1', content='<form></form>', version='1',
+         answer_schema={'type': 'object'})
+    made(w.omar, 'document', 'Said to be a janitor\'s', attention_kind='janitor_failure', content='z')
+    made(w.omar, 'release', 'Released', status='completed', version='1.0')
+    w.call('create_decision', session=w.vera, title='Ship?', question='Ship it?')
+    w.call('inbox', note='what failed, what is ready, what is in the making; each oldest first')
+    w.call('inbox', representation='summary-v1')
+    w.call('inbox', representation='flat-v1')
+    w.call('inbox', representation='nothing-of-the-kind')
+    # A page at a time.
+    w.call('inbox', limit=3, keep='first')
+    w.call('inbox', limit=3, after='first', keep='second')
+    w.call('inbox', limit=3, after='second', keep='third')
+    w.call('inbox', limit=0, keep='one', note='at least one')
+    w.call('inbox', limit=1000, note='at most two hundred')
+    w.call('inbox', limit=-5)
+    # What is no cursor.
+    w.call('inbox', cursor='not a cursor')
+    w.call('inbox', cursor='bm90IGpzb24=', note='not JSON')
+    w.call('inbox', cursor='eyJvZmZzZXQiOiAwfQ==', note='an offset without a snapshot')
+    w.call('inbox', cursor='eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IC0xfQ==', note='an offset before the beginning')
+    w.call('inbox', cursor='eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6ICIxIn0=', note='an offset that is text')
+    w.call('inbox', cursor='eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IDAsICJtb3JlIjogMX0=', note='with more than a cursor has')
+    w.call('inbox', cursor='eyJyZXZpc2lvbiI6ICJ4IiwgIm9mZnNldCI6IDB9', note='of a snapshot that never was')
+    w.call('inbox', cursor='x' * 2049)
+    # What a user does with what is shown changes what is shown: a cursor of before is stale.
+    w.call('inbox', limit=2, keep='before')
+    w.call('archive', artifact_id='report-1', archived=True, expected_updated_at=w.kept_updated_at('report-1'))
+    w.call('inbox', limit=2, after='before', note='put away in between')
+    w.call('inbox', note='put away, it is still shown, as put away')
+    w.call('inbox', limit=2, keep='before')
+    w.call('pin', artifact_id='form-1', pinned=True)
+    w.call('inbox', limit=2, after='before', note='pinned in between')
+    w.call('inbox', limit=2, keep='before')
+    w.call('update', artifact_id='form-1', data={'summary': 'Said of it'})
+    w.call('inbox', limit=2, after='before', note='changed in between')
+    w.call('inbox', limit=2, keep='before')
+    w.call('inbox', limit=2, after='before', note='nothing in between')
+    # What it becomes moves it: finished work is ready, failed work comes first, what is over is gone.
+    first = w.call('list', session=w.vera, type='data')[0]
+    w.call('update', artifact_id=first['artifact_id'], data={'status': 'completed'})
+    w.call('inbox')
+    w.call('update', artifact_id=first['artifact_id'], data={'status': 'failed'})
+    w.call('inbox')
+    w.call('update', artifact_id=first['artifact_id'], data={'status': 'expired'})
+    w.call('inbox')
+    w.call('discard', artifact_id='report-1', expected_updated_at=w.kept_updated_at('report-1'))
+    w.call('inbox', note='thrown away, it is gone')
+
+
 SCENARIOS = [plain_kinds, what_an_artifact_refuses, a_plan_is_an_artifact, an_approval_is_asked_and_answered,
              a_question_with_options_and_typed_answers, what_becomes_of_a_request_nobody_answers,
              the_inbox_and_what_a_user_does_with_an_artifact, what_names_a_published_file,
-             a_report_and_its_revisions, a_form_and_its_answers]
+             a_report_and_its_revisions, a_form_and_its_answers, what_the_user_is_shown_in_updates]
 
 
 def main(argv: list[str]) -> int:

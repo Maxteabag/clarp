@@ -6684,3 +6684,163 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
     let shown = fetch(&host, token, "GET", "/artifacts/form-plan/html", &[], b"");
     assert!(shown.status == 200 && shown.text().contains(page));
 }
+
+#[test]
+fn the_user_is_shown_what_agents_made_a_page_at_a_time() {
+    let place = Place::new("updates");
+    let host = place.start();
+    let (maker, other) = (host.new_agent("Maker"), host.new_agent("Other"));
+    let made = |session: &str, kind: &str, title: &str, status: &str, payload: Value| -> Value {
+        let body = json!({ "session": session, "type": kind, "title": title, "status": status, "payload": payload });
+        let (code, answer) = host.ask("POST", "/artifacts", Some(&body));
+        assert_eq!(code, 201, "{answer}");
+        answer["artifact"].clone()
+    };
+    let page = |query: &str| -> (u16, Value) {
+        host.ask("GET", &format!("/attention/inbox{query}"), None)
+    };
+    let (code, empty) = page("");
+    assert_eq!(code, 200, "{empty}");
+    assert_eq!(
+        (
+            &empty["artifacts"],
+            &empty["next_cursor"],
+            &empty["total"],
+            &empty["index_version"]
+        ),
+        (&json!([]), &Value::Null, &json!(0), &json!(1))
+    );
+    // What two agents made: something ready, something in the making, something that
+    // failed, a report, and what is not shown (a draft, a run of a workflow, a request).
+    made(
+        &maker,
+        "document",
+        "Notes",
+        "ready",
+        json!({ "content": "# Notes" }),
+    );
+    let table = made(
+        &maker,
+        "data",
+        "A table",
+        "active",
+        json!({ "columns": ["a"], "rows": [[1]] }),
+    );
+    made(
+        &other,
+        "code_change",
+        "A change",
+        "failed",
+        json!({ "repository": "owner/repo" }),
+    );
+    made(
+        &maker,
+        "release",
+        "A draft",
+        "draft",
+        json!({ "version": "0.1" }),
+    );
+    made(
+        &maker,
+        "workflow_run",
+        "CI",
+        "active",
+        json!({ "provider": "github", "run_id": "42", "workflow_name": "Tests",
+                "run_url": "https://github.com/owner/repo/actions/runs/42" }),
+    );
+    made(
+        &other,
+        "html_form",
+        "A report",
+        "ready",
+        json!({ "content": "<p>Read me.</p>", "version": "1", "read_only": true }),
+    );
+    let ask = json!({ "session": maker, "title": "Ship?", "question": "Ship it?" });
+    assert_eq!(host.ask("POST", "/decisions", Some(&ask)).0, 201);
+
+    // What failed first, then what is ready, then what is in the making; each oldest first.
+    let (code, whole) = page("");
+    assert_eq!(code, 200, "{whole}");
+    let listed = |page: &Value| -> Vec<(String, String)> {
+        let rows = page["artifacts"].as_array().unwrap();
+        let of = |row: &Value, key: &str| row[key].as_str().unwrap().to_string();
+        rows.iter()
+            .map(|row| (of(row, "title"), of(row, "attention_bucket")))
+            .collect()
+    };
+    let pair = |title: &str, bucket: &str| (title.to_string(), bucket.to_string());
+    assert_eq!(
+        listed(&whole),
+        [
+            pair("A change", "blocking"),
+            pair("Notes", "review"),
+            pair("A report", "review"),
+            pair("A table", "working"),
+        ]
+    );
+    assert_eq!(
+        (&whole["total"], &whole["next_cursor"]),
+        (&json!(4), &Value::Null)
+    );
+    assert_eq!(whole["artifacts"][2]["content"], "<p>Read me.</p>");
+    let (_, summed) = page("?representation=summary-v1");
+    assert_eq!(summed["artifacts"][2].get("content"), None);
+    assert_eq!(
+        summed["artifacts"][2]["content_omitted"]["reason"],
+        "summary"
+    );
+    assert_eq!(summed["snapshot_revision"], whole["snapshot_revision"]);
+
+    // A page at a time: a cursor goes on from where a page ended.
+    let (_, first) = page("?limit=3");
+    assert_eq!(listed(&first).len(), 3);
+    let cursor = first["next_cursor"].as_str().unwrap().to_string();
+    let (code, second) = page(&format!("?limit=3&cursor={cursor}"));
+    assert_eq!(code, 200, "{second}");
+    assert_eq!(listed(&second), [pair("A table", "working")]);
+    assert_eq!(second["next_cursor"], Value::Null);
+    assert_eq!(second["snapshot_revision"], first["snapshot_revision"]);
+
+    // What is no query, and a cursor of a list that has changed since.
+    for wrong in [
+        "?limit=many",
+        "?cursor=not-a-cursor",
+        "?representation=nothing",
+    ] {
+        let (code, said) = page(wrong);
+        assert_eq!(
+            (code, &said["error"]),
+            (400, &json!("invalid attention query")),
+            "{wrong}"
+        );
+    }
+    let table_id = table["artifact_id"].as_str().unwrap();
+    let (code, done) = host.ask(
+        "POST",
+        &format!("/artifacts/{table_id}"),
+        Some(&json!({ "status": "completed" })),
+    );
+    assert_eq!(code, 200, "{done}");
+    let (code, stale) = page(&format!("?limit=3&cursor={cursor}"));
+    assert_eq!(code, 409, "{stale}");
+    assert_eq!(
+        stale["error"],
+        "attention snapshot changed; restart pagination"
+    );
+    // What was finished is ready to be looked at now.
+    let (_, after) = page("");
+    assert_eq!(
+        listed(&after),
+        [
+            pair("A change", "blocking"),
+            pair("Notes", "review"),
+            pair("A table", "review"),
+            pair("A report", "review"),
+        ]
+    );
+    assert_ne!(after["snapshot_revision"], whole["snapshot_revision"]);
+    // The Host says it has the list.
+    let info = host.get("/server-info");
+    let features = info["capabilities"]["features"].as_array().unwrap();
+    assert!(features.contains(&json!("attention_index")), "{info}");
+}
