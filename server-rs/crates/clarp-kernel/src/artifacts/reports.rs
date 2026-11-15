@@ -27,8 +27,8 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{
-    Artifact, ArtifactBook, Ctx, Made, Maker, New, Opening, Refused, applied, payload_as, refuse,
-    require_payload, status_asked,
+    Artifact, ArtifactBook, Ctx, Made, Maker, New, Opening, Refused, answers, applied, payload_as,
+    refuse, require_payload, status_asked,
 };
 
 /// What a form that takes answers is refused with.
@@ -216,6 +216,24 @@ fn inline(value: &Value, depth: usize) -> Result<(), Refused> {
 /// Whether a normalized payload is a report this Host shows: a page, a version that names
 /// it, origins that are exact, and no answers.
 pub fn validate(payload: &Map<String, Value>) -> Result<(), Refused> {
+    if !judged(payload)? {
+        // Where the Python Host asks whether the schema is a JSON Schema.
+        return refuse(FORMS_NOT_HERE);
+    }
+    Ok(())
+}
+
+/// Whether a normalized payload is a form or a report, as the Python Host judges one: a
+/// page, a version that names it, origins that are exact, and a schema of its answers that
+/// is one. A schema with a word this Host does not read is refused by that word.
+pub fn contract(payload: &Map<String, Value>) -> Result<(), Refused> {
+    judged(payload)?;
+    answers::check(payload.get("answer_schema").unwrap_or(&Value::Null))
+}
+
+/// What is asked of a form and of a report alike, up to what its schema says. Answers
+/// whether it is a report: one that takes no answers.
+fn judged(payload: &Map<String, Value>) -> Result<bool, Refused> {
     let content = payload.get("content").and_then(Value::as_str);
     if !content.is_some_and(|content| !content.trim().is_empty()) {
         return refuse("HTML form requires content");
@@ -244,11 +262,7 @@ pub fn validate(payload: &Map<String, Value>) -> Result<(), Refused> {
         return refuse("answer_schema must describe an object");
     };
     inline(schema, 0)?;
-    if !read_only {
-        // Where the Python Host asks whether the schema is a JSON Schema.
-        return refuse(FORMS_NOT_HERE);
-    }
-    Ok(())
+    Ok(read_only)
 }
 
 /// The field of a shown artifact that names its page, until whoever answers puts the page
