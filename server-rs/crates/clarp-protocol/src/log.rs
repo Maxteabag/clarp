@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// One page of a conversation, or the changes since a revision.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LogResponse {
     /// Changes when the agent starts a new conversation: a client then drops what it cached.
     pub conversation_id: String,
@@ -40,7 +40,7 @@ pub enum Phase {
 }
 
 /// One item of a conversation: something the user, the agent or the Host said.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Turn {
     pub id: String,
     pub role: String,

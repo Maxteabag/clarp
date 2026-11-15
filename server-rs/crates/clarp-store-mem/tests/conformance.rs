@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use clarp_codec::standard_set;
-use clarp_ports::testkit::log_engine_conformance;
-use clarp_store_mem::MemEngine;
+use clarp_ports::testkit::{key_value_conformance, log_engine_conformance};
+use clarp_store_mem::{MemEngine, MemKeyValue};
 
 #[test]
 fn memory_passes_the_log_engine_suite() {
@@ -32,5 +32,14 @@ fn memory_passes_the_suite_starting_compressed() {
         Path::new("/agents/b"),
         &zstd,
         &none,
+    );
+}
+
+#[test]
+fn memory_passes_the_key_value_suite() {
+    key_value_conformance(
+        &MemKeyValue::new(),
+        Path::new("/fleet-a.db"),
+        Path::new("/fleet-b.db"),
     );
 }

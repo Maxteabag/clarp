@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::codec::{CodecSet, Compressor};
+use crate::kv::KeyValueEngine;
 use crate::log::{Item, Kinds, LogEngine, NewItem, Seq};
 
 static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -347,4 +348,80 @@ pub fn log_engine_conformance(
         .expect("the switched set knows the first codec");
     let log = engine.open(dir_a, both).expect("a log opens a third time");
     assert_eq!(log.read_tail(Kinds::ALL, 1).expect("read tail")[0].seq, 6);
+}
+
+/// What every [`KeyValueEngine`] must do. `path_a` and `path_b` are two stores.
+pub fn key_value_conformance(engine: &dyn KeyValueEngine, path_a: &Path, path_b: &Path) {
+    assert!(!engine.name().is_empty(), "an engine has a name");
+    let mut store = engine
+        .open(path_a)
+        .expect("an engine opens a store that is not there yet");
+    assert!(
+        store.get("agent", "a1").expect("get").is_none(),
+        "a new store holds nothing"
+    );
+    assert!(store.list("agent").expect("list").is_empty());
+    assert!(
+        !store.delete("agent", "a1").expect("delete"),
+        "removing what is not there says so"
+    );
+
+    store.put("agent", "b2", b"second").expect("put");
+    store.put("agent", "a1", b"first").expect("put");
+    store.put("setting", "a1", b"another table").expect("put");
+    store
+        .put("agent", "empty", b"")
+        .expect("put an empty value");
+    assert_eq!(
+        store.get("agent", "a1").expect("get").as_deref(),
+        Some(&b"first"[..])
+    );
+    assert_eq!(
+        store.get("setting", "a1").expect("get").as_deref(),
+        Some(&b"another table"[..]),
+        "the same key in another table is another value"
+    );
+    assert_eq!(
+        store.get("agent", "empty").expect("get").as_deref(),
+        Some(&b""[..]),
+        "an empty value is a value"
+    );
+    let big = noise(200_000, 5);
+    store.put("agent", "a1", &big).expect("replace");
+    assert!(
+        store.get("agent", "a1").expect("get").as_deref() == Some(&big[..]),
+        "a put replaces the value that was there"
+    );
+    let keys: Vec<String> = store
+        .list("agent")
+        .expect("list")
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    assert_eq!(
+        keys,
+        vec!["a1", "b2", "empty"],
+        "a table is listed by key, and only that table"
+    );
+    assert!(store.delete("agent", "b2").expect("delete"));
+    assert!(store.get("agent", "b2").expect("get").is_none());
+    assert!(
+        store.get("setting", "a1").expect("get").is_some(),
+        "removing a key leaves the other tables alone"
+    );
+    drop(store);
+
+    // Another path is another store.
+    let other = engine.open(path_b).expect("a second store opens");
+    assert!(
+        other.list("agent").expect("list").is_empty(),
+        "one store's values never appear in another"
+    );
+    drop(other);
+
+    // Opening again finds what was put.
+    let store = engine.open(path_a).expect("a store opens again");
+    assert!(store.get("agent", "a1").expect("get").as_deref() == Some(&big[..]));
+    assert_eq!(store.list("agent").expect("list").len(), 2);
+    assert_eq!(store.list("setting").expect("list").len(), 1);
 }

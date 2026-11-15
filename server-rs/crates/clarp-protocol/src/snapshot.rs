@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub agents: Vec<AgentSummary>,
     /// The session that is open, when one is.
@@ -18,7 +18,7 @@ pub struct Snapshot {
 }
 
 /// One agent in the snapshot: who it is, what it is doing, and where its conversation stands.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentSummary {
     pub agent_id: String,
     pub session: String,

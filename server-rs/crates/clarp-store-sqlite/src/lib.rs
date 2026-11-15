@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use clarp_ports::codec::{CodecSet, CodecTag};
+use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError};
 use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
 use rusqlite::{Connection, Params, params};
 
@@ -212,5 +213,116 @@ impl AgentLog for SqliteLog {
             params![key],
         )?;
         Ok(found.into_iter().next())
+    }
+}
+
+const KV_SCHEMA_VERSION: i64 = 1;
+
+const KV_SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS kv(
+    tbl   TEXT NOT NULL,
+    key   TEXT NOT NULL,
+    value BLOB NOT NULL,
+    PRIMARY KEY(tbl, key)
+) STRICT, WITHOUT ROWID;
+";
+
+/// The fleet's tables in one SQLite file. Durable as the log is: a `put` that returned is on disk.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SqliteKeyValue;
+
+impl SqliteKeyValue {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+fn failed(error: rusqlite::Error) -> StoreError {
+    StoreError(error.to_string())
+}
+
+impl KeyValueEngine for SqliteKeyValue {
+    fn name(&self) -> &'static str {
+        "sqlite"
+    }
+
+    fn open(&self, path: &Path) -> Result<Box<dyn KeyValue>, StoreError> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| StoreError(format!("{}: {e}", dir.display())))?;
+        }
+        let conn = Connection::open(path).map_err(failed)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
+            .map_err(failed)?;
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(failed)?;
+        match version {
+            0 => conn
+                .execute_batch(&format!(
+                    "{KV_SCHEMA} PRAGMA user_version={KV_SCHEMA_VERSION};"
+                ))
+                .map_err(failed)?,
+            KV_SCHEMA_VERSION => {}
+            newer => {
+                return Err(StoreError(format!(
+                    "{} has schema {newer}, this build reads schema {KV_SCHEMA_VERSION}",
+                    path.display()
+                )));
+            }
+        }
+        Ok(Box::new(SqliteTables { conn }))
+    }
+}
+
+struct SqliteTables {
+    conn: Connection,
+}
+
+impl KeyValue for SqliteTables {
+    fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare_cached("SELECT value FROM kv WHERE tbl = ?1 AND key = ?2")
+            .map_err(failed)?;
+        let mut rows = statement.query(params![table, key]).map_err(failed)?;
+        match rows.next().map_err(failed)? {
+            Some(row) => Ok(Some(row.get(0).map_err(failed)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError> {
+        self.conn
+            .prepare_cached("INSERT INTO kv(tbl, key, value) VALUES (?1, ?2, ?3) ON CONFLICT(tbl, key) DO UPDATE SET value = excluded.value")
+            .map_err(failed)?
+            .execute(params![table, key, value])
+            .map_err(failed)?;
+        Ok(())
+    }
+
+    fn delete(&mut self, table: &str, key: &str) -> Result<bool, StoreError> {
+        let removed = self
+            .conn
+            .prepare_cached("DELETE FROM kv WHERE tbl = ?1 AND key = ?2")
+            .map_err(failed)?
+            .execute(params![table, key])
+            .map_err(failed)?;
+        Ok(removed > 0)
+    }
+
+    fn list(&self, table: &str) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare_cached("SELECT key, value FROM kv WHERE tbl = ?1 ORDER BY key")
+            .map_err(failed)?;
+        let rows = statement
+            .query_map(params![table], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(failed)?;
+        let mut found = Vec::new();
+        for row in rows {
+            found.push(row.map_err(failed)?);
+        }
+        Ok(found)
     }
 }

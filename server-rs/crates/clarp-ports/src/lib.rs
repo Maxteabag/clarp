@@ -1,7 +1,8 @@
 //! The ports of the Clarp Host.
 //!
 //! Every part of the server that has more than one implementation is a trait in this crate: the
-//! compressor, the engine that stores an agent's log, the clock. Each port comes with one
+//! compressor, the engine that stores an agent's log, the store of the fleet's own facts, the
+//! clock. Each port comes with one
 //! conformance suite in [`testkit`] that every implementation must pass, so that choosing an
 //! implementation is a configuration value and not a porting project.
 //!
@@ -9,5 +10,6 @@
 
 pub mod clock;
 pub mod codec;
+pub mod kv;
 pub mod log;
 pub mod testkit;

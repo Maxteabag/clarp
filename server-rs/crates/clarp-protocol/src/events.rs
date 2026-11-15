@@ -33,7 +33,7 @@ pub enum Event {
 }
 
 /// The conversation changed. A wake-up, not the data: the client fetches a delta.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TranscriptUpdated {
     pub session: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -117,7 +117,7 @@ pub enum ActivityStatus {
 }
 
 /// What an agent is doing inside a turn: a tool starting or ending, a stop, a repair.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentActivity {
     pub session: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
