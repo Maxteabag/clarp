@@ -87,7 +87,8 @@ done
 # Host on this machine, so that the name is never looked for further along the path. What the
 # Host does not have yet it says so itself, and does nothing.
 tools=0
-for name in $( { echo clarp-agent-bg; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
+for name in $( { printf '%s\n' clarp-agent-bg clarp-admin clarp-goal clarp-agent-artifacts; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
+    [ "$name" = clarp-sub-agent ] && continue
     cat > "$share/tools/.$name.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
@@ -97,6 +98,33 @@ EOF
     mv -f "$share/tools/.$name.new" "$share/tools/$name"
     tools=$((tools + 1))
 done
+# One tool is a program of its own: clarp-sub-agent, with which an agent starts helpers and
+# workers that outlive its turn. It asks no Host anything itself: it calls clarp-admin and
+# clarp-agent-bg, which are this Host's above, and systemd. It is the repository's own program
+# (skills/clarp-sub-agents), copied here, so that a Python Host's copy is never the one run.
+sub_agent="$here/../skills/clarp-sub-agents/scripts/sub_agent.py"
+mkdir -p "$share/libexec" "$share/data/sub-agents"
+if [ -f "$sub_agent" ]; then
+    install -m 644 "$sub_agent" "$share/libexec/.sub_agent.py.new"
+    mv -f "$share/libexec/.sub_agent.py.new" "$share/libexec/sub_agent.py"
+    cat > "$share/tools/.clarp-sub-agent.new" <<EOF
+#!/bin/sh
+# Written by install-host: the program an agent on the Rust Host starts helpers with.
+# What it keeps of its helpers is this Host's own, apart from a Python Host's on the same machine.
+CLARP_SUB_AGENT_DIR="\${CLARP_SUB_AGENT_DIR:-$share/data/sub-agents}"; export CLARP_SUB_AGENT_DIR
+exec python3 "$share/libexec/sub_agent.py" "\$@"
+EOF
+else
+    # Installed without the repository beside it: the name is taken, and says so.
+    cat > "$share/tools/.clarp-sub-agent.new" <<EOF
+#!/bin/sh
+# Written by install-host: one of an agent's own tools on the Rust Host.
+exec "$share/bin/clarp-host" tool clarp-sub-agent "\$@"
+EOF
+fi
+chmod 755 "$share/tools/.clarp-sub-agent.new"
+mv -f "$share/tools/.clarp-sub-agent.new" "$share/tools/clarp-sub-agent"
+tools=$((tools + 1))
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 
@@ -107,8 +135,10 @@ fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
 # What the agents' Clarp tools read to find their Host: this one.
 (umask 077; cat > "$config/config.toml" <<EOF
-# Written by install-host. An agent on the Rust Host finds its Host here.
+# Written by install-host. An agent on the Rust Host finds its Host here: a turn is told
+# where its Host is, and a worker an agent left running reads it from this file.
 [server]
+kind = "clarp-host"
 bind_addr = "$address"
 port = $port
 auth_token = "$token"

@@ -43,12 +43,18 @@ impl Place {
 
     /// Starts the Host with more on its command line.
     fn start_with(&self, token: &str, more: &[&str]) -> Host {
+        self.start_in(token, more, &[])
+    }
+
+    /// Starts the Host with more on its command line and more in its environment.
+    fn start_in(&self, token: &str, more: &[&str], world: &[(&str, &str)]) -> Host {
         let mut process = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
             .args(["--data", self.root.join("data").to_str().unwrap()])
             .args(["--run", self.root.join("run").to_str().unwrap()])
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
             .args(more)
+            .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -4245,4 +4251,249 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         host.get(&format!("/agent-helper-state?session={helper}")),
         before
     );
+}
+
+/// Writes a program a test runs in place of a real one.
+fn program(path: &std::path::Path, text: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, text).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The first program of this name on the path the tests run with.
+fn on_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+#[test]
+fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
+    // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
+    // no Host anything itself: it calls clarp-admin and clarp-agent-bg by name. Here those
+    // names are this Host's, as an installation puts them on an agent's path.
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../skills/clarp-sub-agents/scripts/sub_agent.py"
+    );
+    assert!(
+        std::path::Path::new(script).is_file(),
+        "the program is not beside server-rs: {script}"
+    );
+    let python = on_path("python3").expect("the program needs python3");
+    let place = Place::new("sub-agent");
+    let token = "sub-agent-token";
+    // A stand-in for Claude Code: it takes the message and answers one line.
+    let claude = place.root.join("claude");
+    program(
+        &claude,
+        "#!/bin/sh\nread message\n\
+         printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
+         printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
+         printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+    );
+    let host = place.start_in(
+        token,
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let maker = host.new_agent("Maker");
+
+    // An agent's path, as an installation makes it: this Host's tools, and python. Nothing
+    // of systemd is on it, so the program starts no watcher of its own here.
+    let tools = place.root.join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    for name in ["clarp-admin", "clarp-agent-bg"] {
+        program(
+            &tools.join(name),
+            &format!(
+                "#!/bin/sh\nexec \"{}\" tool {name} \"$@\"\n",
+                env!("CARGO_BIN_EXE_clarp-host")
+            ),
+        );
+    }
+    std::os::unix::fs::symlink(&python, tools.join("python3")).unwrap();
+    // What a worker an agent left running finds its Host by: the file an installation
+    // writes. No turn tells this program where the Host is.
+    let config = place.root.join("config");
+    std::fs::create_dir_all(&config).unwrap();
+    let (address, port) = host.address.rsplit_once(':').unwrap();
+    std::fs::write(
+        config.join("config.toml"),
+        format!(
+            "[server]\nkind = \"clarp-host\"\nbind_addr = \"{address}\"\nport = {port}\nauth_token = \"{token}\"\n"
+        ),
+    )
+    .unwrap();
+    let kept = place.root.join("sub-agents");
+    let run = |args: &[&str]| -> (i32, String, String) {
+        let out = Command::new(&python)
+            .arg(script)
+            .args(args)
+            .current_dir(&place.root)
+            .env_clear()
+            .env("PATH", &tools)
+            .env("HOME", &place.root)
+            .env("CLARP_CONFIG_DIR", &config)
+            .env("CLARP_SUB_AGENT_DIR", &kept)
+            .env("CLAUDE_PWA_SESSION", &maker)
+            .output()
+            .unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let lineage = |session: &str| host.get(&format!("/agent-helper-state?session={session}"));
+    let row = |session: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .cloned()
+            .unwrap_or_else(|| panic!("{session} is not in the snapshot"))
+    };
+
+    // The agent starts a helper from a written brief.
+    let work = place.root.join("work");
+    std::fs::write(
+        place.root.join("brief.md"),
+        "Count the files here and report.\n",
+    )
+    .unwrap();
+    let (code, out, err) = run(&[
+        "start",
+        "counter",
+        work.to_str().unwrap(),
+        "brief.md",
+        "--clarp-agent",
+        "--title",
+        "Counting",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains("started helper counter (parent=maker)"),
+        "{out}{err}"
+    );
+    let made = lineage("counter");
+    assert_eq!(
+        (
+            &made["role"],
+            &made["helper_state"],
+            &made["parent_agent_id"]
+        ),
+        (
+            &json!("helper"),
+            &json!("running"),
+            &row(&maker)["agent_id"]
+        )
+    );
+    assert_eq!(
+        row("counter")["cwd"],
+        json!(work.canonicalize().unwrap().display().to_string())
+    );
+    assert_eq!(row("counter")["model"], "claude-opus-5-5");
+    // It was handed its brief as a message from its maker, and worked on it.
+    wait_for("the helper's answer", || {
+        host.conversation("counter").len() == 2 && host.state("counter") == "done"
+    });
+    let rows = host.turns("counter");
+    assert_eq!(rows[0]["origin"], "agent");
+    assert_eq!(rows[0]["sender_session"], "maker");
+    let brief = rows[0]["text"].as_str().unwrap();
+    assert!(
+        brief
+            .starts_with("You are the Clarp helper agent `counter` (counter), working for `maker`"),
+        "{brief}"
+    );
+    assert!(brief.contains("Count the files here and report."));
+    assert!(brief.contains("clarp-admin prompt --to maker --from counter"));
+    assert_eq!(rows[1]["text"], "on it");
+    assert_eq!(
+        std::fs::read_to_string(kept.join("counter.session")).unwrap(),
+        "counter\n"
+    );
+
+    // The program's watcher holds a job on the maker until the helper has reported. The job
+    // only mirrors the helper: the maker's row counts one sub-agent and no process.
+    let (code, handle, err) = tool(
+        &host,
+        &place.root,
+        None,
+        &[
+            "clarp-agent-bg",
+            &maker,
+            "job-upsert",
+            "sub-agent-counter",
+            "sub-agent",
+            "Counting",
+            "counter",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let active = tool(
+        &host,
+        &place.root,
+        None,
+        &["clarp-agent-bg", &maker, "job-active", handle.trim()],
+    );
+    assert_eq!(active.0, 0, "{}", active.2);
+    wait_for("the maker's row to count its helper once", || {
+        row(&maker)["background_jobs"] == json!({ "count": 0, "sub_agents": 1 })
+    });
+    assert_eq!(row(&maker)["latest_state"], "background");
+
+    // The helper reports, as its brief told it to. The watcher then closes its job, from a
+    // process no turn started: it finds the Host by the installation's file.
+    let (code, _, err) = tool(
+        &host,
+        &place.root,
+        None,
+        &[
+            "clarp-admin",
+            "prompt",
+            "--to",
+            &maker,
+            "--from",
+            "counter",
+            "--text",
+            "There are no files here.",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(lineage("counter")["helper_state"], "reported");
+    let (code, out, err) = run(&["__watch", "counter", "counter", &maker]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(
+        std::fs::read_to_string(kept.join("counter.exit")).unwrap(),
+        "0\n"
+    );
+    let job = host.get("/background-jobs")["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["job_id"] == "sub-agent-counter")
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert_eq!(job["status"], "succeeded", "{job}");
+    wait_for("the maker to be at rest", || {
+        row(&maker)["background_jobs"] == json!({ "count": 0, "sub_agents": 0 })
+            && host.state(&maker) == "done"
+    });
+
+    // The same name again takes the helper up again instead of making a second one.
+    let (code, out, err) = run(&[
+        "start",
+        "counter",
+        work.to_str().unwrap(),
+        "brief.md",
+        "--clarp-agent",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(lineage("counter")["helper_state"], "running");
+    assert_eq!(row(&maker)["child_count"], 1);
 }
