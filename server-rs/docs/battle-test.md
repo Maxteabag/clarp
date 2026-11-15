@@ -106,10 +106,26 @@ exactly once: a turn that was run a second time would leave a second mark.
 The result is in the same evidence file, one line for each agent and one for the exercise, and `soak report`
 names every exercise.
 
-On 15 Nov 2026, on the build of `d9868bea`: at 17:31 two turns of two, and at 17:33 ten turns of ten, were
-in their commands (`sleep 45` under a real Claude Code) when the service was restarted. The Host answered
-again 102 ms after the restart and had all ten turns. All ten ended completed, each message once, each
-command run once, in 52 to 54 seconds from the message: the length of the command and no more.
+Three more things can be said to it. `--by COMMAND` restarts the Host by that command instead: the
+installer, for an update with turns running, or `systemctl --user kill -s KILL clarp-host.service`, for a
+Host that is killed and started again by systemd two seconds later. `--moment accepted` restarts right after
+the messages were accepted, when the turns are in their first steps. `--moment ending` restarts `--settle`
+seconds after the first command ended; the messages go out `--stagger` apart, so one restart meets turns
+that have just ended, turns that are answering, and turns still in their commands.
+
+On 15 Nov 2026, on the build of `d9868bea`, with real Claude Code turns:
+
+| When | How | Turns | What it met | Result |
+|---|---|---|---|---|
+| 17:31 | the service restarted | 2 | every turn in its command (`sleep 30`) | held |
+| 17:33 | the service restarted | 10 | every turn in its command (`sleep 45`) | held: the Host answered again after 102 ms with all ten |
+| 17:35 | the Host killed (`SIGKILL`) | 5 | every turn in its command | held: back after 2.1 s with all five |
+| 17:36 | the Host killed | 5 | the messages just accepted, the turns starting | held |
+| 17:37 | the Host killed | 8 | one turn just ended, two whose command ended and whose answer came while the Host was down, five in their commands | held |
+
+Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
+completed, answered with its word, and its command ran exactly once. Thirty turns, none interrupted, lost or
+run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no more.
 
 ## What a round does not prove
 
