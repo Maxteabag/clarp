@@ -118,6 +118,7 @@ impl ScriptedInterpreter {
         let id = self.reply_id();
         self.replies += 1;
         out.push(Signal::Reply(Reply {
+            origin: clarp_kernel::turn::Origin::User,
             id,
             turn: self.turn,
             text,
@@ -148,6 +149,7 @@ impl ScriptedInterpreter {
             self.settle(out);
             let id = text("id").unwrap_or(name).to_string();
             let call = ToolCall {
+                origin: clarp_kernel::turn::Origin::User,
                 id: id.clone(),
                 turn: self.turn,
                 name: name.to_string(),
@@ -275,6 +277,7 @@ mod tests {
         assert_eq!(
             durable[1],
             Signal::Reply(Reply {
+                origin: clarp_kernel::turn::Origin::User,
                 id: "r-2-1".to_string(),
                 turn: 2,
                 text: "plain text is the reply\nand so is this".to_string(),
@@ -288,6 +291,7 @@ mod tests {
         assert_eq!(
             durable[6],
             Signal::Reply(Reply {
+                origin: clarp_kernel::turn::Origin::User,
                 id: "r-2-2".to_string(),
                 turn: 2,
                 text: "One file.".to_string(),

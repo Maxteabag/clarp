@@ -18,12 +18,34 @@ use serde::{Deserialize, Serialize};
 pub struct TurnId(pub u64);
 
 /// Who asked for the turn. Admission decides differently for each.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "from", rename_all = "kebab-case")]
 pub enum Origin {
+    #[default]
     User,
-    Agent { agent_id: String },
-    Trigger { name: String },
+    Agent {
+        agent_id: String,
+    },
+    /// Something the Host does by itself, by the name the apps file it under: `automation`
+    /// for a goal that is taken up again, a schedule, an answer that is delivered.
+    Trigger {
+        name: String,
+    },
+}
+
+impl Origin {
+    pub fn is_user(&self) -> bool {
+        *self == Self::User
+    }
+
+    /// The word the contract has for it.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::User => "user",
+            Self::Agent { .. } => "agent",
+            Self::Trigger { name } => name,
+        }
+    }
 }
 
 /// How a message enters the mailbox.

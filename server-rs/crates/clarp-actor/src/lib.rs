@@ -39,7 +39,7 @@ use clarp_kernel::conversation::{
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
-use clarp_kernel::turn::{Activity, Admission, RunOutcome, Settled, Turn, TurnId};
+use clarp_kernel::turn::{Activity, Admission, Origin, RunOutcome, Settled, Turn, TurnId};
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
@@ -269,6 +269,10 @@ pub struct LiveStatus {
     /// The id of the message this turn answers, and the trace it travels under.
     pub message_id: String,
     pub trace_id: Option<String>,
+    /// Who asked for it.
+    pub origin: Origin,
+    /// It waited in the queue before it started, or was left for later and went through it.
+    pub from_queue: bool,
     /// Its tool has not said anything yet.
     pub starting: bool,
     pub activity: Activity,
@@ -321,6 +325,8 @@ struct LiveTurn {
     /// The message this turn answers.
     message_id: String,
     trace_id: Option<String>,
+    /// Who asked for it: what every row of the turn is filed under.
+    origin: Origin,
     /// The last row this turn put into the conversation: the message itself until the turn
     /// says something. It is the row that is told how the turn ended.
     last_row: String,
@@ -469,7 +475,7 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     Some(Entry::TurnEnd(end))
 }
 
-fn show(drafts: &mut Vec<Draft>, turn: TurnId, live: LiveReply, ts_ms: i64) {
+fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
     match drafts.iter_mut().find(|draft| draft.id == live.id) {
         Some(draft) => draft.text = live.text,
         None => drafts.push(Draft {
@@ -478,6 +484,7 @@ fn show(drafts: &mut Vec<Draft>, turn: TurnId, live: LiveReply, ts_ms: i64) {
             text: live.text,
             revision: 0,
             ts_ms,
+            origin: origin.clone(),
         }),
     }
 }
@@ -570,11 +577,14 @@ impl Actor {
             ),
             None => (String::new(), None, Vec::new()),
         };
+        let from_queue = agent.live_from_queue();
         let live = match agent.live() {
             Some(Turn::Starting(turn)) => Some(LiveStatus {
                 turn: turn.id,
                 message_id,
                 trace_id,
+                origin: turn.origin.clone(),
+                from_queue,
                 starting: true,
                 activity: Activity::Thinking,
                 started_at_ms: turn.started_at_ms,
@@ -586,6 +596,8 @@ impl Actor {
                 turn: turn.id,
                 message_id,
                 trace_id,
+                origin: turn.origin.clone(),
+                from_queue,
                 starting: false,
                 activity: turn.activity.clone(),
                 started_at_ms: turn.started_at_ms,
@@ -1135,6 +1147,7 @@ impl Actor {
                 turn: draft.turn,
                 text: draft.text,
                 trace_id: facts.trace_id.clone(),
+                origin: draft.origin,
             });
             closes = piece.id().to_string();
             batch.item(written(&piece, now_ms)?);
@@ -1225,6 +1238,7 @@ impl Actor {
             last_row: message.id.clone(),
             message_id: message.id,
             trace_id: message.trace_id,
+            origin: message.origin,
             model: None,
             tokens: None,
             interpreter,
@@ -1310,7 +1324,9 @@ impl Actor {
                 interpreter.on_record(record, &mut signals);
                 for signal in signals.drain(..) {
                     match signal {
-                        Signal::Live(live) => show(&mut drafts, turn, live, record.t),
+                        Signal::Live(live) => {
+                            show(&mut drafts, turn, &message.origin, live, record.t);
+                        }
                         Signal::Reply(reply) => {
                             drafts.retain(|draft| draft.id != reply.id);
                             last_row = reply.id;
@@ -1347,6 +1363,7 @@ impl Actor {
             turn,
             message_id: message.id,
             trace_id: message.trace_id,
+            origin: message.origin,
             last_row,
             model,
             tokens,
@@ -1485,7 +1502,7 @@ impl Actor {
                             if !shown.contains(&reply.id) {
                                 shown.push(reply.id.clone());
                             }
-                            show(&mut live.drafts, turn, reply, t);
+                            show(&mut live.drafts, turn, &live.origin, reply, t);
                             continue;
                         }
                         Signal::Model(named) => {
@@ -1503,9 +1520,11 @@ impl Actor {
                             // The finished reply takes the place of the one being written.
                             live.drafts.retain(|draft| draft.id != reply.id);
                             reply.trace_id = live.trace_id.clone();
+                            reply.origin = live.origin.clone();
                             Entry::Reply(reply)
                         }
-                        Signal::Tool(call) => {
+                        Signal::Tool(mut call) => {
+                            call.origin = live.origin.clone();
                             follow_tool(&mut live.tools, &call);
                             Entry::Tool(call)
                         }

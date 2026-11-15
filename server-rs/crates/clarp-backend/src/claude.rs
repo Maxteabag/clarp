@@ -245,6 +245,7 @@ impl ClaudeInterpreter {
         let id = self.reply_id(&draft);
         self.replies += 1;
         out.push(Signal::Reply(Reply {
+            origin: clarp_kernel::turn::Origin::User,
             id,
             turn: self.turn,
             text,
@@ -442,6 +443,7 @@ impl ClaudeInterpreter {
                     self.announce(call_id, name, out);
                     if !self.tools.contains_key(call_id) {
                         let call = ToolCall {
+                            origin: clarp_kernel::turn::Origin::User,
                             id: call_id.to_string(),
                             turn: self.turn,
                             name: name.to_string(),
@@ -700,6 +702,7 @@ mod tests {
         );
 
         let tool = |status, output: Option<&str>, ended_at_ms| ToolCall {
+            origin: clarp_kernel::turn::Origin::User,
             id: "toolu_1".to_string(),
             turn: 7,
             name: "Bash".to_string(),
@@ -722,6 +725,7 @@ mod tests {
                 }),
                 Signal::Tool(tool(ToolStatus::Running, None, None)),
                 Signal::Reply(Reply {
+                    origin: clarp_kernel::turn::Origin::User,
                     id: "r-1".to_string(),
                     turn: 7,
                     text: "I will look.".to_string(),
@@ -731,6 +735,7 @@ mod tests {
                 Signal::Moved(Activity::Thinking),
                 Signal::Moved(Activity::Responding),
                 Signal::Reply(Reply {
+                    origin: clarp_kernel::turn::Origin::User,
                     id: "r-2".to_string(),
                     turn: 7,
                     text: "One file.".to_string(),
@@ -913,6 +918,7 @@ mod tests {
         assert_eq!(
             tail[0],
             Signal::Reply(Reply {
+                origin: clarp_kernel::turn::Origin::User,
                 id: "r-1".to_string(),
                 turn: 7,
                 text: "Half a sen".to_string(),

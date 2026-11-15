@@ -155,11 +155,16 @@ pub struct Agent {
     stopping: Option<String>,
     paused: bool,
     settled: u64,
-    /// How often what waits, or whether it is held, has changed. A message that starts at once
-    /// never waited and does not count: this is the number a client orders queue news by.
+    /// How often what waits, or whether it is held, has changed. A message that was said and
+    /// starts at once never waited and does not count: this is the number a client orders
+    /// queue news by.
     queue_revision: u64,
-    /// The turns that had to wait: each counts once when it joins and once when it leaves.
+    /// The turns that went through the queue: each counts once when it joins and once when it
+    /// leaves. A turn that had to wait is one, and so is every message that was left for
+    /// later, even when nothing is in its way and it leaves in the same breath.
     waited: BTreeSet<TurnId>,
+    /// The live turn came through the queue.
+    live_from_queue: bool,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
     unheld: BTreeSet<TurnId>,
@@ -193,6 +198,7 @@ impl Default for Agent {
             settled: 0,
             queue_revision: 0,
             waited: BTreeSet::new(),
+            live_from_queue: false,
             unheld: BTreeSet::new(),
             last: None,
             backend_session: None,
@@ -228,6 +234,11 @@ impl Agent {
     /// taken back, the mailbox was held or let go.
     pub fn queue_revision(&self) -> u64 {
         self.queue_revision
+    }
+
+    /// Whether the live turn came through the queue: it had to wait, or it was left for later.
+    pub fn live_from_queue(&self) -> bool {
+        self.live.is_some() && self.live_from_queue
     }
 
     /// The last turn that held the agent and ended. A message that was taken back never did.
@@ -501,9 +512,13 @@ impl Agent {
                 if self.paused && matches!(queued.admission, Admission::Queue | Admission::Later) {
                     self.unheld.insert(turn);
                 }
-                // Does it have to wait: behind a turn, or because of a hold? A free agent has
-                // nothing waiting that could run, so nothing else can be in its way.
-                if self.live.is_some() || held {
+                // Does it go through the queue? It does when it has to wait, behind a turn or
+                // because of a hold: a free agent has nothing waiting that could run, so nothing
+                // else can be in its way. And it does when it was left for later, whether or not
+                // anything is in its way: whoever left it there is told that it joined and, in
+                // the same breath, that it left to run. The Python Host counts it so, and an app
+                // that orders queue news by the revision sees the same numbers from both.
+                if self.live.is_some() || held || queued.admission.waits_outside() {
                     self.waited.insert(turn);
                     self.queue_revision += 1;
                 }
@@ -533,6 +548,7 @@ impl Agent {
                 Turn::Settled(ended) => {
                     self.settled += 1;
                     self.stopping = None;
+                    self.live_from_queue = false;
                     self.last = Some(ended);
                 }
                 next => self.live = Some(next),
@@ -559,7 +575,8 @@ impl Agent {
         let Some(queued) = self.mailbox.remove(index) else {
             return Ok(());
         };
-        if self.waited.remove(&turn) {
+        let waited = self.waited.remove(&turn);
+        if waited {
             self.queue_revision += 1;
         }
         self.unheld.remove(&turn);
@@ -567,6 +584,7 @@ impl Agent {
             Turn::Settled(_) => self.settled += 1,
             next => {
                 self.live = Some(next);
+                self.live_from_queue = waited;
                 // A turn runs: what the agent rested in before is over.
                 self.resting = None;
             }
@@ -1021,6 +1039,31 @@ mod tests {
         })
         .unwrap();
         assert_eq!(a.agent.queue_revision(), 6, "joined, and was taken back");
+    }
+
+    #[test]
+    fn what_is_left_for_later_goes_through_the_queue_even_when_nothing_is_in_its_way() {
+        let mut a = Driven::new();
+        assert_eq!(
+            a.background(10),
+            vec![Effect::StartTurn {
+                turn: TurnId(1),
+                message_seq: 10
+            }]
+        );
+        assert_eq!(a.agent.queue_revision(), 2, "it joined, and left to run");
+        assert!(a.agent.live_from_queue());
+        a.finish(1);
+        assert!(!a.agent.live_from_queue(), "no turn is live");
+        // What is said to a free agent never waited.
+        a.user(11);
+        assert_eq!(a.agent.queue_revision(), 2);
+        assert!(!a.agent.live_from_queue());
+        // What is said to a busy one did.
+        a.user(12);
+        a.finish(2);
+        assert_eq!(a.agent.queue_revision(), 4, "it joined, and left to run");
+        assert!(a.agent.live_from_queue());
     }
 
     #[test]

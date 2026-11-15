@@ -47,6 +47,10 @@ pub struct Reply {
     /// The trace of the turn that said it: the id the message was sent under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
+    /// Who asked for the turn that said it. Written with the row, so that a page of a
+    /// conversation says of every row whose turn it was without looking the turn up.
+    #[serde(default, skip_serializing_if = "Origin::is_user")]
+    pub origin: Origin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +76,9 @@ pub struct ToolCall {
     pub started_at_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at_ms: Option<i64>,
+    /// Who asked for the turn that made the call.
+    #[serde(default, skip_serializing_if = "Origin::is_user")]
+    pub origin: Origin,
 }
 
 /// Something the Host itself says in a conversation: a turn that failed, a limit that was hit.
@@ -241,12 +248,16 @@ mod tests {
                 client: Some("desktop".to_string()),
             }),
             Entry::Reply(Reply {
+                origin: Origin::Trigger {
+                    name: "automation".to_string(),
+                },
                 id: "r-msg_1".to_string(),
                 turn: 3,
                 text: "hi".to_string(),
                 trace_id: None,
             }),
             Entry::Tool(ToolCall {
+                origin: Origin::User,
                 id: "toolu_1".to_string(),
                 turn: 3,
                 name: "Bash".to_string(),
