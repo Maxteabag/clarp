@@ -59,6 +59,9 @@ class World:
         for module in (clock, db):
             module.now_ms = lambda: self.now
         secrets.token_hex = self.token_hex
+        # The id of a published file: counted, like every other id of a scenario.
+        self.files = 0
+        secrets.token_urlsafe = self.token_urlsafe
         db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
         self.agents = {}
         for index, persona in enumerate(('Vera', 'Omar'), start=1):
@@ -81,6 +84,18 @@ class World:
         self.ids += 1
         return format(self.ids, f'0{nbytes * 2}x')
 
+    def token_urlsafe(self, nbytes: int = 18) -> str:
+        self.files += 1
+        return f'{self.files:024d}'
+
+    def publish(self, session: str, blob_hex: str, source_name: str, content_type: str, caption: str = ''):
+        """An agent publishes a file (`media_store.publish`): the row it is answered with, and
+        what its bytes are, which a podcast names."""
+        from lib import media_store
+        row = media_store.publish(session=session, blob=bytes.fromhex(blob_hex), source_name=source_name,
+                                  content_type=content_type, caption=caption, media_dir=SCRATCH / 'media')
+        return {**row, 'sha256': media_store.get(row['asset_id'])['sha256']}
+
     def later(self, ms: int) -> None:
         """Lets time pass without a call."""
         self.now += ms
@@ -101,7 +116,7 @@ class World:
             'has_pending_decision': artifacts.has_pending_decision,
             'cancel_for_agent': artifacts.cancel_for_agent,
             'plan_create': task_plans.create, 'plan_step': self.plan_step, 'plan_act': self.plan_act,
-            'plan_finish': task_plans.finish,
+            'plan_finish': task_plans.finish, 'publish': self.publish,
         }[name]
         entry = {'call': name, 'args': args, 'at': self.now}
         ids_before = self.ids
@@ -492,12 +507,78 @@ def the_inbox_and_what_a_user_does_with_an_artifact(w: World) -> None:
     w.call('update', artifact_id=doc['artifact_id'], data={'status': 'ready'})
 
 
+MP3 = (b'ID3\x04\x00\x00\x00\x00\x00\x00' + b'\x00' * 8).hex()
+MP4 = b'\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom'.hex()
+PDF = b'%PDF-1.7\n1 0 obj\n'.hex()
+PNG = (b'\x89PNG\r\n\x1a\n' + (13).to_bytes(4, 'big') + b'IHDR' + (640).to_bytes(4, 'big') + (480).to_bytes(4, 'big')
+       + b'\x08\x06\x00\x00\x00').hex()
+
+
+def what_names_a_published_file(w: World) -> None:
+    """A recording, a film and a document are artifacts that name a file their agent published."""
+    voice = w.call('publish', session=w.vera, blob_hex=MP3, source_name='voice note.mp3', content_type='audio/mpeg',
+                   caption='A note')
+    film = w.call('publish', session=w.vera, blob_hex=MP4, source_name='clip.mp4', content_type='video/mp4')
+    paper = w.call('publish', session=w.vera, blob_hex=PDF, source_name='report.pdf', content_type='application/pdf')
+    chart = w.call('publish', session=w.vera, blob_hex=PNG, source_name='chart.png', content_type='image/png')
+    theirs = w.call('publish', session=w.omar, blob_hex=PDF, source_name='other.pdf', content_type='application/pdf')
+    w.call('publish', session='nobody', blob_hex=PDF, source_name='x.pdf', content_type='application/pdf')
+    w.call('publish', session=w.vera, blob_hex=b'#!/bin/sh\n'.hex(), source_name='run.sh', content_type='application/x-sh')
+    w.call('publish', session=w.vera, blob_hex='', source_name='empty.pdf', content_type='application/pdf')
+
+    def named(asset, **more):
+        return {'url': asset['url'], 'mime_type': asset['mime_type'], 'file_name': asset['file_name'], **more}
+
+    audio = w.call('create', session=w.vera, type='audio', title='A voice note', summary='Two minutes',
+                   payload=named(voice, duration_ms=120_000, size_bytes=voice['bytes']))
+    w.call('create', session=w.vera, type='video', title='A clip', payload=named(film, duration_ms=4_000,
+                                                                              thumbnail_url=chart['url']))
+    doc = w.call('create', session=w.vera, type='file', title='The report', payload=named(paper))
+    w.call('create', session=w.vera, type='file', title='A picture as a file', payload=named(chart))
+    w.call('create', session=w.vera, type='file', title='A recording as a file', payload=named(voice))
+    w.call('get', artifact_id=audio['artifact_id'])
+    w.call('list', session=w.vera, type='audio')
+    w.call('list', session=w.vera)
+    # What its kind refuses.
+    w.call('create', session=w.vera, type='audio', title='T', payload=named(film), note='a film is no recording')
+    w.call('create', session=w.vera, type='video', title='T', payload=named(voice), note='a recording is no film')
+    w.call('create', session=w.vera, type='audio', title='T', payload=named(voice, mime_type='AUDIO/MPEG'),
+           note='the kind is read without its case, the file\'s own is not')
+    w.call('create', session=w.vera, type='audio', title='T', payload={'url': voice['url'], 'mime_type': 'audio/mpeg'})
+    w.call('create', session=w.vera, type='file', title='T', payload={'url': '', 'mime_type': '', 'file_name': ''})
+    w.call('create', session=w.vera, type='file', title='T', payload=named(paper, url=7))
+    for url in ('https://example.org/report.pdf', '/media/', '/media/a/b', 'media/' + paper['asset_id'],
+                paper['url'] + '?x=1', '/media/' + 'x' * 181, '/media/asset_nothing', ' ' + paper['url']):
+        w.call('create', session=w.vera, type='file', title='T', payload=named(paper, url=url))
+    w.call('create', session=w.vera, type='file', title='T', payload=named(theirs), note='another agent\'s file')
+    w.call('create', session=w.omar, type='file', title='Theirs', payload=named(theirs))
+    w.call('create', session=w.vera, type='file', title='T', payload=named(paper, mime_type='text/plain'))
+    w.call('create', session=w.vera, type='file', title='T', payload=named(paper, file_name='other.pdf'))
+    w.call('create', session=w.vera, type='file', title='T', payload=named(paper, thumbnail_url='http://example.org/t.png'))
+    w.call('create', session=w.vera, type='file', title='T', payload=named(paper, size_bytes='17'))
+    # A change is held to the same.
+    w.call('update', artifact_id=doc['artifact_id'], data={'payload_patch': {'notes': 'Read page 2'}})
+    w.call('update', artifact_id=doc['artifact_id'], data={'payload_patch': {'file_name': 'renamed.pdf'}})
+    w.call('update', artifact_id=doc['artifact_id'], data={'payload': named(chart)},
+           note='the same artifact, another of the agent\'s files')
+    w.call('update', artifact_id=doc['artifact_id'], data={'payload': named(theirs)})
+    w.call('update', artifact_id=doc['artifact_id'], data={'payload': {'url': paper['url']}})
+    w.call('update', artifact_id=audio['artifact_id'], data={'payload': named(film)})
+    w.call('update', artifact_id=audio['artifact_id'], data={'status': 'completed', 'summary': 'Heard'})
+    w.call('get', artifact_id=doc['artifact_id'])
+    w.call('list', type='file')
+
+
 SCENARIOS = [plain_kinds, what_an_artifact_refuses, a_plan_is_an_artifact, an_approval_is_asked_and_answered,
              a_question_with_options_and_typed_answers, what_becomes_of_a_request_nobody_answers,
-             the_inbox_and_what_a_user_does_with_an_artifact]
+             the_inbox_and_what_a_user_does_with_an_artifact, what_names_a_published_file]
 
 
 def main(argv: list[str]) -> int:
+    if os.environ.get('PYTHONHASHSEED') != '0':
+        # The Python Host builds some objects from sets, whose fields then come in the order
+        # of the run's hash seed. One seed, one order: the vectors change when the rules do.
+        os.execve(sys.executable, [sys.executable, *argv], {**os.environ, 'PYTHONHASHSEED': '0'})
     isolate()
     scenarios = []
     for number, scenario in enumerate(SCENARIOS, start=1):

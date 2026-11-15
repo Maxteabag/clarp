@@ -701,6 +701,23 @@ SCENARIOS.append({
         get('/media/{pdf}', 'fetch the report'),
         get('/media/{notes}', 'fetch the notes'),
         get('/media/asset_no_such_file', 'fetch what is not there'),
+        # A file, a recording and a film are artifacts that name a file their agent published.
+        post('/artifacts', {'session': AGENT, 'type': 'file', 'title': 'Synthetic report', 'artifact_id': 'report-1',
+                            'payload': {'url': '/media/{pdf}', 'mime_type': 'application/pdf',
+                                        'file_name': 'report.pdf'}}, 'make a file of the report'),
+        post('/artifacts', {'session': AGENT, 'type': 'audio', 'title': 'Synthetic recording',
+                            'payload': {'url': '/media/{pdf}', 'mime_type': 'application/pdf',
+                                        'file_name': 'report.pdf'}}, 'make a recording of what is none'),
+        post('/artifacts', {'session': AGENT, 'type': 'file', 'title': 'Synthetic nothing',
+                            'payload': {'url': '/media/asset_no_such_file', 'mime_type': 'application/pdf',
+                                        'file_name': 'report.pdf'}}, 'make a file of what was not published'),
+        post('/artifacts', {'session': AGENT, 'type': 'file', 'title': 'Synthetic elsewhere',
+                            'payload': {'url': 'https://example.org/report.pdf', 'mime_type': 'application/pdf',
+                                        'file_name': 'report.pdf'}}, 'make a file of what is elsewhere'),
+        post('/artifacts', {'session': AGENT, 'type': 'file', 'title': 'Synthetic other name',
+                            'payload': {'url': '/media/{pdf}', 'mime_type': 'application/pdf',
+                                        'file_name': 'other.pdf'}}, 'make a file under another name'),
+        get('/artifacts/report-1', 'the file of the report'),
     ],
 })
 

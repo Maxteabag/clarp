@@ -173,7 +173,7 @@ pub fn carry_out(
         persona: &record.persona,
     };
     let decided = {
-        let book = actor.artifacts();
+        let (book, published) = (actor.artifacts(), actor.media());
         let made = |made: Result<Artifact, Refused>| made.map(|artifact| (artifact, true));
         match want {
             Want::Create {
@@ -184,6 +184,7 @@ pub fn carry_out(
                     now_ms: now,
                     token_hex: &mut ids::hex,
                     taken: &|id| *taken_elsewhere || book.any(id).is_some(),
+                    published,
                 };
                 made(book.create(maker, new, &mut ctx))
             }
@@ -192,10 +193,13 @@ pub fn carry_out(
                     now_ms: now,
                     token_hex: &mut ids::hex,
                     taken: &|id| book.any(id).is_some(),
+                    published,
                 };
                 made(book.ask(maker, ask, &mut ctx))
             }
-            Want::Update { artifact_id, data } => made(book.update(artifact_id, data, now)),
+            Want::Update { artifact_id, data } => {
+                made(book.update(artifact_id, data, now, published))
+            }
             Want::Resolve {
                 decision_id,
                 expected_revision,
