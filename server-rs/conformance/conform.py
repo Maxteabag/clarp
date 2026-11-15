@@ -426,37 +426,50 @@ def own_particulars(body):
     return out
 
 
-def cursors(value, found: set):
-    """Collects the cursors a capture hands its client: the heads of its answers."""
+def conversation_of(value: dict, otherwise: str) -> str:
+    """The conversation an answer's cursors belong to: the one it names beside them."""
+    own = value.get('conversation_id')
+    return own if isinstance(own, str) and any(key in HEAD_KEYS for key in value) else otherwise
+
+
+def cursors(value, found: dict, conversation=''):
+    """Collects the cursors a capture hands its client: the heads of its answers, each under
+    the conversation it is a cursor of. A client holds a cursor for one conversation; what it
+    holds for another says nothing about this one, and the two Hosts number their conversations
+    in different ways (the Python Host counts every row of the Host, the Rust Host each agent's
+    own)."""
     if isinstance(value, list):
         for item in value:
-            cursors(item, found)
+            cursors(item, found, conversation)
     elif isinstance(value, dict):
+        conversation = conversation_of(value, conversation)
         for key, item in value.items():
             if key in HEAD_KEYS and isinstance(item, int) and not isinstance(item, bool):
-                found.add(item)
+                found.setdefault(conversation, set()).add(item)
             else:
-                cursors(item, found)
+                cursors(item, found, conversation)
 
 
-def ranked(value, held: list, row=False):
+def ranked(value, held: dict, row=False, conversation=''):
     """Revisions as what a client can tell of them. A head is its place among the cursors the
-    capture handed out. A row's revision is how many of those cursors it is newer than: a
-    client holds a cursor and asks what changed since, so what it can tell of a row is which
-    of its cursors the row is newer than. How two rows that changed between the same two
-    cursors stand to each other, no client can tell."""
+    capture handed out for its conversation. A row's revision is how many of those cursors it
+    is newer than: a client holds a cursor and asks what changed since, so what it can tell of
+    a row is which of its cursors the row is newer than. How two rows that changed between the
+    same two cursors stand to each other, no client can tell."""
     if isinstance(value, list):
-        return [ranked(item, held, row) for item in value]
+        return [ranked(item, held, row, conversation) for item in value]
     if isinstance(value, dict):
+        conversation = conversation_of(value, conversation)
+        mine = held.get(conversation, [])
         out = {}
         for key, item in value.items():
             whole = isinstance(item, int) and not isinstance(item, bool)
             if whole and key in HEAD_KEYS:
-                out[key] = held.index(item) + 1 if item in held else item
+                out[key] = mine.index(item) + 1 if item in mine else item
             elif whole and row and key == 'revision':
-                out[key] = bisect.bisect_left(held, item)
+                out[key] = bisect.bisect_left(mine, item)
             else:
-                out[key] = ranked(item, held, key == 'turns')
+                out[key] = ranked(item, held, key == 'turns', conversation)
         return out
     return value
 
@@ -499,9 +512,9 @@ def core(raw: dict) -> dict:
             if data.get('type') == 'server-version' and 'version' in data:
                 data = {**data, 'version': '<version>'}
         sse.append({**frame, 'data': data})
-    found: set = set()
+    found: dict = {}
     cursors([exchange['body'] for exchange in http], found)
-    held = sorted(found - {0})
+    held = {conversation: sorted(values - {0}) for conversation, values in found.items()}
     names = agent_rows(http)
     http = [{**exchange, 'body': renamed(ranked(exchange['body'], held), names)} for exchange in http]
     sse = [{**frame, 'data': renamed(frame.get('data'), names)} for frame in sse]

@@ -45,6 +45,14 @@ cbaf110bc254  roster-edits: last_completed_message at rest, after the turn of th
 # defect R14).
 18ab05fa986e  approval: the agent's row says it is the open one after its answer was delivered
 661f8028e8eb  approval: the snapshot's focus, the same
+6e0ad863c285  helpers: the maker's row says it is the open one after its helper wrote to it
+6d4a3015976c  helpers: the snapshot's focus, the same
+1ce3c378753f  helpers: the helper's row says it is the open one after its maker wrote to it
+c55a34a43c82  helpers: the snapshot's focus, the same
+28249934e955  helpers: the same row, in the snapshot without the agents put away
+81f983c83fed  helpers: the snapshot's focus, the same
+ab70068086ee  helpers: the helper's row, in the last snapshot
+e04309a8d7a3  helpers: the snapshot's focus, the same
 
 # The answer to a discard says the artifact is not pinned (the Python Host says pinned true
 # beside pinned_at null: reference defect R15).
