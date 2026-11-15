@@ -14,6 +14,7 @@ pub mod goals;
 pub mod helpers;
 pub mod jobs;
 pub mod journal;
+pub mod media;
 pub mod notify;
 pub mod presence;
 pub mod push;
