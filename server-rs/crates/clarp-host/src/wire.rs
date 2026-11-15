@@ -11,7 +11,7 @@ use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::notify;
-use clarp_kernel::turn::{Activity, Outcome, automation_kind};
+use clarp_kernel::turn::{Activity, Origin, Outcome, automation_kind};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Value, json};
@@ -222,7 +222,7 @@ pub fn state(
             detail
         }
         (None, Some(last)) => ending_detail(&last.outcome),
-        (None, None) => json!({}),
+        (None, None) => json!({ "session": record.session }),
     };
     json!({
         "type": "agent-state",
@@ -774,6 +774,12 @@ pub fn row(version: &Versioned) -> Value {
             };
             row["trace_id"] = json!(reply.trace_id.clone().unwrap_or_default());
             row["origin"] = json!(reply.origin.name());
+            // An answer to another agent says whom it answers. It never names that agent
+            // as its sender: the answer is this agent's own. The name and the session are
+            // filled in by whoever knows the fleet ([`reply_to`]).
+            if let Origin::Agent { agent_id } = &reply.origin {
+                row["reply_to_agent_id"] = json!(agent_id);
+            }
         }
         Entry::Tool(call) => {
             let status = match call.status {
@@ -850,6 +856,26 @@ pub fn log_response(
         "file": file,
         "includes_automated": true,
     })
+}
+
+/// Fills in whom the answers on a page are to: the name and the session, today, of each
+/// agent a row names by its id. An agent that is gone leaves both empty.
+pub fn reply_to(response: &mut Value, named: &dyn Fn(&str) -> Option<(String, String)>) {
+    let Some(rows) = response["turns"].as_array_mut() else {
+        return;
+    };
+    for row in rows {
+        let Some(agent_id) = row["reply_to_agent_id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        if let Some((name, session)) = named(agent_id) {
+            row["reply_to_name"] = json!(name);
+            row["reply_to_session"] = json!(session);
+        }
+    }
 }
 
 /// The answer to `GET /log` for a name the Host has no agent under.

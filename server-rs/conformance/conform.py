@@ -546,11 +546,39 @@ def by_name(value, names: dict):
     return value
 
 
+def agents_by_id(value, found: dict) -> dict:
+    """The session of every agent a capture names with its id: an id is the Host's own choice, a
+    session name is what the scenario gave the agent."""
+    if isinstance(value, list):
+        for item in value:
+            agents_by_id(item, found)
+    elif isinstance(value, dict):
+        if isinstance(value.get('agent_id'), str) and isinstance(value.get('session'), str) and value['agent_id']:
+            found.setdefault(value['agent_id'], value['session'])
+        for item in value.values():
+            agents_by_id(item, found)
+    return found
+
+
+def by_session(value, sessions: dict):
+    """A list of agents' ids as a list of who they are. The harness's normalizer names an id
+    where it stands under a key it knows; in a plain list it would stay each Host's own."""
+    if isinstance(value, list):
+        return [by_session(item, sessions) for item in value]
+    if isinstance(value, dict):
+        return {key: ([f'<agent:{sessions.get(item, "?")}>' if isinstance(item, str) else item for item in items]
+                      if key == 'archived_parents' and isinstance(items, list) else by_session(items, sessions))
+                for key, items in value.items()}
+    return value
+
+
 def seen_by_a_client(raw: dict) -> dict:
     """A capture, normalized, and cut down to the channels a client sees."""
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
-    raw = {**raw, 'http': [{**exchange, 'body': settle(exchange['body'], sessions)} for exchange in raw['http']]}
+    known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
+    raw = {**raw, 'http': [{**exchange, 'body': by_session(settle(exchange['body'], sessions), known)}
+                           for exchange in raw['http']]}
     whole = normalize.normalize(raw, str(REPO))
     # The normalizer keeps the answers in the order they were given, one for one.
     names: dict = {}

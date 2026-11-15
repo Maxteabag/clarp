@@ -606,9 +606,17 @@ pub(crate) async fn make_agent(
         .named(&record.agent_id)
         .map(|member| agent_row(&directory, &Families::of(&directory), member))
         .unwrap_or_default();
+    // Three of them the Python Host answers as it stores them: a number, 0 or 1.
+    let stored = ["muted", "heartbeat_enabled", "dreaming_enabled"];
     let agent: serde_json::Map<String, Value> = MADE_FIELDS
         .iter()
-        .map(|field| ((*field).to_string(), row[*field].clone()))
+        .map(|field| {
+            let value = match row[*field].as_bool() {
+                Some(truth) if stored.contains(field) => json!(i32::from(truth)),
+                _ => row[*field].clone(),
+            };
+            ((*field).to_string(), value)
+        })
         .collect();
     Ok(json!({
         "ok": true,
@@ -781,6 +789,12 @@ async fn log(
     let status = &member.agent.view().status;
     let mut answer = wire::log_response(&member.record, status, &page, replace);
     answer["includes_automated"] = json!(include_automated);
+    // An answer to another agent says whom it answers, by the name that agent has today.
+    let directory = app.fleet.directory();
+    wire::reply_to(&mut answer, &|agent_id| {
+        let asked = directory.named(agent_id)?;
+        Some((asked.record.persona.clone(), asked.record.session.clone()))
+    });
     Ok(Json(answer))
 }
 
@@ -887,7 +901,12 @@ pub(crate) async fn send_message(
     // with `queue_if_busy` was left for later: it is in the queue until its turn starts, and
     // when it does not come from a person, a Stop holds it. (The kernel can also take a message
     // that replaces the running turn; nothing asks for it yet.)
+    // A message from another agent of this Host never takes a running turn's place either:
+    // it waits behind it like one left for later, and a Stop that came before does not hold
+    // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
+    let from_peer = matches!(&origin, Origin::Agent { agent_id } if !agent_id.is_empty());
     let admission = match (request.queue_if_busy.unwrap_or(false), origin_is_user) {
+        (false, _) if from_peer => Admission::Later,
         (false, _) => Admission::Queue,
         (true, true) => Admission::Later,
         (true, false) => Admission::Background,

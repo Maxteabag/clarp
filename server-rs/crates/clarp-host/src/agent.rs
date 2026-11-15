@@ -370,10 +370,9 @@ impl AgentHandle {
     }
 }
 
-/// Starts an agent's thread. The agent is opened on that thread, not here.
-pub fn spawn(setup: Setup) -> AgentHandle {
-    let (tx, rx) = mpsc::channel();
-    let idle = Status {
+/// What an agent that has never run a turn is doing: nothing, and nothing waits.
+pub(crate) fn never_ran() -> Status {
+    Status {
         live: None,
         last: None,
         waiting: Vec::new(),
@@ -383,7 +382,13 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         backend_session: None,
         label: String::new(),
         resting: None,
-    };
+    }
+}
+
+/// Starts an agent's thread. The agent is opened on that thread, not here.
+pub fn spawn(setup: Setup) -> AgentHandle {
+    let (tx, rx) = mpsc::channel();
+    let idle = never_ran();
     let (view_tx, view) = watch::channel(Arc::new(View {
         status: idle,
         newest: None,
@@ -698,6 +703,7 @@ impl Worker {
         // What the agent is doing when it is opened is not news: a client that connects is
         // told to look at everything anyway. What follows from opening it is.
         self.told = self.actor.as_ref().map(Actor::status);
+
         // Nor are the jobs it has: only what changes from here on is told.
         self.jobs_told = self
             .actor

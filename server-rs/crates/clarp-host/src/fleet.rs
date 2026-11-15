@@ -1142,9 +1142,13 @@ impl Fleet {
             agent: agent::spawn(setup),
         }));
         self.publish();
-        self.works
-            .hub
-            .publish(wire::roster_created(&record), self.now_ms());
+        // The apps are told when the fleet has the agent: that it is there, and then what
+        // an agent that has never run is doing, in the Python Host's order.
+        let (hub, now, new) = (&self.works.hub, self.now_ms(), agent::never_ran());
+        hub.publish(wire::roster_created(&record), now);
+        hub.publish(wire::transcript_updated(&record), now);
+        hub.publish(wire::state(&record, &new, &record.backend, None), now);
+        hub.publish(wire::activity(&record, &new), now);
         Ok(record)
     }
 
