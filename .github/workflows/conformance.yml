@@ -1,0 +1,53 @@
+name: Conformance (Rust Host)
+
+# The Rust Host against the Python Host on what a client can see (server-rs/conformance):
+# the Python Host's answers are written down, planted changes must show against them, and the
+# Rust Host is compared with them. It starts Python test Hosts, so it runs contained like
+# replay.yml (no network, no credentials), and only when someone starts it:
+#   gh workflow run conformance.yml -R Maxteabag/clarp --ref <branch>
+# The job is red while the Rust Host differs; the report and the written-down answers are in
+# the `conformance-report` artifact either way.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The job token must not sit in .git/config where a test Host could read it.
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server-rs
+      - name: Build the Rust Host
+        working-directory: server-rs
+        run: cargo build --locked -p clarp-host -p clarp-shim
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - name: Conformance
+        run: |
+          set -o pipefail
+          mkdir -p conformance-report
+          bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py cross \
+            --build . --rust server-rs/target/debug/clarp-host --out conformance-report \
+            | tee conformance-report/console.txt
+      # The report prints structure, counts and codes; the corpus is synthetic.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-report
+          path: conformance-report/
