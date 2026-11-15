@@ -18,6 +18,7 @@ is refused as before.
 """
 from __future__ import annotations
 
+import io
 import sqlite3
 
 import pytest
@@ -195,13 +196,105 @@ def test_a_byte_of_an_earlier_tails_record_rewritten_after_the_parser_read_it(tm
             full.tick(1)
             assert _decision(actual.tick(1, faults=_how(switch))) == "tail_applied"
             _append(transcript, backend, 41)
-            moves = {"source_moves": {"when": "parse", "how": "rewrite_earlier",
+            moves = {"source_moves": {"when": "parse", "how": "rewrite_at",
                                       "words": "synthetic step 40"}}
             moved = actual.tick(2, faults=_how(switch, **moves))
             full.tick(3)
             after = actual.tick(3, faults=_how(switch))
             assert _texts(candidate) == _texts(reference)
             assert any(text == "Synthetic step 40" for _id, text in _texts(candidate))
+            seen[switch] = (_decision(moved), "frontier_kept_source_grew" in _retentions(moved),
+                            _decision(after))
+    assert seen[True] == seen[False]
+    assert seen[True][:2] == ("full_file_moved_during_parse", False)
+
+
+# ---- the file moves while the tail's reader is in the middle of it ---------------------
+
+def _several_reads(transcript, backend, first):
+    """Records enough that the reader takes the tail in several reads. The
+    last one's number."""
+    last = first + 3 * io.DEFAULT_BUFFER_SIZE // 1024 + 1
+    with transcript.open("ab") as output:
+        for ordinal in range(first, last + 1):
+            output.write(harness.append_bytes(backend, ordinal))
+    return last
+
+
+def _boundary(database):
+    with sqlite3.connect(database) as connection:
+        [(offset,)] = connection.execute(
+            "SELECT boundary_offset FROM transcript_import_checkpoints")
+    return offset
+
+
+@SWITCH
+@BACKENDS
+def test_a_file_that_grows_while_the_reader_is_in_the_middle_of_the_tail(tmp_path, backend, switch):
+    """What a working agent does to its transcript: a record is appended
+    while the tail's reader has taken some of its range and not the rest.
+    The bytes of the range are what they were, so it is the case of growth
+    found after the parse."""
+    reference, candidate, transcript, full, actual = _stood(tmp_path, backend, switch)
+    with full, actual:
+        full.tick(0)
+        actual.tick(0, faults=_how(switch))
+        _append(transcript, backend, 40)
+        full.tick(1)
+        assert _decision(actual.tick(1, faults=_how(switch))) == "tail_applied"
+        _several_reads(transcript, backend, 41)
+        parsed, boundary = transcript.stat().st_size, _boundary(candidate)
+        full.tick(2)
+        grown = actual.tick(2, faults=_how(switch, **_moves("read")))
+        assert boundary < grown["source_moved_at"] < parsed < transcript.stat().st_size
+        harness.assert_product_equal(reference, candidate)        # the file as it was parsed
+        if switch:
+            assert _decision(grown) == "deferred_tail_source_changed"
+            assert "frontier_kept_source_grew" in _retentions(grown)
+            assert _checkpoint(candidate) == (parsed, parsed)
+        else:
+            assert _decision(grown) == "full_file_moved_during_parse"
+        full.tick(3)
+        after = actual.tick(3, faults=_how(switch))
+        harness.assert_product_equal(reference, candidate)
+        if switch:
+            assert (_decision(after), after["digest_reads"]) == ("tail_applied", ["added"])
+
+
+@pytest.mark.parametrize("where", ["behind the reader", "ahead of the reader"])
+@BACKENDS
+def test_a_byte_rewritten_while_the_reader_is_in_the_middle_of_the_tail(tmp_path, backend, where):
+    """A byte of the range changes in place while the reader is in the
+    middle of it, and a record is appended, so that it looks like growth.
+    Behind the reader: the parser was handed the old byte, and the range
+    read afterwards has the new one. Ahead of it: the parser and the read
+    afterwards agree on the new byte, and the running hash, taken before the
+    parse, holds the old one. Each of the two proofs refuses one of them."""
+    behind = where == "behind the reader"
+    seen = {}
+    for switch in (True, False):
+        home = tmp_path / ("on" if switch else "off")
+        home.mkdir()
+        reference, candidate, transcript, full, actual = _stood(home, backend, switch)
+        with full, actual:
+            full.tick(0)
+            actual.tick(0, faults=_how(switch))
+            _append(transcript, backend, 40)
+            full.tick(1)
+            assert _decision(actual.tick(1, faults=_how(switch))) == "tail_applied"
+            last = _several_reads(transcript, backend, 41)
+            words = f"step {40 if behind else last}"
+            data = transcript.read_bytes()
+            target = data.index(f"synthetic {words}".encode())
+            assert target > _boundary(candidate)
+            moves = {"when": "read", "how": "rewrite_at", "words": f"synthetic {words}"}
+            moved = actual.tick(2, faults=_how(switch, source_moves=moves))
+            assert (target < moved["source_moved_at"]) == behind
+            assert moved["source_moved_at"] < len(data)
+            full.tick(3)
+            after = actual.tick(3, faults=_how(switch))
+            assert _texts(candidate) == _texts(reference)
+            assert any(text == f"Synthetic {words}" for _id, text in _texts(candidate))
             seen[switch] = (_decision(moved), "frontier_kept_source_grew" in _retentions(moved),
                             _decision(after))
     assert seen[True] == seen[False]
