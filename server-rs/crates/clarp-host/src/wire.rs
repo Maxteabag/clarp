@@ -10,6 +10,7 @@ use clarp_actor::{LiveStatus, Status};
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::turn::{Activity, Origin, Outcome};
 use clarp_protocol::events::AgentStateKind;
+use clarp_speech::markup;
 use serde_json::{Value, json};
 
 use crate::fleet::AgentRecord;
@@ -344,26 +345,72 @@ pub fn queue_updated(
     event
 }
 
+/// A text cut to `max` characters, the last of them an ellipsis when something was left out.
+fn cut(text: String, max: usize, trim_before_mark: bool) -> String {
+    if text.chars().count() <= max {
+        return text;
+    }
+    let kept: String = text.chars().take(max.saturating_sub(1)).collect();
+    let kept = if trim_before_mark {
+        kept.trim_end()
+    } else {
+        kept.as_str()
+    };
+    format!("{kept}…")
+}
+
+/// The longest preview a notification carries.
+const NOTIFICATION_PREVIEW_MAX: usize = 180;
+
+/// What an automated check says when it found nothing to do. Nobody is told of those.
+const NOTHING_TO_DO: [&str; 4] = [
+    "heartbeat check: no action needed.",
+    "dreaming check: no action needed.",
+    "leader check: no action needed.",
+    "automated check: no action needed.",
+];
+
+/// What a notification says of a reply, and why the user is told: what the agent said aloud,
+/// when it said something aloud (`speak`), otherwise what it wrote (`text-reply`). `None` for
+/// a reply that has nothing for the user in it.
+pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
+    let spoken = markup::speak_blocks(reply, true).join(" ");
+    let spoken = markup::clean_for_display(&spoken, true);
+    if !spoken.is_empty() {
+        return Some((cut(spoken, NOTIFICATION_PREVIEW_MAX, false), "speak"));
+    }
+    let mut written = reply.to_string();
+    for marker in ["HEARTBEAT_OK", "DREAMING_OK", "LEADER_NOOP"] {
+        written = written.replace(marker, "");
+    }
+    let written = markup::clean_for_display(&written, true);
+    if written.is_empty() || NOTHING_TO_DO.contains(&written.to_lowercase().as_str()) {
+        return None;
+    }
+    Some((cut(written, NOTIFICATION_PREVIEW_MAX, false), "text-reply"))
+}
+
 /// A finished turn the user should know about: what an app badges and marks unread from.
+/// `None` when the reply it ended on has nothing for the user in it.
 pub fn user_notification(
     record: &AgentRecord,
     notification_id: &str,
     cause_message_id: &str,
     reply: &Versioned,
     done_ms: i64,
-) -> Value {
-    let preview = match &reply.entry {
-        Entry::Reply(reply) => reply.text.as_str(),
-        _ => "",
+) -> Option<Value> {
+    let (preview, reason) = match &reply.entry {
+        Entry::Reply(reply) => notification_preview(&reply.text)?,
+        _ => return None,
     };
-    json!({
+    Some(json!({
         "type": "user-notification",
         "notification_id": notification_id,
         "agent_id": record.agent_id,
         "session": record.session,
         "persona": record.persona,
         "origin": "user",
-        "reason": "text-reply",
+        "reason": reason,
         "cause_message_id": cause_message_id,
         "source_message_id": reply.entry.id(),
         "preview": preview,
@@ -372,7 +419,7 @@ pub fn user_notification(
         "unread": true,
         "push": true,
         "muted": false,
-    })
+    }))
 }
 
 pub fn roster(kind: &str, session: &str) -> Value {
@@ -448,7 +495,9 @@ pub fn row(version: &Versioned) -> Value {
             }
         }
         Entry::Reply(reply) => {
-            row["text"] = json!(reply.text);
+            // What is metadata and never conversation does not leave the Host. The voice
+            // markup does: an app hides it itself, and speaks from it.
+            row["text"] = json!(markup::strip_hidden_blocks(&reply.text));
             row["trace_id"] = json!(reply.trace_id.clone().unwrap_or_default());
         }
         Entry::Tool(call) => {
@@ -541,23 +590,30 @@ pub fn no_conversation(cwd: &str) -> Value {
     })
 }
 
-/// What a row says in a list of chats.
+/// What a row says in a list of chats: one line, as a screen shows it, no longer than 80
+/// characters, and what the user wrote marked as theirs.
 fn preview(version: &Versioned) -> String {
-    match &version.entry {
-        Entry::Message(message) => format!("You: {}", message.text),
-        Entry::Reply(reply) => reply.text.clone(),
-        Entry::Notice(notice) => notice.text.clone(),
-        Entry::Tool(call) => call.name.clone(),
-        Entry::Imported(imported) => {
-            let text = imported.row["text"].as_str().unwrap_or("");
-            if imported.row["role"] == "user" {
-                format!("You: {text}")
-            } else {
-                text.to_string()
-            }
-        }
-        Entry::TurnEnd(_) => String::new(),
+    let (theirs, text) = match &version.entry {
+        Entry::Message(message) => (true, message.text.as_str()),
+        Entry::Reply(reply) => (false, reply.text.as_str()),
+        Entry::Notice(notice) => (false, notice.text.as_str()),
+        Entry::Tool(call) => (false, call.name.as_str()),
+        Entry::Imported(imported) => (
+            imported.row["role"] == "user",
+            imported.row["text"].as_str().unwrap_or(""),
+        ),
+        Entry::TurnEnd(_) => (false, ""),
+    };
+    let shown = markup::clean_for_display(text, true);
+    if shown.is_empty() {
+        return String::new();
     }
+    let shown = if theirs {
+        format!("You: {shown}")
+    } else {
+        shown
+    };
+    cut(shown, 80, true)
 }
 
 /// An agent's row in the snapshot, with every field of a row. `ended` is how the last turn
@@ -1265,7 +1321,7 @@ mod tests {
             9,
             None,
         );
-        let told = user_notification(&record(), "pn-abc", "u-1", &reply, 4_000);
+        let told = user_notification(&record(), "pn-abc", "u-1", &reply, 4_000).unwrap();
         assert_eq!(
             (
                 &told["type"],
@@ -1285,5 +1341,59 @@ mod tests {
             (&json!(true), &json!(true), &json!(true))
         );
         assert_eq!(told["reason"], "text-reply");
+    }
+
+    #[test]
+    fn a_notification_says_what_was_said_aloud_or_else_what_was_written() {
+        assert_eq!(
+            notification_preview(
+                "Here is the table.\n<speak>Done, <vox>um,</vox> two files changed.</speak>\n| a | b |"
+            ),
+            Some(("Done, two files changed.".to_string(), "speak")),
+            "what the agent said aloud, as a screen shows it"
+        );
+        assert_eq!(
+            notification_preview("All <break time=\"300ms\"/> done."),
+            Some(("All done.".to_string(), "text-reply"))
+        );
+        assert_eq!(notification_preview("HEARTBEAT_OK"), None);
+        assert_eq!(
+            notification_preview("Heartbeat check: no action needed."),
+            None
+        );
+        assert_eq!(notification_preview("<team>only for the team</team>"), None);
+        let long = "word ".repeat(60);
+        let (preview, _) = notification_preview(&long).unwrap();
+        assert_eq!(preview.chars().count(), 180);
+        assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn a_preview_is_one_line_without_markup_and_not_long() {
+        let reply = |text: &str| {
+            version(
+                Entry::Reply(Reply {
+                    id: "r-1".to_string(),
+                    turn: 1,
+                    text: text.to_string(),
+                    trace_id: None,
+                }),
+                9,
+                None,
+            )
+        };
+        assert_eq!(
+            preview(&reply(
+                "<speak>Hi <vox>um</vox> there.</speak>\n\nSecond line."
+            )),
+            "Hi there. Second line."
+        );
+        let long = preview(&reply(&"abcdefghi ".repeat(20)));
+        assert_eq!(long.chars().count(), 80, "{long}");
+        assert!(long.ends_with('…') && !long.contains(" …"));
+        assert_eq!(preview(&reply("<team>x</team>")), "");
+        // A row never carries what is metadata.
+        let shown = row(&reply("Visible.\n<oai-mem-citation>c</oai-mem-citation>"));
+        assert_eq!(shown["text"], "Visible.\n");
     }
 }
