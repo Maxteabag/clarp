@@ -776,13 +776,6 @@ _DEFAULTS = {
     # was running when the frontier was published has settled, and the rows
     # from the boundary on carry its stamps (lib.message_carry.SETTLED_TURNS).
     "carry_settled_turns": False,
-    # Off unless switched on: a tail takes the two hashes of its range from
-    # its own parse (the bytes are hashed as the parser reads them) instead
-    # of reading the range once before the parse and once after it, when the
-    # file did not change while it was parsed. A tail then reads its range
-    # twice, for the references and for the parse, where it read it four
-    # times.
-    "tail_hashes_while_parsing": False,
     # Off unless switched on: a tail gives the writer away only once it has
     # written something (message_writes._TailWriter). False: its batch budget
     # runs from BEGIN IMMEDIATE, so a tail on a long conversation yields
@@ -793,6 +786,13 @@ _DEFAULTS = {
     # are proven to be the file's still, and the next import is a tail.
     # False: it loses its frontier and the next import is full.
     "tail_keeps_frontier_when_grown": False,
+    # Off unless switched on: a tail takes the two hashes of its range from
+    # its own parse (the bytes are hashed as the parser reads them) instead
+    # of reading the range once before the parse and once after it, when the
+    # file did not change while it was parsed. A tail then reads its range
+    # twice, for the references and for the parse, where it read it four
+    # times.
+    "tail_hashes_while_parsing": False,
 }
 
 
