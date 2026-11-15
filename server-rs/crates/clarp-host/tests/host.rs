@@ -6954,3 +6954,117 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
         (401, &json!("authentication required"))
     );
 }
+
+#[test]
+fn a_user_attaches_a_file_to_what_they_say() {
+    let place = Place::new("upload");
+    let token = "upload-token";
+    let host = place.start_with_token(token);
+    let (first, second) = (host.new_agent("First"), host.new_agent("Second"));
+    let png = b"\x89PNG\r\n\x1a\nnot much of an image".to_vec();
+    let send = |token: &str, headers: &[(&str, &str)], body: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/upload", headers, body);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+    let uploads = place.root.join("data").join("uploads");
+
+    // A file for an agent that is named: kept under the agent's name, under a name that is
+    // safe, and answered with where it is, for the app to put into the message.
+    let named = [
+        ("X-Session", first.as_str()),
+        ("X-File-Name", "holiday%20photo%201.png"),
+        ("Content-Type", "image/png"),
+    ];
+    let (status, said) = send(token, &named, &png);
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["ok"], &said["name"], &said["size"], &said["session"]),
+        (
+            &json!(true),
+            &json!("holiday_photo_1.png"),
+            &json!(png.len()),
+            &json!(first)
+        )
+    );
+    let path = std::path::PathBuf::from(said["path"].as_str().unwrap());
+    assert!(
+        path.is_absolute() && path.starts_with(std::fs::canonicalize(&uploads).unwrap()),
+        "{path:?}"
+    );
+    assert_eq!(path.parent().unwrap().file_name().unwrap(), first.as_str());
+    let file = path.file_name().unwrap().to_str().unwrap().to_string();
+    assert!(
+        file.len() == 8 + 1 + "holiday_photo_1.png".len() && file.ends_with("-holiday_photo_1.png"),
+        "{file}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), png);
+    // Sent again without an id of its own, it is another file.
+    let (_, again) = send(token, &named, &png);
+    assert_ne!(again["path"], said["path"]);
+
+    // Under an id the app gave it, a file is kept once: sent again, it is the same file.
+    let with_id = [
+        ("X-Session", first.as_str()),
+        ("X-File-Name", "notes"),
+        ("Content-Type", "text/markdown"),
+        ("X-Upload-ID", "share-0001"),
+    ];
+    let (status, kept) = send(token, &with_id, b"# Notes\n");
+    assert_eq!(status, 200, "{kept}");
+    assert_eq!(
+        kept["name"], "notes.md",
+        "a name without an ending is given its kind's"
+    );
+    let kept_path = kept["path"].as_str().unwrap().to_string();
+    let kept_file = std::path::Path::new(&kept_path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        kept_file.starts_with("u-")
+            && kept_file.ends_with("-notes.md")
+            && kept_file.len() == 2 + 24 + 1 + 8,
+        "{kept_file}"
+    );
+    let (status, replayed) = send(token, &with_id, b"# Notes\n");
+    assert_eq!((status, &replayed["path"]), (200, &json!(kept_path)));
+    let files = |agent: &str| files_under(&uploads.join(agent));
+    assert_eq!(files(&first), 3, "two without an id, one under its id");
+    let (status, other) = send(token, &with_id, b"# Other notes\n");
+    assert_eq!(status, 409, "{other}");
+    assert_eq!(other["error"], "upload id reused for different content");
+    let bad_id = [("X-Session", first.as_str()), ("X-Upload-ID", "two words")];
+    let (status, refused) = send(token, &bad_id, b"x");
+    assert_eq!(
+        (status, &refused["error"]),
+        (400, &json!("invalid upload id"))
+    );
+
+    // For no agent that is named, it is for the one the user is looking at; called nothing,
+    // it is called after its kind.
+    host.post("/focus", json!({ "session": second }));
+    let (status, unnamed) = send(token, &[("Content-Type", "image/png")], &png);
+    assert_eq!(status, 200, "{unnamed}");
+    assert_eq!(
+        (&unnamed["session"], &unnamed["name"]),
+        (&json!(second), &json!("upload.png"))
+    );
+    assert_eq!(files(&second), 1);
+    // Nothing is no file; and a device that may only chat may attach to what it says.
+    let (status, empty) = send(token, &named, b"");
+    assert_eq!((status, &empty["error"]), (400, &json!("bad size")));
+    let (limited, _) = pair(&host, "watch", "limited");
+    let (status, said) = send(&limited, &named, &png);
+    assert_eq!(status, 200, "{said}");
+
+    // After the Host was killed the file is there, and its id is still its own.
+    host.kill();
+    let host = place.start_with_token(token);
+    let answer = fetch(&host, token, "POST", "/upload", &with_id, b"# Notes\n");
+    let replayed: Value = serde_json::from_slice(&answer.body).unwrap();
+    assert_eq!((answer.status, &replayed["path"]), (200, &json!(kept_path)));
+    assert_eq!(std::fs::read(&kept_path).unwrap(), b"# Notes\n");
+}

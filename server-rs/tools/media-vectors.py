@@ -147,8 +147,26 @@ def main() -> int:
     mimetypes.init(files=[])
     from lib import media_store as store
 
-    names = [{'raw': raw, 'content_type': declared, 'safe': store._safe_name(raw, declared)}
-             for raw in NAMES for declared in ('', 'image/png', 'video/mp4', 'text/markdown', 'application/x-unknown')]
+    # What a user attaches is named by a rule of its own (`_safe_upload_name`), and kept under
+    # its agent's name made safe (`_safe_session`), under an id the app may give it.
+    from lib import paths, upload_results
+    from lib.routes import helpers
+
+    def upload_id(given):
+        try:
+            return upload_results.normalize_upload_id(given)
+        except ValueError as exc:
+            return {'error': str(exc)}
+
+    names = [{'raw': raw, 'content_type': declared, 'safe': store._safe_name(raw, declared),
+              'upload': helpers._safe_upload_name(raw, declared)}
+             for raw in NAMES + ['dir/', 'a/b/', 'noext', 'Photo 1', 'IMG_0001', 'with.dot', 'UPPER.JPG']
+             for declared in ('', 'image/png', 'video/mp4', 'text/markdown', 'application/x-unknown', 'IMAGE/JPEG; q=1',
+                              'application/pdf')]
+    sessions = [{'session': session, 'safe': paths._safe_session(session)}
+                for session in ('claire', 'koko-8255', 'a.b_c-d', '', '../../etc', 'two words', 'blåbær', 'a/b', '.', '日本')]
+    upload_ids = [{'given': given, 'id': upload_id(given)}
+                  for given in ('up-1', ' up-1 ', 'A.b_c:d-9', '', ' ', 'two words', 'a/b', 'x' * 160, 'x' * 161, 'é')]
     # Every file under every declared type without a name; and under no declared type, and
     # under the type that tells nothing, with names that do or do not say what it is.
     cases = [(label, declared, '') for label in BLOBS for declared in DECLARED]
@@ -201,6 +219,7 @@ def main() -> int:
         'images': sorted(store.SAFE_IMAGE_MIME), 'files': sorted(store.SAFE_FILE_MIME),
         'blobs': {label: blob.hex() for label, blob in BLOBS.items()},
         'names': names, 'read': read, 'extensions': extensions, 'alts': alts, 'rows': rows,
+        'sessions': sessions, 'upload_ids': upload_ids,
         'extension_of_type': by_type, 'type_of_extension': by_name, 'read_by_ending': by_ending,
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)

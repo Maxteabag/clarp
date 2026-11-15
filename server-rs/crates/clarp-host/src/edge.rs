@@ -274,7 +274,7 @@ pub enum Principal {
 const EXCHANGE: &str = "/pairing/exchange";
 
 /// What a device with limited scope may send. Whatever it may read, it may read.
-const LIMITED_POSTS: &[&str] = &["/send", "/select", "/focus"];
+const LIMITED_POSTS: &[&str] = &["/send", "/select", "/focus", "/upload"];
 
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
