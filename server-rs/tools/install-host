@@ -90,13 +90,26 @@ python_share="$(systemctl --user show clarp-runtime.service -p Environment --val
 python_share="${python_share:-$HOME/.local/share/clarp}"
 claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
+# What a turn inherits from its Host's unit besides the path, as the Python Host's unit has it:
+# how many files a process may hold open, and how glibc keeps its memory. Without a Python Host,
+# the Python Host's own answers.
+python_unit() {
+    [ "$(systemctl --user show clarp-runtime.service -p LoadState --value 2>/dev/null)" = loaded ] || return 0
+    systemctl --user show clarp-runtime.service -p "$1" --value 2>/dev/null
+}
+open_files="$(python_unit LimitNOFILE)"
+case "$open_files" in ''|*[!0-9]*) open_files=65536 ;; esac
+arenas="$(python_unit Environment | tr ' ' '\n' | sed -n 's/^MALLOC_ARENA_MAX=//p' | head -1)"
 
 for binary in clarp-host clarp-shim; do
     [ -x "$from/$binary" ] || { echo "install-host: $from/$binary is not there: build it with server-rs/tools/build release" >&2; exit 1; }
 done
 (cd "$from" && sha256sum --quiet -c SHA256SUMS) || { echo "install-host: the binaries in $from are not the ones that were built" >&2; exit 1; }
 
-mkdir -p "$share/bin" "$share/tools" "$share/data" "$config" "$units"
+mkdir -p "$share/bin" "$share/tools" "$share/data" "$share/cache" "$share/logs" "$config" "$units"
+# What the Host keeps is its user's alone: conversations, the phones' tokens. The unit below
+# says so for everything the Host writes from now on; this says it for what is there already.
+chmod -R go-rwx "$share/data" "$share/cache" "$share/logs"
 (umask 077; for key in "${!chosen[@]}"; do printf '%s=%s\n' "$key" "${chosen[$key]}"; done | sort > "$kept")
 # Put in place under another name and moved: a Host that is running keeps the file it has open.
 for binary in clarp-host clarp-shim; do
@@ -178,6 +191,9 @@ After=network-online.target
 
 [Service]
 Type=simple
+# Private to its user, as the Python Host's unit is: what the Host writes and what a turn makes.
+UMask=0077
+LimitNOFILE=$open_files
 EnvironmentFile=$config/env
 # The world an agent's commands run in, and the programs that run a turn.
 Environment="PATH=$tools_path"
@@ -188,7 +204,10 @@ ${codex:+Environment="CLARP_CODEX_PROGRAM=$codex"}
 Environment="CLARP_CONFIG_DIR=$config"
 Environment="CLAUDE_PWA_CONFIG=$config/config.toml"
 Environment="CLARP_SHARE_DIR=$share"
+Environment="CLARP_CACHE_DIR=$share/cache"
+Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
+${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
 ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name"${push_relay:+ --push-relay $push_relay}
 Restart=on-failure
 RestartSec=2

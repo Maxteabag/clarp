@@ -12,14 +12,17 @@ a real Host, real agents, a week, no lost or doubled message.
 |---|---|
 | The Host and its shim | `~/.local/share/clarp-host/bin` |
 | Its data: the fleet and one directory for each agent | `~/.local/share/clarp-host/data` |
+| What an agent's tools cache and log, apart from the Python Host's | `~/.local/share/clarp-host/cache`, `logs` |
 | The agents' own tools, first on their path | `~/.local/share/clarp-host/tools` |
 | Its token and what its tools read to find it | `~/.config/clarp-host/env`, `config.toml` (both 0600) |
 | Its service | `~/.config/systemd/user/clarp-host.service` |
 | Where it listens | `127.0.0.1:7690`, the loopback only |
 
 Nothing of the Python Host is written: not its units, its database, its configuration or its tools. The
-installer reads two things from the Python Host's unit, to give a turn the same world it has there: the path
-its tools are found on, and with it the pinned `claude` and `codex` programs.
+installer reads from the Python Host's unit what gives a turn the same world it has there: the path its
+tools are found on, and with it the pinned `claude` and `codex` programs; how many files a process may hold
+open; how glibc keeps its memory (`MALLOC_ARENA_MAX`). And like that unit, this one says `UMask=0077`: what
+the Host writes and what a turn makes is its user's alone.
 
 On that path, every tool of the Python Host has this Host's tool of the same name in front of it. Other
 programs whose names begin with `clarp` may be on it too: on elitebook, ten helpers of the owner's own
