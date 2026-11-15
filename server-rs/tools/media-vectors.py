@@ -22,15 +22,24 @@ wrote them. On a machine with an installed Host:
 
     "$(sed -n 1p ~/.local/share/clarp/current/SERVICE_PYTHON)" server-rs/tools/media-vectors.py
 
+A published file is served in parts to a player that asks for parts. How a `Range` header is
+read is `_byte_range` of `server/server.py`: that function is taken out of the file by its name
+and called, so that nothing of the server is started for it. And the agent's tool sends a
+file's name and caption in headers, written with `%XX`: how those are read back is
+`urllib.parse.unquote`.
+
 Nothing of a Host is touched or started: functions that take bytes are called.
 """
 from __future__ import annotations
 
+import ast
 import json
 import mimetypes
 import pathlib
+import re
 import struct
 import sys
+import urllib.parse
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -99,6 +108,38 @@ NAMES = ['', 'chart.png', 'photo.JPG', 'clip.mp4', 'voice.m4a', 'notes.md', 'NOT
 
 ALTS = ['', 'A chart', 'With [brackets] in it', 'Two\nlines', 'ends with ]', '[', 'æøå 日本', '  spaces  ']
 
+RANGES = ['', 'bytes=0-', 'bytes=0-0', 'bytes=0-99', 'bytes=5-', 'bytes=5-9', 'bytes=9-5', 'bytes=-5', 'bytes=-0', 'bytes=-',
+          'bytes=100-', 'bytes=99-', 'bytes=0-1000', 'bytes= 2 - 4 ', 'bytes=\t2\t-\t4', 'bytes=2-4,6-8', 'bytes=,2-4',
+          'bytes=2-4-6', 'bytes=a-b', 'bytes=1 2-3', 'Bytes=0-1', 'bytes =0-1', 'items=0-1', 'bytes=0x1-2', 'bytes=١-٢',
+          'bytes=1_0-2_0', 'bytes=+1-2', 'bytes=00000-00001', 'bytes=18446744073709551615-', 'bytes=18446744073709551616-',
+          'bytes=-18446744073709551616', 'bytes=-1099511627776', 'bytes=99999999999999999999999-9',
+          'bytes=99999999999999999999999-99999999999999999999998', 'bytes=99999999999999999999998-99999999999999999999999',
+          'bytes=5-99999999999999999999999', 'bytes=' + '1' * 4000 + '-', 'bytes=' + '1' * 4001 + '-', 'bytes=0-' + '0' * 4000,
+          'bytes=-' + '0' * 30 + '5', 'bytes==0-1', 'bytes=0-1=', 'bytes=0–1', 'bytes=2-4 ,6-8', 'bytes=2-4;6-8', 'bytes=  -  7  ',
+          'bytes=3 -', 'bytes']
+TOTALS = [0, 1, 10, 100, 2 ** 40]
+
+QUOTED = ['', 'plain.png', 'My%20shot.png', 'a%2Fb', '%C3%A6%C3%B8%C3%A5.txt', '%E6%97%A5%E6%9C%AC', '100%', '100%25', '%zz',
+          '%4', '%', '%%', '%41%42', '%c3', '%C3%28', '%FF%FE', 'æ%20ø', 'a+b', '%E2%82', '%F0%9F%98%80', '%f0%9f%98', 'x%00y',
+          '%C3æ%A6', 'with [brackets] %5B%5D', '%0A%0D', '%E2%80%A6', '%ED%A0%80', '%C0%AF', '%F8%88%80%80%80', '%e2%82%ac%',
+          'A chart: sales %26 costs', '%2', '%g1%1g']
+
+
+def byte_range():
+    """`_byte_range` of server/server.py with the pattern it reads by: the function itself."""
+    source = (REPO / 'server' / 'server.py').read_text()
+    wanted = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == '_BYTE_RANGE':
+            wanted['pattern'] = node
+        if isinstance(node, ast.FunctionDef) and node.name == '_byte_range':
+            wanted['function'] = node
+    if len(wanted) != 2:
+        sys.exit('server/server.py: _BYTE_RANGE or _byte_range is not where it was')
+    scope = {'re': re}
+    exec(compile(ast.Module(body=[wanted['pattern'], wanted['function']], type_ignores=[]), 'server.py', 'exec'), scope)  # noqa: S102
+    return scope['_byte_range']
+
 
 def main() -> int:
     sys.path.insert(0, str(REPO / 'server'))
@@ -146,8 +187,16 @@ def main() -> int:
                'created_by': 'agent', 'created_at': 1_700_000_000_000, 'deleted_at': None}
         rows.append({'row': {key: value for key, value in row.items() if key not in ('storage_path', 'deleted_at')},
                      'public': store.to_response(row)})
+    asked = byte_range()
+    ranges = []
+    for header in RANGES:
+        for total in TOTALS:
+            kind, start, end = asked(header, total)
+            ranges.append({'header': header, 'total': total, 'kind': kind, 'start': start, 'end': end})
+    quoted = [{'text': text, 'unquoted': urllib.parse.unquote(text)} for text in QUOTED]
     vectors = {
         'python': '.'.join(str(part) for part in sys.version_info[:3]),
+        'ranges': ranges, 'quoted': quoted,
         'max_bytes': store.MAX_MEDIA_BYTES,
         'images': sorted(store.SAFE_IMAGE_MIME), 'files': sorted(store.SAFE_FILE_MIME),
         'blobs': {label: blob.hex() for label, blob in BLOBS.items()},
@@ -158,7 +207,7 @@ def main() -> int:
     OUT.write_text(json.dumps(vectors, indent=1, ensure_ascii=False, sort_keys=True) + '\n')
     taken = sum(1 for vector in read if vector['taken'])
     print(f'{len(names)} names, {len(read)} readings ({taken} taken), {len(extensions)} extensions, {len(alts)} alts, '
-          f'{len(rows)} rows -> {OUT.relative_to(REPO)}')
+          f'{len(rows)} rows, {len(ranges)} ranges, {len(quoted)} quoted texts -> {OUT.relative_to(REPO)}')
     return 0
 
 

@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use clarp_codec::standard_set;
-use clarp_ports::testkit::{key_value_conformance, log_engine_conformance};
-use clarp_store_mem::{MemEngine, MemKeyValue};
+use clarp_ports::testkit::{blob_conformance, key_value_conformance, log_engine_conformance};
+use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
 
 #[test]
 fn memory_passes_the_log_engine_suite() {
@@ -41,5 +41,14 @@ fn memory_passes_the_key_value_suite() {
         &MemKeyValue::new(),
         Path::new("/fleet-a.db"),
         Path::new("/fleet-b.db"),
+    );
+}
+
+#[test]
+fn memory_passes_the_suite_of_whole_files() {
+    blob_conformance(
+        &MemBlobs::new(),
+        Path::new("/media-a"),
+        Path::new("/media-b"),
     );
 }

@@ -1,4 +1,5 @@
-//! Engines that keep everything in memory: an agent's log, and the fleet's small tables.
+//! Engines that keep everything in memory: an agent's log, the fleet's small tables, and
+//! the files agents publish.
 //!
 //! The engine is the "disk": a log opened twice in the same directory is the same log, so a test
 //! or the simulator can drop a log, as a crash would, and open it again. Bodies are stored
@@ -8,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use clarp_ports::blobs::{BlobEngine, Blobs, is_name, not_a_name};
 use clarp_ports::codec::{CodecSet, CodecTag};
 use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError};
 use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
@@ -201,5 +203,69 @@ impl KeyValue for MemTables {
             .filter(|((in_table, _), _)| in_table == table)
             .map(|((_, key), value)| (key.clone(), value.clone()))
             .collect())
+    }
+}
+
+type Files = Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>;
+
+/// Whole files in memory. As with the log engine, the engine is the disk.
+#[derive(Default)]
+pub struct MemBlobs {
+    disks: Mutex<HashMap<PathBuf, Files>>,
+}
+
+impl MemBlobs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl BlobEngine for MemBlobs {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+
+    fn open(&self, path: &Path) -> Result<Arc<dyn Blobs>, StoreError> {
+        let mut disks = self.disks.lock().map_err(|_| lost())?;
+        let files = disks.entry(path.to_path_buf()).or_default().clone();
+        Ok(Arc::new(MemFiles { files }))
+    }
+}
+
+struct MemFiles {
+    files: Files,
+}
+
+impl MemFiles {
+    fn kept(&self, name: &str) -> Result<Option<Arc<Vec<u8>>>, StoreError> {
+        Ok(self.files.lock().map_err(|_| lost())?.get(name).cloned())
+    }
+}
+
+impl Blobs for MemFiles {
+    fn put(&self, name: &str, bytes: &[u8]) -> Result<(), StoreError> {
+        if !is_name(name) {
+            return Err(not_a_name(name));
+        }
+        let mut files = self.files.lock().map_err(|_| lost())?;
+        files
+            .entry(name.to_string())
+            .or_insert_with(|| Arc::new(bytes.to_vec()));
+        Ok(())
+    }
+
+    fn len(&self, name: &str) -> Result<Option<u64>, StoreError> {
+        Ok(self.kept(name)?.map(|bytes| bytes.len() as u64))
+    }
+
+    fn read(&self, name: &str, offset: u64, most: usize) -> Result<Vec<u8>, StoreError> {
+        let Some(bytes) = self.kept(name)? else {
+            return Ok(Vec::new());
+        };
+        let from = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(bytes.len());
+        let to = from.saturating_add(most).min(bytes.len());
+        Ok(bytes[from..to].to_vec())
     }
 }

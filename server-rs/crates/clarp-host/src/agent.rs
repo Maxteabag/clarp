@@ -23,6 +23,7 @@ use clarp_kernel::artifacts::{Artifact, ArtifactBook, Ctx, Maker, Refused, Shelf
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
+use clarp_kernel::media::Asset;
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
@@ -147,6 +148,12 @@ pub enum Ask {
     Artifact {
         want: Box<Want>,
         answer: Answer<Result<Done, Refused>>,
+    },
+    /// The agent published a file: its bytes are kept, and this is what is to be written
+    /// of it.
+    Publish {
+        asset: Box<Asset>,
+        answer: Answer<()>,
     },
     /// The newest changes of a job, oldest first.
     JobTimeline {
@@ -351,6 +358,12 @@ impl AgentHandle {
         self.ask(|answer| Ask::Artifact { want, answer }).await
     }
 
+    /// Writes a file the agent published into its log. Its bytes are kept already.
+    pub async fn publish(&self, asset: Asset) -> Result<(), Unavailable> {
+        let asset = Box::new(asset);
+        self.ask(|answer| Ask::Publish { asset, answer }).await
+    }
+
     /// Answers the goal tool from this agent's goals.
     pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
         self.ask(|answer| Ask::Goal { ask, answer }).await
@@ -514,7 +527,7 @@ fn told_artifact(artifact: &Artifact) -> ToldArtifact {
 fn kept_goal(change: &GoalChange) -> Kept<'_> {
     Kept {
         goal: Some(change),
-        artifacts: &[],
+        ..Kept::default()
     }
 }
 
@@ -556,6 +569,7 @@ fn keep_goal(
     let kept = Kept {
         goal: Some(change),
         artifacts: shown.as_slice(),
+        ..Kept::default()
     };
     actor.keep(&kept, now_ms)
 }
@@ -742,7 +756,7 @@ impl Worker {
         self.ended = self.last_end();
         // Nor are its artifacts: only what changes from here on is told. How many of its
         // requests wait for the user is counted from the start.
-        self.refresh_books();
+        self.refresh_books(true);
         self.artifacts_told = self
             .books
             .artifacts
@@ -757,12 +771,20 @@ impl Worker {
         Ok(())
     }
 
-    /// Reads the agent's books anew for those who read them without asking the agent.
-    fn refresh_books(&mut self) {
+    /// Reads the agent's books anew for those who read them without asking the agent. The
+    /// files it published are many and are only ever added to: they are read anew when one
+    /// was.
+    fn refresh_books(&mut self, published: bool) {
         if let Some(actor) = &self.actor {
+            let media = if published {
+                Arc::new(actor.media().clone())
+            } else {
+                self.books.media.clone()
+            };
             self.books = Arc::new(Books {
                 artifacts: actor.artifacts().clone(),
                 goals: actor.goals().clone(),
+                media,
             });
         }
     }
@@ -975,6 +997,13 @@ impl Worker {
                 let revision = self.setup.revisions.next(now);
                 answered(actor.job(command, now, revision), answer)?
             }
+            Ask::Publish { asset, answer } => {
+                let kept = Kept {
+                    media: std::slice::from_ref(&*asset),
+                    ..Kept::default()
+                };
+                answered(actor.keep(&kept, now).map(|out| ((), out)), answer)?
+            }
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
@@ -1021,8 +1050,8 @@ impl Worker {
         }
         // The books are published before anything is told of them, and before whoever
         // asked for the change is answered.
-        if out.changed.goals || out.changed.artifacts {
-            self.refresh_books();
+        if out.changed.goals || out.changed.artifacts || out.changed.media {
+            self.refresh_books(out.changed.media);
             self.publish_view();
         }
         if out.changed.artifacts {
@@ -1507,6 +1536,7 @@ fn refuse_for(
             Ok(Ask::Before { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Publish { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
