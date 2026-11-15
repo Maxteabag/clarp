@@ -90,13 +90,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -156,7 +156,8 @@
       "total_count": 3,
       "server_now": 1794710001000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -236,13 +237,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -302,7 +303,8 @@
       "total_count": 3,
       "server_now": 1794710002000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -383,13 +385,13 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "removed": 0,
         "skipped": 0,
+        "completed": 0,
         "blocked": 0,
         "deferred": 0,
-        "pending": 3,
+        "removed": 0,
         "in_progress": 0,
-        "completed": 0
+        "pending": 3
        },
        "items": [
         {
@@ -530,13 +532,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -596,7 +598,8 @@
       "total_count": 3,
       "server_now": 1794710004000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -690,13 +693,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 0,
        "in_progress": 1,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -756,7 +759,8 @@
       "total_count": 3,
       "server_now": 1794710005000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 1).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -862,13 +866,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 1,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 1
+       "pending": 2
       },
       "items": [
        {
@@ -928,7 +932,8 @@
       "total_count": 3,
       "server_now": 1794710006000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 2).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -1051,13 +1056,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 1,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 1
+       "pending": 2
       },
       "items": [
        {
@@ -1117,7 +1122,8 @@
       "total_count": 3,
       "server_now": 1794710007000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710007000\nProgress: Probe done\nProvisional next work: Build it\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -1252,13 +1258,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 1,
        "blocked": 0,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 1,
-       "completed": 1
+       "pending": 1
       },
       "items": [
        {
@@ -1318,7 +1324,8 @@
       "total_count": 3,
       "server_now": 1794710008000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 4).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710007000\nProgress: Probe done\nProvisional next work: Build it\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -1464,13 +1471,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 2,
        "blocked": 0,
        "deferred": 0,
-       "pending": 0,
+       "removed": 0,
        "in_progress": 1,
-       "completed": 2
+       "pending": 0
       },
       "items": [
        {
@@ -1530,7 +1537,8 @@
       "total_count": 3,
       "server_now": 1794710009000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710007000\nProgress: Probe done\nProvisional next work: Build it\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -1687,13 +1695,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 3,
        "blocked": 0,
        "deferred": 0,
-       "pending": 0,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 3
+       "pending": 0
       },
       "items": [
        {
@@ -1753,7 +1761,8 @@
       "total_count": 3,
       "server_now": 1794710010000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 6).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710007000\nProgress: Probe done\nProvisional next work: Build it\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -1937,13 +1946,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 3,
        "blocked": 0,
        "deferred": 0,
-       "pending": 0,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 3
+       "pending": 0
       },
       "items": [
        {
@@ -2003,7 +2012,8 @@
       "total_count": 3,
       "server_now": 1794710012000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 7).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710012000\nProgress: Built\nProvisional next work: Close\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -2183,13 +2193,13 @@
       "legacy": false,
       "completion_verified": true,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 3,
        "blocked": 0,
        "deferred": 0,
-       "pending": 0,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 3
+       "pending": 0
       },
       "items": [
        {
@@ -2249,7 +2259,8 @@
       "total_count": 3,
       "server_now": 1794710013000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 8).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710012000\nProgress: Built\nProvisional next work: Close\nContinuation: Completion criteria have recorded evidence\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -2428,13 +2439,13 @@
       "legacy": false,
       "completion_verified": true,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 3,
        "blocked": 0,
        "deferred": 0,
-       "pending": 0,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 3
+       "pending": 0
       },
       "items": [
        {
@@ -2494,7 +2505,8 @@
       "total_count": 3,
       "server_now": 1794710014000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0001aaaabbbbcccc:ship:00000002 (plan revision 8).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0001aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794710012000\nProgress: Built\nProvisional next work: Close\nContinuation: Completion criteria have recorded evidence\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -2687,13 +2699,13 @@
        "legacy": false,
        "completion_verified": true,
        "counts": {
-        "removed": 0,
         "skipped": 0,
+        "completed": 3,
         "blocked": 0,
         "deferred": 0,
-        "pending": 0,
+        "removed": 0,
         "in_progress": 0,
-        "completed": 3
+        "pending": 0
        },
        "items": [
         {
@@ -2954,13 +2966,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -3020,7 +3032,8 @@
       "total_count": 3,
       "server_now": 1794720008000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0002aaaabbbbcccc:ship:00000005 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0002aaaabbbbcccc:ship:00000005\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -3256,13 +3269,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -3322,7 +3335,8 @@
       "total_count": 3,
       "server_now": 1794730001000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -3416,13 +3430,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 0,
        "in_progress": 1,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -3482,7 +3496,8 @@
       "total_count": 3,
       "server_now": 1794730002000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 1).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -3586,13 +3601,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 0,
        "in_progress": 1,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -3652,7 +3667,8 @@
       "total_count": 3,
       "server_now": 1794730003000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 2).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: User paused this goal\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -3770,13 +3786,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 0,
        "in_progress": 1,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -3836,7 +3852,8 @@
       "total_count": 3,
       "server_now": 1794730004000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: User paused this goal\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -3979,13 +3996,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 2,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -4046,6 +4063,7 @@
       "server_now": 1794730006000
      },
      "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 4).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: User paused this goal\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
      "note": "steps of a paused goal"
     },
     {
@@ -4184,13 +4202,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 2,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -4250,7 +4268,8 @@
       "total_count": 3,
       "server_now": 1794730007000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -4386,13 +4405,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 2,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -4452,7 +4471,8 @@
       "total_count": 3,
       "server_now": 1794730008000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -4598,13 +4618,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 2,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -4664,7 +4684,8 @@
       "total_count": 3,
       "server_now": 1794730009000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 6).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: Needs a key only the user has\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -4831,13 +4852,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 2,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -4897,7 +4918,8 @@
       "total_count": 3,
       "server_now": 1794730011000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 7).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -5059,13 +5081,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 2,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -5125,7 +5147,8 @@
       "total_count": 3,
       "server_now": 1794730012000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 8).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: User cancelled the outcome\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -5285,13 +5308,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 2,
        "deferred": 0,
-       "pending": 1,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -5351,7 +5374,8 @@
       "total_count": 3,
       "server_now": 1794730013000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0003aaaabbbbcccc:ship:00000002 (plan revision 8).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0003aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794730004000\nProgress: Noted while paused\nProvisional next work: Wait\nContinuation: User cancelled the outcome\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -5455,13 +5479,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -5521,7 +5545,8 @@
       "total_count": 3,
       "server_now": 1794740001000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -5670,13 +5695,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 1,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 1
       },
       "items": [
        {
@@ -5753,7 +5778,8 @@
       "total_count": 4,
       "server_now": 1794740002000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 1).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -5925,13 +5951,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -6025,7 +6051,8 @@
       "total_count": 5,
       "server_now": 1794740004000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 2).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -6203,13 +6230,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -6303,7 +6330,8 @@
       "total_count": 5,
       "server_now": 1794740005000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): [[\"working-notes.md\", 1]]"
     },
     {
      "argv": [
@@ -6506,13 +6534,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -6606,7 +6634,8 @@
       "total_count": 5,
       "server_now": 1794740007000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): [[\"working-notes.md\", 1]]"
     },
     {
      "argv": [
@@ -6808,13 +6837,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -6908,7 +6937,8 @@
       "total_count": 5,
       "server_now": 1794740009000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 4).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): [[\"working-notes.md\", 2]]"
     },
     {
      "argv": [
@@ -7200,13 +7230,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -7300,7 +7330,8 @@
       "total_count": 5,
       "server_now": 1794740013000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794740013000\nProgress: Notes kept\nProvisional next work: Go on\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): [[\"facts.json\", 1], [\"working-notes.md\", 2]]"
     },
     {
      "argv": [
@@ -7514,13 +7545,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -7614,7 +7645,8 @@
       "total_count": 5,
       "server_now": 1794740014000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794740013000\nProgress: Notes kept\nProvisional next work: Go on\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): [[\"facts.json\", 1], [\"working-notes.md\", 2]]"
     },
     {
      "argv": [
@@ -8187,13 +8219,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 3,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 2,
+       "removed": 3,
        "in_progress": 0,
-       "completed": 0
+       "pending": 2
       },
       "items": [
        {
@@ -8287,7 +8319,8 @@
       "total_count": 5,
       "server_now": 1794740018000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0004aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0004aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794740013000\nProgress: Notes kept\nProvisional next work: Go on\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): [[\"facts.json\", 1], [\"working-notes.md\", 2]]"
     }
    ]
   },
@@ -8378,13 +8411,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -8444,7 +8477,8 @@
       "total_count": 3,
       "server_now": 1794750001000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -8549,13 +8583,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -8615,7 +8649,8 @@
       "total_count": 3,
       "server_now": 1794750002000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 1).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750002000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -8734,13 +8769,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -8801,6 +8836,7 @@
       "server_now": 1794750003000
      },
      "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 2).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750003000\nProgress: Still waiting\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
      "note": "no continuation: the wake stands"
     },
     {
@@ -8962,13 +8998,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -9028,7 +9064,8 @@
       "total_count": 3,
       "server_now": 1794750006000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750003000\nProgress: Still waiting\nProvisional next work: Inspect its result\nContinuation: Automatic continuation is not enrolled\nDependency result: {\"key\": \"build-1\", \"outcome\": \"succeeded\", \"evidence\": \"log at /var/tmp/x\"}\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -9161,13 +9198,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -9227,7 +9264,8 @@
       "total_count": 3,
       "server_now": 1794750007000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750003000\nProgress: Still waiting\nProvisional next work: Inspect its result\nContinuation: Automatic continuation is not enrolled\nDependency result: {\"key\": \"build-1\", \"outcome\": \"succeeded\", \"evidence\": \"log at /var/tmp/x\"}\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -9371,13 +9409,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -9437,7 +9475,8 @@
       "total_count": 3,
       "server_now": 1794750008000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 4).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750008000\nProgress: Result read\nProvisional next work: Go on\nContinuation: Automatic continuation is not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -9594,13 +9633,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -9660,7 +9699,8 @@
       "total_count": 3,
       "server_now": 1794750009000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750009000\nProgress: Stuck\nProvisional next work: Ask\nContinuation: Needs the owner\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     },
     {
      "argv": [
@@ -9815,13 +9855,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "removed": 0,
        "skipped": 0,
+       "completed": 0,
        "blocked": 0,
        "deferred": 0,
-       "pending": 3,
+       "removed": 0,
        "in_progress": 0,
-       "completed": 0
+       "pending": 3
       },
       "items": [
        {
@@ -9881,7 +9921,8 @@
       "total_count": 3,
       "server_now": 1794750010000
      },
-     "stderr": ""
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0005aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0005aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794750009000\nProgress: Stuck\nProvisional next work: Ask\nContinuation: Needs the owner\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []"
     }
    ]
   }
