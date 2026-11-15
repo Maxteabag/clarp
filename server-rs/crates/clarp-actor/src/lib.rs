@@ -331,6 +331,14 @@ fn records<R: serde::de::DeserializeOwned>(
     }
 }
 
+/// What the log keeps of a change to a goal.
+fn goal_item(record: &GoalRecord, now_ms: i64) -> Result<NewItem, ActorError> {
+    let body = serde_json::to_vec(record).map_err(|error| {
+        ActorError::Corrupt(format!("a goal record could not be written: {error}"))
+    })?;
+    Ok(NewItem::new(kind::GOAL, now_ms, body).keyed(format!("g-{}", record.plan_id)))
+}
+
 fn io_error(what: &Path, error: std::io::Error) -> ActorError {
     ActorError::Io(format!("{}: {error}", what.display()))
 }
@@ -517,18 +525,30 @@ impl Actor {
 
     /// How the last turn that held the agent ended, with what its tool said of itself.
     pub fn last_end(&self) -> Result<Option<TurnEnd>, ActorError> {
-        let Some(last) = self.recorder.agent().last() else {
-            return Ok(None);
-        };
-        let Some(stored) = self.recorder.log().find(&format!("t-{}", last.id.0))? else {
+        match self.recorder.agent().last() {
+            Some(last) => self.turn_end(last.id.0),
+            None => Ok(None),
+        }
+    }
+
+    /// How the turn that answered the message with this id ended, once it has.
+    pub fn end_of(&self, message_id: &str) -> Result<Option<TurnEnd>, ActorError> {
+        let message = self.recorder.log().find(message_id)?;
+        match message.and_then(|message| message.turn) {
+            Some(turn) => self.turn_end(turn),
+            None => Ok(None),
+        }
+    }
+
+    fn turn_end(&self, turn: u64) -> Result<Option<TurnEnd>, ActorError> {
+        let Some(stored) = self.recorder.log().find(&format!("t-{turn}"))? else {
             return Ok(None);
         };
         match Entry::from_item(&stored) {
             Ok(Some(Entry::TurnEnd(end))) => Ok(Some(end)),
             Ok(_) => Ok(None),
             Err(error) => Err(ActorError::Corrupt(format!(
-                "the end of turn {} cannot be read: {error}",
-                last.id.0
+                "the end of turn {turn} cannot be read: {error}"
             ))),
         }
     }
@@ -654,10 +674,7 @@ impl Actor {
     /// Writes a change that was decided on the agent's book of goals, and takes it.
     pub fn goal(&mut self, change: &GoalChange, now_ms: i64) -> Result<Outputs, ActorError> {
         let record = self.goals.record(change, now_ms);
-        let body = serde_json::to_vec(&record).map_err(|error| {
-            ActorError::Corrupt(format!("a goal record could not be written: {error}"))
-        })?;
-        let item = NewItem::new(kind::GOAL, now_ms, body).keyed(format!("g-{}", record.plan_id));
+        let item = goal_item(&record, now_ms)?;
         let mut batch = self.recorder.batch();
         batch.item(item);
         batch.commit()?;
@@ -731,16 +748,51 @@ impl Actor {
         admission: Admission,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
+        self.take(message, admission, Vec::new(), now_ms)
+    }
+
+    /// Wakes the agent for one of its goals: the message it is woken with and what the goal
+    /// says of the wake are written together, so there is never a wake the goal does not
+    /// know of, nor a goal that counts a wake that was not sent.
+    pub fn wake(
+        &mut self,
+        change: &GoalChange,
+        message: &Message,
+        now_ms: i64,
+    ) -> Result<(Sent, Outputs), ActorError> {
+        let record = self.goals.record(change, now_ms);
+        let item = goal_item(&record, now_ms)?;
+        // Said to the agent, not left for later: a goal that is being worked was resumed or
+        // made after the last Stop, and what that Stop still holds does not hold it.
+        let (sent, mut out) = self.take(message, Admission::Queue, vec![item], now_ms)?;
+        if sent.duplicate {
+            // The message is there already; the goal has still to learn of it.
+            return Ok((sent, self.goal(change, now_ms)?));
+        }
+        self.goals.apply(&record);
+        out.changed.goals = true;
+        Ok((sent, out))
+    }
+
+    /// Takes a message, and writes `with` with it.
+    fn take(
+        &mut self,
+        message: &Message,
+        admission: Admission,
+        with: Vec<NewItem>,
+        now_ms: i64,
+    ) -> Result<(Sent, Outputs), ActorError> {
         let body = serde_json::to_vec(message).map_err(|error| {
             ActorError::Corrupt(format!("a message could not be written: {error}"))
         })?;
-        let accepted = self.recorder.accept_message(
+        let accepted = self.recorder.accept_message_with(
             Incoming {
                 key: Some(message.id.clone()),
                 body,
                 origin: message.origin.clone(),
                 admission,
             },
+            with,
             now_ms,
         )?;
         let mut out = Outputs::default();

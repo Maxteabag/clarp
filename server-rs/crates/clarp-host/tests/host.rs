@@ -948,6 +948,174 @@ fn an_agent_keeps_a_goal_with_its_own_tool_and_still_has_it_after_the_host_is_ki
     assert_eq!(goal(&host, &dir, &["show", &session]), json!({}));
 }
 
+fn now_ms() -> i64 {
+    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    i64::try_from(since.unwrap().as_millis()).unwrap()
+}
+
+#[test]
+fn an_agent_is_woken_for_a_goal_that_is_due_and_a_stop_holds_its_goals_too() {
+    let place = Place::new("wake");
+    let host = place.start();
+    let session = host.new_agent("Keeper");
+    let dir = place.root.clone();
+    let wakes = |host: &Host| {
+        let begins = "Continue your durable outcome commitment.";
+        let all = host.conversation(&session);
+        all.iter()
+            .filter(|(role, text)| role == "user" && text.starts_with(begins))
+            .count()
+    };
+    let state_of = |host: &Host, plan_id: &str| goal(host, &dir, &["get", plan_id]);
+
+    // A goal is bound to the conversation its owner has with its tool: the agent has one.
+    host.send(&session, r#"{"session": "s1"}"#, "bind");
+    wait_for("the first turn to end", || host.state(&session) == "done");
+    let commitment = json!({
+        "outcome": "It is kept", "criteria": ["It runs"], "limits": "None", "enroll": true,
+    })
+    .to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &["create", &session, "keep", "Keep it", "[]", &commitment],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
+    assert_eq!(plan["recovery_enabled"], 1);
+    assert_eq!(plan["goal"]["continuation"]["state"], "ready");
+    assert_eq!(wakes(&host), 0);
+
+    // The agent says when it wants to go on: in a moment. It is woken then, and answers.
+    let checkpoint = json!({
+        "progress": "Started", "next_work": "Go on",
+        "continuation": { "kind": "timer", "due_at": now_ms() + 300, "reason": "Go on in a moment" },
+    })
+    .to_string();
+    goal(&host, &dir, &["checkpoint", &plan_id, "0", &checkpoint]);
+    wait_for("the agent to be woken", || wakes(&host) == 1);
+    let woken_with = host
+        .conversation(&session)
+        .into_iter()
+        .find(|(role, text)| role == "user" && text.contains("clarp-goal get"))
+        .unwrap()
+        .1;
+    assert!(
+        woken_with.contains(&format!("clarp-goal get {plan_id}\n")),
+        "{woken_with}"
+    );
+    assert!(
+        woken_with.contains("Continuation: Go on in a moment\n"),
+        "{woken_with}"
+    );
+    wait_for("what the wake's turn came to", || {
+        state_of(&host, &plan_id)["goal"]["continuation"]["last_execution"]["kind"] == "done"
+    });
+    let plan = state_of(&host, &plan_id);
+    let wake = &plan["goal"]["continuation"];
+    assert_eq!(
+        (&wake["state"], &wake["attempts"]),
+        (&json!("admitted"), &json!(1))
+    );
+    assert!(
+        wake["request_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("task-goal-")
+    );
+    assert_eq!(
+        plan["revision"], 1,
+        "a wake does not make the agent's copy of its goal stale"
+    );
+    assert_eq!(
+        wakes(&host),
+        1,
+        "it is not woken again before the goal is due again"
+    );
+
+    // A Stop holds the agent's goals too: nothing wakes an agent its user has just stopped.
+    let stopped = host.post("/stop", json!({ "session": session }));
+    assert_eq!(stopped["goals_paused"], 1);
+    let plan = state_of(&host, &plan_id);
+    assert_eq!(plan["status"], "paused");
+    assert_eq!(
+        plan["goal"]["continuation"]["reason"],
+        "User stopped this agent"
+    );
+
+    // Resumed, the goal waits for a background job, and its owner is woken when the job ends.
+    let revision = plan["revision"].to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &[
+            "resume",
+            &plan_id,
+            &revision,
+            r#"{"reason": "The user said go on"}"#,
+        ],
+    );
+    let handle = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            "build-1",
+            "build",
+            "The build",
+        ],
+    )
+    .1;
+    assert_eq!(handle.trim(), "bg1:1:build-1");
+    let waiting = json!({
+        "progress": "Build launched", "next_work": "Read its result",
+        "continuation": {
+            "kind": "dependency", "key": "build-1", "reason": "Waiting for the build",
+            "due_at": now_ms() + 600_000, "job_handle": "bg1:1:build-1",
+        },
+    })
+    .to_string();
+    let revision = plan["revision"].to_string();
+    let plan = goal(&host, &dir, &["checkpoint", &plan_id, &revision, &waiting]);
+    assert_eq!(plan["goal"]["continuation"]["state"], "waiting");
+    assert_eq!(wakes(&host), 1);
+    let finished = tool(
+        &host,
+        &dir,
+        None,
+        &["clarp-agent-bg", &session, "job-finish", "bg1:1:build-1"],
+    );
+    assert_eq!(finished.0, 0, "{}", finished.2);
+    wait_for("the agent to be woken for the job's end", || {
+        wakes(&host) == 2
+    });
+    let plan = state_of(&host, &plan_id);
+    let result = &plan["goal"]["continuation"]["dependency_result"];
+    assert_eq!(
+        (&result["key"], &result["outcome"]),
+        (&json!("build-1"), &json!("succeeded"))
+    );
+    wait_for("the agent to rest", || host.state(&session) == "done");
+
+    // The Host is killed. A goal that comes due while nobody looks wakes its owner when the
+    // Host is back.
+    let revision = state_of(&host, &plan_id)["revision"].to_string();
+    let soon = json!({
+        "progress": "Result read", "next_work": "Close",
+        "continuation": { "kind": "timer", "due_at": now_ms() + 1_500, "reason": "Close it" },
+    })
+    .to_string();
+    goal(&host, &dir, &["checkpoint", &plan_id, &revision, &soon]);
+    host.kill();
+    std::thread::sleep(Duration::from_millis(2_000));
+    let host = place.start();
+    wait_for("the agent to be woken after the restart", || {
+        wakes(&host) == 3
+    });
+}
+
 #[test]
 fn a_host_that_is_killed_in_the_middle_of_turns_comes_back_and_every_turn_finishes() {
     let place = Place::new("kill");

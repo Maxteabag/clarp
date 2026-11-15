@@ -628,11 +628,11 @@ async fn stop(
         // Nothing runs under a name the Host does not have: nothing was ended, and that is all.
         return Ok(Json(answer));
     };
-    let (terminated, queue) = member.agent.stop("user".to_string()).await?;
+    let stopped = member.agent.stop("user".to_string()).await?;
     Ok(Json(StopResponse {
-        terminated: u64::from(terminated),
-        queue_paused: Some(queue.paused),
-        goals_paused: Some(0),
+        terminated: u64::from(stopped.told),
+        queue_paused: Some(stopped.queue.paused),
+        goals_paused: Some(stopped.goals_paused as u64),
         ..answer
     }))
 }

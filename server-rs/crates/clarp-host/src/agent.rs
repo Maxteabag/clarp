@@ -19,9 +19,9 @@ use clarp_actor::{
 };
 use clarp_backend::Backend;
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
-use clarp_kernel::goals::{Owner, World};
+use clarp_kernel::goals::{GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
-use clarp_kernel::turn::{Activity, Admission, Outcome, TurnId};
+use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
@@ -61,6 +61,17 @@ pub struct Unavailable(pub String);
 
 pub type Answer<T> = oneshot::Sender<Result<T, Unavailable>>;
 
+/// What a Stop did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stopped {
+    /// How many turns were told to end.
+    pub told: u32,
+    /// Where the queue stands after.
+    pub queue: QueueState,
+    /// How many goals that were being worked are paused now.
+    pub goals_paused: usize,
+}
+
 /// What an agent's thread is asked.
 pub enum Ask {
     Send {
@@ -68,10 +79,9 @@ pub enum Ask {
         admission: Admission,
         answer: Answer<Sent>,
     },
-    /// Answers how many turns were told to end, and where the queue stands after.
     Stop {
         by: String,
-        answer: Answer<(u32, QueueState)>,
+        answer: Answer<Stopped>,
     },
     /// Answers whether the mailbox was held, and where the queue stands after.
     Resume {
@@ -203,7 +213,7 @@ impl AgentHandle {
         .await
     }
 
-    pub async fn stop(&self, by: String) -> Result<(u32, QueueState), Unavailable> {
+    pub async fn stop(&self, by: String) -> Result<Stopped, Unavailable> {
         self.ask(|answer| Ask::Stop { by, answer }).await
     }
 
@@ -325,6 +335,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         transcript_due: None,
         jobs_told: BTreeMap::new(),
         jobs_checked: Instant::now(),
+        goals_looked_at: 0,
         clock_seen: (Instant::now(), now_ms),
     };
     let name = format!("agent-{}", worker.setup.record.session);
@@ -356,8 +367,56 @@ struct Worker {
     jobs_told: BTreeMap<String, u64>,
     /// When the running jobs were last looked at.
     jobs_checked: Instant,
+    /// When the goals were last looked at, on the Host's clock. A goal that was due then and
+    /// woke nobody is looked at again when something happens, not when the time comes.
+    goals_looked_at: i64,
     /// The two clocks as they were read together last: what tells a sleep of the machine.
     clock_seen: (Instant, i64),
+}
+
+/// The id of the message a goal's owner is woken with, from the wake's own id: it is a
+/// message to the agent like any other.
+fn wake_message_id(request_id: &str) -> String {
+    format!("u-{request_id}")
+}
+
+/// A turn that ended, as the goals are told of it. A turn that was taken back before it
+/// started is nothing the agent did.
+fn seen_end(last: &Settled) -> Option<TurnSeen> {
+    let (outcome, message) = match &last.outcome {
+        Outcome::Completed => ("completed", String::new()),
+        Outcome::Failed { reason } => ("failed", reason.clone()),
+        Outcome::Interrupted { reason } => ("interrupted", reason.clone()),
+        Outcome::Stopped { by } => ("interrupted", format!("Stopped by {by}")),
+        Outcome::Withdrawn { .. } => return None,
+    };
+    Some(TurnSeen {
+        outcome: outcome.to_string(),
+        started: last.started_at_ms.is_some(),
+        ended_at_ms: last.ended_at_ms,
+        code: String::new(),
+        message,
+    })
+}
+
+/// Asks an agent's book of goals something, with the world around it as its actor has it.
+fn with_goals<T>(
+    actor: &Actor,
+    now_ms: i64,
+    ask: impl FnOnce(&GoalBook, &mut World<'_>) -> T,
+) -> T {
+    let status = actor.status();
+    let jobs = actor.jobs();
+    ask(
+        actor.goals(),
+        &mut World {
+            now_ms,
+            native_session: status.backend_session.as_deref().unwrap_or(""),
+            queue_revision: status.queue_revision,
+            token_hex: &mut ids::hex,
+            has_job: &|id, generation| jobs.get(id).is_some_and(|job| job.generation == generation),
+        },
+    )
 }
 
 fn unavailable(error: &ActorError) -> Unavailable {
@@ -391,10 +450,20 @@ impl Worker {
                 .as_ref()
                 .is_some_and(|actor| actor.jobs().active().next().is_some());
             let jobs_due = has_jobs.then(|| self.jobs_checked + self.setup.jobs_checked_every);
-            let due = match (self.transcript_due, jobs_due) {
-                (Some(transcript), Some(jobs)) => Some(transcript.min(jobs)),
-                (transcript, jobs) => transcript.or(jobs),
-            };
+            // And an agent with a goal that is due later wakes for that.
+            let goals_due = self
+                .actor
+                .as_ref()
+                .and_then(|actor| actor.goals().next_due())
+                .filter(|due| *due > self.goals_looked_at)
+                .map(|due| {
+                    let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
+                    Instant::now() + Duration::from_millis(wait)
+                });
+            let due = [self.transcript_due, jobs_due, goals_due]
+                .into_iter()
+                .flatten()
+                .min();
             let ask = match due {
                 None => match rx.recv() {
                     Ok(ask) => ask,
@@ -407,9 +476,14 @@ impl Worker {
                         if self.transcript_due.is_some_and(|due| due <= now) {
                             self.tell_transcript();
                         }
-                        if jobs_due.is_some_and(|due| due <= now)
-                            && let Err(error) = self.check_jobs()
-                        {
+                        let mut looked = Ok(());
+                        if jobs_due.is_some_and(|due| due <= now) {
+                            looked = self.check_jobs();
+                        }
+                        if looked.is_ok() && goals_due.is_some_and(|due| due <= now) {
+                            looked = self.check_goals();
+                        }
+                        if let Err(error) = looked {
                             eprintln!(
                                 "clarp-host: agent {} failed and is opened again: {error}",
                                 self.setup.record.session
@@ -424,7 +498,9 @@ impl Worker {
             if matches!(ask, Ask::Close) {
                 return;
             }
-            if let Err(error) = self.handle(ask) {
+            // Whatever happened may have left a goal's owner resting, or ended what a goal
+            // waits for.
+            if let Err(error) = self.handle(ask).and_then(|()| self.check_goals()) {
                 eprintln!(
                     "clarp-host: agent {} failed and is opened again: {error}",
                     self.setup.record.session
@@ -481,9 +557,29 @@ impl Worker {
                 answer,
             } => answered(actor.send(&message, admission, now), answer)?,
             Ask::Stop { by, answer } => {
-                let stopped = actor.stop(&by, now);
+                // A Stop holds the agent's goals too: each one that is being worked is paused
+                // until someone resumes it, so that none wakes the agent the user just stopped.
+                let stopped = actor.stop(&by, now).and_then(|(told, mut out)| {
+                    let reason = match by.as_str() {
+                        "user" => "User stopped this agent".to_string(),
+                        by => format!("Stopped by {by} (unverified)"),
+                    };
+                    let paused = with_goals(actor, now, |book, world| book.stopped(&reason, world));
+                    for change in &paused {
+                        out.changed.goals |= actor.goal(change, now)?.changed.goals;
+                    }
+                    Ok(((told, paused.len()), out))
+                });
                 let queue = actor.queue_state();
-                answered(stopped.map(|(told, out)| ((told, queue), out)), answer)?
+                let stopped = stopped.map(|((told, goals_paused), out)| {
+                    let stopped = Stopped {
+                        told,
+                        queue,
+                        goals_paused,
+                    };
+                    (stopped, out)
+                });
+                answered(stopped, answer)?
             }
             Ask::Resume { by, answer } => {
                 let resumed = actor.resume(&by, now);
@@ -519,25 +615,13 @@ impl Worker {
                 return read(actor.job_timeline(&id, limit), answer);
             }
             Ask::Goal { ask, answer } => {
-                let status = actor.status();
-                let jobs = actor.jobs();
-                let (said, change) = goaltool::answer(
-                    actor.goals(),
-                    Owner {
-                        agent_id: &self.setup.record.agent_id,
-                        session: &self.setup.record.session,
-                    },
-                    &ask,
-                    &mut World {
-                        now_ms: now,
-                        native_session: status.backend_session.as_deref().unwrap_or(""),
-                        queue_revision: status.queue_revision,
-                        token_hex: &mut ids::hex,
-                        has_job: &|id, generation| {
-                            jobs.get(id).is_some_and(|job| job.generation == generation)
-                        },
-                    },
-                );
+                let owner = Owner {
+                    agent_id: &self.setup.record.agent_id,
+                    session: &self.setup.record.session,
+                };
+                let (said, change) = with_goals(actor, now, |book, world| {
+                    goaltool::answer(book, owner, &ask, world)
+                });
                 // What the tool prints of a change is true once the change is written.
                 let written = match &change {
                     Some(change) => actor.goal(change, now),
@@ -598,6 +682,84 @@ impl Worker {
 
     /// Looks whether somebody still runs the agent's running jobs, and ends the ones nobody
     /// does. A job whose process is gone drops out here at once, not a timeout later.
+    /// Looks at the agent's goals: notes what happened around them, and wakes the agent for
+    /// one that is due while it rests.
+    fn check_goals(&mut self) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        self.goals_looked_at = now;
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let watched: Vec<String> = actor
+            .goals()
+            .watched()
+            .map(|plan| plan.plan_id.clone())
+            .collect();
+        let mut outs = Vec::new();
+        for plan_id in watched {
+            // Read anew for every goal: a wake for one makes the agent busy for the next.
+            let status = actor.status();
+            // What a Stop left held is not work the agent still has: nothing runs it until
+            // someone resumes it, and a goal that is being worked was resumed after that Stop.
+            let resting = status.live.is_none() && (status.waiting.is_empty() || status.paused);
+            let last = status.last.as_ref().filter(|_| status.live.is_none());
+            let rested = last.and_then(seen_end);
+            let looked = {
+                let actor = &*actor;
+                let jobs = actor.jobs();
+                let wake = |request: &str| {
+                    let end = actor.end_of(&wake_message_id(request)).ok().flatten()?;
+                    // Why a turn failed is known of the last one that ended.
+                    let known = status.last.as_ref().filter(|last| last.id.0 == end.turn);
+                    Some(known.and_then(seen_end).unwrap_or(TurnSeen {
+                        outcome: end.status,
+                        started: end.started_at_ms.is_some(),
+                        ended_at_ms: end.ended_at_ms,
+                        ..TurnSeen::default()
+                    }))
+                };
+                actor.goals().look(
+                    &plan_id,
+                    &mut Seen {
+                        now_ms: now,
+                        session: &self.setup.record.session,
+                        native_session: status.backend_session.as_deref().unwrap_or(""),
+                        busy: (!resting).then_some(("working", "Owner has live or queued work")),
+                        rested: rested.as_ref(),
+                        job: &|id| jobs.get(id),
+                        wake: &wake,
+                        token_hex: &mut ids::hex,
+                    },
+                )
+            };
+            match looked {
+                Looked::Nothing => {}
+                Looked::Noted(change) => outs.push(actor.goal(&change, now)?),
+                Looked::Wake {
+                    change,
+                    request_id,
+                    prompt,
+                } => {
+                    let message = Message {
+                        id: wake_message_id(&request_id),
+                        text: prompt,
+                        origin: Origin::Trigger {
+                            name: "automation".to_string(),
+                        },
+                        trace_id: Some(request_id),
+                        sender: None,
+                        client: None,
+                    };
+                    outs.push(actor.wake(&change, &message, now)?.1);
+                }
+            }
+        }
+        for out in outs {
+            self.after(out);
+        }
+        Ok(())
+    }
+
     fn check_jobs(&mut self) -> Result<(), ActorError> {
         let checked = Instant::now();
         let now = self.now_ms();
