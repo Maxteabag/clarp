@@ -21,8 +21,13 @@
 #
 # It installs beside a Python Host and touches nothing of it: its own directories
 # (~/.local/share/clarp-host, ~/.config/clarp-host), its own port, its own unit (clarp-host.service).
-# An agent on this Host is fenced from the Python Host's state: its tools are told this Host's
-# address and files, so a Clarp tool this Host does not serve yet fails here and does not act there.
+#
+# An agent on this Host is fenced from the Python Host's state. The Python Host's Clarp tools
+# (clarp-goal, clarp-agent-bg and the rest in ~/.local/share/clarp/bin, also linked from
+# ~/.local/bin) write straight into that Host's database, whatever the environment says. Skills
+# call them by name, so this Host's own directory of tools (~/.local/share/clarp-host/tools)
+# comes first on the path an agent's commands run with, and for every tool of the Python Host
+# that this Host does not have yet it holds one of the same name that says so and does nothing.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,6 +54,11 @@ port="${listen##*:}"; address="${listen%:*}"
 # that an agent that moves finds what it found before. Without a Python Host, a plain one.
 tools_path="$(systemctl --user show clarp-runtime.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^PATH=//p' | head -1)"
 tools_path="${tools_path:-$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin}"
+# This Host's own tools first: a name found there is never looked for further.
+tools_path="$share/tools:$tools_path"
+# Where the Python Host on this machine keeps its tools, when there is one.
+python_share="$(systemctl --user show clarp-runtime.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^CLARP_SHARE_DIR=//p' | head -1)"
+python_share="${python_share:-$HOME/.local/share/clarp}"
 claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
 
@@ -57,11 +67,32 @@ for binary in clarp-host clarp-shim; do
 done
 (cd "$from" && sha256sum --quiet -c SHA256SUMS) || { echo "install-host: the binaries in $from are not the ones that were built" >&2; exit 1; }
 
-mkdir -p "$share/bin" "$share/data" "$config" "$units"
+mkdir -p "$share/bin" "$share/tools" "$share/data" "$config" "$units"
 # Put in place under another name and moved: a Host that is running keeps the file it has open.
 for binary in clarp-host clarp-shim; do
     install -m 755 "$from/$binary" "$share/bin/.$binary.new"
     mv -f "$share/bin/.$binary.new" "$share/bin/$binary"
+done
+# For every Clarp tool of the Python Host that this Host has none of: one of the same name
+# that refuses. A tool this Host does have is left as it is.
+stubs=0
+for tool in "$python_share"/bin/clarp-*; do
+    [ -e "$tool" ] || continue
+    name="$(basename "$tool")"
+    if [ -e "$share/tools/$name" ] && ! grep -q '^# clarp-host: not here yet$' "$share/tools/$name" 2>/dev/null; then
+        continue
+    fi
+    cat > "$share/tools/$name" <<EOF
+#!/bin/sh
+# clarp-host: not here yet
+# Written by install-host. This agent runs on the Rust Host, which does not have $name yet.
+# The tool of the same name further along the path belongs to the Python Host and writes its
+# database: it must not be reached from here.
+echo "$name: not available on this Host yet (the Rust Host). Nothing was done." >&2
+exit 69
+EOF
+    chmod 755 "$share/tools/$name"
+    stubs=$((stubs + 1))
 done
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
@@ -94,7 +125,8 @@ EnvironmentFile=$config/env
 Environment="PATH=$tools_path"
 ${claude:+Environment="CLARP_CLAUDE_PROGRAM=$claude"}
 ${codex:+Environment="CLARP_CODEX_PROGRAM=$codex"}
-# The fence: an agent's Clarp tools are pointed at this Host, never at a Python Host's files.
+# The fence: what a Clarp tool reads to find its Host names this Host, never a Python Host's files.
+# (The Python Host's own tools do not read it. They are off the path above.)
 Environment="CLARP_CONFIG_DIR=$config"
 Environment="CLAUDE_PWA_CONFIG=$config/config.toml"
 Environment="CLARP_SHARE_DIR=$share"
@@ -109,6 +141,7 @@ EOF
 
 echo "installed: $share/bin/clarp-host ($version), unit $units/clarp-host.service"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
+echo "Clarp tools of the Python Host that refuse here: $stubs"
 [ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
 systemctl --user daemon-reload
 if [ "$start" = 1 ]; then

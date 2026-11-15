@@ -213,10 +213,17 @@ Speech was planned first and is last: on this Host it carries the least. What is
 turn comes: a speech engine is a program outside the Host (text in, audio out), a clip is a file that grows and
 is announced before its first byte, as the Python Host's chunked-file delivery does.
 
-An agent's Clarp tools (`clarp-goal`, `clarp-agent-bg`, `clarp-agent-artifacts`, `clarp-sub-agent`) reach their
-Host over HTTP with the address and token of the configuration they are pointed at. So the agent's side of the
-contract is endpoints too, and `tools/install-host` points an agent on the Rust Host at the Rust Host: a tool
-this Host does not serve yet fails here and does not act on the Python Host.
+**The agent's side of the contract is command lines.** An agent reaches its Host through tools that skills call
+by name: `clarp-goal`, `clarp-agent-bg`, `clarp-agent-artifacts`, `clarp-sub-agent`, `clarp-media-publish`. On
+the Python Host most of them are not clients of an API: `clarp-goal` and `clarp-agent-bg` import the Host's
+library and write its database, and their wrappers set the Python Host's paths themselves, whatever the
+environment says (read on 15 Nov in `~/.local/share/clarp/bin` and `scripts/agent_bg.py`,
+`scripts/agent_tasks.py`); `clarp-agent-artifacts` speaks HTTP. So for the Rust Host each tool is a program of
+its own with the same name, arguments, output and exit codes, which speaks to the Rust Host. `tools/install-host`
+puts the Rust Host's own directory of tools first on the path of an agent's commands, and fills it with one tool
+of the same name, which refuses, for every tool of the Python Host that is not built yet (they are also linked
+from `~/.local/bin`, so taking a directory off the path would not keep them away): a tool that is not there yet
+says so, and is never an action on the other Host.
 
 ## 7. Stages and gates
 
