@@ -1,0 +1,2417 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "error": "muted required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-mute",
+   "status": 400,
+   "step": "mute without saying whether"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-mute",
+   "status": 400,
+   "step": "mute without saying whom"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-mute",
+   "status": 404,
+   "step": "mute an agent that is not there"
+  },
+  {
+   "body": {
+    "muted": true,
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-mute",
+   "status": 200,
+   "step": "mute"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "started",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "spawned",
+       "persona": "Claire",
+       "phase": "spawned",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Started",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": null,
+      "context_window": 1000000,
+      "conversation_id": "",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": false,
+      "goal": null,
+      "head_revision": 0,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "",
+      "last_message": "",
+      "last_message_id": "",
+      "last_turn_end": 0,
+      "latest_state": "spawned",
+      "latest_state_ts": "<time>",
+      "live_activity": null,
+      "mcp_servers": [],
+      "model": "",
+      "muted": true,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": null,
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot of the muted agent"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:2>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send ralfa"
+  },
+  {
+   "body": {
+    "muted": false,
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-mute",
+   "status": 200,
+   "step": "mute with a word"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 400,
+   "step": "rename without saying whom"
+  },
+  {
+   "body": {
+    "error": "name required (maximum 60 characters)"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 400,
+   "step": "rename to nothing"
+  },
+  {
+   "body": {
+    "error": "name required (maximum 60 characters)"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 400,
+   "step": "rename to too much"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 404,
+   "step": "rename an agent that is not there"
+  },
+  {
+   "body": {
+    "error": "contact_occupied",
+    "message": "Rachel already has an active session.",
+    "owner": "Rachel",
+    "session": "rachel"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 409,
+   "step": "rename to a name that is taken"
+  },
+  {
+   "body": {
+    "error": "contact_occupied",
+    "message": "Rachel already has an active session. Open or release that chat before starting another.",
+    "owner": "Rachel",
+    "session": "rachel"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agents",
+   "status": 409,
+   "step": "make an agent under a name that is taken"
+  },
+  {
+   "body": {
+    "name": "Claire the Second",
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 200,
+   "step": "rename"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire the Second",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 1,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: synthetic roster alfa",
+      "last_message": "Claude replay reply: synthetic roster alfa",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire the Second",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot of the renamed agent"
+  },
+  {
+   "body": {
+    "name": "Claire the Second",
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 200,
+   "step": "rename to the name it has"
+  },
+  {
+   "body": {
+    "name": "claire",
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 200,
+   "step": "rename to its first name in small letters"
+  },
+  {
+   "body": {
+    "name": "Claire",
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-rename",
+   "status": 200,
+   "step": "rename back"
+  },
+  {
+   "body": {
+    "error": "session and archived required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-archive",
+   "status": 400,
+   "step": "put away with a word"
+  },
+  {
+   "body": {
+    "error": "session and archived required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-archive",
+   "status": 400,
+   "step": "put away without saying whom"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-archive",
+   "status": 404,
+   "step": "put away an agent that is not there"
+  },
+  {
+   "body": {
+    "archived": true,
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-archive",
+   "status": 200,
+   "step": "put away"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": "<time>",
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 1,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: synthetic roster alfa",
+      "last_message": "Claude replay reply: synthetic roster alfa",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot with the agent put away"
+  },
+  {
+   "body": {
+    "agents": [],
+    "archived_count": 1,
+    "archived_parents": [],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot without the agents put away"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": "<time>",
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 1,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: synthetic roster alfa",
+      "last_message": "Claude replay reply: synthetic roster alfa",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot asked for in another word"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": "<time>",
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 1,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: synthetic roster alfa",
+      "last_message": "Claude replay reply: synthetic roster alfa",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "next_cursor": null,
+    "total": 1
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/archived",
+   "status": 200,
+   "step": "the agents put away"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": "<time>",
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 1,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: synthetic roster alfa",
+      "last_message": "Claude replay reply: synthetic roster alfa",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "next_cursor": null,
+    "total": 1
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/archived",
+   "status": 200,
+   "step": "the agents put away, one to a page"
+  },
+  {
+   "body": {
+    "error": "invalid archived agents query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/archived",
+   "status": 400,
+   "step": "a page of none"
+  },
+  {
+   "body": {
+    "error": "invalid archived agents query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/archived",
+   "status": 400,
+   "step": "a page of too many"
+  },
+  {
+   "body": {
+    "error": "invalid archived agents query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/archived",
+   "status": 400,
+   "step": "a page with a size not in plain digits"
+  },
+  {
+   "body": {
+    "error": "invalid archived agents query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/archived",
+   "status": 400,
+   "step": "a page after no place"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:4>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send rbravo"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": "<time>",
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 2,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "You: synthetic roster bravo",
+      "last_message": "Claude replay reply: synthetic roster bravo",
+      "last_message_id": "<row:2>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:4>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot after a turn of the agent put away"
+  },
+  {
+   "body": {
+    "archived": false,
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-archive",
+   "status": 200,
+   "step": "take out again"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 2,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "You: synthetic roster bravo",
+      "last_message": "Claude replay reply: synthetic roster bravo",
+      "last_message_id": "<row:2>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:4>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "archived_count": 0,
+    "archived_parents": [],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot with nobody put away"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 400,
+   "step": "tune without saying whom"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 404,
+   "step": "tune an agent that is not there"
+  },
+  {
+   "body": {
+    "error": "model must be string or null"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 400,
+   "step": "a model that is no text"
+  },
+  {
+   "body": {
+    "error": "effort must be string or null"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 400,
+   "step": "an effort that is no text"
+  },
+  {
+   "body": {
+    "backend": "claude",
+    "error": "invalid effort for backend",
+    "valid_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 400,
+   "step": "an effort the tool has not"
+  },
+  {
+   "body": {
+    "backend": "claude",
+    "effort": "high",
+    "model": "synthetic-model-one",
+    "ok": true,
+    "valid_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 200,
+   "step": "tune"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "high",
+      "focused": true,
+      "goal": null,
+      "head_revision": 2,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "You: synthetic roster bravo",
+      "last_message": "Claude replay reply: synthetic roster bravo",
+      "last_message_id": "<row:2>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:4>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "synthetic-model-one",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot of the tuned agent"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:5>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "send rcharlie"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "high",
+      "focused": true,
+      "goal": null,
+      "head_revision": 3,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "You: synthetic roster charlie",
+      "last_message": "Claude replay reply: synthetic roster charlie",
+      "last_message_id": "<row:3>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:5>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "synthetic-model-one",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "snapshot after a turn of the tuned agent"
+  },
+  {
+   "body": {
+    "backend": "claude",
+    "effort": "",
+    "model": "synthetic-model-one",
+    "ok": true,
+    "valid_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 200,
+   "step": "the tool chooses its effort"
+  },
+  {
+   "body": {
+    "backend": "claude",
+    "effort": "",
+    "model": "",
+    "ok": true,
+    "valid_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 200,
+   "step": "the tool chooses its model"
+  },
+  {
+   "body": {
+    "backend": "claude",
+    "effort": "",
+    "model": "",
+    "ok": true,
+    "valid_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-llm",
+   "status": 200,
+   "step": "tune nothing"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:3>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:3>.jsonl",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 3,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-ralfa",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic roster alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:2>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic roster alfa",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:2>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:2>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-rbravo",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic roster bravo",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:4>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:2>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic roster bravo",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:4>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:4>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-rcharlie",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "synthetic roster charlie",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:3>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic roster charlie",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:5>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:3>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:3>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 3,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "You: synthetic roster charlie",
+      "last_message": "Claude replay reply: synthetic roster charlie",
+      "last_message_id": "<row:3>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:5>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "get /agents/snapshot"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "roster-edits",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "event_id": "<eid:transcript-updated#1@45bbad>",
+    "session": "claire",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@45bbad>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "ralfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "backend_session_id": "<id:3>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:2>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:2>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "badge": true,
+    "cause_message_id": "u-ralfa",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": true,
+    "notification_id": "pn-<id:6>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic roster alfa",
+    "push": false,
+    "reason": "text-reply-muted",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#1@fc1621>",
+    "kind": "agent-renamed",
+    "name": "Claire the Second",
+    "session": "claire",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#1@fc1621>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#2@fc1621>",
+    "kind": "agent-renamed",
+    "name": "claire",
+    "session": "claire",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#2@fc1621>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#3@fc1621>",
+    "kind": "agent-renamed",
+    "name": "Claire",
+    "session": "claire",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#3@fc1621>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "rbravo",
+    "event_id": "<eid:agent-state#2@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:4>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "backend_session_id": "<id:3>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:4>"
+    },
+    "event_id": "<eid:agent-state#5@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#5@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#6@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#6@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:4>"
+    },
+    "event_id": "<eid:agent-state#7@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#7@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#8@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#8@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "badge": true,
+    "cause_message_id": "u-rbravo",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#2@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:7>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic roster bravo",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:2>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#2@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "rcharlie",
+    "event_id": "<eid:agent-state#3@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:5>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "backend_session_id": "<id:3>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#9@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#9@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#10@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#10@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#11@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#11@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#12@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#12@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "badge": true,
+    "cause_message_id": "u-rcharlie",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#3@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic roster charlie",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:3>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#3@f5caa0>"
+  }
+ ]
+}

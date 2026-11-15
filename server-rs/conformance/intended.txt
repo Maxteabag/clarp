@@ -19,6 +19,7 @@ cdeb37c253ec  turn-timer: the second reply, which answered a message that had wa
 34052692aaba  who-is-told: the last reply
 f2243c3156c0  routine-turns: the last reply, in a page without automation
 80e273b5bd0a  routine-turns: the reply to a watcher's event
+c9827f59a66a  roster-edits: the last reply
 
 # A notification's preview of what was said aloud does not show an emotion tag the engine
 # acts out (the Python Host shows "[sigh]" there: reference defect R10).
@@ -29,6 +30,11 @@ f2243c3156c0  routine-turns: the last reply, in a page without automation
 d4b9221921eb  turn-timer: last_completed_message at rest, after the second turn
 1e31cfb83338  who-is-told: last_completed_message at rest, after turns nobody waited for
 3c21eb549be7  routine-turns: last_completed_message at rest, after routine turns
+631b42b31474  roster-edits: last_completed_message at rest, after the turn of the agent put away
+6b801a35e263  roster-edits: the same, in the snapshot with nobody put away
+ecd38a2b9306  roster-edits: the same, in the snapshot of the tuned agent
+cbaf110bc254  roster-edits: last_completed_message at rest, after the turn of the tuned agent
+713b6d78996c  roster-edits: the same, in the last snapshot
 
 # The model that answered is shown after a turn that completed (the Python Host shows none
 # after some: reference defect R13).
@@ -43,3 +49,8 @@ d4b9221921eb  turn-timer: last_completed_message at rest, after the second turn
 # The answer to a discard says the artifact is not pinned (the Python Host says pinned true
 # beside pinned_at null: reference defect R15).
 23ad255cb543  library: pinned in the answer to the discard of a pinned artifact
+
+# A reply is given once to a client that catches up by revision (the Python Host writes the
+# reply that closed a turn again when the next message arrives, so its revision moves past a
+# cursor the client already holds: reference defect R16).
+d9328e5ae3d4  roster-edits: the second reply, which no cursor after its turn is older than
