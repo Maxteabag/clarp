@@ -131,6 +131,14 @@ impl Host {
         heard
     }
 
+    /// Everything in the conversation, as the Host answers it.
+    fn turns(&self, session: &str) -> Vec<Value> {
+        self.get(&format!("/log?session={session}&limit=200"))["turns"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
     fn new_agent(&self, name: &str) -> String {
         let made = self.post("/agents", json!({ "name": name, "backend": "scripted" }));
         made["session"].as_str().unwrap().to_string()
@@ -187,6 +195,21 @@ fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
     while !ready() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Waits for something a real tool does, which can take a while. Says what it saw when it
+/// gives up, and gives up at once when the turn has ended badly.
+fn wait_long(host: &Host, session: &str, what: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while !ready() {
+        let state = host.state(session);
+        assert!(
+            Instant::now() < deadline && state != "interrupted",
+            "waiting for {what}: the agent is {state} and its conversation is {:#?}",
+            host.turns(session)
+        );
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -348,5 +371,91 @@ fn a_host_that_is_killed_in_the_middle_of_turns_comes_back_and_every_turn_finish
     wait_for("the next answer", || {
         host.conversation(&agents[0])
             .contains(&said("assistant", "and now?"))
+    });
+}
+
+/// A real Claude Code turn through the Host, with the Host killed while Claude's tool runs.
+///
+/// It spends a few cents of a real account and needs a Claude Code that is logged in, so it runs
+/// only when asked: `CLARP_TEST_CLAUDE=1 cargo test --test host -- --ignored`. Set
+/// `CLARP_CLAUDE_PROGRAM` when Claude Code is not `claude` on the path.
+#[test]
+#[ignore = "runs a real Claude Code turn: needs a logged-in account and CLARP_TEST_CLAUDE=1"]
+fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it() {
+    if std::env::var("CLARP_TEST_CLAUDE").as_deref() != Ok("1") {
+        eprintln!("skipped: CLARP_TEST_CLAUDE is not 1");
+        return;
+    }
+    let place = Place::new("claude");
+    let host = place.start();
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Real", "backend": "claude", "model": "claude-haiku-5-5" }),
+    );
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(
+        &session,
+        "Use the Bash tool once to run exactly: sleep 12; echo spool-survived. Then reply with one short sentence that says what it printed.",
+        "real-1",
+    );
+    wait_long(&host, &session, "Claude to start its tool", || {
+        host.state(&session) == "tool"
+    });
+
+    // The Host dies while Claude's command sleeps, and is away for a moment.
+    host.kill();
+    std::thread::sleep(Duration::from_secs(2));
+    let host = place.start();
+
+    wait_long(&host, &session, "the turn to finish", || {
+        host.state(&session) == "done"
+    });
+    let turns = host.turns(&session);
+    let tool = turns
+        .iter()
+        .find(|turn| turn["kind"] == "tool")
+        .expect("the tool call is in the conversation");
+    assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
+    assert!(
+        tool["tools"][0]["output"]
+            .as_str()
+            .unwrap()
+            .contains("spool-survived")
+    );
+    let answers: Vec<&str> = turns
+        .iter()
+        .filter(|turn| turn["role"] == "assistant" && turn["kind"].is_null())
+        .map(|turn| turn["text"].as_str().unwrap())
+        .collect();
+    assert!(
+        answers.iter().any(|text| text.contains("spool-survived")),
+        "Claude's answer came through the restart: {answers:?}"
+    );
+    assert_eq!(
+        turns.iter().filter(|turn| turn["role"] == "user").count(),
+        1,
+        "the message is there once"
+    );
+
+    // The next turn continues Claude's own session: it knows what the last one did.
+    host.send(
+        &session,
+        "In one word or one hyphenated word: what did that command print?",
+        "real-2",
+    );
+    wait_long(&host, &session, "the second answer", || {
+        host.state(&session) == "done"
+            && host
+                .turns(&session)
+                .iter()
+                .filter(|turn| turn["role"] == "user")
+                .count()
+                == 2
+            && host.turns(&session).last().is_some_and(|turn| {
+                turn["role"] == "assistant"
+                    && turn["text"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("spool-survived"))
+            })
     });
 }
