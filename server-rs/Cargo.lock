@@ -166,6 +166,7 @@ dependencies = [
  "clarp-ports",
  "clarp-protocol",
  "clarp-shim",
+ "clarp-speech",
  "clarp-store-mem",
  "clarp-store-sqlite",
  "futures-util",

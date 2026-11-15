@@ -161,6 +161,20 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'voice-markup',
+        'what': 'a reply with voice markup in it: what the conversation, the list of chats and the notification show',
+        'steps': [
+            # The fake answers with the message, so the reply carries the markup too. Nothing is
+            # asked to be spoken: this is about what is shown.
+            send('<speak>synthetic <vox>um,</vox> spoken part. <break time="300ms"/> [sigh] done.</speak> '
+                 'and a written part <team>for the team</team>', 'mike'),
+            {'op': 'wait_reply', 'after': 'u-mike'},
+            {'op': 'quiesce'},
+            LOG,
+            SNAPSHOT,
+        ],
+    },
+    {
         'id': 'focus',
         'what': 'the open agent is chosen and the snapshot says so',
         'steps': [

@@ -586,10 +586,12 @@ impl Worker {
                 .map(|was| was.message_id.clone())
                 .unwrap_or_default();
             let id = format!("pn-{}", ids::hex(6));
-            hub.publish(
-                wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms),
-                now,
-            );
+            // A reply with nothing for the user in it is not something to be told of.
+            if let Some(told) =
+                wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms)
+            {
+                hub.publish(told, now);
+            }
         }
         self.told = Some(status);
         self.publish_view();

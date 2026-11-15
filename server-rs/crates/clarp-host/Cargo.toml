@@ -14,6 +14,7 @@ clarp-kernel.workspace = true
 clarp-ports.workspace = true
 clarp-protocol.workspace = true
 clarp-shim.workspace = true
+clarp-speech.workspace = true
 clarp-store-mem.workspace = true
 clarp-store-sqlite.workspace = true
 futures-util.workspace = true
