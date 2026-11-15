@@ -687,6 +687,106 @@ impl GoalBook {
         }
     }
 
+    /// A plan that comes with an agent that moves here, as the Host it was on showed it
+    /// (`GET /task-plans`), with the documents of its goal that came with it. Answers the
+    /// change that puts it into the agent's books as it stood there: under its id, at its
+    /// revision, with its steps, its history and how its work goes on. Nothing of it is
+    /// judged anew: it was a plan there, and it is the same plan here.
+    pub fn taken_over(
+        &self,
+        owner: Owner<'_>,
+        shown: &Value,
+        documents: &[Value],
+    ) -> Result<Change, Refused> {
+        let text = |name: &str| {
+            let said = shown.get(name).and_then(Value::as_str);
+            said.unwrap_or("").to_string()
+        };
+        let whole = |name: &str| shown.get(name).and_then(Value::as_i64);
+        let plan_id = text("plan_id");
+        if plan_id.is_empty() || text("agent_id") != owner.agent_id {
+            return refuse("the plan is not this agent's");
+        }
+        if self.plans.contains_key(&plan_id) {
+            return refuse("the agent has this plan already");
+        }
+        if text("status").is_empty() {
+            return refuse("the plan does not say how it stands");
+        }
+        let unreadable = |what: &str, error: &serde_json::Error| {
+            Refused(format!("{what} of the plan cannot be read: {error}"))
+        };
+        // The steps as they are kept: one after another, each naming the step it is under.
+        let mut items: Vec<Item> = Vec::new();
+        let roots = shown.get("items").and_then(Value::as_array);
+        for root in roots.into_iter().flatten() {
+            let under = root.get("subtasks").and_then(Value::as_array);
+            for row in std::iter::once(root).chain(under.into_iter().flatten()) {
+                let item = Item::deserialize(row).map_err(|error| unreadable("a step", &error))?;
+                items.push(item);
+            }
+        }
+        let goal = shown.get("goal").and_then(Value::as_object).map(|given| {
+            let mut fields = given.clone();
+            let listed = |value: Option<Value>| match value {
+                Some(Value::Array(entries)) => entries,
+                _ => Vec::new(),
+            };
+            let history = listed(fields.remove("history"));
+            let continuation = match fields.remove("continuation") {
+                Some(Value::Object(continuation)) => continuation,
+                _ => Map::new(),
+            };
+            let history_offset = fields
+                .remove("history_offset")
+                .and_then(|offset| offset.as_u64());
+            // The list of its documents is made from the documents themselves.
+            fields.remove("documents");
+            Goal {
+                fields,
+                continuation,
+                history,
+                history_offset: history_offset.unwrap_or(0),
+            }
+        });
+        let mut came = Vec::new();
+        for row in documents {
+            let document =
+                Document::deserialize(row).map_err(|error| unreadable("a document", &error))?;
+            if document.plan_id != plan_id {
+                return refuse("a document of another plan came with the plan");
+            }
+            came.push(document);
+        }
+        let ledger = |name: &str| shown.get("ledger").and_then(|ledger| ledger.get(name));
+        let plan = Plan {
+            agent_id: owner.agent_id.to_string(),
+            session: owner.session.to_string(),
+            title: text("title"),
+            status: text("status"),
+            created_at: whole("created_at").unwrap_or(0),
+            updated_at: whole("updated_at").unwrap_or(0),
+            completed_at: whole("completed_at"),
+            revision: whole("revision").unwrap_or(1),
+            recovery_enabled: whole("recovery_enabled").unwrap_or(0),
+            goal,
+            history: shown
+                .get("history")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            items,
+            event_count: ledger("event_count").and_then(Value::as_i64).unwrap_or(0),
+            last_event_at: ledger("last_event_at").and_then(Value::as_i64),
+            order: 0,
+            plan_id,
+        };
+        Ok(Change {
+            plan,
+            documents: came,
+        })
+    }
+
     /// Takes a change that is in the log.
     pub fn apply(&mut self, record: &GoalRecord) {
         let known = self.plans.remove(&record.plan_id);
@@ -1835,6 +1935,85 @@ mod tests {
             .unwrap();
         keep(book, &change, 1_000);
         change.plan.plan_id
+    }
+
+    #[test]
+    fn a_plan_that_moves_with_its_agent_is_the_same_plan_where_it_arrives() {
+        // A plan with a goal, steps under steps, a checkpoint and a document, on one Host.
+        let mut ids = counter();
+        let mut there = GoalBook::new();
+        let goal = json!({ "outcome": "It is done", "criteria": ["It runs"], "limits": "None" });
+        let items = json!([
+            { "id": "one", "title": "The first step", "subtasks": [{ "id": "one-a", "title": "A part of it" }] },
+            { "id": "two", "title": "The second step" },
+        ]);
+        let change = there
+            .create(
+                VERA,
+                "ship",
+                "Ship it",
+                &items,
+                Some(&goal),
+                &mut world(1_000, &mut ids),
+            )
+            .unwrap();
+        keep(&mut there, &change, 1_000);
+        let plan_id = change.plan.plan_id.clone();
+        let revision = there.plan(&plan_id).unwrap().revision;
+        let data = json!({
+            "progress": "Half of it", "next_work": "The other half",
+            "continuation": { "kind": "timer", "due_at": 9_000 },
+            "documents": [{ "name": "notes.md", "format": "markdown", "content": "# Notes",
+                            "document_revision": 0, "reason": "the first" }],
+        });
+        let change = there
+            .act(
+                &plan_id,
+                revision,
+                "checkpoint",
+                &data,
+                &mut world(2_000, &mut ids),
+            )
+            .unwrap();
+        keep(&mut there, &change, 2_000);
+        let shown = there.get(&plan_id, 5_000).unwrap();
+        let document = there.read(&plan_id, "notes.md", None).unwrap();
+
+        // It arrives with its agent: as it was shown there, it is shown here.
+        let mut here = GoalBook::new();
+        let arrived = here
+            .taken_over(VERA, &shown, std::slice::from_ref(&document))
+            .unwrap();
+        let record = here.record(&arrived, 6_000);
+        let read: GoalRecord =
+            serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+        here.apply(&read);
+        assert_eq!(here.get(&plan_id, 5_000).unwrap(), shown);
+        assert_eq!(here.read(&plan_id, "notes.md", None).unwrap(), document);
+        // And it goes on here from where it stood: the next change follows its revision.
+        let revision = shown["revision"].as_i64().unwrap();
+        let next = json!({ "progress": "All of it", "next_work": "Nothing",
+                           "continuation": { "kind": "timer", "due_at": 20_000 } });
+        let change = here
+            .act(
+                &plan_id,
+                revision,
+                "checkpoint",
+                &next,
+                &mut world(7_000, &mut ids),
+            )
+            .unwrap();
+        assert_eq!(change.plan.revision, revision + 1);
+
+        // What is not this agent's plan, or is here already, does not arrive.
+        let other = Owner {
+            agent_id: "b2",
+            session: "omar",
+        };
+        let refused = GoalBook::new().taken_over(other, &shown, &[]).unwrap_err();
+        assert_eq!(refused.0, "the plan is not this agent's");
+        let again = here.taken_over(VERA, &shown, &[]).unwrap_err();
+        assert_eq!(again.0, "the agent has this plan already");
     }
 
     #[test]

@@ -11,6 +11,7 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 | Its conversation, every row as the apps show it, in the same order, under the same ids | read from `GET /log`, page by page |
 | The tool's own session (Claude's session, Codex's thread) | the next turn continues it: the agent remembers |
 | The conversation's name (`conversation_id`) | kept, so it is the same conversation to an app |
+| Its plans and goals: each plan under its id and at its revision, with its steps, what was done, the goal's criteria and evidence, its history, how its work goes on, and the newest version of each of the goal's documents | read from `GET /task-plans?session=` and `GET /task-plan/document`. They arrive with the conversation or not at all: an agent does not arrive without what it is committed to |
 | The files it published: its gallery (the newest 500 images), and every file its conversation names | read from `GET /media?session=` and `GET /media/<id>`, and published here under the ids they have, so that an image in an old reply still shows |
 
 ## What does not move yet
@@ -18,8 +19,9 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 - Its portrait and voice (stage 3).
 - Its library: what it made for its user (documents, reports, tables) and what it asked.
   It stays readable on the Python Host. Not built yet.
-- Its goals and plans. An agent that works toward a goal loses it in the move: move it
-  between goals, or wait until goals move. Not built yet.
+- The older versions of a goal's documents: the newest of each comes, with its number.
+- What a goal waits for when it waits for a background job: jobs do not move, so the wait
+  is over on arrival, as it is when a job is gone.
 - Messages that wait in its queue, schedules and background jobs. Move an agent when
   nothing waits for it.
 - The details behind the tool cards of the old history. The cards arrive in their short
@@ -73,7 +75,7 @@ there.
 
 | When | What | Result |
 |---|---|---|
-| 15 Nov 2026 | `an_agent_moves_from_one_host_to_another_with_its_conversation` (`crates/clarp-host/tests/host.rs`): two Rust Hosts, real binaries | The conversation arrives whole, the next turn continues the tool's session, a second move of the same agent is refused. An image and a document the agent published arrive under their ids, byte for byte, the image in its gallery as it was; a file the conversation names that is gone is counted; asked for again, nothing arrives twice |
+| 15 Nov 2026 | `an_agent_moves_from_one_host_to_another_with_its_conversation` (`crates/clarp-host/tests/host.rs`): two Rust Hosts, real binaries | The conversation arrives whole, the next turn continues the tool's session, a second move of the same agent is refused. An image and a document the agent published arrive under their ids, byte for byte, the image in its gallery as it was; a file the conversation names that is gone is counted; asked for again, nothing arrives twice. Its goal arrives as it stood (the plan read on the new Host equals the plan read on the old one, field for field; so do its working notes), is in the library as its artifact, and the agent's next step on the new Host follows the revision it had |
 | 15 Nov 2026 | Rehearsal against the live Python Host on elitebook (reads only), into a scratch Rust Host: one Claude agent (23 rows) and one Codex agent (179 rows) | Both arrived in under two seconds. Every row equal to the Python Host's in every field but its revision; same order; same `conversation_id`. No turn was run on the scratch Host and it was removed afterwards |
 
 | 15 Nov 2026 | The service arrangement, on elitebook: the Rust Host as a systemd user unit (`--launcher systemd`), six turns running, `systemctl --user restart` of the unit | Each turn's shim was in a scope of its own; all six scopes outlived the restart and all six turns finished, each answered once. (The first try found a defect: `systemd-run` rewrote `${...}` in a tool's arguments. Fixed, and `a_turn_in_a_systemd_scope_gets_its_tool_unchanged_and_outlives_the_host` holds it) |
