@@ -782,4 +782,89 @@ SCENARIOS.append({
     ],
 })
 
+FORM_PAGE = '<form><label>When <select name="when"><option>now</option><option>later</option></select></label></form>'
+FORM_SCHEMA = {'type': 'object', 'properties': {
+    'when': {'type': 'string', 'enum': ['now', 'later']}, 'budget': {'type': 'number', 'minimum': 0},
+    'notes': {'type': 'string', 'maxLength': 40}, 'steps': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 3}},
+    'required': ['when'], 'additionalProperties': False}
+# The ids a client mints for what it sends: the same on both Hosts.
+ANSWERS_ONE = '0a1b2c3d-0000-4000-8000-000000000001'
+ANSWERS_TWO = '0a1b2c3d-0000-4000-8000-000000000002'
+
+
+def form(artifact_id, name, schema=None, **more):
+    """An agent makes a form: a page that asks its user for answers, with what an answer is."""
+    payload = {'content': FORM_PAGE, 'version': '1', 'answer_schema': FORM_SCHEMA if schema is None else schema}
+    return post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic plan: it\'s "here"',
+                               'artifact_id': artifact_id, 'summary': 'What it asks', 'payload': payload, **more}, name)
+
+
+def answers(artifact_id, submission_id, given, name, version='1', **more):
+    """A user sends answers to a form, under an id the app chose."""
+    return post(f'/artifacts/{artifact_id}/submit',
+                {'submission_id': submission_id, 'version': version, 'answers': given, **more}, name)
+
+
+SCENARIOS.append({
+    'id': 'forms',
+    'what': 'a form, a page that asks its user for answers: it is made once and never changed, shown whole and in a '
+            'summary, sent answers that fit its schema and answers that do not, and its agent is told what its user '
+            'answered, once',
+    'steps': [
+        form('form-1', 'make a form'),
+        form('form-1', 'make it again'),
+        get('/artifacts/form-1', 'the form'),
+        get(f'/artifacts?session={AGENT}&representation=summary-v1', 'the library, summed up'),
+        get('/artifacts/form-1/html', 'the page as a browser is given it'),
+        get('/artifacts/form-1/revisions', 'the versions of a form'),
+        post('/artifacts/form-1', {'payload_patch': {'version': '2'}}, 'change the form'),
+        post('/artifacts/form-1', {'summary': 'What it asks, said better'}, 'change what is said of it'),
+        # What a form is not.
+        form('form-2', 'a schema that is none', schema={'type': 'object', 'properties': {'a': {'type': 'text'}}}),
+        form('form-2', 'a schema that points elsewhere',
+             schema={'type': 'object', 'properties': {'a': {'$ref': '#/$defs/a'}}}),
+        form('form-2', 'a schema of something that is no object', schema={'type': 'string'}),
+        # What is no submission, and what the form does not take.
+        post('/artifacts/form-1/submit', {'submission_id': 'short', 'version': '1', 'answers': {}},
+             'answers under an id that is none'),
+        post('/artifacts/form-1/submit', {'submission_id': ANSWERS_ONE, 'version': '1', 'answers': ['now']},
+             'answers that are a list'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now'}, 'answers with a wish that is no yes or no', synthesize_audio='yes'),
+        answers('form-1', ANSWERS_ONE, {}, 'answers without what is required'),
+        answers('form-1', ANSWERS_ONE, {'when': 'soon'}, 'an answer that is not among the choices'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'budget': -1}, 'a number below what is allowed'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'budget': '10'}, 'a number that is text'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'notes': 'n' * 41}, 'a text that is too long'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'steps': ['a', 'b', 'c', 'd']}, 'a list that is too long'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'steps': ['a', 2]}, 'a list with what is no text'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'colour': 'red', 'also': 1}, 'answers nobody asked for'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now'}, 'answers to another version', version='2'),
+        answers('no-such-form', ANSWERS_ONE, {'when': 'now'}, 'answers to nothing'),
+        post('/artifacts', {'session': AGENT, 'type': 'html_form', 'title': 'Synthetic report', 'artifact_id': 'report-1',
+                            'payload': {'content': PAGE_ONE, 'version': 'v1', 'read_only': True}}, 'publish a report'),
+        answers('report-1', ANSWERS_ONE, {}, 'answers to a report', version='v1'),
+        LOG,
+        # Answers that fit: a receipt, and the agent is told them as what its user said.
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'budget': 12.5, 'notes': 'synthetic, "quoted" æøå',
+                                        'steps': ['a', 'b']}, 'answers that fit', synthesize_audio=False),
+        {'op': 'wait_reply', 'after': f'u-html-form-{ANSWERS_ONE}'},
+        {'op': 'quiesce'},
+        LOG,
+        answers('form-1', ANSWERS_ONE, {'steps': ['a', 'b'], 'notes': 'synthetic, "quoted" æøå', 'budget': 12.5,
+                                        'when': 'now'}, 'the same answers again, in another order'),
+        answers('form-1', ANSWERS_ONE, {'when': 'later'}, 'other answers under the same id'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'budget': 12.5, 'notes': 'synthetic, "quoted" æøå',
+                                        'steps': ['a', 'b']}, 'the same answers with another wish', synthesize_audio=True),
+        answers('no-such-form', ANSWERS_ONE, {'when': 'now'}, 'a used id, for a form that is not there'),
+        # A form that is over takes no more; what it took is still answered.
+        post('/artifacts/form-1', {'status': 'completed'}, 'complete the form'),
+        answers('form-1', ANSWERS_TWO, {'when': 'later'}, 'answers to a form that is over'),
+        answers('form-1', ANSWERS_ONE, {'when': 'now', 'budget': 12.5, 'notes': 'synthetic, "quoted" æøå',
+                                        'steps': ['a', 'b']}, 'the first answers once more'),
+        {'op': 'quiesce'},
+        LOG,
+        get('/artifacts/form-1', 'the form, after'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

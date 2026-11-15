@@ -19,6 +19,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_actor::{Actor, ActorError, Kept, Outputs};
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
+use clarp_kernel::artifacts::forms::{self, Sent};
 use clarp_kernel::artifacts::reports::{self, Page, Revisions};
 use clarp_kernel::artifacts::{
     self, Artifact, ArtifactBook, Ctx, Listing, Made, Maker, New, Refused, Shelf, Why,
@@ -93,6 +94,11 @@ pub enum Want {
         artifact_id: String,
         pinned: bool,
     },
+    /// A user's answers to a form.
+    Submit {
+        artifact_id: String,
+        sent: Box<Sent>,
+    },
 }
 
 /// What was done: the artifact as it is shown, whether anything changed, and whether how a
@@ -102,6 +108,8 @@ pub struct Done {
     pub artifact: Value,
     pub changed: bool,
     pub delivery_pending: bool,
+    /// What the one who sent answers to a form is answered.
+    pub receipt: Option<Value>,
 }
 
 /// What carrying something out comes to, for the agent's thread: the answer, and what the
@@ -160,6 +168,25 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
         let told = [told];
         outs.push(actor.keep_with(&kept(&told), &message, admission, now)?.1);
     }
+    // What a user answered to a form is what the user said to the form's agent: it is in
+    // the conversation from now on, and the agent comes to it when it is free.
+    for (artifact_id, submission_id) in actor.artifacts().untold() {
+        let told = actor.artifacts().told(&artifact_id, &submission_id, now);
+        let Some((form, prompt, _spoken)) = told else {
+            continue;
+        };
+        let message = Message {
+            id: format!("u-html-form-{submission_id}"),
+            text: prompt,
+            origin: Origin::User,
+            trace_id: Some(ids::hex(8)),
+            sender: None,
+            client: None,
+        };
+        let told = [form];
+        let said = actor.keep_with(&kept(&told), &message, Admission::Queue, now)?;
+        outs.push(said.1);
+    }
     Ok(outs)
 }
 
@@ -188,6 +215,7 @@ pub fn carry_out(
         session: &record.session,
         persona: &record.persona,
     };
+    let mut receipt = None;
     let decided = {
         let (book, published) = (actor.artifacts(), actor.media());
         let page = |page: &Page| kept_page(pages, page);
@@ -277,6 +305,18 @@ pub fn carry_out(
                 artifact_id,
                 pinned,
             } => changed(book.pin(artifact_id, *pinned, now)),
+            // Answers that came before under their id are answered as they were: two that
+            // were sent at once come here one after the other.
+            Want::Submit { artifact_id, sent } => match book.submission(&sent.submission_id) {
+                Some((form, before)) => before.again(&form.artifact_id, sent).map(|said| {
+                    receipt = Some(said);
+                    (form.clone(), false, None)
+                }),
+                None => book.submitted(artifact_id, sent, now).map(|(form, said)| {
+                    receipt = Some(said);
+                    (form, true, None)
+                }),
+            },
         }
     };
     let (artifact, changed, page) = match decided {
@@ -311,6 +351,7 @@ pub fn carry_out(
             artifact: shown,
             changed,
             delivery_pending,
+            receipt,
         }),
         outs,
     })
@@ -759,7 +800,46 @@ async fn post_artifact(
     Path(rest): Path<String>,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
+    if let Some(artifact_id) = rest.trim_matches('/').strip_suffix("/submit") {
+        return Ok(Json(
+            submit(&app, artifact_id.trim_matches('/'), &body).await?,
+        ));
+    }
     Ok(Json(change(&app, &rest, object(&body)?).await?))
+}
+
+/// `POST /artifacts/<id>/submit`: a user sends answers to a form. Answered with a receipt;
+/// the same answers under the same id are answered with the same.
+async fn submit(app: &App, artifact_id: &str, body: &[u8]) -> Result<Value, ApiError> {
+    let Ok(Value::Object(data)) = serde_json::from_slice(body) else {
+        return Err(refused(StatusCode::BAD_REQUEST, "JSON object required"));
+    };
+    // What a report answers is a request that was wrong; every other refusal is one that
+    // cannot be now.
+    let told = |why: Refused| match why.message.as_str() {
+        forms::READ_ONLY => refused(StatusCode::BAD_REQUEST, why.message),
+        _ => refused(StatusCode::CONFLICT, why.message),
+    };
+    let sent = forms::sent(artifact_id, &data).map_err(told)?;
+    let fleet = Fleet::of(app);
+    // An id is used once on the whole Host: it is looked for before the form is.
+    let before = fleet.0.iter().find_map(|(_, view)| {
+        let (form, before) = view.books.artifacts.submission(&sent.submission_id)?;
+        Some(before.again(&form.artifact_id, &sent))
+    });
+    if let Some(answered) = before {
+        return answered.map_err(told);
+    }
+    let Some(member) = fleet.holder(artifact_id, false) else {
+        return Err(refused(StatusCode::CONFLICT, "HTML form not found"));
+    };
+    let want = Want::Submit {
+        artifact_id: artifact_id.to_string(),
+        sent: Box::new(sent),
+    };
+    let done = member.agent.artifact(want).await?.map_err(told)?;
+    done.receipt
+        .ok_or_else(|| refused(StatusCode::INTERNAL_SERVER_ERROR, "no receipt"))
 }
 
 /// Changes an artifact, or does with it what a user does. `rest` is what follows
