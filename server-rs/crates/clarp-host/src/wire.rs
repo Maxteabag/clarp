@@ -502,13 +502,11 @@ pub fn log_response(
 ) -> Value {
     // Claude Code keeps a transcript of its own under the session's name. The Python Host
     // names that file; so does this one, for what it is worth to whoever looks for it.
-    let file = status
-        .backend_session
-        .as_ref()
-        .filter(|_| record.backend == "claude")
-        .map(|session| format!("{session}.jsonl"));
+    let conversation = conversation_id(record, status);
+    let file = (record.backend == "claude" && !conversation.is_empty())
+        .then(|| format!("{conversation}.jsonl"));
     json!({
-        "conversation_id": conversation_id(record, status),
+        "conversation_id": conversation,
         "turns": page.entries.iter().map(row).collect::<Vec<_>>(),
         "latest_revision": page.latest_revision,
         "has_more": page.has_more,
@@ -610,7 +608,12 @@ pub fn summary(
         "persona": record.persona,
         "backend": backend,
         "cwd": record.cwd,
-        "model": ended.and_then(|end| end.model.clone()).unwrap_or_else(|| record.model.clone()),
+        // The model that answered last. A turn that was cut off may or may not have said its
+        // model before it went: what an app shows must not depend on that.
+        "model": ended
+            .filter(|end| end.status == "completed")
+            .and_then(|end| end.model.clone())
+            .unwrap_or_else(|| record.model.clone()),
         "effort": record.effort,
         "voice_id": "",
         "avatar_symbol": "",
@@ -660,7 +663,7 @@ pub fn summary(
         "live_activity": live_activity,
         "compacting": kind == AgentStateKind::Compacting,
         "context_tokens": ended.and_then(|end| end.tokens_in),
-        "context_window": null,
+        "context_window": clarp_backend::context_window(&record.backend),
         "queued_turn_count": status.waiting.len(),
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,

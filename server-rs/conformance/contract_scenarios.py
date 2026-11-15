@@ -186,6 +186,7 @@ SCENARIOS = [
             send('synthetic page one', 'one'),
             {'op': 'wait_reply', 'after': 'u-one'},
             {'op': 'quiesce'},
+            {**get(f'/log?session={AGENT}', 'log after the first turn'), 'save': {'first': 'latest_revision'}},
             send('synthetic page two', 'two'),
             {'op': 'wait_reply', 'after': 'u-two'},
             {'op': 'quiesce'},
@@ -194,6 +195,10 @@ SCENARIOS = [
             get(f'/log?session={AGENT}&limit=2&before=u-two', 'log before the second message'),
             get(f'/log?session={AGENT}&after_revision=0&limit=3', 'log first three by revision'),
             get(f'/log?session={AGENT}&after_revision={{cursor}}', 'log after the cursor'),
+            # A client that was away since the first turn catches up, one row at a time.
+            {**get(f'/log?session={AGENT}&after_revision={{first}}&limit=1', 'log one row after the first turn'),
+             'save': {'next': 'latest_revision'}},
+            get(f'/log?session={AGENT}&after_revision={{next}}', 'log the rest'),
         ],
     },
 ]

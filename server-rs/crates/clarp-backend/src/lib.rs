@@ -106,6 +106,13 @@ pub trait Backend: Send + Sync {
     /// when the tool gives it none. (A turn's number is not such a name: an agent that moves
     /// to another Host starts counting again there.)
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter>;
+
+    /// How many tokens a conversation of this tool can hold, for a tool whose conversations
+    /// fill up and are compacted where the user can see it. `None` for a tool that manages
+    /// its context on its own: there is no gauge to show.
+    fn context_window(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// The environment variable that names Claude Code's program, when it is not `claude` on the path.
@@ -121,6 +128,11 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
     }
+}
+
+/// The context window of the backend with this name, when it declares one.
+pub fn context_window(id: &str) -> Option<u64> {
+    by_id(id).and_then(|backend| backend.context_window())
 }
 
 /// The first `max` characters of a text, with a mark when something was left out.

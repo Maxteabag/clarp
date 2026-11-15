@@ -255,12 +255,22 @@ NOT_YET = {
         'events': ('delivery-updated',),
     },
 }
-NOT_YET_FIELDS = frozenset(field for feature in NOT_YET.values() for field in feature['fields'])
-NOT_YET_EVENTS = frozenset(event for feature in NOT_YET.values() for event in feature['events'])
+# Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
+# sends them empty. Left out of both sides the same way, and listed in the same document.
+NOT_BUILT = {
+    'portraits and the persona catalogue': {
+        'fields': ('avatar_url', 'model_avatar_url', 'personas'),
+        'events': (),
+    },
+}
+ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
+NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
+NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
 # A conversation's revisions order its rows, and the order is all a client may rely on. The two
 # Hosts count differently, so a revision is compared as its place among the revisions of its
-# capture, not as its number.
-REVISION_KEYS = frozenset({'revision', 'latest_revision', 'head_revision'})
+# capture, not as its number. A queue's revision is another thing: both Hosts count the same
+# changes, and it is compared as the number it is.
+HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 
 
 def settle(value, sessions):
@@ -283,6 +293,8 @@ def settle(value, sessions):
         elif key == 'roster' and isinstance(item, list):
             item = [name for name in item if isinstance(name, str) and name.lower() in sessions]
         out[key] = settle(item, sessions)
+    if 'server_id' in out and 'capabilities' in out and out.get('name'):
+        out['name'] = '<name>'  # `GET /server-info`: a Host is called what its machine is called
     return out
 
 
@@ -295,32 +307,76 @@ def without_features(value):
     return value
 
 
-def revisions(value, found: set):
+def own_particulars(body):
+    """`GET /server-info` with what is each Host's own as just that: the list of its features
+    (what a Host has is what it advertises there, and the two do not have the same) and its
+    version."""
+    if not isinstance(body, dict) or 'capabilities' not in body or 'contract' not in body:
+        return body
+    out = dict(body)
+    if isinstance(out.get('capabilities'), dict):
+        out['capabilities'] = {**out['capabilities'], 'features': '<features>'}
+    if isinstance(out.get('contract'), dict):
+        out['contract'] = {**out['contract'], 'features': '<features>'}
+    if out.get('clarp_version'):
+        out['clarp_version'] = '<version>'
+    return out
+
+
+def revisions(value, found: set, row=False):
+    """Collects a capture's conversation revisions: a row's `revision` and the heads."""
     if isinstance(value, list):
         for item in value:
-            revisions(item, found)
+            revisions(item, found, row)
     elif isinstance(value, dict):
         for key, item in value.items():
-            if key in REVISION_KEYS and isinstance(item, int) and not isinstance(item, bool):
+            if isinstance(item, int) and not isinstance(item, bool) and (
+                    key in HEAD_KEYS or (row and key == 'revision')):
                 found.add(item)
             else:
-                revisions(item, found)
+                revisions(item, found, key == 'turns')
 
 
-def ranked(value, rank: dict):
+def ranked(value, rank: dict, row=False):
     if isinstance(value, list):
-        return [ranked(item, rank) for item in value]
+        return [ranked(item, rank, row) for item in value]
     if isinstance(value, dict):
-        return {key: rank.get(item, item) if key in REVISION_KEYS and isinstance(item, int)
-                and not isinstance(item, bool) else ranked(item, rank) for key, item in value.items()}
+        return {key: rank.get(item, item)
+                if isinstance(item, int) and not isinstance(item, bool) and (
+                    key in HEAD_KEYS or (row and key == 'revision'))
+                else ranked(item, rank, key == 'turns')
+                for key, item in value.items()}
+    return value
+
+
+def agent_rows(http) -> dict:
+    """The ids of the rows an agent wrote, named in the order a client first reads them. An id
+    is the Host's own choice; what a client relies on is that the same row has the same id
+    wherever it is named."""
+    names: dict = {}
+    for exchange in http:
+        body = exchange['body']
+        for turn in (body.get('turns') or ()) if isinstance(body, dict) else ():
+            if isinstance(turn, dict) and turn.get('role') == 'assistant' and isinstance(turn.get('id'), str):
+                names.setdefault(turn['id'], f'<row:{len(names) + 1}>')
+    return names
+
+
+def renamed(value, names: dict):
+    if isinstance(value, list):
+        return [renamed(item, names) for item in value]
+    if isinstance(value, dict):
+        return {key: renamed(item, names) for key, item in value.items()}
+    if isinstance(value, str):
+        return names.get(value, value)
     return value
 
 
 def core(raw: dict) -> dict:
     """A raw capture as it is compared across Hosts: without what belongs to features the Rust
-    Host does not have yet, with revisions as their order, and with each Host's own version
-    string as just "a version"."""
-    http = [{**exchange, 'body': without_features(exchange['body'])} for exchange in raw['http']]
+    Host does not have yet, with revisions as their order, with the ids of the agent's rows as
+    the order they are first read in, and with each Host's own version as just "a version"."""
+    http = [{**exchange, 'body': own_particulars(without_features(exchange['body']))} for exchange in raw['http']]
     sse = []
     for frame in raw['sse']:
         data = frame.get('data')
@@ -334,7 +390,9 @@ def core(raw: dict) -> dict:
     found: set = set()
     revisions([exchange['body'] for exchange in http], found)
     rank = {number: place for place, number in enumerate(sorted(found - {0}), start=1)}
-    http = [{**exchange, 'body': ranked(exchange['body'], rank)} for exchange in http]
+    names = agent_rows(http)
+    http = [{**exchange, 'body': renamed(ranked(exchange['body'], rank), names)} for exchange in http]
+    sse = [{**frame, 'data': renamed(frame.get('data'), names)} for frame in sse]
     return {**raw, 'http': http, 'sse': sse}
 
 
@@ -444,9 +502,13 @@ def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
     first = corpus(python_host(build), chosen, run.label('py-a'), jobs)
     second = corpus(python_host(build), chosen, run.label('py-b'), jobs)
     errors = run_errors(first, 'python') + run_errors(second, 'python again')
-    report = differences(first, second, steady(chosen))
+    report = differences(first, second, steady(chosen), view='core')
     lines = [diff.render(report, set(), 'the Python Host against itself', errors)]
-    unsteady = differences(first, second, [s for s in chosen if s.get('unsteady')])
+    whole = differences(first, second, steady(chosen))
+    if whole.items:
+        lines.append(diff.render(whole, set(), 'the same two runs with everything in them (revisions as '
+                                 'numbers, the fields of features the Rust Host lacks): for information'))
+    unsteady = differences(first, second, [s for s in chosen if s.get('unsteady')], view='core')
     if unsteady.items:
         lines.append(diff.render(unsteady, set(), 'scenarios the reference is known not to answer the same '
                                  'way twice (reported as defects of the reference; not counted)'))
@@ -483,7 +545,7 @@ def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tu
         copy = planted_copy(build, change, run.label(f"plant-{change['id']}"))
         seen = corpus(python_host(copy), chosen, run.label(f"run-{change['id']}"), jobs)
         errors = run_errors(seen, change['id'])
-        report = differences(golden, seen, steady(chosen))
+        report = differences(golden, seen, steady(chosen), view='core')
         hits = caught(change, report.items)
         verdict = 'CAUGHT' if hits and not errors else 'MISSED'
         ok = ok and verdict == 'CAUGHT'
@@ -527,7 +589,8 @@ def main(argv=None) -> int:
     parser.add_argument('--build', type=Path, help='a checkout of the repository: the Python Host under ./server')
     parser.add_argument('--rust', type=Path, help='the clarp-host binary (clarp-shim beside it)')
     parser.add_argument('--golden', type=Path, default=HERE / 'golden')
-    parser.add_argument('--out', type=Path, help='cross: where the report and the written-down answers go')
+    parser.add_argument('--out', type=Path, help='cross: where the report and the written-down answers go; '
+                        'compare: where what the Rust Host answered goes, when it is wanted')
     parser.add_argument('--intended', default=str(HERE / 'intended.txt'))
     parser.add_argument('--scenarios', help='a comma-separated subset of the corpus')
     parser.add_argument('--jobs', type=int, default=4)
@@ -551,8 +614,11 @@ def main(argv=None) -> int:
         elif args.mode == 'plants':
             lines, ok = prove(build, load_golden(args.golden, chosen), chosen, plants.CHANGES, run, args.jobs)
         elif args.mode == 'compare':
-            lines, ok, _ = against_rust(rust, load_golden(args.golden, chosen), chosen,
-                                        load_intended(args.intended), run, args.jobs)
+            lines, ok, rust_seen = against_rust(rust, load_golden(args.golden, chosen), chosen,
+                                                load_intended(args.intended), run, args.jobs)
+            if args.out:
+                write_golden(args.out / 'rust', rust_seen)
+                (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
         else:
             args.out.mkdir(parents=True, exist_ok=True)
             seen, lines, ok, again = record(build, chosen, run, args.jobs)

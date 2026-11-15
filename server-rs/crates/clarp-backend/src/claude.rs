@@ -50,6 +50,11 @@ impl Backend for Claude {
         "claude"
     }
 
+    fn context_window(&self) -> Option<u64> {
+        // What the Python Host declares for Claude Code, whatever model runs.
+        Some(1_000_000)
+    }
+
     fn launch(&self, spec: &TurnSpec) -> Launch {
         let mut args: Vec<String> = [
             "-p",

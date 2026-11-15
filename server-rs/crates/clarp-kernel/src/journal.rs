@@ -10,7 +10,7 @@
 //! becomes; what a stretch of a tool's output means, with the position in that output the log
 //! has now reached. There is never one without the other.
 
-use clarp_ports::log::{AgentLog, LogError, NewItem, Seq};
+use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, AgentEvent, Command, Effect, Refusal};
@@ -24,6 +24,10 @@ pub mod kind {
     pub const AGENT_EVENT: u16 = 1;
     /// A [`SpoolCursor`](super::SpoolCursor) as JSON: how far into a turn's spool the log has got.
     pub const SPOOL_CURSOR: u16 = 2;
+    /// A [`Message`](crate::conversation::Message) that waits its turn outside the conversation.
+    /// When its turn starts, the same message is written again as a [`MESSAGE`]: that is the
+    /// moment it enters the conversation, and where it stands in it.
+    pub const WAITING: u16 = 3;
     /// A [`Message`](crate::conversation::Message) to the agent.
     pub const MESSAGE: u16 = 100;
     /// A [`Reply`](crate::conversation::Reply) of the agent.
@@ -111,6 +115,9 @@ pub struct Accepted {
     pub turn: Option<TurnId>,
     /// The log already held this message: nothing was written and nothing is to be done.
     pub duplicate: bool,
+    /// The message is in the conversation. One that was left for later and has to wait is not,
+    /// until its turn starts.
+    pub entered: bool,
     pub effects: Vec<Effect>,
 }
 
@@ -142,6 +149,8 @@ pub struct Recorder {
     cursor: Option<SpoolCursor>,
     /// The position of the newest item. This recorder is the log's one writer, so it knows.
     last_seq: Seq,
+    /// The position of the newest item of the conversation: 0 when it has none.
+    conversation_seq: Seq,
 }
 
 fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
@@ -189,17 +198,28 @@ impl Recorder {
             }
         }
         let last_seq = log.last_seq()?;
+        let conversation_seq = log
+            .read_before(Seq::MAX, kind::CONVERSATION, 1)?
+            .last()
+            .map_or(0, |item| item.seq);
         Ok(Self {
             log,
             agent,
             cursor,
             last_seq,
+            conversation_seq,
         })
     }
 
     /// The position of the newest item in the log.
     pub fn last_seq(&self) -> Seq {
         self.last_seq
+    }
+
+    /// The position of the newest item of the conversation: the conversation changed last when
+    /// that item was written. 0 when there is none.
+    pub fn conversation_seq(&self) -> Seq {
+        self.conversation_seq
     }
 
     pub fn agent(&self) -> &Agent {
@@ -274,13 +294,22 @@ impl Recorder {
                 message_seq: earlier.seq,
                 turn: None,
                 duplicate: true,
+                entered: false,
                 effects: Vec::new(),
             });
         }
         let message_seq = self.last_seq + 1;
         let turn = self.agent.next_turn();
+        // A message that starts at once is in the conversation at once, however it was admitted.
+        let outside =
+            message.admission.waits_outside() && !self.agent.starts_at_once(message.admission);
+        let kind = if outside {
+            kind::WAITING
+        } else {
+            kind::MESSAGE
+        };
         let mut batch = self.batch();
-        let mut item = NewItem::new(kind::MESSAGE, now_ms, message.body).in_turn(turn.0);
+        let mut item = NewItem::new(kind, now_ms, message.body).in_turn(turn.0);
         item.key = message.key;
         batch.item(item);
         batch
@@ -298,6 +327,7 @@ impl Recorder {
             message_seq,
             turn: Some(turn),
             duplicate: false,
+            entered: !outside,
             effects: committed.effects,
         })
     }
@@ -337,8 +367,38 @@ impl Batch<'_> {
             }
             self.events.push(event);
         }
+        for effect in &decision.effects {
+            if let Effect::StartTurn { turn, message_seq } = effect {
+                self.enter(*turn, *message_seq, now_ms);
+            }
+        }
         self.effects.extend(decision.effects);
         Ok(())
+    }
+
+    /// A turn starts: if its message waited outside the conversation, it enters it now, in the
+    /// same write that starts the turn.
+    fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
+        if message_seq > self.recorder.last_seq {
+            return; // accepted in this very batch: it is in the conversation already
+        }
+        let waiting = self.recorder.log.read_after(
+            message_seq.saturating_sub(1),
+            Kinds::only(kind::WAITING),
+            1,
+        );
+        match waiting {
+            Ok(found) => {
+                if let Some(stored) = found.into_iter().find(|item| item.seq == message_seq) {
+                    let mut item = NewItem::new(kind::MESSAGE, now_ms, stored.body).in_turn(turn.0);
+                    item.key = stored.key;
+                    self.items.push(item);
+                }
+            }
+            Err(error) => {
+                self.failed.get_or_insert(error.into());
+            }
+        }
     }
 
     /// Adds an item that is not an event, such as a piece of the conversation. Returns its place
@@ -383,13 +443,21 @@ impl Batch<'_> {
         }
         let last_seq = self.recorder.log.append(&self.items)?;
         // The items are durable. From here the state follows them.
+        let first_seq = last_seq + 1 - self.items.len() as Seq;
+        if let Some(newest) = self
+            .items
+            .iter()
+            .rposition(|item| kind::CONVERSATION.has(item.kind))
+        {
+            self.recorder.conversation_seq = first_seq + newest as Seq;
+        }
         self.recorder.last_seq = last_seq;
         self.recorder.agent = self.work;
         if let Some(cursor) = self.cursor {
             self.recorder.cursor = Some(cursor);
         }
         Ok(Committed {
-            first_seq: last_seq + 1 - self.items.len() as Seq,
+            first_seq,
             last_seq,
             events: self.events,
             effects: self.effects,
@@ -732,6 +800,91 @@ mod tests {
             .accept_message(message("u-2", Admission::Queue), 4)
             .unwrap();
         assert_eq!((other.turn, other.duplicate), (Some(TurnId(2)), false));
+    }
+
+    #[test]
+    fn a_message_left_for_later_enters_the_conversation_when_its_turn_starts() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        let rows = |r: &Recorder| {
+            r.log()
+                .read_after(0, kind::ROWS, 100)
+                .unwrap()
+                .into_iter()
+                .map(|item| (item.key.unwrap_or_default(), item.turn))
+                .collect::<Vec<_>>()
+        };
+        let first = recorder
+            .accept_message(message("u-1", Admission::Later), 1)
+            .unwrap();
+        assert!(first.entered, "nothing was in its way: it is said at once");
+        let said = recorder
+            .accept_message(message("u-2", Admission::Queue), 2)
+            .unwrap();
+        assert!(
+            said.entered,
+            "said while the agent is busy: in the conversation, and waiting"
+        );
+        let later = recorder
+            .accept_message(message("u-3", Admission::Later), 3)
+            .unwrap();
+        assert!(!later.entered);
+        assert_eq!(
+            rows(&recorder),
+            vec![("u-1".to_string(), Some(1)), ("u-2".to_string(), Some(2))],
+            "what was left for later is in the queue, not in the conversation"
+        );
+        let before = recorder.conversation_seq();
+        assert!(
+            recorder
+                .accept_message(message("u-3", Admission::Later), 4)
+                .unwrap()
+                .duplicate,
+            "and it is still the same message when it is sent again"
+        );
+        // The first turn ends, the second starts: its message was in the conversation already.
+        let ended = |turn| Command::TurnEnded {
+            turn: TurnId(turn),
+            outcome: crate::turn::RunOutcome::Completed,
+        };
+        recorder.handle(ended(1), 5).unwrap();
+        assert_eq!(rows(&recorder).len(), 2);
+        assert_eq!(
+            recorder.conversation_seq(),
+            before,
+            "the conversation did not change"
+        );
+        // The second ends, the third starts: now its message enters, in the same write.
+        let effects = recorder.handle(ended(2), 6).unwrap();
+        assert_eq!(
+            effects,
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: later.message_seq
+            }]
+        );
+        assert_eq!(
+            rows(&recorder),
+            vec![
+                ("u-1".to_string(), Some(1)),
+                ("u-2".to_string(), Some(2)),
+                ("u-3".to_string(), Some(3))
+            ]
+        );
+        assert_eq!(recorder.conversation_seq(), recorder.last_seq());
+        // A restart finds the same conversation and the same newest change.
+        let (seq, all) = (recorder.conversation_seq(), rows(&recorder));
+        drop(recorder);
+        let recorder = open(&engine);
+        assert_eq!((recorder.conversation_seq(), rows(&recorder)), (seq, all));
+        assert!(
+            recorder
+                .log()
+                .find("u-3")
+                .unwrap()
+                .is_some_and(|item| item.kind == kind::MESSAGE),
+            "the id finds the row, not the waiting copy"
+        );
     }
 
     #[test]

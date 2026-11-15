@@ -36,12 +36,12 @@ case "$cmd" in
     test)   cargo_cmd="cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
     clippy) cargo_cmd="cargo clippy --workspace --all-targets -j $JOBS -- -D warnings" ;;
     fmt)    cargo_cmd="cargo fmt --all" ;;
-    conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && python3 conformance/conform.py compare --rust target/debug/clarp-host $(printf '%q ' "$@")" ;;
+    conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|status" >&2; exit 2 ;;
 esac
 
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
-rsync -a --delete --exclude target/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
+rsync -a --delete --exclude target/ --exclude conformance/out/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
 # The contract's schemas and fixtures sit beside server-rs in the repository; tests read them.
 rsync -a --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$remote/contract/"
 if [ "$cmd" = conform ]; then
@@ -58,6 +58,10 @@ code=$?
 set -e
 if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
     rsync -a --exclude target/ --exclude Cargo.lock -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/crates/" "$here/crates/"
+fi
+if [ "$cmd" = conform ]; then
+    # What the Rust Host answered, to read beside what is written down (not committed).
+    rsync -a --delete -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/conformance/out/" "$here/conformance/out/" 2>/dev/null || true
 fi
 # The lockfile is made by the first build; bring it home so it is committed.
 rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/Cargo.lock" "$here/Cargo.lock" 2>/dev/null || true

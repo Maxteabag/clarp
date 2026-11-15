@@ -40,7 +40,7 @@ use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
 pub mod conversation;
 
-use conversation::{Draft, Page, REVISION_STEP};
+use conversation::{Draft, Page, REVISION_STEP, Versioned};
 
 /// How many lines of a spool are read, understood and written to the log at a time.
 const WINDOW: usize = 2_000;
@@ -283,6 +283,8 @@ pub struct Actor {
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
+    /// The newest revision given to something that is shown and not stored.
+    shown_revision: u64,
 }
 
 fn io_error(what: &Path, error: std::io::Error) -> ActorError {
@@ -375,6 +377,7 @@ impl Actor {
             recorder,
             live: None,
             unstored_changes: 0,
+            shown_revision: 0,
         };
         let mut out = Outputs::default();
         let live = match actor.recorder.agent().live() {
@@ -397,9 +400,10 @@ impl Actor {
         self.backend.id()
     }
 
-    /// The newest revision of the conversation.
+    /// The newest revision of the conversation: that of its newest change, stored or shown.
+    /// What the log holds besides the conversation does not move it.
     pub fn head_revision(&self) -> u64 {
-        self.recorder.last_seq() * REVISION_STEP + self.unstored_changes.min(REVISION_STEP - 1)
+        (self.recorder.conversation_seq() * REVISION_STEP).max(self.shown_revision)
     }
 
     pub fn status(&self) -> Status {
@@ -491,10 +495,12 @@ impl Actor {
         let stored = self
             .recorder
             .log()
-            .read_after(message_seq.saturating_sub(1), Kinds::only(kind::MESSAGE), 1)?
+            .read_after(message_seq.saturating_sub(1), Kinds::ALL, 1)?
             .into_iter()
             .next()
-            .filter(|item| item.seq == message_seq)
+            .filter(|item| {
+                item.seq == message_seq && matches!(item.kind, kind::MESSAGE | kind::WAITING)
+            })
             .ok_or_else(|| {
                 ActorError::Corrupt(format!(
                     "a turn answers the message at {message_seq}, and the log has none there"
@@ -532,6 +538,11 @@ impl Actor {
             self.head_revision(),
             limit,
         )
+    }
+
+    /// The stored row with this id, as it is now.
+    pub fn row(&self, id: &str) -> Result<Option<Versioned>, ActorError> {
+        conversation::one(self.recorder.log(), id)
     }
 
     /// The `limit` things before the one with this id, as a chat scrolls back. `None` when the
@@ -585,7 +596,7 @@ impl Actor {
         );
         self.unstored_changes = 0;
         out.changed = Changed {
-            conversation: true,
+            conversation: accepted.entered,
             status: !accepted.effects.is_empty(),
             queue: !started,
         };
@@ -961,6 +972,7 @@ impl Actor {
         for draft in &mut drafts {
             self.unstored_changes += 1;
             draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
+            self.shown_revision = draft.revision;
         }
         self.live = Some(LiveTurn {
             turn,
@@ -1170,6 +1182,7 @@ impl Actor {
                 if shown.contains(&draft.id) {
                     self.unstored_changes += 1;
                     draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
+                    self.shown_revision = draft.revision;
                     out.changed.conversation = true;
                 }
             }

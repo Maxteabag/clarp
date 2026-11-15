@@ -313,6 +313,79 @@ fn a_message_sent_twice_is_one_turn() {
 }
 
 #[test]
+fn what_is_said_is_in_the_conversation_at_once_and_what_is_left_for_later_when_its_turn_starts() {
+    let mut world = World::new("later");
+    let mut actor = world.open();
+    let ids = |actor: &Actor| {
+        actor
+            .tail(100)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|version| version.entry.id().to_string())
+            .collect::<Vec<_>>()
+    };
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    // Said while the agent is busy: there at once. Left for later: in the queue.
+    let said = world.send(&mut actor, "u-2", "and this", Admission::Queue);
+    assert!(said.changed.conversation && said.changed.queue);
+    let head = actor.head_revision();
+    let left = world.send(&mut actor, "u-3", "when you are done", Admission::Later);
+    assert!(!left.changed.conversation && left.changed.queue);
+    assert_eq!(ids(&actor), vec!["u-1", "u-2"]);
+    assert_eq!(
+        actor.head_revision(),
+        head,
+        "what is not in the conversation does not change it"
+    );
+    let waiting: Vec<String> = actor
+        .queue()
+        .unwrap()
+        .into_iter()
+        .map(|waiting| waiting.message_id)
+        .collect();
+    assert_eq!(waiting, vec!["u-2", "u-3"], "both wait their turn");
+
+    world.says(1, "One.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2]);
+    assert_eq!(ids(&actor), vec!["u-1", "u-2", "r-1-1"]);
+    world.says(2, "Two.");
+    world.exits(2, Some(0), None);
+    let before = actor.head_revision();
+    world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2, 3]);
+    assert_eq!(
+        ids(&actor),
+        vec!["u-1", "u-2", "r-1-1", "r-2-1", "u-3"],
+        "its turn started: now it is in the conversation, after the answer before it"
+    );
+    // A client that asks what is newer is given the message and the answer that closed the
+    // turn before it, and holds the newest revision afterwards.
+    let page = actor.after(before, 10).unwrap();
+    let newer: Vec<&str> = page.entries.iter().map(|v| v.entry.id()).collect();
+    assert_eq!(newer, vec!["u-3", "r-2-1"]);
+    assert_eq!(page.latest_revision, actor.head_revision());
+    assert_eq!(
+        page.entries[1].revision,
+        actor.head_revision(),
+        "the head is the conversation's newest change, not the log's newest item"
+    );
+
+    // A restart changes nothing about the conversation, and does not move its head.
+    let (head, all) = (actor.head_revision(), ids(&actor));
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!((actor.head_revision(), ids(&actor)), (head, all));
+    world.says(3, "Three.");
+    world.exits(3, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2, 3], "and no turn ran twice");
+    assert_eq!(actor.status().waiting, vec![]);
+}
+
+#[test]
 fn a_stop_is_passed_to_the_shim_and_a_direct_message_takes_the_place_of_the_live_turn() {
     let mut world = World::new("stop");
     let mut actor = world.open();
