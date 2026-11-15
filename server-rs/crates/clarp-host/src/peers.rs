@@ -39,7 +39,7 @@ fn public(name: &str, url: &str, enabled: bool) -> Value {
 fn owner_only(principal: &Principal) -> Result<(), ApiError> {
     match principal {
         Principal::Administrator => Ok(()),
-        Principal::Device { .. } => Err(ApiError::new(
+        Principal::Device { .. } | Principal::Tools => Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "peers are named from the Host's own machine",
         )),

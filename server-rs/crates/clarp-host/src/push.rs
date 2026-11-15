@@ -114,7 +114,8 @@ async fn unregister(
         Principal::Device {
             scope: Scope::Limited,
             ..
-        } => return Err(forbidden()),
+        }
+        | Principal::Tools => return Err(forbidden()),
         Principal::Device { device_id, .. } => {
             if token.is_empty() || !prefix.is_empty() || !device.is_empty() {
                 return Ok(refused(StatusCode::BAD_REQUEST, "token_required"));
@@ -176,7 +177,7 @@ async fn tokens(
             device_id,
             scope: Scope::Full,
         } => directory.push.shown(Some(device_id.as_str()), &can_receive),
-        Principal::Device { .. } => return Err(forbidden()),
+        Principal::Device { .. } | Principal::Tools => return Err(forbidden()),
     };
     Ok(Json(json!({ "ok": true, "tokens": rows })))
 }
@@ -201,7 +202,7 @@ async fn desktop_presence(
             device_id,
             scope: Scope::Full,
         } => device_id.as_str(),
-        Principal::Device { .. } => return Err(forbidden()),
+        Principal::Device { .. } | Principal::Tools => return Err(forbidden()),
     };
     let data = if body.is_empty() {
         Map::new()

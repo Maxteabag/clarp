@@ -269,10 +269,29 @@ create` and follows it with `clarp-admin agent helper-state`: the two commands t
 is built on. Held to the Python Host by the scenario `helpers`. Not there: a helper that starts from its
 maker's conversation (`agent fork`), and the program `clarp-sub-agent` itself on this Host's path.
 
+**Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
+Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token
+their turn was given (`CLARP_TOOL_TOKEN`, `clarp_host::tool_token`): it follows from the administrator's token,
+so a turn that went on while the Host was started again still reaches its Host; it does not give the
+administrator's token away; and it opens `/tools/` and nothing else. What the Host starts never inherits the
+Host's own secrets (`OWN_SECRETS`: the administrator's token, the credential at the push relay, the tokens of a
+move and of a peer): a turn's environment is read by every command an agent runs, and what an agent prints is in
+its conversation. The first install found it: until then a turn inherited the Host's environment whole. This is
+not a wall between an agent and the administrator, who are the same user of the machine: the file the installer
+writes for a worker that no turn told where its Host is (`~/.config/clarp-host/config.toml`) holds the
+administrator's token, as the Python Host's file does.
+
+**The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
+agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
+install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
+`docs/battle-test.md` says: its own directories, its own unit, the loopback only, no push relay while no phone
+is paired. One agent lives there, on a small model, and `tools/soak` writes to it every quarter of an hour and
+audits every message. The first build installed was `d9868bea`. The week of section 2's third proof counts from
+here, and every update of the Host during it is part of the proof: a restart with a turn running.
+
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
-livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
-other feature out of `capabilities.features`. The owner declined an install on 15 Nov: a Host an agent cannot
-live on is not put on his machine. It is proposed again when stage 3's first surfaces are there.
+livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the core contract and what
+stage 3 has added so far, and leaves every other feature out of `capabilities.features`.
 
 **Stage 3 goes in the order the load says.** Counted on the live elitebook Host on 15 Nov 2026, reads only, over
 the seven days before:

@@ -248,6 +248,8 @@ pub enum Principal {
         device_id: String,
         scope: Scope,
     },
+    /// One of an agent's own tools, with the token its turn was given, from this machine.
+    Tools,
 }
 
 /// The only route a caller without a token may use: a device that has a code has no token yet.
@@ -258,9 +260,14 @@ const LIMITED_POSTS: &[&str] = &["/send", "/select"];
 
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
-    // An agent's own tools speak as the Host's administrator, from this machine. No device does.
+    // An agent's own tools are asked for from this machine, with the token a turn was given
+    // or the administrator's. No device asks for them.
     if path.starts_with("/tools/") {
-        return !matches!(principal, Principal::Administrator);
+        return !matches!(principal, Principal::Administrator | Principal::Tools);
+    }
+    // And that token opens nothing else: what the apps read and do is not a tool's.
+    if matches!(principal, Principal::Tools) {
+        return true;
     }
     let Principal::Device {
         scope: Scope::Limited,
@@ -293,6 +300,10 @@ fn who(app: &App, request: &Request) -> Option<Principal> {
     if local && same_token(&token, expected) {
         return Some(Principal::Administrator);
     }
+    // What a turn was given for its agent's tools, from this machine as well.
+    if local && same_token(&token, &crate::tool_token(expected)) {
+        return Some(Principal::Tools);
+    }
     let directory = app.fleet.directory();
     let device = directory.device(&token)?;
     Some(Principal::Device {
@@ -309,7 +320,12 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
         match who(&app, &request) {
             None => ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
             Some(principal) if out_of_scope(&principal, request.method(), &path) => {
-                ApiError::new(StatusCode::FORBIDDEN, "this device may not do that").into_response()
+                let why = if matches!(principal, Principal::Tools) {
+                    "an agent's tools may ask for tools only"
+                } else {
+                    "this device may not do that"
+                };
+                ApiError::new(StatusCode::FORBIDDEN, why).into_response()
             }
             Some(principal) => {
                 request.extensions_mut().insert(principal);
@@ -1499,7 +1515,28 @@ mod tests {
             );
             assert!(!out_of_scope(&full, &method, path), "{method} {path}");
             assert!(!out_of_scope(&Principal::Administrator, &method, path));
+            // The token of an agent's tools opens none of what the apps read and do.
+            assert!(
+                out_of_scope(&Principal::Tools, &method, path),
+                "{method} {path}"
+            );
         }
+    }
+
+    #[test]
+    fn an_agents_tools_are_asked_for_from_this_machine_and_by_no_device() {
+        let full = Principal::Device {
+            device_id: "device_2".to_string(),
+            scope: Scope::Full,
+        };
+        let path = "/tools/run";
+        assert!(!out_of_scope(&Principal::Tools, &Method::POST, path));
+        assert!(!out_of_scope(
+            &Principal::Administrator,
+            &Method::POST,
+            path
+        ));
+        assert!(out_of_scope(&full, &Method::POST, path));
     }
 
     #[test]
