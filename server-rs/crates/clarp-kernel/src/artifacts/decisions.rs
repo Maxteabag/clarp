@@ -543,6 +543,7 @@ impl ArtifactBook {
             reference_id: ask.reference_id.clone(),
             payload,
             artifact_id: String::new(),
+            expected_version: None,
         };
         let mut artifact = self.make(maker, &new, ctx)?;
         decision.decision_id = new_id("decision", ctx);

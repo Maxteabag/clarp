@@ -62,6 +62,11 @@ class World:
         # The id of a published file: counted, like every other id of a scenario.
         self.files = 0
         secrets.token_urlsafe = self.token_urlsafe
+        # A report's revision that was given no version gets one of sixteen random bytes: the
+        # scenario's next id.
+        import types
+        import uuid
+        uuid.uuid4 = lambda: types.SimpleNamespace(hex=self.token_hex(16))
         db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
         self.agents = {}
         for index, persona in enumerate(('Vera', 'Omar'), start=1):
@@ -96,6 +101,21 @@ class World:
                                   content_type=content_type, caption=caption, media_dir=SCRATCH / 'media')
         return {**row, 'sha256': media_store.get(row['asset_id'])['sha256']}
 
+    def revisions(self, artifact_id: str, version=None, limit: int = 50, offset: int = 0):
+        """What a report was, version by version (`html_report_revisions.revisions`)."""
+        from lib import html_report_revisions
+        return html_report_revisions.revisions(artifact_id, version, limit=limit, offset=offset)
+
+    def represent(self, artifact_id: str, representation: str):
+        """An artifact as a list shows it (`response_representation`)."""
+        from lib import artifacts
+        return artifacts.response_representation(artifacts.get(artifact_id), representation)
+
+    def kept_updated_at(self, artifact_id: str) -> int:
+        """When an artifact last changed, read without a call that is written down."""
+        from lib import artifacts
+        return artifacts.get(artifact_id)['updated_at']
+
     def later(self, ms: int) -> None:
         """Lets time pass without a call."""
         self.now += ms
@@ -116,7 +136,8 @@ class World:
             'has_pending_decision': artifacts.has_pending_decision,
             'cancel_for_agent': artifacts.cancel_for_agent,
             'plan_create': task_plans.create, 'plan_step': self.plan_step, 'plan_act': self.plan_act,
-            'plan_finish': task_plans.finish, 'publish': self.publish,
+            'plan_finish': task_plans.finish, 'publish': self.publish, 'revisions': self.revisions,
+            'represent': self.represent,
         }[name]
         entry = {'call': name, 'args': args, 'at': self.now}
         ids_before = self.ids
@@ -569,9 +590,116 @@ def what_names_a_published_file(w: World) -> None:
     w.call('list', type='file')
 
 
+PAGE_1 = '<h1>Synthetic report</h1><p>First.</p>'
+PAGE_2 = ('<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, '
+          '<environment_context>kept</environment_context>.</p><script>document.title = "two"</script>')
+
+
+def a_report_and_its_revisions(w: World) -> None:
+    """A report is a page of HTML that takes no answers. Published again under its id it is revised,
+    and what it was is kept, version by version."""
+    def page(content, **more):
+        return {'content': content, 'read_only': True, **more}
+
+    def report(session, payload, expected=None, note='', **more):
+        args = {'session': session, 'type': 'html_form', 'title': 'A report', 'artifact_id': 'report-1',
+                'payload': payload, **more}
+        if expected is not None:
+            args['expected_version'] = expected
+        return w.call('create', note=note, **args)
+
+    report(w.vera, page(PAGE_1, version='v1'), summary='Day one')
+    w.call('get', artifact_id='report-1')
+    w.call('revisions', artifact_id='report-1')
+    w.call('represent', artifact_id='report-1', representation='summary-v1')
+    w.call('represent', artifact_id='report-1', representation='flat-v1')
+    # Published again under the same id: a revision, which says the version it follows.
+    report(w.vera, page(PAGE_2, version='v2'), summary='Day two', note='without the version it follows')
+    report(w.vera, page(PAGE_2, version='v2'), expected='v0', summary='Day two', note='following a version that is not the current')
+    report(w.vera, page(PAGE_2, version='v2'), expected='v1', summary='Day two')
+    report(w.vera, page(PAGE_2, version='v2'), expected='v1', summary='Day two', note='the same again: a retry is answered with the report as it is')
+    report(w.vera, page(PAGE_2, version='v2'), summary='Day two', note='and once more, without the version it follows')
+    report(w.vera, page(PAGE_1, version='v2'), expected='v2', note='a version that was used for other content')
+    report(w.vera, page(PAGE_1, version='v1'), expected='v2', note='an old version as it was: answered with the current')
+    report(w.vera, page(PAGE_1, version='v1'), note='the same, without the version it follows')
+    report(w.omar, page(PAGE_1, version='v9'), expected='v2', note='the report of another agent')
+    report(w.vera, page(PAGE_2), expected='v2', note='no version given, nothing changed')
+    report(w.vera, page(PAGE_1), expected='v2', title='A report, again', note='no version given, and changed: it is given one')
+    w.call('get', artifact_id='report-1')
+    # Changed in place.
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'content': '<p>Third.</p>'}})
+    w.call('update', artifact_id='report-1', data={'payload_patch': {}, 'title': 'A report, renamed'},
+           note='nothing of the page changes: no new version')
+    w.call('update', artifact_id='report-1', data={'payload': page('<p>Fourth.</p>', version='v4'), 'summary': 'Day four',
+                                                   'expected_version': 'nope'})
+    w.call('update', artifact_id='report-1', data={'payload': page('<p>Fourth.</p>', version='v4'), 'summary': 'Day four'})
+    w.call('update', artifact_id='report-1', data={'payload': page('<p>Fourth.</p>', version='v4'), 'title': 'A fourth'},
+           note='the same page under the same version: the title changes')
+    w.call('update', artifact_id='report-1', data={'payload': page('<p>x</p>', version='v5'), 'payload_patch': {}})
+    w.call('update', artifact_id='report-1', data={'payload': 'text'})
+    w.call('update', artifact_id='report-1', data={'payload_patch': ['list']})
+    w.call('update', artifact_id='report-1', data={'payload': {'content': '<p>x</p>', 'version': 'v6'}},
+           note='a revision stays a report')
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'read_only': False}})
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'connect_origins': ['https://EXAMPLE.org:443']}})
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'connect_origins': ['http://example.org']}})
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'version': 'not a version'}})
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'version': 'v1'}}, note='back to a version that was another page')
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'content': ''}})
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'content': 7}})
+    w.call('update', artifact_id='report-1', data={'status': 'completed'}, note='its state is no revision')
+    w.call('update', artifact_id='report-1', data={'payload_patch': {'notes': 'A note beside the page'}, 'expected_version': 'v4'},
+           note='following a version that is no longer the current')
+    w.call('revisions', artifact_id='report-1')
+    w.call('revisions', artifact_id='report-1', version='v1')
+    w.call('revisions', artifact_id='report-1', version='v2')
+    w.call('revisions', artifact_id='report-1', version='v4')
+    w.call('revisions', artifact_id='report-1', version='nothing')
+    w.call('revisions', artifact_id='report-1', limit=2, offset=1)
+    w.call('revisions', artifact_id='report-1', limit=0, offset=-3)
+    w.call('revisions', artifact_id='report-1', limit=500, offset=50)
+    w.call('revisions', artifact_id='nothing')
+    w.call('represent', artifact_id='report-1', representation='summary-v1')
+    w.call('get', artifact_id='report-1')
+    w.call('list', session=w.vera, type='html_form')
+    # What is no report.
+    w.call('create', session=w.vera, type='html_form', title='T', payload=page(''))
+    w.call('create', session=w.vera, type='html_form', title='T', payload=page(PAGE_1))
+    w.call('create', session=w.vera, type='html_form', title='T', payload=page(PAGE_1, version='v 1'))
+    w.call('create', session=w.vera, type='html_form', title='T', payload=page(7, version='v1'))
+    w.call('create', session=w.vera, type='html_form', title='T',
+           payload=page(PAGE_1, version='v1', answer_schema={'type': 'object', 'properties': {'a': {'type': 'string'}}}))
+    w.call('create', session=w.vera, type='html_form', title='T', payload=page(PAGE_1, version='v1', connect_origins=['https://example.org/x']))
+    w.call('create', session=w.vera, type='html_form', title='T', payload=page(PAGE_1, version='v1', read_only='yes'))
+    w.call('create', session=w.vera, type='html_form', title='T', payload=None)
+    w.call('create', session='nobody', type='html_form', title='T', payload=page(PAGE_1, version='v1'))
+    w.call('create', session=w.vera, type='html_form', title='T', status='sleeping', payload=page(PAGE_1, version='v1'))
+    # A report under the id of something that is none.
+    w.call('create', session=w.vera, type='document', title='Notes', artifact_id='doc-1', payload={'content': 'x'})
+    w.call('create', session=w.vera, type='html_form', title='T', artifact_id='doc-1', payload=page(PAGE_1, version='v1'),
+           expected_version='v1')
+    w.call('revisions', artifact_id='doc-1')
+    w.call('represent', artifact_id='doc-1', representation='summary-v1')
+    # What a title loses a page keeps, and a page may reach what it names.
+    kept = w.call('create', session=w.omar, type='html_form', title='With <environment_context>cut</environment_context> a title',
+                  summary='Reaches out', status='active', reference_id='ref-9',
+                  payload=page(PAGE_2, version='2026.11.15-a', connect_origins=['https://API.example.org:443', 'https://api.example.org']))
+    w.call('revisions', artifact_id=kept['artifact_id'])
+    w.call('represent', artifact_id=kept['artifact_id'], representation='summary-v1')
+    w.call('list', type='html_form')
+    w.call('list', search='report')
+    # Put away, pinned and thrown away like anything an agent made.
+    w.call('pin', artifact_id='report-1', pinned=True)
+    w.call('archive', artifact_id='report-1', archived=True, expected_updated_at=w.kept_updated_at('report-1'))
+    w.call('discard', artifact_id=kept['artifact_id'], expected_updated_at=kept['updated_at'])
+    w.call('revisions', artifact_id=kept['artifact_id'])
+    w.call('get', artifact_id='report-1')
+
+
 SCENARIOS = [plain_kinds, what_an_artifact_refuses, a_plan_is_an_artifact, an_approval_is_asked_and_answered,
              a_question_with_options_and_typed_answers, what_becomes_of_a_request_nobody_answers,
-             the_inbox_and_what_a_user_does_with_an_artifact, what_names_a_published_file]
+             the_inbox_and_what_a_user_does_with_an_artifact, what_names_a_published_file,
+             a_report_and_its_revisions]
 
 
 def main(argv: list[str]) -> int:

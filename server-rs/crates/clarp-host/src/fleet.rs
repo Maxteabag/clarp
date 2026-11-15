@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use clarp_actor::Profile;
 use clarp_kernel::devices::{self, PushBook, PushRow};
 use clarp_kernel::{helpers, roster};
+use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::kv::KeyValue;
@@ -300,6 +301,8 @@ pub struct Works {
     pub tool_env: Vec<(String, String)>,
     /// The way to the phones that are not listening.
     pub pusher: Pusher,
+    /// Where whole files are kept: what agents publish, and the pages of their reports.
+    pub blobs: Arc<dyn Blobs>,
 }
 
 enum Ask {
@@ -682,6 +685,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         revisions: works.revisions.clone(),
         jobs_checked_every: std::time::Duration::from_millis(works.config.jobs_checked_every_ms),
         pusher: works.pusher.clone(),
+        blobs: works.blobs.clone(),
     })
 }
 

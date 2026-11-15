@@ -7,9 +7,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::HashMap;
+
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
+use clarp_kernel::artifacts::reports::{self, Revisions};
 use clarp_kernel::artifacts::{
-    self, Artifact, ArtifactBook, Ctx, Listing, Maker, New, Refused, Shelf, Why,
+    self, Artifact, ArtifactBook, Ctx, Listing, Made, Maker, New, Refused, Shelf, Why,
 };
 use clarp_kernel::goals::{Change, GoalBook, Owner, World, item_key};
 use clarp_kernel::media::{self, Asset, MediaBook};
@@ -75,6 +78,9 @@ struct Fleet {
     ids: u64,
     /// How many files were published: the Python Host's ids in the vectors are counted.
     files: u64,
+    /// The pages of reports, kept beside the books under their names, as the Host keeps
+    /// them beside the log.
+    pages: HashMap<String, String>,
 }
 
 type Said = Result<Value, Refused>;
@@ -133,7 +139,26 @@ impl Fleet {
 
     fn shown(&self, at: usize, artifact: &Artifact, now: i64) -> Value {
         let agent = &self.agents[at];
-        artifact.public(&agent.persona, &agent.goals, now)
+        self.answered(artifact.public(&agent.persona, &agent.goals, now))
+    }
+
+    /// A row as the Host answers it: with its report's page put back.
+    fn answered(&self, mut row: Value) -> Value {
+        if let Some(page) = reports::named_page(&mut row) {
+            reports::with_page(&mut row, &self.pages[&page.blob()]);
+        }
+        row
+    }
+
+    /// Keeps what was made or changed, its page first, and shows it.
+    fn kept(&mut self, at: usize, made: &Made, now: i64) -> Value {
+        if let (Some(content), Some(page)) = (&made.page, &made.artifact.page) {
+            self.pages.insert(page.blob(), content.clone());
+        }
+        if made.changed {
+            self.agents[at].keep(&made.artifact, now);
+        }
+        self.shown(at, &made.artifact, now)
     }
 
     /// Makes an artifact for a session, with the ids the whole fleet counts.
@@ -142,24 +167,31 @@ impl Fleet {
         session: &str,
         now: i64,
         nobody: impl FnOnce() -> Refused,
-        make: impl FnOnce(&ArtifactBook, Maker<'_>, &mut Ctx<'_>) -> Result<Artifact, Refused>,
+        make: impl FnOnce(&ArtifactBook, Maker<'_>, &mut Ctx<'_>) -> Result<Made, Refused>,
     ) -> Said {
         let Some(at) = self.by_session(session) else {
             return Err(nobody());
         };
         let made = {
-            let agents = &self.agents;
+            let (agents, pages) = (&self.agents, &self.pages);
             let ids = &mut self.ids;
+            let others = |id: &str| {
+                let has = |(index, agent): (usize, &Agent)| {
+                    index != at && agent.artifacts.get(id).is_some()
+                };
+                agents.iter().enumerate().any(has)
+            };
             let mut ctx = Ctx {
                 now_ms: now,
                 token_hex: &mut |bytes| Self::token(ids, bytes),
                 taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
                 published: &agents[at].media,
+                elsewhere: &others,
+                page: &|page| pages.get(&page.blob()).cloned(),
             };
             make(&agents[at].artifacts, agents[at].maker(), &mut ctx)?
         };
-        self.agents[at].keep(&made, now);
-        Ok(self.shown(at, &made, now))
+        Ok(self.kept(at, &made, now))
     }
 
     /// A change of one artifact, by the agent that holds it: kept, and shown with whether
@@ -226,6 +258,8 @@ impl Fleet {
                 token_hex: &mut |bytes| Self::token(ids, bytes),
                 taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
                 published: &agents[at].media,
+                elsewhere: &|_| false,
+                page: &|_| None,
             };
             agents[at].artifacts.plan_synced(
                 agents[at].maker(),
@@ -320,6 +354,7 @@ impl Fleet {
                     reference_id: text(args, "reference_id"),
                     payload: args.get("payload").cloned(),
                     artifact_id: text(args, "artifact_id"),
+                    expected_version: args.get("expected_version").cloned(),
                 };
                 let nobody = || artifacts::create_of_nobody(&new);
                 self.make(&text(args, "session"), now, nobody, |book, maker, ctx| {
@@ -355,13 +390,58 @@ impl Fleet {
                 ask.input_hint = args.get("input_hint").cloned();
                 let nobody = || decisions::ask_of_nobody(&ask, now);
                 self.make(&text(args, "session"), now, nobody, |book, maker, ctx| {
-                    book.ask(maker, &ask, ctx)
+                    let artifact = book.ask(maker, &ask, ctx)?;
+                    Ok(Made {
+                        artifact,
+                        page: None,
+                        changed: true,
+                    })
                 })
             }
-            "get" => Ok(
-                artifacts::get(&self.shelves(), &text(args, "artifact_id"), now)
-                    .unwrap_or(Value::Null),
-            ),
+            "get" => {
+                let found = artifacts::get(&self.shelves(), &text(args, "artifact_id"), now);
+                Ok(self.answered(found.unwrap_or(Value::Null)))
+            }
+            // What a report was, version by version, or one version with its page.
+            "revisions" => {
+                let id = text(args, "artifact_id");
+                let Some(at) = self.holding(&id) else {
+                    return refused(Why::Value, "read-only report not found");
+                };
+                let number = |name: &str, otherwise: i64| {
+                    given(name).and_then(Value::as_i64).unwrap_or(otherwise)
+                };
+                let version = given("version").and_then(Value::as_str);
+                let (limit, offset) = (number("limit", 50), number("offset", 0));
+                let book = &self.agents[at].artifacts;
+                match book.revisions(&id, version, limit, offset)? {
+                    Revisions::Listed(listed) => Ok(json!(listed)),
+                    Revisions::One(mut one) => {
+                        let page = one.get_mut("payload").and_then(reports::named_page);
+                        let page = page.expect("a revision names its page");
+                        one["payload"]["content"] = json!(self.pages[&page.blob()]);
+                        Ok(one)
+                    }
+                }
+            }
+            // An artifact as a list shows it: without the payload its fields were taken
+            // from, and in a summary without a report's page, which is named instead.
+            "represent" => {
+                let found = artifacts::get(&self.shelves(), &text(args, "artifact_id"), now);
+                let mut row = found.unwrap_or(Value::Null);
+                let page = reports::named_page(&mut row);
+                if let Some(fields) = row.as_object_mut() {
+                    fields.remove("payload");
+                }
+                match page {
+                    Some(page) if args["representation"] == "summary-v1" => {
+                        reports::without_page(&mut row, &page);
+                    }
+                    Some(page) => reports::with_page(&mut row, &self.pages[&page.blob()]),
+                    None => {}
+                }
+                Ok(row)
+            }
             "list" => {
                 self.expire(now);
                 let listing = Listing {
@@ -375,11 +455,15 @@ impl Fleet {
                     offset: given("offset").and_then(Value::as_i64).unwrap_or(0),
                     by_creation: args["order"] == "created",
                 };
-                Ok(json!(artifacts::list(&self.shelves(), &listing, now)))
+                let rows = artifacts::list(&self.shelves(), &listing, now);
+                let rows: Vec<Value> = rows.into_iter().map(|row| self.answered(row)).collect();
+                Ok(json!(rows))
             }
             "list_pinned" => {
                 let limit = given("limit").and_then(Value::as_i64).unwrap_or(100);
-                Ok(json!(artifacts::list_pinned(&self.shelves(), limit, now)))
+                let rows = artifacts::list_pinned(&self.shelves(), limit, now);
+                let rows: Vec<Value> = rows.into_iter().map(|row| self.answered(row)).collect();
+                Ok(json!(rows))
             }
             "update" => {
                 let id = text(args, "artifact_id");
@@ -390,12 +474,20 @@ impl Fleet {
                 else {
                     return refused(Why::Value, "artifact not found");
                 };
-                let agent = &self.agents[at];
-                let artifact = agent
-                    .artifacts
-                    .update(&id, &args["data"], now, &agent.media)?;
-                self.agents[at].keep(&artifact, now);
-                Ok(self.shown(at, &artifact, now))
+                let made = {
+                    let (agents, pages) = (&self.agents, &self.pages);
+                    let ids = &mut self.ids;
+                    let mut ctx = Ctx {
+                        now_ms: now,
+                        token_hex: &mut |bytes| Self::token(ids, bytes),
+                        taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
+                        published: &agents[at].media,
+                        elsewhere: &|_| false,
+                        page: &|page| pages.get(&page.blob()).cloned(),
+                    };
+                    agents[at].artifacts.update(&id, &args["data"], &mut ctx)?
+                };
+                Ok(self.kept(at, &made, now))
             }
             "archive" => {
                 let Some(archived) = args["archived"].as_bool() else {
@@ -620,6 +712,7 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
             agents: agents.collect(),
             ids: 0,
             files: 0,
+            pages: HashMap::new(),
         };
         for (number, call) in scenario["calls"].as_array().unwrap().iter().enumerate() {
             let what = call["call"].as_str().unwrap();
@@ -687,5 +780,5 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
         wrong.len(),
         shown.join("\n")
     );
-    assert!(compared >= 300, "only {compared} calls were compared");
+    assert!(compared >= 380, "only {compared} calls were compared");
 }
