@@ -173,7 +173,7 @@
       "session": "claire",
       "status_text": null,
       "team_ids": [],
-      "turn_started_at": "<turn 1, begun after send 1>",
+      "turn_started_at": 0,
       "voice_id": ""
      }
     ],
@@ -1908,41 +1908,6 @@
   {
    "data": {
     "agent_id": "<id:3>",
-    "client_msg_id": "golf",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:3>",
-    "detail": {
-     "message": "Turn stopped",
-     "source": "user_stop",
-     "stop_actor": "user",
-     "stop_actor_verified": false,
-     "stop_reason": ""
-    },
-    "event_id": "<eid:agent-state#1@7da00e>",
-    "kind": "interrupted",
-    "persona": "Claire",
-    "session": "claire",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@7da00e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:3>",
     "detail": {
      "backend_session_id": "<id:4>",
      "dispatch": "claude",
@@ -1983,6 +1948,55 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "client_msg_id": "golf",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "detail": {
+     "message": "Turn stopped",
+     "source": "user_stop",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    },
+    "event_id": "<eid:agent-state#1@7da00e>",
+    "kind": "interrupted",
+    "persona": "Claire",
+    "session": "claire",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@7da00e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "event_id": "<eid:queue-updated#1@4e1693>",
+    "queue_depth": 1,
+    "queue_paused": true,
+    "queue_revision": 2,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@4e1693>"
   },
   {
    "data": {
@@ -2030,20 +2044,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:3>",
-    "event_id": "<eid:queue-updated#1@4e1693>",
-    "queue_depth": 1,
-    "queue_paused": true,
-    "queue_revision": 2,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@4e1693>"
   },
   {
    "data": {

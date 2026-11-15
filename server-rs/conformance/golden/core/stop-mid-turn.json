@@ -183,7 +183,7 @@
       "session": "claire",
       "status_text": null,
       "team_ids": [],
-      "turn_started_at": "<turn 1, begun after send 1>",
+      "turn_started_at": 0,
       "voice_id": ""
      }
     ],

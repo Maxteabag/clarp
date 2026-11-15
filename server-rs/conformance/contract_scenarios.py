@@ -380,6 +380,34 @@ SCENARIOS = [
             get(f'/log?session={AGENT}&after_revision={{next}}', 'log the rest'),
         ],
     },
+    {
+        'id': 'who-is-told',
+        'what': 'a turn that ends tells the user, without a push when the user asked at the desk; '
+                'what another agent or a schedule began tells nobody',
+        'steps': [
+            send('synthetic told sierra', 'sierra', client='desktop'),
+            {'op': 'wait_reply', 'after': 'u-sierra'},
+            {'op': 'quiesce'},
+            send('synthetic told tango', 'tango', origin='agent'),
+            {'op': 'wait_reply', 'after': 'u-tango'},
+            {'op': 'quiesce'},
+            send('synthetic told uniform', 'uniform', origin='schedule'),
+            {'op': 'wait_reply', 'after': 'u-uniform'},
+            {'op': 'quiesce'},
+            send('synthetic told victor', 'victor', origin='automation'),
+            {'op': 'wait_reply', 'after': 'u-victor'},
+            {'op': 'quiesce'},
+            send('synthetic told whiskey', 'whiskey', origin='watcher'),
+            {'op': 'wait_reply', 'after': 'u-whiskey'},
+            {'op': 'quiesce'},
+            # An origin nobody may set from outside is a person's.
+            send('synthetic told xray', 'xray', origin='janitor'),
+            {'op': 'wait_reply', 'after': 'u-xray'},
+            {'op': 'quiesce'},
+            LOG,
+            SNAPSHOT,
+        ],
+    },
 ]
 
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
