@@ -527,6 +527,95 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
     });
 }
 
+/// The same with a real Codex: `CLARP_TEST_CODEX=1 cargo test --test host -- --ignored`. Set
+/// `CLARP_CODEX_PROGRAM` when Codex is not `codex` on the path.
+#[test]
+#[ignore = "runs a real Codex turn: needs a logged-in account and CLARP_TEST_CODEX=1"]
+fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it() {
+    if std::env::var("CLARP_TEST_CODEX").as_deref() != Ok("1") {
+        eprintln!("skipped: CLARP_TEST_CODEX is not 1");
+        return;
+    }
+    let place = Place::new("codex");
+    let host = place.start();
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Realx", "backend": "codex", "effort": "low" }),
+    );
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(
+        &session,
+        "Run the shell command `sleep 12; echo spool-survived` exactly once. Then reply with one short sentence that says what it printed.",
+        "real-1",
+    );
+    wait_long(&host, &session, "Codex to start its command", || {
+        host.state(&session) == "tool"
+    });
+
+    // The Host dies while Codex's command sleeps, and is away for a moment.
+    host.kill();
+    std::thread::sleep(Duration::from_secs(2));
+    let host = place.start();
+
+    wait_long(&host, &session, "the turn to finish", || {
+        host.state(&session) == "done"
+    });
+    let turns = host.turns(&session);
+    let tool = turns
+        .iter()
+        .find(|turn| turn["kind"] == "tool")
+        .expect("the command is in the conversation");
+    assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
+    assert!(
+        tool["tools"][0]["output"]
+            .as_str()
+            .unwrap()
+            .contains("spool-survived")
+    );
+    let answers: Vec<&str> = turns
+        .iter()
+        .filter(|turn| turn["role"] == "assistant" && turn["kind"].is_null())
+        .map(|turn| turn["text"].as_str().unwrap())
+        .collect();
+    assert!(
+        answers.iter().any(|text| text.contains("spool-survived")),
+        "Codex's answer came through the restart: {answers:?}"
+    );
+    assert_eq!(
+        turns.iter().filter(|turn| turn["role"] == "user").count(),
+        1,
+        "the message is there once"
+    );
+    let named = host.get(&format!("/log?session={session}"))["conversation_id"].clone();
+
+    // The next turn resumes Codex's own thread: it knows what the last one did. The
+    // conversation is still called what it was called before Codex had named its thread.
+    host.send(
+        &session,
+        "In one word or one hyphenated word: what did that command print?",
+        "real-2",
+    );
+    wait_long(&host, &session, "the second answer", || {
+        host.state(&session) == "done"
+            && host
+                .turns(&session)
+                .iter()
+                .filter(|turn| turn["role"] == "user")
+                .count()
+                == 2
+            && host.turns(&session).last().is_some_and(|turn| {
+                turn["role"] == "assistant"
+                    && turn["text"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("spool-survived"))
+            })
+    });
+    assert_eq!(
+        host.get(&format!("/log?session={session}"))["conversation_id"],
+        named
+    );
+}
+
 #[test]
 fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away() {
     let place = Place::new("pair");

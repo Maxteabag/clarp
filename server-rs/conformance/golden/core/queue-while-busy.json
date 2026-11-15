@@ -68,7 +68,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 5,
+    "latest_revision": 4,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -99,14 +99,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:4>",
+      "id": "<row:1>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 4,
+      "revision": 2,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -151,14 +151,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:5>",
+      "id": "<row:2>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 5,
+      "revision": 4,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -229,7 +229,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "event_id": "<eid:transcript-updated#1@45bbad>",
     "session": "claire",
     "type": "transcript-updated"
@@ -239,7 +239,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "client_msg_id": "slow",
     "event_id": "<eid:agent-state#1@91d46a>",
     "kind": "thinking",
@@ -254,7 +254,22 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
+    "client_msg_id": "bravo",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -276,7 +291,7 @@
   {
    "data": {
     "action": "thinking",
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "call_id": null,
     "event_id": "<eid:agent-activity#2@0952e1>",
     "file_path": "",
@@ -298,22 +313,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
-    "client_msg_id": "bravo",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "client_msg_id": "bravo",
     "event_id": "<eid:queue-updated#2@dfa4af>",
     "queue_depth": 0,
@@ -328,7 +328,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "client_msg_id": "bravo",
     "event_id": "<eid:agent-state#2@91d46a>",
     "kind": "thinking",
@@ -343,7 +343,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -366,7 +366,7 @@
   {
    "data": {
     "action": "done",
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "call_id": null,
     "event_id": "<eid:agent-activity#4@0952e1>",
     "file_path": "",
@@ -388,7 +388,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -410,7 +410,7 @@
   {
    "data": {
     "action": "thinking",
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "call_id": null,
     "event_id": "<eid:agent-activity#6@0952e1>",
     "file_path": "",
@@ -432,29 +432,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
-    "badge": true,
-    "cause_message_id": "u-slow",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:7>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic long task",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "live-<id:4>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -477,7 +455,7 @@
   {
    "data": {
     "action": "done",
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
     "call_id": null,
     "event_id": "<eid:agent-activity#8@0952e1>",
     "file_path": "",
@@ -499,20 +477,42 @@
   },
   {
    "data": {
-    "agent_id": "<id:6>",
+    "agent_id": "<id:4>",
+    "badge": true,
+    "cause_message_id": "u-slow",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:5>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic long task",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
     "badge": true,
     "cause_message_id": "u-bravo",
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#2@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:8>",
+    "notification_id": "pn-<id:6>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: synthetic follow-up bravo",
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:5>",
+    "source_message_id": "<row:2>",
     "type": "user-notification",
     "unread": true
    },

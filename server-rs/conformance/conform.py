@@ -489,6 +489,12 @@ def write_golden(directory: Path, seen: dict):
             path.write_text(json.dumps(views[view], indent=1, sort_keys=True) + '\n')
 
 
+def golden_dirs(first: Path) -> list:
+    """Where the two recordings of the reference are written down: the first, and beside it
+    the second."""
+    return [first, first.with_name(first.name + '-again')]
+
+
 def load_intended(path) -> set:
     if not path or not Path(path).is_file():
         return set()
@@ -497,24 +503,28 @@ def load_intended(path) -> set:
 
 
 def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
-    """The Python Host's answers, twice. Returns (what a client saw, lines of the report, ok)."""
+    """The Python Host's answers, twice. Returns (both recordings, lines of the report, ok).
+
+    Where the two recordings differ, the reference itself answers in more than one way. That
+    is a defect of the reference (they are listed in docs/reference-defects.md), and it does
+    not stop the run: both answers are kept, and the Rust Host conforms in such a scenario
+    when it gives one of them."""
     harness_run.pin_static_mtimes(build)
     first = corpus(python_host(build), chosen, run.label('py-a'), jobs)
     second = corpus(python_host(build), chosen, run.label('py-b'), jobs)
     errors = run_errors(first, 'python') + run_errors(second, 'python again')
     report = differences(first, second, steady(chosen), view='core')
     lines = [diff.render(report, set(), 'the Python Host against itself', errors)]
-    whole = differences(first, second, steady(chosen))
-    if whole.items:
-        lines.append(diff.render(whole, set(), 'the same two runs with everything in them (revisions as '
-                                 'numbers, the fields of features the Rust Host lacks): for information'))
     unsteady = differences(first, second, [s for s in chosen if s.get('unsteady')], view='core')
     if unsteady.items:
         lines.append(diff.render(unsteady, set(), 'scenarios the reference is known not to answer the same '
                                  'way twice (reported as defects of the reference; not counted)'))
-    ok = not errors and not report.items
-    lines.append('REFERENCE REPRODUCIBLE' if ok else 'REFERENCE NOT REPRODUCIBLE: nothing below can be trusted')
-    return first, lines, ok, second
+    spread = sorted({d['scenario'] for d in report.items})
+    lines.append('REFERENCE REPRODUCIBLE' if not spread and not errors else
+                 'THE REFERENCE RAN WITH ERRORS: nothing below can be trusted' if errors else
+                 f'THE REFERENCE ANSWERS IN MORE THAN ONE WAY in {", ".join(spread)}: '
+                 'both answers are kept, and the Rust Host is compared with each')
+    return [first, second], lines, not errors
 
 
 def planted_copy(build: Path, change: dict, where: Path) -> Path:
@@ -560,12 +570,27 @@ def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tu
     return lines, ok
 
 
-def against_rust(binary: Path, golden: dict, chosen, intended: set, run: Run, jobs: int) -> tuple:
+def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run, jobs: int) -> tuple:
+    """The Rust Host against what the Python Host answered. Where the reference was recorded
+    answering in more than one way, the answer the Rust Host is nearest to is the one it is
+    held to; the report says which recording that was."""
     seen = corpus(rust_host(binary), chosen, run.label('rust'), jobs)
     errors = run_errors(seen, 'rust')
-    report = differences(golden, seen, steady(chosen), view='core')
+    report, held_to = diff.Report(), []
+    for scenario in steady(chosen):
+        nearest = None
+        for number, recording in enumerate(recordings, start=1):
+            one = differences(recording, seen, [scenario], view='core')
+            unexplained = sum(1 for d in one.items if d['id'] not in intended)
+            if nearest is None or unexplained < nearest[0]:
+                nearest = (unexplained, number, one)
+        report.items.extend(nearest[2].items)
+        if nearest[1] != 1:
+            held_to.append(f"{scenario['id']}: recording {nearest[1]}")
     unexplained = [d for d in report.items if d['id'] not in intended]
     lines = [diff.render(report, intended, 'the Python Host (base) against the Rust Host (head)', errors)]
+    if held_to:
+        lines += ['', 'compared with another recording than the first: ' + '; '.join(held_to)]
     lines += ['', '# The same differences by shape', *diff.shapes(report, top=200)]
     ok = not errors and not unexplained
     lines.append('')
@@ -607,34 +632,32 @@ def main(argv=None) -> int:
     ok, lines = True, []
     try:
         if args.mode == 'record':
-            seen, lines, ok, _ = record(build, chosen, run, args.jobs)
+            recordings, lines, ok = record(build, chosen, run, args.jobs)
             if ok:
-                write_golden(args.golden, seen)
-                lines.append(f'written down: {len(seen)} scenario(s) in {args.golden}')
+                for directory, seen in zip(golden_dirs(args.golden), recordings):
+                    write_golden(directory, seen)
+                lines.append(f'written down: {len(recordings[0])} scenario(s), twice, in {args.golden}')
         elif args.mode == 'plants':
             lines, ok = prove(build, load_golden(args.golden, chosen), chosen, plants.CHANGES, run, args.jobs)
         elif args.mode == 'compare':
-            lines, ok, rust_seen = against_rust(rust, load_golden(args.golden, chosen), chosen,
+            recordings = [load_golden(directory, chosen) for directory in golden_dirs(args.golden)
+                          if directory == args.golden or directory.is_dir()]
+            lines, ok, rust_seen = against_rust(rust, recordings, chosen,
                                                 load_intended(args.intended), run, args.jobs)
             if args.out:
                 write_golden(args.out / 'rust', rust_seen)
                 (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
         else:
             args.out.mkdir(parents=True, exist_ok=True)
-            seen, lines, ok, again = record(build, chosen, run, args.jobs)
-            write_golden(args.out / 'golden', seen)
-            if not ok:
-                # Both runs, so that what differs between them can be looked at.
-                write_golden(args.out / 'golden-again', again)
-            # The Rust Host is compared even with a reference that is not steady yet: the
-            # report says which it was, and most of what differs does not depend on it.
-            if True:
-                proof, proved = prove(build, seen, chosen, plants.CHANGES, run, args.jobs)
-                rust_lines, conforms, rust_seen = against_rust(
-                    rust, seen, chosen, load_intended(args.intended), run, args.jobs)
-                write_golden(args.out / 'rust', rust_seen)
-                lines += ['', *proof, '', *rust_lines]
-                ok = ok and proved and conforms
+            recordings, lines, ok = record(build, chosen, run, args.jobs)
+            for directory, seen in zip(golden_dirs(args.out / 'golden'), recordings):
+                write_golden(directory, seen)
+            proof, proved = prove(build, recordings[0], chosen, plants.CHANGES, run, args.jobs)
+            rust_lines, conforms, rust_seen = against_rust(
+                rust, recordings, chosen, load_intended(args.intended), run, args.jobs)
+            write_golden(args.out / 'rust', rust_seen)
+            lines += ['', *proof, '', *rust_lines]
+            ok = ok and proved and conforms
             (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
     finally:
         run.close(args.keep or not ok)

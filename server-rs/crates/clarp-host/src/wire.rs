@@ -114,7 +114,10 @@ fn state_since(record: &AgentRecord, status: &Status) -> i64 {
 /// The name of the tool's session: what the tool said, or, before it has said anything, the
 /// name the Host gave it.
 fn session_name(record: &AgentRecord, status: &Status) -> String {
-    conversation_id(record, status)
+    match &status.backend_session {
+        Some(session) => session.clone(),
+        None => conversation_id(record, status),
+    }
 }
 
 /// The id a client gave a message, from the id the conversation files it under.
@@ -483,13 +486,16 @@ pub fn row(version: &Versioned) -> Value {
     row
 }
 
-/// The name of an agent's conversation: the tool's own session, which for a tool that can be
-/// told is the name the Host chose. An agent that has not been written to has none yet.
+/// The name of an agent's conversation. It is the Host's own: chosen when the agent was made,
+/// or brought along when the agent moved here, and the same from the first message on. A tool
+/// that can be told its session's name is told this one (Claude); one that names its session
+/// itself (Codex) is resumed by its own name, which no client sees. An agent that has not been
+/// written to has no conversation yet.
 pub fn conversation_id(record: &AgentRecord, status: &Status) -> String {
-    match &status.backend_session {
-        Some(session) => session.clone(),
-        None if status.head_revision > 0 => record.conversation_id.clone(),
-        None => String::new(),
+    if status.head_revision > 0 || status.backend_session.is_some() {
+        record.conversation_id.clone()
+    } else {
+        String::new()
     }
 }
 
@@ -893,14 +899,14 @@ mod tests {
             &page(),
             false,
         );
-        assert_eq!(answer["conversation_id"], "sess-1");
+        assert_eq!(answer["conversation_id"], "conv-1");
         assert_eq!(answer["latest_revision"], 7 << 20);
         assert_eq!(
             (&answer["has_more"], &answer["missing"]),
             (&json!(true), &json!(false))
         );
         assert_eq!(
-            answer["file"], "sess-1.jsonl",
+            answer["file"], "conv-1.jsonl",
             "Claude Code's own transcript of the session"
         );
         let turns = answer["turns"].as_array().unwrap();
@@ -968,8 +974,8 @@ mod tests {
         );
         assert_eq!(
             conversation_id(&record(), &status(None, None)),
-            "sess-1",
-            "the tool's own word for it"
+            "conv-1",
+            "and it stays that, whatever the tool calls its own session"
         );
     }
 
@@ -1031,7 +1037,7 @@ mod tests {
             ),
             (&json!(42), &json!(1), &json!(7), &json!(true))
         );
-        assert_eq!(row["conversation_id"], "sess-1");
+        assert_eq!(row["conversation_id"], "conv-1");
         assert_eq!(
             (&row["last_message"], &row["last_message_id"]),
             (&json!("You: newest"), &json!("u-9"))

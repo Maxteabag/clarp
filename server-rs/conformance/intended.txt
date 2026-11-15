@@ -1,3 +1,17 @@
 # Differences between the Python Host and the Rust Host that are meant to be there.
 # One per line: the difference's id from the report, then why. The register with the reasoning
 # is server-rs/docs/differences.md; an id is added here only once it is written there.
+
+# A plain send that has to wait is announced with `queue-updated` (the Python Host announces
+# nothing: reference defect R5). One event more, which the differ shows as these four.
+66b251f369fb  send-while-busy: queue-updated for the message that joined (queue_depth)
+a6a1fa158ccb  send-while-busy: the same event (queue_revision)
+f588400bad1e  send-while-busy: the same event (queue_started)
+d64ffe6fffea  send-while-busy: the event the Python Host does send, now second
+
+# The reply that closes a completed turn is `final` (the Python Host says null when the turn
+# before had settled: reference defect R6).
+dfcb5143ebc3  two-turns: the second reply
+15b27f8ead44  log-pages: the second reply, in the newest page
+9c9b8bbc7447  log-pages: the second reply, in the page a client with nothing gets
+00f5d90896a6  log-pages: the second reply, to a client that catches up
