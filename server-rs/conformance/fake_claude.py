@@ -18,13 +18,17 @@ an assistant message and a result. Markers in the prompt:
   error, and exit code 1;
 - ``[qa-crash]``: the tool dies: a line on stderr, no result, exit code 1;
 - ``[qa-says-first]``: the agent says one thing before whatever else the prompt asks for: a
-  turn that had begun to answer when it failed.
+  turn that had begun to answer when it failed;
+- ``[qa-drops:N]``: the connection drops in the first N processes that are given this prompt
+  (a line on stderr in the CLI's words for it, no result, exit code 1); the next one answers.
+  How often a prompt was given is counted in ``$CLARP_QA_PROVIDER_ROOT``.
 
 Every process appends its lifecycle to ``$CLARP_QA_PROVIDER_ROOT/claude-procs.jsonl``.
 """
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -73,6 +77,18 @@ def record(path: Path | None, session: str, kind: str, parent: str | None, messa
                 'cwd': os.getcwd(), 'timestamp': now, 'isSidechain': False, 'userType': 'external',
                 'message': message, **more}) + '\n')
     return ident
+
+
+def given_before(text: str) -> int:
+    """How many processes were given this prompt before this one. Counted in a file of the
+    provider's directory; without one, never."""
+    root = os.environ.get('CLARP_QA_PROVIDER_ROOT')
+    if not root:
+        return 0
+    counter = Path(root) / ('given-' + hashlib.sha256(text.encode()).hexdigest()[:16])
+    before = int(counter.read_text() or 0) if counter.exists() else 0
+    counter.write_text(str(before + 1))
+    return before
 
 
 # The CLI's own sentence when the account's window is spent, as it said it on 15 Nov 2026.
@@ -125,6 +141,12 @@ def main() -> int:
     asked = record(path, session, 'user', None, {'role': 'user', 'content': text})
     if '[qa-slow]' in text:
         stopped.wait(3)
+    drops = re.search(r'\[qa-drops:(\d+)\]', text)
+    if drops and given_before(text) < int(drops.group(1)):
+        sys.stderr.write('API Error: socket connection was closed unexpectedly\n')
+        sys.stderr.flush()
+        log('exit', how='dropped')
+        return 1
     if '[qa-says-first]' in text:
         first = {'id': 'msg_first_' + PROC, 'role': 'assistant', 'model': 'replay-fake',
                  'content': [{'type': 'text', 'text': 'Claude replay first words: ' + text}],
