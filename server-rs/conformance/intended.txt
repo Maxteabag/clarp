@@ -62,3 +62,12 @@ e04309a8d7a3  helpers: the snapshot's focus, the same
 # reply that closed a turn again when the next message arrives, so its revision moves past a
 # cursor the client already holds: reference defect R16).
 d9328e5ae3d4  roster-edits: the second reply, which no cursor after its turn is older than
+
+# After a turn that completed, an agent's row says what it is doing: at rest, since when, after
+# which turn (the Python Host leaves `live_activity` empty after an agent's first turn until its
+# next one, in three recordings of four: reference defect R17).
+dab2f73f0779  roster-edits: live_activity of the renamed agent, after its first turn
+ddf864060396  roster-edits: the same, in the snapshot with the agent put away
+b552ef3283ca  roster-edits: the same, in the snapshot asked for in another word
+6fabd674f43e  roster-edits: the same, in the list of the agents put away
+46022bbcdc67  roster-edits: the same, in that list one to a page
