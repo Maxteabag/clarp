@@ -1,0 +1,3 @@
+# Differences between the Python Host and the Rust Host that are meant to be there.
+# One per line: the difference's id from the report, then why. The register with the reasoning
+# is server-rs/docs/differences.md; an id is added here only once it is written there.
