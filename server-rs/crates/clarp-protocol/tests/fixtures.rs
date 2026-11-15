@@ -132,7 +132,12 @@ fn an_agent_state_writes_the_wire_names() {
     )
     .unwrap();
     assert!(
-        matches!(newer.event, Event::AgentState(ref s) if s.kind == AgentStateKind::Other),
-        "a newer kind reads as Other"
+        matches!(newer.event, Event::AgentState(ref s) if s.kind == AgentStateKind::Other("levitating".to_string())),
+        "a newer kind is kept as it was sent"
+    );
+    assert_eq!(
+        serde_json::to_value(&newer).unwrap()["kind"],
+        "levitating",
+        "and written back unchanged"
     );
 }

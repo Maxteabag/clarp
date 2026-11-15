@@ -42,7 +42,7 @@ pub struct TranscriptUpdated {
     pub backend_session_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentStateKind {
     Thinking,
@@ -55,15 +55,15 @@ pub enum AgentStateKind {
     Waiting,
     Interrupted,
     Background,
-    /// A kind from a newer Host.
-    #[serde(other)]
-    Other,
+    /// A kind from a newer Host, kept as it was sent.
+    #[serde(untagged)]
+    Other(String),
 }
 
 impl AgentStateKind {
     /// Whether an agent in this state is working on a turn. `thinking` starts one; `done`,
     /// `idle`, `stopped` and `interrupted` end one (docs/protocol.md, section 3).
-    pub fn is_busy(self) -> bool {
+    pub fn is_busy(&self) -> bool {
         matches!(
             self,
             Self::Thinking
@@ -105,15 +105,15 @@ pub struct AgentState {
     pub origin: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ActivityStatus {
     Running,
     Ok,
     Error,
     Recorded,
-    #[serde(other)]
-    Other,
+    #[serde(untagged)]
+    Other(String),
 }
 
 /// What an agent is doing inside a turn: a tool starting or ending, a stop, a repair.
@@ -270,27 +270,27 @@ pub struct ServerVersion {
     pub version: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientAction {
     Record,
     RecordToggle,
     StopAgent,
     ControllerEvent,
-    #[serde(other)]
-    Other,
+    #[serde(untagged)]
+    Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ControllerButton {
     Primary,
     Secondary,
-    #[serde(other)]
-    Other,
+    #[serde(untagged)]
+    Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ControllerGesture {
     Down,
@@ -304,8 +304,8 @@ pub enum ControllerGesture {
     SwipeDown,
     RotateClockwise,
     RotateCounterclockwise,
-    #[serde(other)]
-    Other,
+    #[serde(untagged)]
+    Other(String),
 }
 
 /// Something a hardware controller asked the open client to do.
