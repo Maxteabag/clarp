@@ -68,6 +68,15 @@ pub fn left_out_of_chats(origin: &str) -> bool {
     matches!(origin, "watcher" | "heartbeat" | "leader_tick" | "dreaming")
 }
 
+/// Whether a turn of this origin that fails is told in the agent's state alone, with no row in
+/// the conversation: nobody was waiting for it (the Python Host's `SILENT_ORIGINS`).
+pub fn silent_when_failed(origin: &str) -> bool {
+    matches!(
+        origin,
+        "heartbeat" | "leader_tick" | "dreaming" | "janitor" | "watcher"
+    )
+}
+
 /// How a message enters the mailbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -122,6 +131,11 @@ pub enum Outcome {
     Completed,
     Failed {
         reason: String,
+        /// What kind of failure it was (`failures`), as it was read when it happened: what
+        /// the user is told follows from it, and the wordings it is read from change. Empty
+        /// in a log that was written before the kind was kept.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        kind: String,
     },
     Stopped {
         by: String,
@@ -134,6 +148,24 @@ pub enum Outcome {
     Withdrawn {
         by: String,
     },
+}
+
+impl Outcome {
+    /// A turn whose tool failed, with the tool's words for it.
+    pub fn failed(reason: String) -> Self {
+        Self::Failed {
+            kind: crate::failures::classify_error(&reason).to_string(),
+            reason,
+        }
+    }
+
+    /// A turn whose tool could not be started.
+    pub fn not_started(reason: String) -> Self {
+        Self::Failed {
+            kind: crate::failures::NOT_STARTED.to_string(),
+            reason,
+        }
+    }
 }
 
 /// Everything that can happen to a turn. These are what the agent's log holds.
@@ -322,17 +354,24 @@ impl Starting {
     /// The tool process could not be started, or the start was stopped.
     pub fn settle(self, outcome: StartOutcome, at_ms: i64) -> (Settled, TurnEvent) {
         let outcome = outcome.into_outcome();
-        let next = Settled {
+        (
+            self.ended(outcome.clone(), at_ms),
+            TurnEvent::Settled { outcome, at_ms },
+        )
+    }
+
+    /// The turn as it is once it has ended this way.
+    fn ended(self, outcome: Outcome, at_ms: i64) -> Settled {
+        Settled {
             id: self.id,
             message_seq: self.message_seq,
             origin: self.origin,
-            outcome: outcome.clone(),
+            outcome,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: Some(self.started_at_ms),
             ended_at_ms: at_ms,
             tool_count: 0,
-        };
-        (next, TurnEvent::Settled { outcome, at_ms })
+        }
     }
 }
 
@@ -347,7 +386,7 @@ pub enum StartOutcome {
 impl StartOutcome {
     fn into_outcome(self) -> Outcome {
         match self {
-            Self::Failed { reason } => Outcome::Failed { reason },
+            Self::Failed { reason } => Outcome::not_started(reason),
             Self::Stopped { by } => Outcome::Stopped { by },
             Self::Interrupted { reason } => Outcome::Interrupted { reason },
         }
@@ -367,7 +406,7 @@ impl RunOutcome {
     fn into_outcome(self) -> Outcome {
         match self {
             Self::Completed => Outcome::Completed,
-            Self::Failed { reason } => Outcome::Failed { reason },
+            Self::Failed { reason } => Outcome::failed(reason),
             Self::Stopped { by } => Outcome::Stopped { by },
             Self::Interrupted { reason } => Outcome::Interrupted { reason },
         }
@@ -390,17 +429,24 @@ impl Running {
 
     pub fn settle(self, outcome: RunOutcome, at_ms: i64) -> (Settled, TurnEvent) {
         let outcome = outcome.into_outcome();
-        let next = Settled {
+        (
+            self.ended(outcome.clone(), at_ms),
+            TurnEvent::Settled { outcome, at_ms },
+        )
+    }
+
+    /// The turn as it is once it has ended this way.
+    fn ended(self, outcome: Outcome, at_ms: i64) -> Settled {
+        Settled {
             id: self.id,
             message_seq: self.message_seq,
             origin: self.origin,
-            outcome: outcome.clone(),
+            outcome,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: Some(self.started_at_ms),
             ended_at_ms: at_ms,
             tool_count: self.tool_count,
-        };
-        (next, TurnEvent::Settled { outcome, at_ms })
+        }
     }
 }
 
@@ -485,28 +531,11 @@ impl Turn {
                     at_ms,
                 },
             ) => Ok(Self::Running(t.running(*at_ms).0)),
+            // An ended turn is as its log says it ended: nothing is read a second time.
             (Self::Starting(t), TurnEvent::Settled { outcome, at_ms }) => match outcome {
-                Outcome::Failed { reason } => Ok(Self::Settled(
-                    t.settle(
-                        StartOutcome::Failed {
-                            reason: reason.clone(),
-                        },
-                        *at_ms,
-                    )
-                    .0,
-                )),
-                Outcome::Stopped { by } => Ok(Self::Settled(
-                    t.settle(StartOutcome::Stopped { by: by.clone() }, *at_ms).0,
-                )),
-                Outcome::Interrupted { reason } => Ok(Self::Settled(
-                    t.settle(
-                        StartOutcome::Interrupted {
-                            reason: reason.clone(),
-                        },
-                        *at_ms,
-                    )
-                    .0,
-                )),
+                Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {
+                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
+                }
                 Outcome::Completed | Outcome::Withdrawn { .. } => Err(illegal(&Self::Starting(t))),
             },
             (Self::Running(t), TurnEvent::Bound { backend_session }) => {
@@ -516,28 +545,12 @@ impl Turn {
                 Ok(Self::Running(t.moved(activity.clone(), *at_ms).0))
             }
             (Self::Running(t), TurnEvent::Settled { outcome, at_ms }) => match outcome {
-                Outcome::Completed => Ok(Self::Settled(t.settle(RunOutcome::Completed, *at_ms).0)),
-                Outcome::Failed { reason } => Ok(Self::Settled(
-                    t.settle(
-                        RunOutcome::Failed {
-                            reason: reason.clone(),
-                        },
-                        *at_ms,
-                    )
-                    .0,
-                )),
-                Outcome::Stopped { by } => Ok(Self::Settled(
-                    t.settle(RunOutcome::Stopped { by: by.clone() }, *at_ms).0,
-                )),
-                Outcome::Interrupted { reason } => Ok(Self::Settled(
-                    t.settle(
-                        RunOutcome::Interrupted {
-                            reason: reason.clone(),
-                        },
-                        *at_ms,
-                    )
-                    .0,
-                )),
+                Outcome::Completed
+                | Outcome::Failed { .. }
+                | Outcome::Stopped { .. }
+                | Outcome::Interrupted { .. } => {
+                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
+                }
                 Outcome::Withdrawn { .. } => Err(illegal(&Self::Running(t))),
             },
             (state, _) => Err(illegal(&state)),
@@ -566,6 +579,71 @@ mod tests {
 
     fn accepted() -> (Queued, TurnEvent) {
         Queued::accept(TurnId(7), 41, Origin::User, Admission::Queue, 1_000)
+    }
+
+    #[test]
+    fn a_failed_turn_keeps_the_kind_it_was_read_as() {
+        let (queued, accepted) = accepted();
+        let (starting, started) = queued.start(1_100);
+        let (running, moved) = starting.running(1_200);
+        let (settled, failed) = running.settle(
+            RunOutcome::Failed {
+                reason: "read ECONNRESET".to_string(),
+            },
+            1_300,
+        );
+        // Read when it happened.
+        assert_eq!(
+            settled.outcome,
+            Outcome::Failed {
+                reason: "read ECONNRESET".to_string(),
+                kind: "connection".to_string()
+            }
+        );
+        // A log says how a turn ended, and is not read again: wordings change, what
+        // happened does not.
+        let kept = TurnEvent::Settled {
+            outcome: Outcome::Failed {
+                reason: "read ECONNRESET".to_string(),
+                kind: "as it was read then".to_string(),
+            },
+            at_ms: 1_300,
+        };
+        let Some(Turn::Settled(replayed)) =
+            Turn::replay(&[accepted.clone(), started.clone(), moved.clone(), kept]).unwrap()
+        else {
+            panic!("the turn has ended");
+        };
+        assert_eq!(
+            replayed.outcome,
+            Outcome::Failed {
+                reason: "read ECONNRESET".to_string(),
+                kind: "as it was read then".to_string()
+            }
+        );
+        // A log from before the kind was kept has none, and reads as it was written.
+        let old: TurnEvent = serde_json::from_str(
+            r#"{"event":"settled","outcome":{"outcome":"failed","reason":"boom"},"at_ms":1300}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old,
+            TurnEvent::Settled {
+                outcome: Outcome::Failed {
+                    reason: "boom".to_string(),
+                    kind: String::new()
+                },
+                at_ms: 1_300
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"event":"settled","outcome":{"outcome":"failed","reason":"boom"},"at_ms":1300}"#
+        );
+        assert_eq!(
+            Turn::replay(&[accepted, started, moved, failed]).unwrap(),
+            Some(Turn::Settled(settled))
+        );
     }
 
     /// Drives a whole turn with the typed transitions and returns the end state with its events.
@@ -656,9 +734,7 @@ mod tests {
         );
         assert_eq!(
             settled.outcome,
-            Outcome::Failed {
-                reason: "the tool is not installed".to_string()
-            }
+            Outcome::not_started("the tool is not installed".to_string())
         );
         assert_eq!(
             Turn::replay(&[accepted, started, failed]).unwrap(),

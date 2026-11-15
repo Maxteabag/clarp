@@ -90,6 +90,14 @@ pub struct Notice {
     /// A stable name for what happened, for a client that wants to act on it.
     pub code: String,
     pub text: String,
+    /// The trace of the turn it is about, when it is about one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+}
+
+impl Notice {
+    /// The code of the row that says why a turn failed, under the message that caused it.
+    pub const TURN_FAILED: &'static str = "turn-failed";
 }
 
 /// How a turn ended. It is not a row of the conversation: it belongs to the row that closed
@@ -284,6 +292,7 @@ mod tests {
                 turn: Some(3),
                 code: "usage-limit".to_string(),
                 text: "The usage limit was reached.".to_string(),
+                trace_id: None,
             }),
             Entry::Imported(Imported {
                 id: "live-abc".to_string(),

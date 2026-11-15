@@ -398,7 +398,7 @@ impl Agent {
                 work.must_be_live(turn)?;
                 let outcome = match work.agent.stopping.clone() {
                     Some(by) => Outcome::Stopped { by },
-                    None => Outcome::Failed { reason },
+                    None => Outcome::not_started(reason),
                 };
                 work.record(AgentEvent::Turn {
                     turn,
@@ -440,7 +440,7 @@ impl Agent {
                         work.running(turn, now_ms);
                         Outcome::Completed
                     }
-                    (None, RunOutcome::Failed { reason }) => Outcome::Failed { reason },
+                    (None, RunOutcome::Failed { reason }) => Outcome::failed(reason),
                     (None, RunOutcome::Stopped { by }) => Outcome::Stopped { by },
                     (None, RunOutcome::Interrupted { reason }) => Outcome::Interrupted { reason },
                 };

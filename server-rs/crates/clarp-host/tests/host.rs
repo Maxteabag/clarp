@@ -4505,6 +4505,149 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
 }
 
 #[test]
+fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
+    let place = Place::new("failed");
+    // A stand-in for Claude Code whose account is out when the message says so, that dies
+    // when the message says so, and that answers otherwise.
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\ncase \"$message\" in\n*limit*)\n",
+        init,
+        "printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
+        "exit 1 ;;\n*crash*)\n",
+        init,
+        "echo 'Error: the tool broke' >&2\nexit 1 ;;\nesac\n",
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let events = host.listen();
+    let row = || -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == agent)
+            .cloned()
+            .unwrap()
+    };
+    let failed = |rows: usize| {
+        wait_for("the turn to fail", || {
+            host.turns(&agent).len() == rows && host.state(&agent) == "interrupted"
+        });
+    };
+
+    // The account is out.
+    host.send(&agent, "reach the limit", "kilo");
+    failed(2);
+    let rows = host.turns(&agent);
+    // The turn said nothing: its end is told on the message itself.
+    assert_eq!(
+        (&rows[0]["id"], &rows[0]["turn"]["status"]),
+        (&json!("u-kilo"), &json!("failed"))
+    );
+    // And under the message the Host says why, in a row of its own that closes nothing.
+    assert_eq!(
+        (
+            &rows[1]["id"],
+            &rows[1]["origin"],
+            &rows[1]["role"],
+            &rows[1]["kind"],
+            &rows[1]["text"],
+            &rows[1]["turn"],
+        ),
+        (
+            &json!("marker-u-kilo"),
+            &json!("system"),
+            &json!("assistant"),
+            &Value::Null,
+            &json!("Usage limit reached.\n\nClaude usage limit reached"),
+            &Value::Null,
+        )
+    );
+    assert_eq!(rows[1]["trace_id"], rows[0]["trace_id"]);
+    assert_ne!(rows[1]["trace_id"], "");
+    let shown = row();
+    assert_eq!(
+        (
+            &shown["latest_state"],
+            &shown["activity"]["summary"],
+            &shown["live_activity"]["headline"],
+            &shown["last_message"],
+            &shown["last_message_id"],
+        ),
+        (
+            &json!("interrupted"),
+            &json!("Usage limit reached. Your message is saved."),
+            &json!("Usage limit reached"),
+            &json!("Usage limit reached. Claude usage limit reached"),
+            &json!("marker-u-kilo"),
+        )
+    );
+    let detail = events
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "agent-state" && event["kind"] == "interrupted")
+        .map(|event| event["detail"].clone())
+        .expect("the apps were told the turn failed");
+    assert_eq!(
+        detail,
+        json!({
+            "attempts": 1,
+            "dispatch": "claude",
+            "error": "Claude usage limit reached",
+            "message": "Usage limit reached",
+            "provider_message": "Claude usage limit reached",
+            "reason": "usage_limit",
+            "summary": "Usage limit reached. Your message is saved.",
+        })
+    );
+
+    // The tool dies: nothing reads its words as a kind of failure, and they are given whole.
+    host.send(&agent, "crash now", "lima");
+    failed(4);
+    let rows = host.turns(&agent);
+    assert_eq!(
+        (&rows[2]["id"], &rows[2]["turn"]["status"]),
+        (&json!("u-lima"), &json!("failed"))
+    );
+    assert_eq!(
+        (&rows[3]["id"], &rows[3]["text"]),
+        (
+            &json!("marker-u-lima"),
+            &json!("Turn failed.\n\nError: the tool broke")
+        )
+    );
+    assert_eq!(
+        row()["activity"]["summary"],
+        "Turn failed. Your message is saved."
+    );
+
+    // And the agent works on.
+    host.send(&agent, "hello", "mike");
+    wait_for("the answer", || {
+        host.turns(&agent).len() == 6 && host.state(&agent) == "done"
+    });
+    let rows = host.turns(&agent);
+    assert_eq!(
+        (&rows[5]["role"], &rows[5]["turn"]["status"]),
+        (&json!("assistant"), &json!("completed"))
+    );
+    assert_eq!(rows[4]["turn"], Value::Null);
+}
+
+#[test]
 fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
     // no Host anything itself: it calls clarp-admin and clarp-agent-bg by name. Here those

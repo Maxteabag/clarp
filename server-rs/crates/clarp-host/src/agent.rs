@@ -467,7 +467,7 @@ fn wake_message_id(request_id: &str) -> String {
 fn seen_end(last: &Settled) -> Option<TurnSeen> {
     let (outcome, message) = match &last.outcome {
         Outcome::Completed => ("completed", String::new()),
-        Outcome::Failed { reason } => ("failed", reason.clone()),
+        Outcome::Failed { reason, .. } => ("failed", reason.clone()),
         Outcome::Interrupted { reason } => ("interrupted", reason.clone()),
         Outcome::Stopped { by } => ("interrupted", format!("Stopped by {by}")),
         Outcome::Withdrawn { .. } => return None,
