@@ -290,6 +290,90 @@ pub fn is_account_wait_message(text: &str) -> bool {
     ACCOUNT_WAIT_RE.is_match(text)
 }
 
+/// What the user is shown of a turn that ended on a failure: in the agent's state, and as a
+/// row under the message that caused it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Told {
+    /// The sentence: what explains the tool's words when something does, else the kind's own.
+    pub message: String,
+    /// What the tool said, cut to 200 characters.
+    pub error: String,
+    /// The provider's own words out of it, cut to 500.
+    pub provider_message: String,
+    /// The sentence, and that the message is kept.
+    pub summary: String,
+    /// The row in the conversation: the sentence, and below it the provider's words when the
+    /// sentence does not hold them already.
+    pub row: String,
+}
+
+/// What only some callers know of a failure.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Known {
+    /// Whether the provider confirmed that the quota is spent. `Some(false)`: it was asked
+    /// and did not.
+    pub quota_confirmed: Option<bool>,
+    /// The account was switched already, and the switch waits for the tool's other agents.
+    pub switch_pending: bool,
+}
+
+/// The sentence of a kind of failure whose words explain nothing by themselves.
+fn sentence(kind: &str, model: &str) -> String {
+    match kind {
+        CONNECTION => "Connection lost — retries exhausted".to_string(),
+        TRANSIENT => "API unavailable (overloaded / rate limited)".to_string(),
+        INTERRUPTED => "Turn interrupted".to_string(),
+        USAGE_LIMIT => "Usage limit reached".to_string(),
+        AUTH => "Sign-in expired — could not refresh the account".to_string(),
+        RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
+        TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
+        NOT_STARTED => "The turn could not be started".to_string(),
+        ACCOUNT_PLAN => format!(
+            "This account's plan does not include {}. Switch to an account that has it or \
+             choose another model",
+            if model.is_empty() {
+                "this model"
+            } else {
+                model
+            }
+        ),
+        _ => "Turn failed".to_string(),
+    }
+}
+
+/// What the user is told of a turn of this model that ended on a failure of this kind, with
+/// these words of the tool's. The Python Host's wording (`turn_retry._mark_interrupted` and
+/// `_record_failure_row`), held to it by `tests/failure_vectors.rs`.
+pub fn told(kind: &str, said: &str, model: &str, known: Known) -> Told {
+    let explained = explain(said);
+    let mut message = if explained.is_empty() {
+        sentence(kind, model)
+    } else {
+        explained.to_string()
+    };
+    if kind == USAGE_LIMIT && known.quota_confirmed == Some(false) {
+        message = QUOTA_UNCONFIRMED_MESSAGE.to_string();
+    }
+    if known.switch_pending {
+        message.push_str(
+            " — the account switch waits until no Codex agent is busy; send again once they finish",
+        );
+    }
+    let provider = provider_message(said);
+    let mut row = format!("{message}.");
+    if !provider.is_empty() && !message.contains(provider.as_str()) {
+        row.push_str("\n\n");
+        row.extend(provider.chars().take(1000));
+    }
+    Told {
+        summary: format!("{message}. Your message is saved."),
+        error: said.chars().take(200).collect(),
+        provider_message: provider.chars().take(500).collect(),
+        message,
+        row,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

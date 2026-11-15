@@ -10,14 +10,24 @@ writes what they said to `crates/clarp-kernel/tests/fixtures/failure-vectors.jso
 
     python3 server-rs/tools/failure-vectors.py
 
+It also writes what the user is told of a turn that ended on a failure: the sentence in the
+agent's state and the row under the message that caused it. The Python Host words those in
+`server/lib/turn_retry.py` (`_mark_interrupted`, `_record_failure_row`), which are not pure:
+the table of sentences is taken out of the first by its structure, and how the two put a
+sentence, the explanation and the provider's own words together is written again in `told`
+below. So that this copy cannot fall behind unseen, the two functions' texts are fingerprinted:
+when one of them changes, this program stops and says so, and `told` is read against it again.
+
 Nothing of a Host is touched or started: pure functions are called.
 """
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import pathlib
 import sys
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -93,6 +103,55 @@ RESULTS = [
 WAITS = [('claude', ''), ('codex', ''), ('claude', 'claude-opus-5-5'), ('claude', None), ('agy', 'gemini-4'), ('', '')]
 
 
+# The texts of the two functions `told` was read against (sha256, the first sixteen digits).
+READ = {'_mark_interrupted': '88eb16f08481d8ee', '_record_failure_row': '5bd7846a4ff13062'}
+
+
+def sentences(rules):
+    """The Python Host's table from a kind of failure to its sentence, as a function of the kind
+    and the turn's model, and the sentence for a kind the table does not have."""
+    source = (REPO / 'server' / 'lib' / 'turn_retry.py').read_text()
+    tree = ast.parse(source)
+    functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    for name, read in READ.items():
+        now = hashlib.sha256(ast.get_source_segment(source, functions[name]).encode()).hexdigest()[:16]
+        if now != read:
+            sys.exit(f'server/lib/turn_retry.py: {name} has changed ({now}, read at {read}). Read it against '
+                     f'`told` in this program, then put the new fingerprint into READ.')
+    table = next(
+        stmt.value for stmt in functions['_mark_interrupted'].body
+        if isinstance(stmt, ast.Assign) and getattr(stmt.targets[0], 'id', '') == 'human'
+        and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Attribute)
+        and stmt.value.func.attr == 'get' and isinstance(stmt.value.func.value, ast.Dict))
+    worded = {getattr(rules, key.attr): compile(ast.Expression(value), 'turn_retry.py', 'eval')
+              for key, value in zip(table.func.value.keys, table.func.value.values)}
+    other = ast.literal_eval(table.args[1])
+
+    def sentence(kind: str, model: str) -> str:
+        if kind not in worded:
+            return other
+        return eval(worded[kind], {'spec': types.SimpleNamespace(model=model)})  # noqa: S307 - the Host's own table
+    return sentence
+
+
+def told(rules, sentence, kind, text, model, quota_confirmed=None, switch_pending=False) -> dict:
+    """What `_mark_interrupted` puts into the agent's state and `_record_failure_row` into the
+    conversation, for a turn of this model that ended on a failure of this kind with these words."""
+    human = rules.explain(text) or sentence(kind, model)
+    if kind == rules.USAGE_LIMIT and quota_confirmed is False:
+        human = rules.QUOTA_UNCONFIRMED_MESSAGE
+    if switch_pending:
+        human = f'{human} — the account switch waits until no Codex agent is busy; send again once they finish'
+    provider = rules.provider_message(text)
+    row = human + '.'
+    if provider and provider not in human:
+        row += '\n\n' + provider[:1000]
+    return {'kind': kind, 'text': text, 'model': model, 'quota_confirmed': quota_confirmed,
+            'switch_pending': switch_pending,
+            'message': human, 'error': (text or '')[:200], 'provider_message': provider[:500],
+            'summary': human + '. Your message is saved.', 'row': row}
+
+
 def strings_of(path: pathlib.Path) -> list[str]:
     """Every text the Python Host's own tests of the module use."""
     found = []
@@ -121,10 +180,26 @@ def main() -> int:
     results = [{'event': event, 'kind': rules.classify_result(event)} for event in RESULTS]
     waits = [{'backend': backend, 'model': model, 'message': rules.account_wait_message(backend, model)}
              for backend, model in WAITS]
+    kinds = sorted({rules.CLEAN, rules.CONNECTION, rules.TRANSIENT, rules.INTERRUPTED, rules.USAGE_LIMIT,
+                    rules.AUTH, rules.ACCOUNT_PLAN, rules.RUNNER_EXIT, rules.TIMEOUT, rules.NOT_STARTED,
+                    rules.UNKNOWN, rules.MUSE_SESSION_LOCKED})
+    sentence = sentences(rules)
+    # Every text as the kind it is read as, for a turn of one model (the sentence and the row,
+    # beside the text). Then, whole: every kind with words that explain nothing, with and without
+    # a model; a long text, which is cut; and the two things only some callers know.
+    long = 'request failed: {"message": "' + 'the provider went on and on. ' * 60 + '"}'
+    for vector in read:
+        whole = told(rules, sentence, vector['kind'], vector['text'], 'claude-opus-5-5')
+        vector['told'] = {'message': whole['message'], 'row': whole['row']}
+    said = [told(rules, sentence, kind, text, model)
+             for kind in [*kinds, 'a kind nobody has heard of'] for text in ('', 'something else entirely', long)
+             for model in ('', 'gpt-6')]
+    said += [told(rules, sentence, rules.USAGE_LIMIT, text, 'gpt-6', quota_confirmed=confirmed, switch_pending=pending)
+             for text in ('', 'You exceeded your current quota', 'usage limit reached. Your limit will reset at 3pm')
+             for confirmed in (None, True, False) for pending in (False, True)]
     vectors = {
-        'kinds': sorted({rules.CLEAN, rules.CONNECTION, rules.TRANSIENT, rules.INTERRUPTED, rules.USAGE_LIMIT,
-                         rules.AUTH, rules.ACCOUNT_PLAN, rules.RUNNER_EXIT, rules.TIMEOUT, rules.NOT_STARTED,
-                         rules.UNKNOWN, rules.MUSE_SESSION_LOCKED}),
+        'kinds': kinds,
+        'told': said,
         'notify': sorted(rules.NOTIFY),
         'quota_unconfirmed': rules.QUOTA_UNCONFIRMED_MESSAGE,
         'texts': read, 'absent': absent, 'results': results, 'waits': waits,
@@ -134,7 +209,8 @@ def main() -> int:
     by_kind = {}
     for vector in read:
         by_kind[vector['kind']] = by_kind.get(vector['kind'], 0) + 1
-    print(f'{len(read)} texts, {len(results)} results, {len(waits)} waits -> {OUT.relative_to(REPO)}')
+    print(f'{len(read)} texts, {len(results)} results, {len(waits)} waits, {len(said)} tellings '
+          f'-> {OUT.relative_to(REPO)}')
     print(', '.join(f'{kind}: {count}' for kind, count in sorted(by_kind.items())))
     return 0
 

@@ -8,8 +8,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_kernel::failures::{
-    self, NOTIFY, QUOTA_UNCONFIRMED_MESSAGE, account_wait_message, classify_error, classify_result,
-    explain, is_account_wait_message, provider_message, usage_limit_resets,
+    self, Known, NOTIFY, QUOTA_UNCONFIRMED_MESSAGE, account_wait_message, classify_error,
+    classify_result, explain, is_account_wait_message, provider_message, told, usage_limit_resets,
 };
 use serde_json::Value;
 
@@ -62,6 +62,66 @@ fn a_failure_is_read_as_the_python_host_reads_it() {
     assert_eq!(
         is_account_wait_message(""),
         absent["account_wait"].as_bool().unwrap()
+    );
+}
+
+#[test]
+fn a_user_is_told_of_a_failed_turn_as_the_python_host_tells_it() {
+    let vectors = vectors();
+    let mut wrong = Vec::new();
+    // Every text, as the kind it is read as: the sentence and the row.
+    for vector in vectors["texts"].as_array().unwrap() {
+        let (kind, text) = (
+            vector["kind"].as_str().unwrap(),
+            vector["text"].as_str().unwrap(),
+        );
+        let ours = told(kind, text, "claude-opus-5-5", Known::default());
+        let theirs = &vector["told"];
+        if ours.message != theirs["message"].as_str().unwrap()
+            || ours.row != theirs["row"].as_str().unwrap()
+        {
+            wrong.push(format!(
+                "{kind} {text:?}: {ours:?}, the Python Host: {theirs}"
+            ));
+        }
+    }
+    // And whole: every kind with words that explain nothing, a long text, and what only some
+    // callers know.
+    let whole = vectors["told"].as_array().unwrap();
+    assert!(whole.len() > 90);
+    for vector in whole {
+        let known = Known {
+            quota_confirmed: vector["quota_confirmed"].as_bool(),
+            switch_pending: vector["switch_pending"].as_bool().unwrap(),
+        };
+        let ours = told(
+            vector["kind"].as_str().unwrap(),
+            vector["text"].as_str().unwrap(),
+            vector["model"].as_str().unwrap(),
+            known,
+        );
+        let theirs = |field: &str| vector[field].as_str().unwrap();
+        if (
+            ours.message.as_str(),
+            ours.error.as_str(),
+            ours.provider_message.as_str(),
+            ours.summary.as_str(),
+            ours.row.as_str(),
+        ) != (
+            theirs("message"),
+            theirs("error"),
+            theirs("provider_message"),
+            theirs("summary"),
+            theirs("row"),
+        ) {
+            wrong.push(format!("{ours:?}, the Python Host: {vector}"));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} told differently:\n{}",
+        wrong.len(),
+        wrong.join("\n")
     );
 }
 
