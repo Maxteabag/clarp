@@ -121,3 +121,210 @@ pub fn archive_due<'a>(rows: &[Kept<'a>], now_ms: i64, grace_ms: i64) -> Vec<&'a
         .map(|row| row.agent_id)
         .collect()
 }
+
+// ---- a helper that went quiet ----------------------------------------------------------------
+
+/// How long a helper that is working may sit idle before it counts as having reported.
+pub const IDLE_AFTER_MS: i64 = 30 * 60 * 1_000;
+
+/// What an agent is doing right now, as the list of agents counts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Doing {
+    /// A turn runs or waits.
+    pub busy: bool,
+    /// Background processes it left running, not the jobs that only mirror a helper.
+    pub active_jobs: usize,
+    /// Helpers of its own that are working.
+    pub running_children: usize,
+    /// The last time anything of it changed: a state, the end of a turn, a job.
+    pub idle_since_ms: i64,
+}
+
+impl Doing {
+    pub fn idle(&self) -> bool {
+        !self.busy && self.active_jobs == 0 && self.running_children == 0
+    }
+}
+
+/// Whether a helper that is working has sat idle past `limit_ms`. It then counts as having
+/// reported, not as done or failed: what came of it is still its parent's to say. A limit
+/// of nothing turns the rule off.
+pub fn idle_due(helper_state: Option<&str>, doing: &Doing, now_ms: i64, limit_ms: i64) -> bool {
+    limit_ms > 0
+        && helper_state == Some("running")
+        && doing.idle()
+        && now_ms - doing.idle_since_ms > limit_ms
+}
+
+// ---- what an agent's row says of the work it handed out -----------------------------------
+
+/// How the state of a helper that is working reads in its parent's line.
+pub fn bucket(state: &str) -> &'static str {
+    match state {
+        "thinking" | "tool" | "compacting" | "background" => "working",
+        "waiting" | "interrupted" => "waiting",
+        _ => "idle",
+    }
+}
+
+/// A helper that is working, as its parent's line describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Working {
+    pub session: String,
+    /// What it says it is doing, or what its state says.
+    pub text: String,
+    pub bucket: &'static str,
+}
+
+/// A background process an agent left running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Process {
+    pub title: String,
+    /// The last line of progress it reported.
+    pub progress: String,
+    /// When it last reported progress, or when it started.
+    pub active_at_ms: i64,
+}
+
+/// What an agent's helpers and processes are doing, in a line. The counts are on the row's
+/// badge already, so the line says what goes on: one helper by its name and what it does,
+/// several as "3 working, 1 waiting", a process by its newest line of progress or its title.
+/// A bare count is the last resort.
+pub fn work_summary(helpers: &[Working], processes: &[Process]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    match helpers {
+        [] => {}
+        [only] if only.text.is_empty() => parts.push(only.session.clone()),
+        [only] => parts.push(format!("{}: {}", only.session, only.text)),
+        several => {
+            let counted: Vec<String> = ["working", "waiting", "idle"]
+                .iter()
+                .filter_map(|bucket| {
+                    let count = several
+                        .iter()
+                        .filter(|helper| helper.bucket == *bucket)
+                        .count();
+                    (count > 0).then(|| format!("{count} {bucket}"))
+                })
+                .collect();
+            parts.push(counted.join(", "));
+        }
+    }
+    // The newest progress stands for all; of two as new, the one that started later.
+    let newest = processes
+        .iter()
+        .enumerate()
+        .max_by_key(|(place, process)| (process.active_at_ms, *place))
+        .map(|(_, process)| process);
+    if let Some(newest) = newest {
+        let (title, text) = (newest.title.trim(), newest.progress.trim());
+        let described = match (title.is_empty(), text.is_empty()) {
+            (false, false) => format!("{title}: {text}"),
+            (true, false) => text.to_string(),
+            (false, true) => title.to_string(),
+            (true, true) if processes.len() == 1 => "1 background process".to_string(),
+            (true, true) => format!("{} background processes", processes.len()),
+        };
+        parts.push(described);
+    }
+    parts.join(" \u{b7} ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doing(busy: bool, active_jobs: usize, running_children: usize, idle_since_ms: i64) -> Doing {
+        Doing {
+            busy,
+            active_jobs,
+            running_children,
+            idle_since_ms,
+        }
+    }
+
+    #[test]
+    fn a_helper_that_sits_idle_too_long_counts_as_reported() {
+        let limit = IDLE_AFTER_MS;
+        let quiet = doing(false, 0, 0, 1_000);
+        assert!(!idle_due(Some("running"), &quiet, 1_000 + limit, limit));
+        assert!(idle_due(Some("running"), &quiet, 1_001 + limit, limit));
+        // Only a helper that is working, and only one with nothing going on.
+        assert!(!idle_due(Some("reported"), &quiet, 1_001 + limit, limit));
+        assert!(!idle_due(None, &quiet, 1_001 + limit, limit));
+        for alive in [
+            doing(true, 0, 0, 1_000),
+            doing(false, 1, 0, 1_000),
+            doing(false, 0, 1, 1_000),
+        ] {
+            assert!(!idle_due(Some("running"), &alive, 1_001 + limit, limit));
+        }
+        assert!(
+            !idle_due(Some("running"), &quiet, i64::MAX / 2, 0),
+            "the rule is off"
+        );
+    }
+
+    fn working(session: &str, text: &str, state: &str) -> Working {
+        Working {
+            session: session.to_string(),
+            text: text.to_string(),
+            bucket: bucket(state),
+        }
+    }
+
+    fn process(title: &str, progress: &str, active_at_ms: i64) -> Process {
+        Process {
+            title: title.to_string(),
+            progress: progress.to_string(),
+            active_at_ms,
+        }
+    }
+
+    #[test]
+    fn a_line_says_what_the_helpers_and_processes_are_doing() {
+        assert_eq!(work_summary(&[], &[]), "");
+        assert_eq!(
+            work_summary(&[working("slice5-helper", "running tests", "tool")], &[]),
+            "slice5-helper: running tests"
+        );
+        assert_eq!(
+            work_summary(&[working("slice5-helper", "", "spawned")], &[]),
+            "slice5-helper"
+        );
+        let several = [
+            working("a", "x", "thinking"),
+            working("b", "", "tool"),
+            working("c", "", "waiting"),
+            working("d", "", "done"),
+            working("e", "", "background"),
+        ];
+        assert_eq!(work_summary(&several, &[]), "3 working, 1 waiting, 1 idle");
+        assert_eq!(
+            work_summary(&several[..2], &[]),
+            "2 working",
+            "what nobody is doing is not counted"
+        );
+        // A process by its newest progress; of two as new, the later one.
+        let processes = [
+            process("Build", "linking", 30),
+            process("Tests", "412 passed", 40),
+            process("Deploy", "", 40),
+        ];
+        assert_eq!(work_summary(&[], &processes[..2]), "Tests: 412 passed");
+        assert_eq!(work_summary(&[], &processes), "Deploy");
+        assert_eq!(work_summary(&[], &[process("", "half way", 1)]), "half way");
+        assert_eq!(
+            work_summary(&[], &[process("", "", 1)]),
+            "1 background process"
+        );
+        assert_eq!(
+            work_summary(&[], &[process("", "", 1), process(" ", " ", 1)]),
+            "2 background processes"
+        );
+        assert_eq!(
+            work_summary(&[working("h", "reading", "tool")], &processes[..1]),
+            "h: reading \u{b7} Build: linking"
+        );
+    }
+}

@@ -54,4 +54,13 @@ pub struct CreateAgentRequest {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_id: Option<String>,
+    /// The agent that makes this one, by its session name or its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// `agent` or `helper`. A helper is made by another agent to do one piece of work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// The session name asked for. It is the agent's when no agent has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }

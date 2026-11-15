@@ -7,11 +7,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::{Duration, Instant};
 
 use clarp_actor::Profile;
 use clarp_kernel::devices::{self, PushBook, PushRow};
-use clarp_kernel::roster;
+use clarp_kernel::{helpers, roster};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::kv::KeyValue;
@@ -72,6 +73,40 @@ pub struct AgentRecord {
     /// written to; the apps leave it out of their lists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
+    /// The agent that made this one, by its id, when one did. It stays when that agent
+    /// is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_agent_id: Option<String>,
+    /// `helper`: made by another agent to do one piece of work. Nothing: an agent like
+    /// any other.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub role: String,
+    /// How a helper's work stands ([`clarp_kernel::helpers`]). Nothing for an agent that
+    /// is no helper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper_state: Option<String>,
+    /// When a helper's work was over, while it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helper_completed_at_ms: Option<i64>,
+    /// The voice it was made with, as it was named: kept for the day this Host speaks.
+    /// `{}` is the Python Host's word for none of its own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice_id: String,
+}
+
+impl AgentRecord {
+    /// The agent's role, as the contract names it.
+    pub fn role(&self) -> &str {
+        if self.role.is_empty() {
+            "agent"
+        } else {
+            &self.role
+        }
+    }
+
+    pub fn is_helper(&self) -> bool {
+        self.role == "helper"
+    }
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -119,6 +154,32 @@ pub enum NotMade {
     Refused(String),
     /// Another agent has the name.
     Occupied { owner: String, session: String },
+    /// Refused in the Python Host's words: the status, its word for the reason, and why.
+    Told(Told),
+}
+
+/// A refusal in the Python Host's words: a status, its word for the reason, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Told {
+    pub status: u16,
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl Told {
+    fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<Told> for NotMade {
+    fn from(told: Told) -> Self {
+        Self::Told(told)
+    }
 }
 
 impl From<String> for NotMade {
@@ -253,6 +314,21 @@ enum Ask {
         change: Amend,
         answer: Answer<Result<Amended, NotAmended>>,
     },
+    /// A helper is marked done, failed or working again: by `by`, an agent, or by the
+    /// user when nobody is named.
+    Mark {
+        key: String,
+        state: String,
+        by: String,
+        answer: Answer<Result<String, Told>>,
+    },
+    /// An agent wrote to another: a helper that writes to the agent that made it has
+    /// reported, and one that is written to by it has more work.
+    Noted {
+        sender: String,
+        target: String,
+        answer: Answer<()>,
+    },
     /// An agent that comes from another Host, as it was known there.
     Adopt {
         record: AgentRecord,
@@ -379,6 +455,35 @@ impl FleetHandle {
             }
             Err(why) => Err(why),
         })
+    }
+
+    /// Marks a helper done, failed or working again. `by` is the agent that marks it, which
+    /// has to be the one that made it; nobody named is the user. Answers the state it then
+    /// has, or the Python Host's refusal.
+    pub async fn mark(
+        &self,
+        key: String,
+        state: String,
+        by: String,
+    ) -> Result<Result<String, Told>, Unavailable> {
+        self.ask(|answer| Ask::Mark {
+            key,
+            state,
+            by,
+            answer,
+        })
+        .await
+    }
+
+    /// Says that one agent wrote to another, both by their ids: when the two are a helper
+    /// and the agent that made it, the helper moves. Answers when it has.
+    pub async fn noted(&self, sender: String, target: String) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Noted {
+            sender,
+            target,
+            answer,
+        })
+        .await
     }
 
     /// Adds an agent that comes from another Host, under the identity it had there. The inner
@@ -665,10 +770,43 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
 
 impl Fleet {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
-        for ask in rx {
+        let every = Duration::from_millis(self.works.config.helpers_checked_every_ms.max(1));
+        let mut looked = Instant::now();
+        loop {
+            // Now and then the fleet looks after the helpers nobody speaks of any more.
+            let ask = match rx.recv_timeout(every.saturating_sub(looked.elapsed())) {
+                Ok(ask) => Some(ask),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return,
+            };
+            if looked.elapsed() >= every {
+                looked = Instant::now();
+                if let Err(why) = self.look_after_helpers() {
+                    eprintln!(
+                        "clarp-host: the helpers could not be looked after: {}",
+                        why.0
+                    );
+                }
+            }
+            let Some(ask) = ask else { continue };
             match ask {
                 Ask::Create { request, answer } => {
                     let _ = answer.send(Ok(self.create(request)));
+                }
+                Ask::Mark {
+                    key,
+                    state,
+                    by,
+                    answer,
+                } => {
+                    let _ = answer.send(self.mark(&key, &state, &by));
+                }
+                Ask::Noted {
+                    sender,
+                    target,
+                    answer,
+                } => {
+                    let _ = answer.send(self.noted(&sender, &target));
                 }
                 Ask::Amend {
                     key,
@@ -909,7 +1047,7 @@ impl Fleet {
     fn create(&mut self, request: CreateAgentRequest) -> Result<AgentRecord, NotMade> {
         let persona = request.name.trim().to_string();
         if persona.is_empty() {
-            return Err("an agent needs a name".to_string().into());
+            return Err(Told::new(400, "name required", "name required").into());
         }
         let cwd = request
             .cwd
@@ -926,25 +1064,74 @@ impl Fleet {
                 session: owner.session.clone(),
             });
         }
-        let base = ids::slug(&persona);
-        let mut session = base.clone();
-        while self.taken(&session) {
-            session = format!("{base}-{}", ids::hex(2));
+        // The session name that was asked for is the agent's when no agent has it.
+        let asked: String = request
+            .session
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || "._-".contains(*c))
+            .collect();
+        let session = if asked.is_empty() || self.taken(&asked) {
+            let base = ids::slug(&persona);
+            let mut session = base.clone();
+            while self.taken(&session) {
+                session = format!("{base}-{}", ids::hex(2));
+            }
+            session
+        } else {
+            asked
+        };
+        let backend = request
+            .backend
+            .as_deref()
+            .and_then(non_empty)
+            .unwrap_or_else(|| "claude".to_string());
+        if clarp_backend::by_id(&backend).is_none() {
+            return Err(format!("this Host has no backend named `{backend}`").into());
+        }
+        let said_effort = request.effort.as_deref().unwrap_or("");
+        let Some(effort) = roster::effort(said_effort, clarp_backend::efforts(&backend)) else {
+            let why = "invalid effort for backend";
+            return Err(Told::new(400, why, why).into());
+        };
+        // Who makes it, and as what.
+        let Some(role) = helpers::parse_role(request.role.as_deref().unwrap_or("")) else {
+            let why = "role must be 'agent' or 'helper'";
+            return Err(Told::new(400, "invalid_role", why).into());
+        };
+        let said_parent = request.parent.as_deref().unwrap_or("").trim();
+        let parent = match (said_parent, self.place_of(said_parent)) {
+            ("", _) => None,
+            (_, Some(at)) => Some(self.members[at].record.agent_id.clone()),
+            (_, None) => {
+                let why = format!("No live agent matches parent '{said_parent}'.");
+                return Err(Told::new(404, "parent_not_found", why).into());
+            }
+        };
+        if role == "helper" && parent.is_none() {
+            let why = "A helper needs a parent session.";
+            return Err(Told::new(400, "helper_requires_parent", why).into());
         }
         let record = AgentRecord {
             agent_id: ids::hex(8),
             session,
             persona,
-            backend: request
-                .backend
-                .as_deref()
-                .and_then(non_empty)
-                .unwrap_or_else(|| "claude".to_string()),
+            backend,
             cwd,
-            model: request.model.unwrap_or_default(),
-            effort: request.effort.unwrap_or_default(),
+            model: request.model.unwrap_or_default().trim().to_string(),
+            effort,
             conversation_id: ids::uuid(),
             created_at_ms: self.now_ms(),
+            parent_agent_id: parent,
+            role: if role == "helper" {
+                role.to_string()
+            } else {
+                String::new()
+            },
+            helper_state: helpers::initial_state(role).map(str::to_string),
+            voice_id: request.voice_id.unwrap_or_default().trim().to_string(),
             ..AgentRecord::default()
         };
         // Refused before anything is written: an agent whose backend this Host lacks.
@@ -955,7 +1142,9 @@ impl Fleet {
             agent: agent::spawn(setup),
         }));
         self.publish();
-        self.tell_roster("created", &record.session);
+        self.works
+            .hub
+            .publish(wire::roster_created(&record), self.now_ms());
         Ok(record)
     }
 
@@ -964,12 +1153,7 @@ impl Fleet {
         key: &str,
         change: Amend,
     ) -> Result<Result<Amended, NotAmended>, Unavailable> {
-        let by = |find: &dyn Fn(&AgentRecord) -> bool| {
-            self.members.iter().position(|member| find(&member.record))
-        };
-        let Some(at) =
-            by(&|record| record.session == key).or_else(|| by(&|record| record.agent_id == key))
-        else {
+        let Some(at) = self.place_of(key) else {
             return Ok(Err(NotAmended::Unknown));
         };
         let before = &self.members[at].record;
@@ -1002,22 +1186,234 @@ impl Fleet {
             return Ok(Ok(Amended { record, taken }));
         }
         let renamed = record.persona != before.persona;
-        self.put(&record).map_err(Unavailable)?;
-        // The agent's thread is told in the order the fleet made the changes.
-        let agent = self.members[at].agent.clone();
-        agent.amended(record.clone(), took);
-        self.members[at] = Arc::new(Member {
-            record: record.clone(),
-            agent,
-        });
-        self.publish();
+        let put_away = record.archived_at_ms.is_some();
+        self.replace(at, record.clone(), took)?;
         if renamed {
             self.works.hub.publish(
                 wire::roster_renamed(&record.session, &record.persona),
                 self.now_ms(),
             );
         }
+        if put_away {
+            self.abandon_helpers_of(&record.agent_id)?;
+        }
         Ok(Ok(Amended { record, taken }))
+    }
+
+    /// Where the agent a request names is in the list: by its session name, or by its id.
+    fn place_of(&self, key: &str) -> Option<usize> {
+        if key.is_empty() {
+            return None;
+        }
+        let by = |find: &dyn Fn(&AgentRecord) -> bool| {
+            self.members.iter().position(|member| find(&member.record))
+        };
+        by(&|record| record.session == key).or_else(|| by(&|record| record.agent_id == key))
+    }
+
+    /// Keeps an agent as a change left it, and tells its own thread and everyone who reads
+    /// the fleet. `took` is done when the agent's thread has the change.
+    fn replace(
+        &mut self,
+        at: usize,
+        record: AgentRecord,
+        took: oneshot::Sender<()>,
+    ) -> Result<(), Unavailable> {
+        self.put(&record).map_err(Unavailable)?;
+        // The agent's thread is told in the order the fleet made the changes.
+        let agent = self.members[at].agent.clone();
+        agent.amended(record.clone(), took);
+        self.members[at] = Arc::new(Member { record, agent });
+        self.publish();
+        Ok(())
+    }
+
+    /// Moves a helper where an event takes it ([`helpers::next_state`]). Answers the state
+    /// it then has, or nothing when the event changes nothing for it. `announce` tells
+    /// the apps to read the list again.
+    fn helper_event(
+        &mut self,
+        agent_id: &str,
+        event: &str,
+        announce: bool,
+    ) -> Result<Option<String>, Unavailable> {
+        let Some(at) = self
+            .members
+            .iter()
+            .position(|member| member.record.agent_id == agent_id)
+        else {
+            return Ok(None);
+        };
+        let before = &self.members[at].record;
+        let current = before.helper_state.as_deref().unwrap_or("");
+        let Some(moved) = helpers::next_state(current, event) else {
+            return Ok(None);
+        };
+        let mut record = before.clone();
+        record.helper_state = Some(moved.state.to_string());
+        record.helper_completed_at_ms = moved.completed.then(|| self.now_ms());
+        let session = record.session.clone();
+        // Nobody waits for the helper's own thread to have it.
+        let (took, _taken) = oneshot::channel();
+        self.replace(at, record, took)?;
+        if announce {
+            self.tell_roster("helper-state", &session);
+        }
+        Ok(Some(moved.state.to_string()))
+    }
+
+    /// The helpers an agent made that are not finished lose it: it was removed or put
+    /// away. Nothing else follows from that; a helper is never removed with its maker.
+    fn abandon_helpers_of(&mut self, agent_id: &str) -> Result<(), Unavailable> {
+        let children: Vec<String> = self
+            .members
+            .iter()
+            .filter(|member| member.record.parent_agent_id.as_deref() == Some(agent_id))
+            .map(|member| member.record.agent_id.clone())
+            .collect();
+        for child in children {
+            self.helper_event(&child, "parent_gone", false)?;
+        }
+        Ok(())
+    }
+
+    fn noted(&mut self, sender: &str, target: &str) -> Result<(), Unavailable> {
+        if sender.is_empty() || target.is_empty() || sender == target {
+            return Ok(());
+        }
+        let parent_of = |agent_id: &str| {
+            self.members
+                .iter()
+                .find(|member| member.record.agent_id == agent_id)
+                .and_then(|member| member.record.parent_agent_id.clone())
+        };
+        let (senders, targets) = (parent_of(sender), parent_of(target));
+        if senders.as_deref() == Some(target) {
+            self.helper_event(sender, "reported", true)?;
+        } else if targets.as_deref() == Some(sender) {
+            self.helper_event(target, "parent_prompted", true)?;
+        }
+        Ok(())
+    }
+
+    fn mark(
+        &mut self,
+        key: &str,
+        state: &str,
+        by: &str,
+    ) -> Result<Result<String, Told>, Unavailable> {
+        let Some(event) = helpers::marked(state) else {
+            let why = "state must be done, failed or running";
+            return Ok(Err(Told::new(400, "invalid_state", why)));
+        };
+        let no_agent =
+            |named: &str| Told::new(404, "agent_not_found", format!("No live agent: {named}"));
+        let Some(at) = self.place_of(key) else {
+            return Ok(Err(no_agent(key)));
+        };
+        let helper = self.members[at].record.clone();
+        if !helper.is_helper() {
+            let why = format!("{} is not a helper", helper.session);
+            return Ok(Err(Told::new(409, "not_a_helper", why)));
+        }
+        if !by.is_empty() {
+            let Some(marker) = self.place_of(by) else {
+                return Ok(Err(no_agent(by)));
+            };
+            if Some(&self.members[marker].record.agent_id) != helper.parent_agent_id.as_ref() {
+                let why = "Only the helper's parent or the user may mark it";
+                return Ok(Err(Told::new(403, "not_parent", why)));
+            }
+        }
+        if helper.helper_state.as_deref() == Some(state) {
+            return Ok(Ok(state.to_string()));
+        }
+        match self.helper_event(&helper.agent_id, event, true)? {
+            Some(new) => Ok(Ok(new)),
+            None => {
+                let now = helper.helper_state.as_deref().unwrap_or("None");
+                let why = format!("{} is {now}; cannot mark {state}", helper.session);
+                Ok(Err(Told::new(409, "illegal_transition", why)))
+            }
+        }
+    }
+
+    /// What an agent is doing right now, as the list of agents counts it.
+    fn doing(&self, member: &Member) -> helpers::Doing {
+        let view = member.agent.view();
+        let children: Vec<&AgentRecord> = self
+            .members
+            .iter()
+            .map(|child| &child.record)
+            .filter(|child| child.parent_agent_id.as_ref() == Some(&member.record.agent_id))
+            .collect();
+        let helper_sessions: Vec<&str> = children
+            .iter()
+            .filter(|child| child.is_helper())
+            .map(|child| child.session.as_str())
+            .collect();
+        let processes = view
+            .jobs
+            .iter()
+            .filter(|job| job.status.is_active())
+            .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none());
+        let last_job = view.jobs.iter().map(|job| job.updated_at_ms).max();
+        let last_turn = view.status.last.as_ref().map(|last| last.ended_at_ms);
+        helpers::Doing {
+            busy: view.status.live.is_some() || !view.status.waiting.is_empty(),
+            active_jobs: processes.count(),
+            running_children: children
+                .iter()
+                .filter(|child| child.helper_state.as_deref() == Some("running"))
+                .count(),
+            idle_since_ms: [Some(member.record.created_at_ms), last_job, last_turn]
+                .into_iter()
+                .flatten()
+                .max()
+                .unwrap_or(0),
+        }
+    }
+
+    /// Now and then: a helper that is working and has sat idle too long counts as having
+    /// reported, and a helper that has been done for long enough is put away.
+    fn look_after_helpers(&mut self) -> Result<(), Unavailable> {
+        let now = self.now_ms();
+        let idle_after = self.works.config.helper_idle_after_ms;
+        let quiet: Vec<String> = self
+            .members
+            .iter()
+            .filter(|member| {
+                let state = member.record.helper_state.as_deref();
+                state == Some("running")
+                    && helpers::idle_due(state, &self.doing(member), now, idle_after)
+            })
+            .map(|member| member.record.agent_id.clone())
+            .collect();
+        for agent_id in quiet {
+            self.helper_event(&agent_id, "went_idle", true)?;
+        }
+        let kept: Vec<helpers::Kept<'_>> = self
+            .members
+            .iter()
+            .map(|member| helpers::Kept {
+                agent_id: &member.record.agent_id,
+                role: member.record.role(),
+                helper_state: member.record.helper_state.as_deref().unwrap_or(""),
+                archived: member.record.archived_at_ms.is_some(),
+                helper_completed_at: member.record.helper_completed_at_ms,
+            })
+            .collect();
+        let grace = self.works.config.helper_archive_grace_ms;
+        let done: Vec<String> = helpers::archive_due(&kept, now, grace)
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        for agent_id in done {
+            if let Ok(Ok(amended)) = self.amend(&agent_id, Amend::Archive(true)) {
+                self.tell_roster("helper-state", &amended.record.session);
+            }
+        }
+        Ok(())
     }
 
     fn adopt(&mut self, mut record: AgentRecord) -> Result<Arc<Member>, String> {
@@ -1055,7 +1451,9 @@ impl Fleet {
         });
         self.members.push(member.clone());
         self.publish();
-        self.tell_roster("created", &record.session);
+        self.works
+            .hub
+            .publish(wire::roster_created(&record), self.now_ms());
         Ok(member)
     }
 
@@ -1079,6 +1477,7 @@ impl Fleet {
         self.put(&record).map_err(Unavailable)?;
         let member = self.members.remove(at);
         member.agent.close();
+        self.abandon_helpers_of(&record.agent_id)?;
         if self.focus.as_deref() == Some(record.agent_id.as_str()) {
             self.focus = None;
             let _ = self.store.delete(SETTINGS, FOCUS);

@@ -297,7 +297,8 @@ def capture(make_host, scenario, root: Path) -> dict:
     """Runs a scenario against a fresh Host in the new directory `root`."""
     replay.fresh_root(root)
     host = make_host(root)
-    events, frames, http, error, variables = None, [], [], None, {}
+    # A scenario names a directory of the Host it runs against as `{workspace}`.
+    events, frames, http, error, variables = None, [], [], None, {'workspace': str(root / 'workspace')}
     clock = TurnClock()
     try:
         host.start()
@@ -362,7 +363,8 @@ HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 # Readings of the clock the harness's normalizer has no name for: when something an agent made
 # was pinned, put away or thrown away, and when what it asked was answered. Whether there is
 # one is compared; which moment it was is not.
-CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at'})
+CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at',
+                        'helper_completed_at'})
 # The ids a Host gives to what agents make and ask. Under their own keys the harness's
 # normalizer names them by the order they appear in (`artifact-<id:1>`). They are also in the
 # paths a client calls (`/decisions/<id>/resolve`) and in what an agent is told and says back
@@ -546,7 +548,8 @@ def by_name(value, names: dict):
 
 def seen_by_a_client(raw: dict) -> dict:
     """A capture, normalized, and cut down to the channels a client sees."""
-    sessions = (scenarios.AGENT,)
+    # The agents a scenario is about: its own, unless it names more.
+    sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     raw = {**raw, 'http': [{**exchange, 'body': settle(exchange['body'], sessions)} for exchange in raw['http']]}
     whole = normalize.normalize(raw, str(REPO))
     # The normalizer keeps the answers in the order they were given, one for one.

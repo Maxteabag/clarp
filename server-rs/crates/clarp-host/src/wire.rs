@@ -571,9 +571,10 @@ pub fn user_notification(
         interrupted: false,
         client: asked.client,
     };
-    // No setting treats automation specially on this Host yet.
+    // A helper reports to the agent that made it: what it says is marked unread and pages
+    // nobody, as if it were muted. No setting treats automation specially on this Host yet.
     let agent = notify::Capabilities {
-        muted: record.muted,
+        muted: record.muted || record.is_helper(),
         ..notify::Capabilities::default()
     };
     let notify::Decision::Notify {
@@ -606,6 +607,42 @@ pub fn user_notification(
 
 pub fn roster(kind: &str, session: &str) -> Value {
     json!({ "type": "agent-roster", "kind": kind, "session": session })
+}
+
+/// The helper a job only mirrors, when it does. `clarp-sub-agent --clarp-agent` registers a
+/// job of kind `sub-agent` that names the helper's session: the helper itself is the
+/// sub-agent, and the job that watches it is not a second one. `helper_sessions` are the
+/// sessions of the helpers the job's owner made.
+pub fn mirrored_helper<'a>(job: &Job, helper_sessions: &[&'a str]) -> Option<&'a str> {
+    if job.kind != "sub-agent" {
+        return None;
+    }
+    let named = [
+        job.metadata["helper_session"].as_str().unwrap_or(""),
+        job.detail.as_str(),
+    ];
+    named
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .find_map(|name| {
+            helper_sessions
+                .iter()
+                .copied()
+                .find(|session| *session == name)
+        })
+}
+
+/// An agent was made: the apps read the list again.
+pub fn roster_created(record: &AgentRecord) -> Value {
+    json!({
+        "type": "agent-roster",
+        "kind": "created",
+        "session": record.session,
+        "persona": record.persona,
+        "voice_id": record.voice_id,
+        "backend": record.backend,
+    })
 }
 
 /// An agent has another name: the apps read the list again.
@@ -949,7 +986,7 @@ pub fn summary(
             record.model.clone()
         },
         "effort": record.effort,
-        "voice_id": "",
+        "voice_id": record.voice_id,
         "avatar_symbol": "",
         "avatar_url": "",
         "avatar_generation_status": null,
@@ -960,10 +997,11 @@ pub fn summary(
         "muted": record.muted,
         "quiet": false,
         "archived_at": record.archived_at_ms,
-        "role": "agent",
+        "role": record.role(),
         "is_janitor": false,
-        "parent_agent_id": null,
-        "helper_state": null,
+        "parent_agent_id": record.parent_agent_id,
+        "helper_state": record.helper_state,
+        // What the agent made: counted over the whole fleet, by whoever builds the list.
         "child_count": 0,
         "running_children": 0,
         "team_ids": [],

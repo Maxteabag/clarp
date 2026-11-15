@@ -812,7 +812,21 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
         tool(&host, &dir, None, &["clarp-agent-bg", &session, "off"]).0,
         0
     );
-    wait_for("the label to go", || row(&host)["status_text"].is_null());
+    // Without a label of its own, what it left running says what goes on: the job that
+    // was started again is still there, and the agent is drawn as working, not as idle.
+    wait_for("the label to go", || row(&host)["status_text"] == "Watch");
+    assert_eq!(row(&host)["latest_state"], "background");
+    assert_eq!(
+        tool(
+            &host,
+            &dir,
+            None,
+            &["clarp-agent-bg", &session, "job-finish", "bg1:2:watch-1"]
+        )
+        .0,
+        0
+    );
+    wait_for("the agent to rest", || row(&host)["status_text"].is_null());
     assert_eq!(row(&host)["latest_state"], "idle");
 
     // A tool this Host does not have yet says so, and does nothing.
@@ -3232,7 +3246,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     let (session, agent_id) = (
         made["session"].as_str().unwrap().to_string(),
-        made["agent_id"].as_str().unwrap().to_string(),
+        made["agent"]["agent_id"].as_str().unwrap().to_string(),
     );
     old_host.send(&session, "what we spoke of", "old-1");
     wait_for("the first Host's answer", || {
@@ -3780,4 +3794,455 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
         json!(["Real", false, null, "claude-haiku-5-5", "low"])
     );
     assert_eq!(kept(&other), json!(["Other", false, null, "", ""]));
+}
+
+#[test]
+fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
+    let place = Place::new("helpers");
+    // The fleet looks after its helpers often here, and one that is done is put away at once.
+    let fast = [
+        "--helpers-checked-every-ms",
+        "100",
+        "--helper-archive-grace-ms",
+        "0",
+    ];
+    let host = place.start_with("", &fast);
+    let heard = host.listen();
+    let maker = host.new_agent("Maker");
+    let other = host.new_agent("Other");
+    let row = |session: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .cloned()
+            .unwrap_or_else(|| panic!("{session} is not in the snapshot"))
+    };
+    let lineage = |session: &str| host.get(&format!("/agent-helper-state?session={session}"));
+    let refused = |path: &str, body: Value| -> (u16, Value) { host.ask("POST", path, Some(&body)) };
+    let maker_id = row(&maker)["agent_id"].as_str().unwrap().to_string();
+
+    // Who makes it, and as what.
+    let told = |status: u16, code: &str, message: &str| {
+        (status, json!({ "error": code, "message": message }))
+    };
+    assert_eq!(
+        refused(
+            "/agents",
+            json!({ "name": "H", "backend": "scripted", "role": "boss" })
+        ),
+        told(400, "invalid_role", "role must be 'agent' or 'helper'")
+    );
+    assert_eq!(
+        refused(
+            "/agents",
+            json!({ "name": "H", "backend": "scripted", "role": "helper" })
+        ),
+        told(
+            400,
+            "helper_requires_parent",
+            "A helper needs a parent session."
+        )
+    );
+    assert_eq!(
+        refused(
+            "/agents",
+            json!({ "name": "H", "backend": "scripted", "role": "helper", "parent": "nobody" })
+        ),
+        told(
+            404,
+            "parent_not_found",
+            "No live agent matches parent 'nobody'."
+        )
+    );
+    assert_eq!(
+        refused("/agents", json!({ "backend": "scripted" })),
+        told(400, "name required", "name required")
+    );
+    assert_eq!(
+        refused(
+            "/agents",
+            json!({ "name": "H", "backend": "scripted", "model": 5 })
+        ),
+        told(
+            400,
+            "model must be a string or null",
+            "model must be a string or null"
+        )
+    );
+    assert_eq!(
+        refused(
+            "/agents",
+            json!({ "name": "H", "backend": "claude", "effort": "extreme" })
+        ),
+        told(
+            400,
+            "invalid effort for backend",
+            "invalid effort for backend"
+        )
+    );
+    let (status, answer) = host.ask("POST", "/agents", Some(&json!([1])));
+    assert_eq!((status, answer["error"].as_str()), (400, Some("bad json")));
+
+    let made = host.post(
+        "/agents",
+        json!({
+            "name": "Slice Helper",
+            "backend": "scripted",
+            "parent": maker,
+            "role": "helper",
+            "session": "slice-1",
+            "synthesize_audio": false,
+            "voice_id": "{}",
+        }),
+    );
+    assert_eq!(
+        (&made["ok"], &made["session"], &made["name"]),
+        (&json!(true), &json!("slice-1"), &json!("Slice Helper"))
+    );
+    let agent = &made["agent"];
+    assert_eq!(
+        (
+            &agent["session"],
+            &agent["persona"],
+            &agent["role"],
+            &agent["parent_agent_id"],
+            &agent["helper_state"],
+            &agent["latest_state"],
+            &agent["alive"],
+        ),
+        (
+            &json!("slice-1"),
+            &json!("Slice Helper"),
+            &json!("helper"),
+            &json!(maker_id),
+            &json!("running"),
+            &json!("spawned"),
+            &json!(true),
+        )
+    );
+    assert_eq!(agent.as_object().unwrap().len(), 21);
+    let helper = "slice-1";
+    let helper_id = agent["agent_id"].as_str().unwrap().to_string();
+    // A session name that is taken is not given twice: the next agent gets one of its own.
+    let second = host.post(
+        "/agents",
+        json!({ "name": "Second", "backend": "scripted", "session": "slice-1" }),
+    );
+    assert_eq!(second["session"], "second");
+    assert_eq!(second["agent"]["role"], "agent");
+    assert_eq!(second["agent"]["helper_state"], Value::Null);
+
+    assert_eq!(
+        lineage(helper),
+        json!({
+            "agent_id": helper_id,
+            "session": "slice-1",
+            "role": "helper",
+            "parent_agent_id": maker_id,
+            "helper_state": "running",
+            "helper_completed_at": null,
+            "archived_at": null,
+        })
+    );
+    assert_eq!(lineage(&maker)["role"], "agent");
+    let (status, answer) = host.ask("GET", "/agent-helper-state?session=nobody", None);
+    assert_eq!(
+        (status, answer["error"].as_str()),
+        (404, Some("agent_not_found"))
+    );
+    let (status, answer) = host.ask("GET", "/agent-helper-state", None);
+    assert_eq!(
+        (status, answer["error"].as_str()),
+        (400, Some("session required"))
+    );
+
+    // The maker's row counts what it made: it is at work while its helper is.
+    let makers = row(&maker);
+    assert_eq!(
+        (
+            &makers["child_count"],
+            &makers["running_children"],
+            &makers["background_jobs"],
+            &makers["latest_state"],
+            &makers["busy"],
+        ),
+        (
+            &json!(1),
+            &json!(1),
+            &json!({ "count": 0, "sub_agents": 1 }),
+            &json!("background"),
+            &json!(false),
+        )
+    );
+    assert!(
+        makers["status_text"]
+            .as_str()
+            .is_some_and(|line| line.starts_with("slice-1")),
+        "{}",
+        makers["status_text"]
+    );
+    let helpers = row(helper);
+    assert_eq!(
+        (
+            &helpers["role"],
+            &helpers["parent_agent_id"],
+            &helpers["helper_state"]
+        ),
+        (&json!("helper"), &json!(maker_id), &json!("running"))
+    );
+
+    let roster_told = |session: &str| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event["type"] == "agent-roster"
+                    && event["kind"] == "helper-state"
+                    && event["session"] == session
+            })
+            .count()
+    };
+    let agent_message = |to: &str, from: &str, text: &str, id: &str| {
+        host.post(
+            "/send",
+            json!({ "session": to, "text": text, "client_msg_id": id, "origin": "agent", "sender": from }),
+        )
+    };
+    let state = |session: &str| lineage(session)["helper_state"].clone();
+
+    // The maker hands it work: it is working already, nothing moves.
+    agent_message(helper, &maker, "do the slice", "h1");
+    wait_for("the helper's turn", || host.state(helper) == "done");
+    assert_eq!(state(helper), "running");
+    assert_eq!(roster_told(helper), 0);
+    // What a helper says tells nobody: it reports to the agent that made it.
+    host.send(helper, "how is it going?", "h2");
+    let told_of = |id: &str| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| event["type"] == "user-notification" && event["cause_message_id"] == id)
+            .cloned()
+    };
+    wait_for("the helper's answer to the user", || {
+        told_of("u-h2").is_some()
+    });
+    let quiet = told_of("u-h2").unwrap();
+    assert_eq!(
+        (&quiet["push"], &quiet["muted"]),
+        (&json!(false), &json!(true))
+    );
+
+    // An agent that is neither its maker nor its helper moves nothing.
+    agent_message(&maker, &other, "unrelated", "h3");
+    wait_for("the maker's turn", || host.state(&maker) == "background");
+    assert_eq!(state(helper), "running");
+    // It writes to its maker: it has reported.
+    agent_message(&maker, helper, "the slice is done", "h4");
+    wait_for("the report to be noted", || state(helper) == "reported");
+    wait_for("the apps to hear of the helper's move", || {
+        roster_told(helper) == 1
+    });
+    wait_for("the maker to be at rest", || host.state(&maker) == "done");
+    let makers = row(&maker);
+    assert_eq!(
+        (
+            &makers["running_children"],
+            &makers["background_jobs"],
+            &makers["status_text"]
+        ),
+        (
+            &json!(0),
+            &json!({ "count": 0, "sub_agents": 0 }),
+            &Value::Null
+        )
+    );
+    assert_eq!(makers["child_count"], 1);
+    // The maker writes back: more work.
+    agent_message(helper, &maker, "one more thing", "h5");
+    wait_for("the helper to be working again", || {
+        state(helper) == "running"
+    });
+    wait_for("the apps to hear of the helper's move", || {
+        roster_told(helper) == 2
+    });
+    wait_for("the helper's turn", || host.state(helper) == "done");
+
+    // Marked by hand: by the agent that made it, or by the user.
+    let mark = |body: Value| refused("/agent-helper-state", body);
+    assert_eq!(
+        mark(json!({ "session": helper })).1["error"],
+        "session and state required"
+    );
+    assert_eq!(
+        mark(json!({ "session": helper, "state": "abandoned" })),
+        told(
+            400,
+            "invalid_state",
+            "state must be done, failed or running"
+        )
+    );
+    assert_eq!(
+        mark(json!({ "session": "nobody", "state": "done" })),
+        told(404, "agent_not_found", "No live agent: nobody")
+    );
+    assert_eq!(
+        mark(json!({ "session": maker, "state": "done" })),
+        told(409, "not_a_helper", "maker is not a helper")
+    );
+    assert_eq!(
+        mark(json!({ "session": helper, "state": "done", "by": other })),
+        told(
+            403,
+            "not_parent",
+            "Only the helper's parent or the user may mark it"
+        )
+    );
+    assert_eq!(
+        mark(json!({ "session": helper, "state": "done", "by": "nobody" })),
+        told(404, "agent_not_found", "No live agent: nobody")
+    );
+    assert_eq!(
+        mark(json!({ "session": helper, "state": "failed", "by": maker })),
+        (
+            200,
+            json!({ "ok": true, "session": "slice-1", "helper_state": "failed" })
+        )
+    );
+    let failed_at = lineage(helper)["helper_completed_at"].as_i64().unwrap();
+    assert!(failed_at > 1_600_000_000_000);
+    // The state it has already is no change and no refusal.
+    assert_eq!(mark(json!({ "session": helper, "state": "failed" })).0, 200);
+    wait_for("the apps to hear of the helper's move", || {
+        roster_told(helper) == 3
+    });
+    // Opened again by the user, and the moment it ended is forgotten.
+    assert_eq!(
+        mark(json!({ "session": helper, "state": "running" })).1["helper_state"],
+        "running"
+    );
+    assert_eq!(lineage(helper)["helper_completed_at"], Value::Null);
+
+    // The agent's own tool for it.
+    let admin = |args: &[&str]| -> (i32, Value, String) {
+        let mut all = vec!["clarp-admin", "agent"];
+        all.extend_from_slice(args);
+        let (code, out, err) = tool(&host, &place.root, None, &all);
+        (
+            code,
+            serde_json::from_str(&out).unwrap_or(Value::Null),
+            err.trim_end().to_string(),
+        )
+    };
+    let (code, shown, err) = admin(&["helper-state", helper]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(shown, lineage(helper));
+    let work = place.root.join("work-of-two");
+    std::fs::create_dir_all(&work).unwrap();
+    let (code, made, err) = admin(&[
+        "create",
+        "tool-helper",
+        "--parent",
+        &maker,
+        "--role",
+        "helper",
+        "--cwd",
+        "work-of-two",
+        "--backend",
+        "scripted",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(made["session"], "tool-helper");
+    assert_eq!(made["agent"]["helper_state"], "running");
+    assert_eq!(
+        made["agent"]["cwd"],
+        json!(work.canonicalize().unwrap().display().to_string()),
+        "a directory is named from where the tool was called"
+    );
+    let (code, _, err) = admin(&["create", "x", "--role", "helper"]);
+    assert_eq!(
+        (code, err.as_str()),
+        (1, "--role helper needs --parent SESSION")
+    );
+    let (code, _, err) = admin(&[
+        "create",
+        "x",
+        "--role",
+        "helper",
+        "--parent",
+        "nobody",
+        "--backend",
+        "scripted",
+    ]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        err,
+        "clarp-admin: HTTP 404: {\"error\": \"parent_not_found\", \"message\": \"No live agent matches parent 'nobody'.\"}"
+    );
+    let (code, marked, err) = admin(&["helper-state", "tool-helper", "done", "--from", &maker]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        marked,
+        json!({ "ok": true, "session": "tool-helper", "helper_state": "done" })
+    );
+    let (code, _, err) = admin(&["helper-state", "tool-helper", "failed", "--from", &maker]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        err,
+        "clarp-admin: HTTP 409: {\"error\": \"illegal_transition\", \"message\": \"tool-helper is done; cannot mark failed\"}"
+    );
+    assert_eq!(admin(&["helper-state", "tool-helper", "sideways"]).0, 2);
+    assert_eq!(admin(&["fork", "x"]).0, 69);
+
+    // A helper that has been done long enough is put away by the fleet.
+    wait_for("the finished helper to be put away", || {
+        lineage("tool-helper")["archived_at"].as_i64().is_some()
+    });
+    wait_for("the apps to hear that it is done and put away", || {
+        roster_told("tool-helper") == 2
+    });
+    assert_eq!(
+        row(&maker)["child_count"],
+        2,
+        "it is still one of the two it made"
+    );
+
+    // The maker is put away: what it made and has not finished loses it.
+    host.post(
+        "/agent-archive",
+        json!({ "session": maker, "archived": true }),
+    );
+    assert_eq!(state(helper), "abandoned");
+    assert_eq!(
+        state("tool-helper"),
+        "done",
+        "what is finished stays as it ended"
+    );
+    assert!(lineage(helper)["helper_completed_at"].as_i64().is_some());
+    let without = host.get("/agents/snapshot?include_archived=0");
+    assert_eq!(without["archived_parents"], json!([maker_id]));
+    assert_eq!(without["archived_count"], 2);
+    // An abandoned helper can be taken up again by the user.
+    assert_eq!(
+        mark(json!({ "session": helper, "state": "running" })).1["helper_state"],
+        "running"
+    );
+    // And when its maker is removed, it is abandoned and stays: nothing is removed with it.
+    let (status, _) = host.ask("DELETE", &format!("/agents/{maker}"), None);
+    assert_eq!(status, 200);
+    assert_eq!(state(helper), "abandoned");
+    assert_eq!(lineage(helper)["parent_agent_id"], json!(maker_id));
+
+    // The Host keeps all of it.
+    let before = lineage(helper);
+    host.kill();
+    let host = place.start_with("", &fast);
+    assert_eq!(
+        host.get(&format!("/agent-helper-state?session={helper}")),
+        before
+    );
 }
