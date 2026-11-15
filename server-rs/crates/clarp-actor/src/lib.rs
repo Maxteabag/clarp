@@ -33,6 +33,7 @@ use std::sync::Arc;
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Rest};
 use clarp_kernel::conversation::{Entry, Imported, Message, Notice, Reply, TurnEnd};
+use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
 use clarp_kernel::turn::{Activity, Admission, RunOutcome, Settled, Turn, TurnId};
@@ -132,6 +133,8 @@ pub struct Changed {
     pub queue: bool,
     /// One of the agent's background jobs changed.
     pub jobs: bool,
+    /// One of the agent's goals or plans changed.
+    pub goals: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -292,11 +295,40 @@ pub struct Actor {
     live: Option<LiveTurn>,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
+    /// The agent's goals and plans, as the log has them.
+    goals: GoalBook,
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
     /// The newest revision given to something that is shown and not stored.
     shown_revision: u64,
+}
+
+/// Hands over every record of one kind that the log has, oldest first. Items of the same
+/// range that a newer build wrote in a kind of its own are passed over.
+fn records<R: serde::de::DeserializeOwned>(
+    log: &dyn AgentLog,
+    kinds: Kinds,
+    kind: u16,
+    mut take: impl FnMut(R),
+) -> Result<(), ActorError> {
+    let mut after = 0;
+    loop {
+        let page = log.read_after(after, kinds, WINDOW)?;
+        let Some(last) = page.last() else {
+            return Ok(());
+        };
+        after = last.seq;
+        for item in page.iter().filter(|item| item.kind == kind) {
+            let record = serde_json::from_slice(&item.body).map_err(|error| {
+                ActorError::Corrupt(format!(
+                    "log item {} is not the record its kind {kind} says: {error}",
+                    item.seq
+                ))
+            })?;
+            take(record);
+        }
+    }
 }
 
 fn io_error(what: &Path, error: std::io::Error) -> ActorError {
@@ -384,32 +416,31 @@ impl Actor {
     ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
-        let mut after = 0;
-        loop {
-            let page = recorder.log().read_after(after, kind::JOBS, WINDOW)?;
-            let Some(last) = page.last() else { break };
-            after = last.seq;
-            for item in &page {
-                // A kind of this range a newer build wrote is passed over.
-                if item.kind == kind::JOB {
-                    let record: JobRecord =
-                        serde_json::from_slice(&item.body).map_err(|error| {
-                            ActorError::Corrupt(format!(
-                                "log item {} is not the job record its kind says: {error}",
-                                item.seq
-                            ))
-                        })?;
-                    jobs.apply(&record);
-                }
-            }
-        }
+        records(
+            recorder.log(),
+            kind::JOBS,
+            kind::JOB,
+            |record: JobRecord| {
+                jobs.apply(&record);
+            },
+        )?;
         // What the Host did not hear while it was away says nothing about the workers.
         jobs.heard_at(now_ms);
+        let mut goals = GoalBook::new();
+        records(
+            recorder.log(),
+            kind::GOALS,
+            kind::GOAL,
+            |record: GoalRecord| {
+                goals.apply(&record);
+            },
+        )?;
         let mut actor = Self {
             profile,
             backend,
             recorder,
             jobs,
+            goals,
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
@@ -613,6 +644,27 @@ impl Actor {
             out.changed.jobs = true;
         }
         Ok((Ok(change), out))
+    }
+
+    /// The agent's goals and plans.
+    pub fn goals(&self) -> &GoalBook {
+        &self.goals
+    }
+
+    /// Writes a change that was decided on the agent's book of goals, and takes it.
+    pub fn goal(&mut self, change: &GoalChange, now_ms: i64) -> Result<Outputs, ActorError> {
+        let record = self.goals.record(change, now_ms);
+        let body = serde_json::to_vec(&record).map_err(|error| {
+            ActorError::Corrupt(format!("a goal record could not be written: {error}"))
+        })?;
+        let item = NewItem::new(kind::GOAL, now_ms, body).keyed(format!("g-{}", record.plan_id));
+        let mut batch = self.recorder.batch();
+        batch.item(item);
+        batch.commit()?;
+        self.goals.apply(&record);
+        let mut out = Outputs::default();
+        out.changed.goals = true;
+        Ok(out)
     }
 
     /// Counts every running job as heard from now: after the machine slept, what was not

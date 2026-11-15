@@ -816,13 +816,136 @@ fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see
     assert_eq!(row(&host)["latest_state"], "idle");
 
     // A tool this Host does not have yet says so, and does nothing.
-    let absent = tool(&host, &dir, None, &["clarp-goal", "get", "some-plan"]);
+    let absent = tool(&host, &dir, None, &["clarp-sub-agent", "list"]);
     assert_eq!(absent.0, 69);
     assert!(
         absent.2.contains("not available on this Host yet"),
         "{}",
         absent.2
     );
+}
+
+/// Calls the goal tool and reads the plan it prints.
+fn goal(host: &Host, dir: &std::path::Path, args: &[&str]) -> Value {
+    let mut all = vec!["clarp-goal"];
+    all.extend_from_slice(args);
+    let (code, out, err) = tool(host, dir, None, &all);
+    assert_eq!(code, 0, "clarp-goal {args:?} said: {err}");
+    serde_json::from_str(&out).unwrap()
+}
+
+#[test]
+fn an_agent_keeps_a_goal_with_its_own_tool_and_still_has_it_after_the_host_is_killed() {
+    let place = Place::new("goal");
+    let host = place.start();
+    let session = host.new_agent("Planner");
+    let dir = place.root.clone();
+    let items = json!([
+        { "id": "probe", "title": "Probe the behaviour" },
+        { "id": "build", "title": "Build it" },
+    ])
+    .to_string();
+    let commitment = json!({
+        "outcome": "The thing is shipped",
+        "criteria": ["It runs"],
+        "limits": "No publication",
+    })
+    .to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &[
+            "create",
+            &session,
+            "ship",
+            "Ship the thing",
+            &items,
+            &commitment,
+        ],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
+    assert_eq!(plan["revision"], 0);
+    assert_eq!(plan["session"], session.as_str());
+    assert_eq!(plan["goal"]["continuation"]["state"], "not_enrolled");
+    assert!(plan_id.contains(":ship:"), "{plan_id}");
+
+    let plan = goal(
+        &host,
+        &dir,
+        &["step", &plan_id, "0", "probe", "completed", "It behaves"],
+    );
+    assert_eq!(plan["counts"]["completed"], 1);
+    let note = json!({
+        "name": "working-notes.md", "format": "markdown", "content": "# Notes\nFirst.",
+        "document_revision": 0, "reason": "Initial findings",
+    })
+    .to_string();
+    let plan = goal(&host, &dir, &["document", &plan_id, "1", &note]);
+    assert_eq!(plan["goal"]["documents"][0]["name"], "working-notes.md");
+    let checkpoint = json!({
+        "progress": "Probe done", "next_work": "Build it",
+        "evidence": { "criterion-1": "ran it" },
+    })
+    .to_string();
+    let plan = goal(&host, &dir, &["checkpoint", &plan_id, "2", &checkpoint]);
+    assert_eq!(plan["revision"], 3);
+
+    // What the tool refuses, it refuses in the Python tool's words and with its exit code.
+    let stale = tool(
+        &host,
+        &dir,
+        None,
+        &["clarp-goal", "step", &plan_id, "0", "build", "in_progress"],
+    );
+    assert_eq!(
+        (stale.0, stale.2.as_str()),
+        (1, "agent_tasks: plan changed; reload before editing\n")
+    );
+    let nobody = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-goal",
+            "create",
+            "nobody",
+            "ship",
+            "Ship",
+            "[]",
+            &commitment,
+        ],
+    );
+    assert_eq!(
+        (nobody.0, nobody.2.as_str()),
+        (1, "agent_tasks: agent session not found\n")
+    );
+    assert_eq!(tool(&host, &dir, None, &["clarp-goal", "frobnicate"]).0, 2);
+    // The other name the skills know the tool by.
+    let listed = tool(&host, &dir, None, &["clarp-agent-tasks", "list", &session]);
+    let listed: Value = serde_json::from_str(&listed.1).unwrap();
+    assert_eq!(listed[0]["plan_id"], plan_id.as_str());
+
+    // The Host is killed. What the tool said was written is there when it is back.
+    let before = goal(&host, &dir, &["get", &plan_id]);
+    host.kill();
+    let host = place.start();
+    let mut after = goal(&host, &dir, &["get", &plan_id]);
+    after["server_now"] = before["server_now"].clone();
+    assert_eq!(after, before);
+    let read = goal(&host, &dir, &["read", &plan_id, "working-notes.md"]);
+    assert_eq!(read["text"], "# Notes\nFirst.");
+    assert_eq!(
+        goal(&host, &dir, &["show", &session])["plan_id"],
+        plan_id.as_str()
+    );
+
+    // And the work goes on from there, to its end.
+    let plan = goal(&host, &dir, &["step", &plan_id, "3", "build", "completed"]);
+    let revision = plan["revision"].to_string();
+    let plan = goal(&host, &dir, &["complete", &plan_id, &revision]);
+    assert_eq!(plan["status"], "completed");
+    assert_eq!(plan["completion_verified"], true);
+    assert_eq!(goal(&host, &dir, &["show", &session]), json!({}));
 }
 
 #[test]

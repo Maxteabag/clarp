@@ -10,6 +10,7 @@ clarp-backend.workspace = true
 clarp-kernel.workspace = true
 clarp-ports.workspace = true
 clarp-spool.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

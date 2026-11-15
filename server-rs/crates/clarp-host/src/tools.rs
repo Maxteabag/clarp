@@ -19,6 +19,7 @@ use serde_json::Value;
 use crate::agent::Unavailable;
 use crate::edge::App;
 use crate::fleet::Member;
+use crate::goaltool::{self, About};
 use crate::{ids, process};
 
 /// What a tool was called with.
@@ -49,7 +50,7 @@ pub struct ToolAnswer {
 }
 
 impl ToolAnswer {
-    fn code(exit: i32) -> Self {
+    pub(crate) fn code(exit: i32) -> Self {
         Self {
             exit,
             ..Self::default()
@@ -57,7 +58,7 @@ impl ToolAnswer {
     }
 
     /// Exits with a line on standard error.
-    fn said(exit: i32, line: impl AsRef<str>) -> Self {
+    pub(crate) fn said(exit: i32, line: impl AsRef<str>) -> Self {
         Self {
             exit,
             stdout: String::new(),
@@ -66,7 +67,7 @@ impl ToolAnswer {
     }
 
     /// Exits with a line on standard output.
-    fn printed(exit: i32, line: impl AsRef<str>) -> Self {
+    pub(crate) fn printed(exit: i32, line: impl AsRef<str>) -> Self {
         Self {
             exit,
             stdout: format!("{}\n", line.as_ref()),
@@ -82,9 +83,39 @@ pub const NOT_HERE: i32 = 69;
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.tool.as_str() {
         "clarp-agent-bg" => agent_bg(app, call).await,
+        "clarp-goal" | "clarp-agent-tasks" => goal(app, call).await,
         other => ToolAnswer::said(
             NOT_HERE,
             format!("{other}: not available on this Host yet (the Rust Host). Nothing was done."),
+        ),
+    }
+}
+
+/// `clarp-goal VERB ...`: an agent's goals and plans. The words are in [`goaltool`]; here the
+/// agent is found whose goals they are about.
+async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
+    let ask = match goaltool::parse(&call.argv) {
+        Ok(ask) => ask,
+        Err(said) => return said,
+    };
+    let member = match ask.about() {
+        About::Session(session) => app.member(session),
+        About::Plan(plan_id) => {
+            let agent_id = goaltool::owner_of(plan_id);
+            let directory = app.fleet.directory();
+            let owns = |member: &&Arc<Member>| member.record.agent_id == agent_id;
+            directory.members.iter().find(owns).cloned()
+        }
+        About::Nobody => None,
+    };
+    let Some(member) = member else {
+        return goaltool::nobody(&ask, app.clock.now_ms());
+    };
+    match member.agent.goal(ask).await {
+        Ok(said) => said,
+        Err(error) => ToolAnswer::said(
+            1,
+            format!("agent_tasks: the Host could not do it: {}", error.0),
         ),
     }
 }
