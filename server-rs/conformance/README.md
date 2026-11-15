@@ -67,6 +67,14 @@ agent wrote as the order they are first read in, a Host's version as "a version"
 revision is compared as the number it is. Fields and events of features the Rust Host does not
 have yet are left out of both sides.
 
+The start of the turn that runs (`turn_started_at` in the snapshot) is what an app counts a
+running turn from (issue 354). It is a reading of a clock, and is compared as what it is a
+reading of (`TurnClock` in `conform.py`): which turn of the capture it belongs to, so that the
+same turn has the same start however often it is read and the next turn has another, and
+which message this client had last sent when the turn began. The scenarios `turn-timer` and
+`turn-timer-after-stop` read the snapshot while a turn runs, while more is sent, and after;
+no other scenario reads it while an agent is busy.
+
 ## When the Python Host changes
 
 `golden/` and `golden-again/` are the Python Host at the commit the workflow ran on. After a
