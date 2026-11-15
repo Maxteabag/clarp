@@ -694,6 +694,18 @@ struct ImportRequest {
     /// its goal as `GET /task-plan/document` gave them.
     #[serde(default)]
     plans: Vec<MovedPlan>,
+    /// Its library, each artifact as the other Host's `GET /artifacts` gave it, a report
+    /// with its versions as `GET /artifacts/<id>/revisions` gave them.
+    #[serde(default)]
+    library: Vec<MovedArtifact>,
+}
+
+/// An artifact that comes with an agent.
+#[derive(Debug, Deserialize)]
+struct MovedArtifact {
+    artifact: Value,
+    #[serde(default)]
+    revisions: Vec<Value>,
 }
 
 /// A plan that comes with an agent.
@@ -770,15 +782,46 @@ async fn import_agent(
             });
         }
     };
-    // Then what it is committed to. An agent that arrives without its goals is not the
-    // agent that was asked for: it does not stay either.
+    // Then what it made and asked, and what it is committed to. An agent that arrives
+    // without its library or its goals is not the agent that was asked for: it does not
+    // stay either. The library first: a plan is shown as an artifact, and finds the one it
+    // had.
+    let library: Vec<(Value, Vec<Value>)> = request
+        .library
+        .into_iter()
+        .map(|moved| (moved.artifact, moved.revisions))
+        .collect();
+    let elsewhere = library.iter().find_map(|(artifact, _)| {
+        let id = artifact["artifact_id"].as_str()?;
+        let directory = app.fleet.directory();
+        let has = |other: &&Arc<Member>| {
+            other.record.agent_id != member.record.agent_id
+                && other.agent.view().books.artifacts.any(id).is_some()
+        };
+        directory.members.iter().find(has).map(|_| id.to_string())
+    });
     let plans: Vec<(Value, Vec<Value>)> = request
         .plans
         .into_iter()
         .map(|moved| (moved.plan, moved.documents))
         .collect();
-    let plans = match member.agent.take_plans(plans).await {
-        Ok(Ok(plans)) => plans,
+    let taken = match elsewhere {
+        Some(id) => Ok(Err(format!(
+            "another agent on this Host has an artifact with the id {id}"
+        ))),
+        None => member.agent.take_library(library).await,
+    };
+    let taken = match taken {
+        Ok(Ok(artifacts)) => match member.agent.take_plans(plans).await {
+            Ok(Ok(plans)) => Ok(Ok((artifacts, plans))),
+            Ok(Err(why)) => Ok(Err(why)),
+            Err(unavailable) => Err(unavailable),
+        },
+        Ok(Err(why)) => Ok(Err(why)),
+        Err(unavailable) => Err(unavailable),
+    };
+    let (artifacts, plans) = match taken {
+        Ok(Ok(taken)) => taken,
         failed => {
             let _ = app.fleet.remove(member.record.session.clone()).await;
             return Err(match failed {
@@ -797,6 +840,7 @@ async fn import_agent(
         "session": member.record.session,
         "agent_id": member.record.agent_id,
         "imported": imported,
+        "artifacts": artifacts,
         "plans": plans,
         "held": held,
     })))

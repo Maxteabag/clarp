@@ -3407,6 +3407,46 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     };
     let plan_before = without_now(goal(&old_host, &dir, &["get", &plan_id]));
     let notes_before = goal(&old_host, &dir, &["read", &plan_id, "working-notes.md"]);
+    // And it has a library there: notes its user pinned, a report it revised, and a
+    // request that still waits for its user.
+    let made = |host: &Host, body: Value| -> Value {
+        let (status, answer) = host.ask("POST", "/artifacts", Some(&body));
+        assert_eq!(status, 201, "{answer}");
+        answer["artifact"].clone()
+    };
+    made(
+        &old_host,
+        json!({ "session": session, "type": "document", "title": "Notes", "artifact_id": "notes-1",
+                "payload": { "content": "# Notes" } }),
+    );
+    old_host.post("/artifacts/notes-1/pin", json!({ "pinned": true }));
+    let report = |page: &str, version: &str, follows: Option<&str>| {
+        json!({ "session": session, "type": "html_form", "title": "Findings", "artifact_id": "findings",
+                "summary": version, "expected_version": follows,
+                "payload": { "content": page, "version": version, "read_only": true } })
+    };
+    made(&old_host, report("<p>Day one.</p>", "v1", None));
+    made(&old_host, report("<p>Day two.</p>", "v2", Some("v1")));
+    let ask = json!({
+        "session": session, "title": "Ship?", "question": "Ship it?", "context": "It is ready.",
+    });
+    let (status, asked) = old_host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(status, 201, "{asked}");
+    let decision_id = asked["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let library_of = |host: &Host| -> Vec<Value> {
+        let listed = host.get(&format!("/artifacts?session={session}&order=created"));
+        listed["artifacts"].as_array().unwrap().clone()
+    };
+    let library_before = library_of(&old_host);
+    assert_eq!(
+        library_before.len(),
+        4,
+        "a plan, notes, a report, a request"
+    );
+    let was_before = old_host.get("/artifacts/findings/revisions?version=v1");
     let before = old_host.conversation(&session);
 
     // The move, as its owner would run it.
@@ -3425,7 +3465,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let told = String::from_utf8_lossy(&moved.stdout).into_owned();
     assert!(
         told.contains(
-            "with the 4 rows of its conversation, its plan and 2 files it published (1 more"
+            "with the 4 rows of its conversation, the 4 things in its library, its plan and \
+             2 files it published (1 more"
         ),
         "{told}"
     );
@@ -3441,9 +3482,40 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     let listed = new_host.get(&format!("/task-plans?session={session}"));
     assert_eq!(listed["plans"].as_array().unwrap().len(), 1);
-    let library = new_host.get(&format!("/artifacts?session={session}"));
-    assert_eq!(library["artifacts"][0]["type"], "plan");
-    assert_eq!(library["artifacts"][0]["plan"]["plan_id"], plan_id.as_str());
+
+    // Its library came with it: every artifact under its id, as it was shown where it came
+    // from. The plan is shown as the artifact it had, which follows its plan here.
+    let library_here = library_of(&new_host);
+    assert_eq!(library_here.len(), library_before.len());
+    for (here, there) in library_here.iter().zip(&library_before) {
+        // A plan's artifact shows its plan as of the moment it is read.
+        let (mut here, mut there) = (here.clone(), there.clone());
+        for row in [&mut here, &mut there] {
+            if let Some(plan) = row.get_mut("plan").and_then(Value::as_object_mut) {
+                plan.remove("server_now");
+            }
+        }
+        assert_eq!(here, there, "{}", here["artifact_id"]);
+    }
+    // The report with what it was, and its page for a browser; the notes still pinned; the
+    // request still waiting for its user, here.
+    assert_eq!(
+        new_host.get("/artifacts/findings/revisions?version=v1"),
+        was_before
+    );
+    assert_eq!(
+        new_host.get("/artifacts/findings/revisions"),
+        old_host.get("/artifacts/findings/revisions")
+    );
+    let page = fetch(&new_host, "", "GET", "/artifacts/findings/html", &[], b"");
+    assert!(page.status == 200 && page.text().contains("<p>Day two.</p>"));
+    assert_eq!(
+        new_host.get("/pinned-artifacts")["artifacts"][0]["artifact_id"],
+        "notes-1"
+    );
+    let waiting = new_host.get("/attention");
+    assert_eq!(waiting["count"], 1, "{waiting}");
+    assert_eq!(waiting["items"][0]["decision_id"], decision_id.as_str());
     // It arrived held: until its owner resumes it here, nothing starts by itself, because
     // until then it is on the first Host too. Its goals are as they were, not paused.
     assert!(told.contains("Here it is held until then"), "{told}");
@@ -3524,7 +3596,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     let gallery = new_host.get(&format!("/media?session={session}"));
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
-    assert_eq!(files_under(&new_place.root.join("data").join("media")), 2);
+    // The image, the document, and the report's two pages.
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 4);
     // Only the administrator says which id a file has, and an id is one file's.
     let taken = [
         ("X-Session", session.as_str()),

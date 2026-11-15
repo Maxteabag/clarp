@@ -26,9 +26,10 @@ Host's from CLARP_HOST_TOKEN.";
 
 pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
-Reads the agent NAME, its conversation, its plans and goals and the files it published from
-the Host at --from and gives them to this Host. With --files only the files are read, for an
-agent that is here already: a move whose files did not all arrive is finished that way.
+Reads the agent NAME, its conversation, its library, its plans and goals and the files it
+published from the Host at --from and gives them to this Host. With --files only the files
+are read, for an agent that is here already: a move whose files did not all arrive is
+finished that way.
 The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN.";
 
 /// How many rows of a conversation are asked for at a time.
@@ -345,13 +346,58 @@ pub fn import(
         }
         plans.push(json!({ "plan": plan, "documents": documents }));
     }
-    let committed = match plans.len() {
+    // What it made and asked: its library, a page of it at a time, and for a report what
+    // it was, version by version.
+    let mut library: Vec<Value> = Vec::new();
+    loop {
+        let path = format!(
+            "/artifacts?session={}&order=created&limit=500&offset={}",
+            ids::in_a_link(&session),
+            library.len()
+        );
+        let page = get(&from, &path, source_token)?;
+        let rows = page["artifacts"].as_array().cloned().unwrap_or_default();
+        let count = rows.len();
+        for artifact in rows {
+            let mut revisions: Vec<Value> = Vec::new();
+            if artifact["type"] == "html_form" && artifact["read_only"] == true {
+                let id = ids::in_a_link(artifact["artifact_id"].as_str().unwrap_or(""));
+                let was = get(
+                    &from,
+                    &format!("/artifacts/{id}/revisions?limit=100"),
+                    source_token,
+                )?;
+                let versions = was["revisions"].as_array().cloned().unwrap_or_default();
+                for version in versions
+                    .iter()
+                    .filter_map(|entry| entry["version"].as_str())
+                {
+                    let path = format!(
+                        "/artifacts/{id}/revisions?version={}",
+                        ids::in_a_link(version)
+                    );
+                    revisions.push(get(&from, &path, source_token)?["revision"].clone());
+                }
+            }
+            library.push(json!({ "artifact": artifact, "revisions": revisions }));
+        }
+        if count < 500 {
+            break;
+        }
+    }
+    let made = match library.len() {
         0 => String::new(),
-        1 => ", its plan".to_string(),
-        many => format!(", its {many} plans"),
+        1 => ", the one thing in its library".to_string(),
+        many => format!(", the {many} things in its library"),
+    };
+    let committed = match plans.len() {
+        0 => made,
+        1 => format!("{made}, its plan"),
+        many => format!("{made}, its {many} plans"),
     };
     let asked = json!({
         "agent": agent, "from": format!("http://{from}"), "turns": turns, "plans": plans,
+        "library": library,
     });
     let (status, answer) = post(&host, "/agents/import", token, &asked)?;
     if status != 200 {

@@ -318,7 +318,7 @@ fn version_of(payload: &Map<String, Value>) -> String {
 impl Artifact {
     /// Remembers what the report is now, under its version, when that version is not
     /// remembered yet.
-    fn remember(&mut self) {
+    pub(super) fn remember(&mut self) {
         let (version, Some(page)) = (version_of(&self.payload), self.page.clone()) else {
             return;
         };
