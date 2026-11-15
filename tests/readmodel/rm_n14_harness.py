@@ -348,6 +348,40 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     return turns
 
                 stack.enter_context(patch.object(parser, "parse_transcript", parse_then_change))
+            if faults.get("during_read"):
+                # The file changes while the full import's reader is in the
+                # middle of it: it has taken at least "after" bytes and not
+                # all of them. "how": "grow" (a record is appended), "behind"
+                # (the first letter of a reply the reader has passed changes
+                # in place) or "ahead" (of one it has not reached, the last
+                # record's). "keep_times": atime and
+                # mtime are put back. The report's ``read_changed_at`` is how
+                # far the reader was.
+                spec, fired = faults["during_read"], []
+                native_readinto = inc._Range.readinto
+
+                def readinto_then_change(self, buffer):
+                    count = native_readinto(self, buffer)
+                    position = self._file.tell()
+                    if count and not fired and self._left > 0 and position >= spec["after"]:
+                        fired.append(position)
+                        data, stat = transcript.read_bytes(), transcript.stat()
+                        if spec["how"] == "grow":
+                            with transcript.open("ab") as output:
+                                output.write(append_bytes(backend, 900 + tick))
+                        else:
+                            at = data.index(b"synthetic step") if spec["how"] == "behind" \
+                                else data.rindex(b"synthetic step")
+                            assert (at < position) == (spec["how"] == "behind"), (at, position)
+                            with transcript.open("r+b") as output:
+                                output.seek(at)
+                                output.write(b"S")
+                            if spec.get("keep_times"):
+                                os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+                        metrics["read_changed_at"] = position
+                    return count
+
+                stack.enter_context(patch.object(inc._Range, "readinto", readinto_then_change))
             if faults.get("checkpoint"):
                 original_checkpoint = inc.write_checkpoint
 

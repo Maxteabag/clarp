@@ -414,7 +414,8 @@ file and the check (`transcriptPrefixChanged file=… what=…`) and the import
 is full.
 
 A full import parses the file and then reads all of it again for that
-digest: twice the file, every time (588 MB for a 284 MB transcript). With
+digest: twice the file, every time (588 MB read for a 284 MB transcript at
+a turn's end, 590 at its first import). With
 `full_digest_while_parsing = true` it takes the digest from the bytes its
 parser was handed, which are hashed as the parser reads them, and the digest
 of the bytes an earlier import read from the same pass, on the way past
@@ -425,6 +426,26 @@ read would give the same digest. A file that grew or was touched meanwhile
 is read again as before, because growth cannot be told from a rewrite
 without reading; a rewrite that puts the modification time back still moves
 the change time, which cannot be set. Off by default.
+
+What the comparison of the times does not see. A store through a memory map
+into a page that is already dirty moves neither time; no process was found
+mapping a transcript, and Claude and Codex append with ordinary writes. On a
+file system that keeps its times coarsely (a kernel before 6.13), a rewrite
+in the same tick as the write before it leaves them equal; that was not
+measured. Either way the digest and the rows are those of the bytes that
+were parsed, as with a rewrite that lands just after any import, and the
+next audit finds the file changed. With the switch off the second read
+catches such a change at once when it lands while the file is parsed; with
+it on, the audit does.
+
+The saving is one read of two, where the file stood still. A conversation
+is mostly imported in full while its agent writes to it, and a file that
+grew while it was parsed is read again; for the largest conversations that
+may be half the full imports (an estimate from record timestamps, not a
+count; `transcriptFullDigest`, below, counts it on a Host). A full import
+whose publication has to be certified a second time, because someone else
+committed while its write yielded, reads the file once more for that with
+or without the switch.
 
 Every full import that reaches its digest says in the journal which it was:
 `transcriptFullDigest code=saved count=1 backend=claude size=lt256m`. The
