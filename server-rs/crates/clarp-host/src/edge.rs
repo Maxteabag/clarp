@@ -525,6 +525,17 @@ async fn log(
 
 // ---- the commands ----------------------------------------------------------------------------
 
+/// The short name an app gives itself on a send (`desktop`), when it is one: lower case
+/// letters, digits and hyphens, at most 32.
+fn client_name(given: &str) -> Option<String> {
+    let name = given.trim().to_lowercase();
+    let plain = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    let fits = name.chars().count() <= 32
+        && name.chars().next().is_some_and(plain)
+        && name.chars().all(|c| plain(c) || c == '-');
+    fits.then_some(name)
+}
+
 /// Who wrote a message that says it comes from another agent.
 fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
     let directory = app.fleet.directory();
@@ -569,17 +580,31 @@ async fn send(
     if request.text.trim().is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
     }
-    let from_agent = request.origin.as_deref() == Some("agent");
-    let sender = if from_agent {
-        sender(&app, request.sender.as_ref())
-    } else {
-        None
+    // Who it comes from, as the Python Host reads a send: the origin it names, when that is
+    // one a sender may name; otherwise another agent, when it names its sender; otherwise
+    // the user. What the Host stamps itself (a janitor, a leader's tick) nobody may claim.
+    let sender = sender(&app, request.sender.as_ref());
+    let from_agent = || Origin::Agent {
+        agent_id: sender
+            .as_ref()
+            .map(|sender| sender.agent_id.clone())
+            .unwrap_or_default(),
     };
-    let origin = match &sender {
-        Some(sender) => Origin::Agent {
-            agent_id: sender.agent_id.clone(),
-        },
-        None => Origin::User,
+    let named = request
+        .origin
+        .as_deref()
+        .map(|origin| origin.trim().to_lowercase())
+        .unwrap_or_default();
+    let origin = match named.as_str() {
+        "user" => Origin::User,
+        "agent" => from_agent(),
+        "oracle" | "schedule" | "automation" | "watcher" | "heartbeat" | "dreaming" => {
+            Origin::Trigger {
+                name: named.clone(),
+            }
+        }
+        _ if sender.is_some() => from_agent(),
+        _ => Origin::User,
     };
     let origin_is_user = origin == Origin::User;
     // A message to an agent that is busy waits its turn, as on the Python Host. What differs
@@ -600,7 +625,7 @@ async fn send(
         origin,
         trace_id: Some(trace_id.clone()),
         sender,
-        client: request.client,
+        client: request.client.as_deref().and_then(client_name),
     };
     let sent = member.agent.send(message, admission).await?;
     if origin_is_user {
