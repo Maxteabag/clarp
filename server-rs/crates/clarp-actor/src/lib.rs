@@ -33,6 +33,7 @@ use std::sync::Arc;
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect};
 use clarp_kernel::conversation::{Entry, Imported, Message, Notice, Reply, TurnEnd};
+use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
 use clarp_kernel::turn::{Activity, Admission, RunOutcome, Settled, Turn, TurnId};
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
@@ -64,6 +65,9 @@ pub struct Profile {
     pub effort: Option<String>,
     pub identity: Option<String>,
     /// How long a tool gets to end by itself when it is told to stop.
+    /// What every turn's tool is told on top of what its backend sets: where the agent's own
+    /// tools find the Host.
+    pub tool_env: Vec<(String, String)>,
     pub stop_grace_ms: u64,
     /// Keep a turn's spool when the turn is over and in the log.
     pub keep_spools: bool,
@@ -126,6 +130,8 @@ pub struct Changed {
     pub status: bool,
     /// What waits in the mailbox changed, or whether it is held.
     pub queue: bool,
+    /// One of the agent's background jobs changed.
+    pub jobs: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -280,6 +286,8 @@ pub struct Actor {
     backend: Arc<dyn Backend>,
     recorder: Recorder,
     live: Option<LiveTurn>,
+    /// The agent's background jobs, as the log has them and as they were last heard from.
+    jobs: JobBook,
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
@@ -371,10 +379,33 @@ impl Actor {
         now_ms: i64,
     ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
+        let mut jobs = JobBook::new();
+        let mut after = 0;
+        loop {
+            let page = recorder.log().read_after(after, kind::JOBS, WINDOW)?;
+            let Some(last) = page.last() else { break };
+            after = last.seq;
+            for item in &page {
+                // A kind of this range a newer build wrote is passed over.
+                if item.kind == kind::JOB {
+                    let record: JobRecord =
+                        serde_json::from_slice(&item.body).map_err(|error| {
+                            ActorError::Corrupt(format!(
+                                "log item {} is not the job record its kind says: {error}",
+                                item.seq
+                            ))
+                        })?;
+                    jobs.apply(&record);
+                }
+            }
+        }
+        // What the Host did not hear while it was away says nothing about the workers.
+        jobs.heard_at(now_ms);
         let mut actor = Self {
             profile,
             backend,
             recorder,
+            jobs,
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
@@ -540,6 +571,80 @@ impl Actor {
         )
     }
 
+    /// The agent's background jobs.
+    pub fn jobs(&self) -> &JobBook {
+        &self.jobs
+    }
+
+    /// Carries out what a worker, a person or the Host asks of a background job. `revision`
+    /// is the number the change gets if it is one. The inner error is a command that makes
+    /// no sense; a command that changes nothing is not an error.
+    pub fn job(
+        &mut self,
+        command: JobCommand,
+        now_ms: i64,
+        revision: u64,
+    ) -> Result<(Result<JobChange, JobRefusal>, Outputs), ActorError> {
+        let change = match self.jobs.decide(command, now_ms, revision) {
+            Ok(change) => change,
+            Err(refusal) => return Ok((Err(refusal), Outputs::default())),
+        };
+        let mut out = Outputs::default();
+        if let Some(record) = &change.record {
+            let body = serde_json::to_vec(record).map_err(|error| {
+                ActorError::Corrupt(format!("a job record could not be written: {error}"))
+            })?;
+            let item = NewItem::new(kind::JOB, now_ms, body).keyed(format!("j-{}", record.job.id));
+            let mut batch = self.recorder.batch();
+            batch.item(item);
+            batch.commit()?;
+            self.jobs.apply(record);
+            out.changed.jobs = true;
+        }
+        if let Some(beat) = &change.beat {
+            // Not written, but shown: how long ago a job was heard from is read off it.
+            self.jobs.beat(beat);
+            out.changed.jobs = true;
+        }
+        Ok((Ok(change), out))
+    }
+
+    /// Counts every running job as heard from now: after the machine slept, what was not
+    /// heard meanwhile says nothing about the workers.
+    pub fn jobs_heard_at(&mut self, now_ms: i64) {
+        self.jobs.heard_at(now_ms);
+    }
+
+    /// A job's timeline: the newest `limit` of its changes, oldest first.
+    pub fn job_timeline(&self, id: &str, limit: usize) -> Result<Vec<JobRecord>, ActorError> {
+        let mut entries = Vec::new();
+        let mut before = Seq::MAX;
+        while entries.len() < limit {
+            let page = self
+                .recorder
+                .log()
+                .read_before(before, kind::JOBS, WINDOW)?;
+            let Some(first) = page.first() else { break };
+            before = first.seq;
+            for item in page.iter().rev() {
+                if item.kind != kind::JOB || item.key.as_deref() != Some(&format!("j-{id}")) {
+                    continue;
+                }
+                let record: JobRecord = serde_json::from_slice(&item.body).map_err(|error| {
+                    ActorError::Corrupt(format!(
+                        "log item {} is not the job record its kind says: {error}",
+                        item.seq
+                    ))
+                })?;
+                if record.timeline && entries.len() < limit {
+                    entries.push(record);
+                }
+            }
+        }
+        entries.reverse();
+        Ok(entries)
+    }
+
     /// The stored row with this id, as it is now.
     pub fn row(&self, id: &str) -> Result<Option<Versioned>, ActorError> {
         conversation::one(self.recorder.log(), id)
@@ -599,6 +704,7 @@ impl Actor {
             conversation: accepted.entered,
             status: !accepted.effects.is_empty(),
             queue: !started,
+            ..Changed::default()
         };
         self.carry_out(accepted.effects, &mut out)?;
         let sent = Sent {
@@ -649,6 +755,7 @@ impl Actor {
                 conversation: true,
                 status: true,
                 queue: false,
+                ..Changed::default()
             },
             ..Outputs::default()
         };
@@ -668,6 +775,7 @@ impl Actor {
                 conversation: false,
                 status: true,
                 queue: true,
+                ..Changed::default()
             },
             ..Outputs::default()
         };
@@ -707,6 +815,7 @@ impl Actor {
                 conversation: false,
                 status: !effects.is_empty(),
                 queue: true,
+                ..Changed::default()
             },
             ..Outputs::default()
         };
@@ -880,7 +989,11 @@ impl Actor {
             cwd: self.profile.cwd.clone(),
             program: launch.program,
             args: launch.args,
-            env: launch.env,
+            env: launch
+                .env
+                .into_iter()
+                .chain(self.profile.tool_env.iter().cloned())
+                .collect(),
         }));
         Ok(())
     }

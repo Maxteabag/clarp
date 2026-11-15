@@ -37,6 +37,7 @@ use crate::config::Config;
 use crate::fleet::{AgentRecord, FleetHandle, Member};
 use crate::hub::{Hub, Published};
 use crate::pairing::{self, Device, Scope};
+use crate::revisions::Revisions;
 use crate::{ids, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
@@ -62,6 +63,8 @@ pub struct App {
     pub clock: Arc<dyn Clock + Send + Sync>,
     /// Which Host this is, for an app that knows several.
     pub server_id: String,
+    /// The numbers for changes the whole Host counts in one row.
+    pub revisions: Arc<Revisions>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,

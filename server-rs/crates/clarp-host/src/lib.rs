@@ -21,7 +21,13 @@ pub mod hub;
 pub mod ids;
 pub mod launcher;
 pub mod pairing;
+pub mod process;
+pub mod revisions;
 pub mod wire;
 
 /// The version this Host reports.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The environment variable that tells an agent's own tools where their Host listens. The
+/// Host's token is in the Host's own environment, which every turn inherits.
+pub const TOOL_ADDR_ENV: &str = "CLARP_HOST_ADDR";
