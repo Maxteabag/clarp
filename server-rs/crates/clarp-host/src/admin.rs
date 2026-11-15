@@ -17,6 +17,12 @@ pub const PAIR_USAGE: &str =
 URL is the address the device will reach this Host at. The administrator's token is read from
 CLARP_HOST_TOKEN.";
 
+pub const PEER_USAGE: &str =
+    "usage: clarp-host peer add NAME URL | peer list | peer remove NAME  [--host ADDR:PORT]
+Names another Host this one may write to: an agent here then writes to an agent there with
+`clarp-admin prompt --server NAME`. The other Host's token is read from CLARP_PEER_TOKEN, this
+Host's from CLARP_HOST_TOKEN.";
+
 pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT]
 Reads the agent NAME and its conversation from the Host at --from and gives them to this Host.
@@ -231,6 +237,74 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             stdout: answer["stdout"].as_str().unwrap_or("").to_string(),
             stderr: answer["stderr"].as_str().unwrap_or("").to_string(),
         };
+    }
+}
+
+/// `clarp-host peer`: names another Host for the running Host, lists the ones it knows, or
+/// forgets one. Returns what to show.
+pub fn peer(
+    mut args: impl Iterator<Item = String>,
+    token: &str,
+    peer_token: &str,
+) -> Result<String, String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut host = "127.0.0.1:7690".to_string();
+    while let Some(arg) = args.next() {
+        if arg == "--host" {
+            host = args.next().ok_or("--host needs an address")?;
+        } else {
+            words.push(arg);
+        }
+    }
+    let refused = |status: u16, answer: &Value| {
+        let why = answer["error"].as_str().unwrap_or("no reason given");
+        format!("the Host refused ({status}): {why}")
+    };
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    match words.as_slice() {
+        ["add", name, url] => {
+            if peer_token.is_empty() {
+                return Err("the other Host's token is read from CLARP_PEER_TOKEN".to_string());
+            }
+            let named = json!({ "name": name, "url": url, "token": peer_token });
+            match post(&host, "/peers", token, &named)? {
+                (200, answer) => Ok(format!(
+                    "{} is the Host at {}",
+                    answer["name"].as_str().unwrap_or(name),
+                    answer["url"].as_str().unwrap_or(url)
+                )),
+                (status, answer) => Err(refused(status, &answer)),
+            }
+        }
+        ["list"] => {
+            let peers = get(&host, "/peers", token)?;
+            let lines: Vec<String> = peers
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(|peer| {
+                    let off = if peer["enabled"] == false {
+                        " (off)"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "{} {}{off}",
+                        peer["name"].as_str().unwrap_or(""),
+                        peer["url"].as_str().unwrap_or("")
+                    )
+                })
+                .collect();
+            Ok(lines.join("\n"))
+        }
+        ["remove", name] => {
+            match request("DELETE", &host, &format!("/peers/{name}"), token, None)? {
+                (200, _) => Ok(format!("removed peer: {name}")),
+                (status, answer) => Err(refused(status, &answer)),
+            }
+        }
+        _ => Err("say what to do: add NAME URL, list, or remove NAME".to_string()),
     }
 }
 

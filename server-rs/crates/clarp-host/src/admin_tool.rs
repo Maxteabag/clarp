@@ -6,6 +6,9 @@
 //! agent on this Host calls the same command; this is what it does here. The arguments, what
 //! is printed and the exit codes are the Python tool's (`bin/clarp-admin.py`, `cmd_prompt`).
 //!
+//! With `--server NAME` the message goes to an agent of another Host the owner named
+//! ([`crate::peers`]): the Python Host beside this one, while agents move over one by one.
+//!
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
@@ -15,6 +18,7 @@ use serde_json::json;
 use crate::artifact_tool::parse;
 use crate::edge::{self, App};
 use crate::ids;
+use crate::peers::{self, Failed};
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
 
 /// What argparse says of a command line it cannot read, and exits 2 with.
@@ -71,19 +75,12 @@ async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
     if from.is_some() && origin.is_some() {
         return ToolAnswer::said(1, "--origin cannot be combined with --from");
     }
-    // A message for later, and one for an agent of another Host, are not built yet. Nothing
-    // is sent in their place.
+    // A message for later is not built yet. Nothing is sent in its place.
     if parsed
         .option("--delay")
         .is_some_and(|delay| !delay.is_empty())
     {
         return not_here("prompt --delay");
-    }
-    if parsed
-        .option("--server")
-        .is_some_and(|server| !server.is_empty())
-    {
-        return not_here("prompt --server");
     }
     let request = SendRequest {
         session: parsed.option("--to").unwrap_or_default().to_string(),
@@ -100,6 +97,34 @@ async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
         sender: from.map(|from| json!(from)),
         ..SendRequest::default()
     };
+    // For an agent of another Host the owner named: that Host's own send.
+    if let Some(server) = parsed
+        .option("--server")
+        .filter(|server| !server.is_empty())
+    {
+        let mut payload = json!(request);
+        payload["force_session"] = json!(true);
+        return match peers::send(app, server, payload).await {
+            Ok(answer) => {
+                ToolAnswer::printed(0, serde_json::to_string_pretty(&answer).unwrap_or_default())
+            }
+            Err(Failed::Unknown(name)) => ToolAnswer::said(
+                1,
+                format!("clarp-admin prompt: unknown or disabled peer: {name}"),
+            ),
+            Err(Failed::Refused { status, detail }) => ToolAnswer::said(
+                4,
+                format!("clarp-admin prompt: the Host refused it (HTTP {status}): {detail}"),
+            ),
+            Err(Failed::Down(why)) => ToolAnswer::said(
+                5,
+                format!(
+                    "clarp-admin prompt: {why}. It may have arrived: do not send it again \
+                     without looking"
+                ),
+            ),
+        };
+    }
     match edge::send_message(app, request).await {
         Ok(sent) => match serde_json::to_string_pretty(&sent) {
             Ok(shown) => ToolAnswer::printed(0, shown),

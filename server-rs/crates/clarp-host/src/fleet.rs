@@ -4,7 +4,7 @@
 //! list as a whole whenever it changes, so that everyone else reads a list that is complete and
 //! never waits for the fleet to find an agent.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -39,6 +39,8 @@ const DEVICES: &str = "device";
 const JOBS: &str = "job";
 /// The register of push devices: one row for each token, under the token.
 const PUSH: &str = "push";
+/// The other Hosts this one may write to, by the name the owner gave each.
+const PEERS: &str = "peer";
 
 /// How long a tool gets to end by itself when its turn is stopped.
 const STOP_GRACE_MS: u64 = 5_000;
@@ -80,6 +82,8 @@ pub struct Directory {
     pub devices: HashMap<String, Arc<Device>>,
     /// The devices that are told of finished turns: who gets a push.
     pub push: Arc<PushBook>,
+    /// The other Hosts this one may write to, by name.
+    pub peers: Arc<BTreeMap<String, Peer>>,
 }
 
 impl Directory {
@@ -110,6 +114,20 @@ fn can_receive(devices: &HashMap<String, Arc<Device>>, owner: &str) -> bool {
         || devices
             .values()
             .any(|device| device.device_id == owner && device.scope == Scope::Full)
+}
+
+/// Another Host this one may write to: where it is, and the token it takes. The owner names
+/// it; an agent then writes to an agent there by that name (`clarp-admin prompt --server`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Peer {
+    pub url: String,
+    pub token: String,
+    #[serde(default = "enabled")]
+    pub enabled: bool,
+}
+
+fn enabled() -> bool {
+    true
 }
 
 /// A registration of a push token, as a device asked for it.
@@ -214,7 +232,21 @@ enum Ask {
         answer: Answer<Result<usize, devices::Refused>>,
     },
     /// What became of a push to a token. Nobody waits for it.
-    Pushed { token: String, outcome: Pushed },
+    Pushed {
+        token: String,
+        outcome: Pushed,
+    },
+    /// The owner names another Host. The inner error is what is missing.
+    PeerAdd {
+        name: String,
+        url: String,
+        token: String,
+        answer: Answer<Result<(), String>>,
+    },
+    PeerRemove {
+        name: String,
+        answer: Answer<bool>,
+    },
 }
 
 /// The way to the fleet's thread, and the fleet as anyone may read it.
@@ -345,6 +377,28 @@ impl FleetHandle {
         .await
     }
 
+    /// Names another Host this one may write to, or renames where one is. The inner error
+    /// is what is missing.
+    pub async fn peer_add(
+        &self,
+        name: String,
+        url: String,
+        token: String,
+    ) -> Result<Result<(), String>, Unavailable> {
+        self.ask(|answer| Ask::PeerAdd {
+            name,
+            url,
+            token,
+            answer,
+        })
+        .await
+    }
+
+    /// Forgets another Host. Returns whether it was known.
+    pub async fn peer_remove(&self, name: String) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::PeerRemove { name, answer }).await
+    }
+
     /// Says what became of a push to a token. Does not wait.
     pub fn pushed(&self, token: String, outcome: Pushed) {
         let _ = self.tx.send(Ask::Pushed { token, outcome });
@@ -383,6 +437,8 @@ struct Fleet {
     jobs: HashMap<String, String>,
     /// The register of push devices.
     push: PushBook,
+    /// The other Hosts this one may write to.
+    peers: BTreeMap<String, Peer>,
     directory: watch::Sender<Arc<Directory>>,
 }
 
@@ -471,11 +527,18 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         })?;
         push.apply(&[row]);
     }
+    let mut peers = BTreeMap::new();
+    for (name, stored) in store.list(PEERS).map_err(|error| error.to_string())? {
+        let peer: Peer = serde_json::from_slice(&stored)
+            .map_err(|error| format!("the entry for the peer {name} cannot be read: {error}"))?;
+        peers.insert(name, peer);
+    }
     let (directory, read) = watch::channel(Arc::new(Directory {
         members: members.clone(),
         focus: focus.clone(),
         devices: devices.clone(),
         push: Arc::new(push.clone()),
+        peers: Arc::new(peers.clone()),
     }));
     let (tx, rx) = mpsc::channel();
     let fleet = Fleet {
@@ -486,6 +549,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         devices,
         jobs,
         push,
+        peers,
         directory,
     };
     std::thread::Builder::new()
@@ -561,6 +625,17 @@ impl Fleet {
                     let _ = answer.send(self.push_disable(&token, &owner, only_owner.as_deref()));
                 }
                 Ask::Pushed { token, outcome } => self.pushed(&token, outcome),
+                Ask::PeerAdd {
+                    name,
+                    url,
+                    token,
+                    answer,
+                } => {
+                    let _ = answer.send(self.peer_add(&name, &url, &token));
+                }
+                Ask::PeerRemove { name, answer } => {
+                    let _ = answer.send(self.peer_remove(&name));
+                }
             }
         }
     }
@@ -593,7 +668,43 @@ impl Fleet {
             focus: self.focus.clone(),
             devices: self.devices.clone(),
             push: Arc::new(self.push.clone()),
+            peers: Arc::new(self.peers.clone()),
         }));
+    }
+
+    fn peer_add(
+        &mut self,
+        name: &str,
+        url: &str,
+        token: &str,
+    ) -> Result<Result<(), String>, Unavailable> {
+        let (name, url, token) = (name.trim(), url.trim().trim_end_matches('/'), token.trim());
+        let addressed = url.starts_with("http://") || url.starts_with("https://");
+        if name.is_empty() || !addressed || token.is_empty() {
+            return Ok(Err("peer requires name, HTTP(S) URL, and token".to_string()));
+        }
+        let peer = Peer {
+            url: url.to_string(),
+            token: token.to_string(),
+            enabled: true,
+        };
+        let stored = serde_json::to_vec(&peer).map_err(|error| Unavailable(error.to_string()))?;
+        self.store
+            .put(PEERS, name, &stored)
+            .map_err(|error| Unavailable(error.to_string()))?;
+        self.peers.insert(name.to_string(), peer);
+        self.publish();
+        Ok(Ok(()))
+    }
+
+    fn peer_remove(&mut self, name: &str) -> Result<bool, Unavailable> {
+        let known = self
+            .store
+            .delete(PEERS, name)
+            .map_err(|error| Unavailable(error.to_string()))?;
+        self.peers.remove(name);
+        self.publish();
+        Ok(known)
     }
 
     /// Keeps rows of the push register as a change left them, and publishes the register.

@@ -2182,12 +2182,112 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (1, "--origin cannot be combined with --from\n")
     );
     // What is not on this Host says so, and does nothing.
+    assert_eq!(admin(&["update"]).0, 69);
     assert_eq!(
-        admin(&["prompt", "--to", &worker, "--text", "x", "--server", "work"]).0,
+        admin(&["prompt", "--to", &worker, "--text", "x", "--delay", "5m"]).0,
         69
     );
-    assert_eq!(admin(&["update"]).0, 69);
+    let stranger = admin(&["prompt", "--to", &worker, "--text", "x", "--server", "work"]);
+    assert_eq!(
+        (stranger.0, stranger.2.as_str()),
+        (1, "clarp-admin prompt: unknown or disabled peer: work\n")
+    );
     assert_eq!(host.turns(&worker).len(), 4, "nothing else was sent");
+
+    // Another Host, which the owner names: an agent here writes to an agent there.
+    let elsewhere = Place::new("message-elsewhere");
+    let other = elsewhere.start_with_token("the-other-hosts-token");
+    let remote = other.new_agent("Remote");
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/peers",
+            Some(&json!({ "name": "work", "url": "nowhere", "token": "t" }))
+        ),
+        (
+            400,
+            json!({ "error": "peer requires name, HTTP(S) URL, and token" })
+        )
+    );
+    let named = host.post(
+        "/peers",
+        json!({
+            "name": "work", "url": format!("http://{}/", other.address),
+            "token": "the-other-hosts-token",
+        }),
+    );
+    assert_eq!(
+        named,
+        json!({ "name": "work", "url": format!("http://{}", other.address), "enabled": true })
+    );
+    assert_eq!(host.get("/peers"), json!([named]), "never its token");
+    // The owner's own command for it reads the same.
+    let listed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["peer", "list", "--host", &host.address])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout).trim(),
+        format!("work http://{}", other.address)
+    );
+    let unnamed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args([
+            "peer",
+            "add",
+            "home",
+            "http://127.0.0.1:1",
+            "--host",
+            &host.address,
+        ])
+        .env_remove("CLARP_PEER_TOKEN")
+        .output()
+        .unwrap();
+    assert_eq!(unnamed.status.code(), Some(2), "a peer needs its token");
+    let (code, out, err) = admin(&[
+        "prompt",
+        "--server",
+        "work",
+        "--to",
+        &remote,
+        "--from",
+        &asker,
+        "--text",
+        "greetings from the other host",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let sent: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(sent["session"], remote.as_str());
+    let reply = said("assistant", "greetings from the other host");
+    wait_for("the answer on the other Host", || {
+        other.conversation(&remote).contains(&reply)
+    });
+    let rows = other.turns(&remote);
+    assert_eq!(
+        (&rows[0]["origin"], &rows[0]["sender_session"]),
+        (&json!("agent"), &json!(asker)),
+        "it says who wrote, by the name the writer has on its own Host"
+    );
+    // What the other Host refuses is said as its own refusal.
+    let lost = admin(&[
+        "prompt", "--server", "work", "--to", "nobody", "--text", "x",
+    ]);
+    assert_eq!(
+        (lost.0, lost.2.as_str()),
+        (
+            4,
+            "clarp-admin prompt: the Host refused it (HTTP 404): unknown forced agent\n"
+        )
+    );
+    // A Host that is forgotten is no longer written to.
+    assert_eq!(
+        host.ask("DELETE", "/peers/work", None),
+        (200, json!({ "ok": true, "removed": "work" }))
+    );
+    assert_eq!(host.ask("DELETE", "/peers/work", None).0, 404);
+    assert_eq!(
+        admin(&["prompt", "--server", "work", "--to", &remote, "--text", "x"]).0,
+        1
+    );
 }
 
 /// Pairs a device with this Host. Answers the device's token and its id.
