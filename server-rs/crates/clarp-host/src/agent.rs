@@ -29,6 +29,7 @@ use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
+use serde_json::Value;
 use tokio::sync::{oneshot, watch};
 
 use crate::fleet::{AgentRecord, non_empty};
@@ -149,6 +150,12 @@ pub enum Ask {
     Artifact {
         want: Box<Want>,
         answer: Answer<Result<Done, Refused>>,
+    },
+    /// The plans the agent had on the Host it comes from, each as that Host showed it, with
+    /// the documents of its goal. Answers how many there are now, or why one cannot be taken.
+    TakePlans {
+        plans: Vec<(Value, Vec<Value>)>,
+        answer: Answer<Result<usize, String>>,
     },
     /// The agent published a file: its bytes are kept, and this is what is to be written
     /// of it.
@@ -359,6 +366,15 @@ impl AgentHandle {
     pub async fn artifact(&self, want: Want) -> Result<Result<Done, Refused>, Unavailable> {
         let want = Box::new(want);
         self.ask(|answer| Ask::Artifact { want, answer }).await
+    }
+
+    /// Gives the agent the plans it had where it comes from. The inner error is a plan
+    /// that cannot be taken.
+    pub async fn take_plans(
+        &self,
+        plans: Vec<(Value, Vec<Value>)>,
+    ) -> Result<Result<usize, String>, Unavailable> {
+        self.ask(|answer| Ask::TakePlans { plans, answer }).await
     }
 
     /// Writes a file the agent published into its log. Its bytes are kept already.
@@ -917,9 +933,52 @@ impl Worker {
         }
     }
 
+    /// Takes the plans an agent brings from the Host it was on: each is written as it
+    /// stood there, with the artifact it is shown as, and published before the answer.
+    fn handle_plans(
+        &mut self,
+        plans: &[(Value, Vec<Value>)],
+        answer: Answer<Result<usize, String>>,
+    ) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let owner = Owner {
+            agent_id: &self.setup.record.agent_id,
+            session: &self.setup.record.session,
+        };
+        let mut outs = Vec::new();
+        let mut taken = Ok(0);
+        for (shown, documents) in plans {
+            let change = match actor.goals().taken_over(owner, shown, documents) {
+                Ok(change) => change,
+                Err(why) => {
+                    taken = Err(why.0);
+                    break;
+                }
+            };
+            let title = change.plan.title.clone();
+            match keep_goal(actor, &self.setup.record, &change, Some(&title), now) {
+                Ok(out) => outs.push(out),
+                Err(error) => {
+                    let _ = answer.send(Err(unavailable(&error)));
+                    return Err(error);
+                }
+            }
+            taken = taken.map(|count| count + 1);
+        }
+        for out in outs {
+            self.after(out);
+        }
+        let _ = answer.send(Ok(taken));
+        Ok(())
+    }
+
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
+            Ask::TakePlans { plans, answer } => return self.handle_plans(&plans, answer),
             Ask::Goal { ask, answer } => return self.handle_goal(&ask, answer),
             Ask::Amended { record, taken } => {
                 self.amended(*record);
@@ -1017,7 +1076,10 @@ impl Worker {
             }
             Ask::Row { id, answer } => return read(actor.row(&id), answer),
             // Answered above, where what they change is published first.
-            Ask::Artifact { .. } | Ask::Goal { .. } | Ask::Amended { .. } => return Ok(()),
+            Ask::Artifact { .. }
+            | Ask::Goal { .. }
+            | Ask::Amended { .. }
+            | Ask::TakePlans { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::ShimGone { turn, attempt } => (actor.shim_gone(turn, attempt, now)?, nobody()),
@@ -1545,6 +1607,7 @@ fn refuse_for(
             Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Publish { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::TakePlans { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),

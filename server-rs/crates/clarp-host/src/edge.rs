@@ -690,6 +690,18 @@ struct ImportRequest {
     from: String,
     /// The rows of its conversation, oldest first, as the other Host's `GET /log` gave them.
     turns: Vec<Value>,
+    /// Its plans, each as the other Host's `GET /task-plans` gave it, with the documents of
+    /// its goal as `GET /task-plan/document` gave them.
+    #[serde(default)]
+    plans: Vec<MovedPlan>,
+}
+
+/// A plan that comes with an agent.
+#[derive(Debug, Deserialize)]
+struct MovedPlan {
+    plan: Value,
+    #[serde(default)]
+    documents: Vec<Value>,
 }
 
 /// Takes an agent over from another Host: who it is, the conversation it had, and the tool's
@@ -758,11 +770,30 @@ async fn import_agent(
             });
         }
     };
+    // Then what it is committed to. An agent that arrives without its goals is not the
+    // agent that was asked for: it does not stay either.
+    let plans: Vec<(Value, Vec<Value>)> = request
+        .plans
+        .into_iter()
+        .map(|moved| (moved.plan, moved.documents))
+        .collect();
+    let plans = match member.agent.take_plans(plans).await {
+        Ok(Ok(plans)) => plans,
+        failed => {
+            let _ = app.fleet.remove(member.record.session.clone()).await;
+            return Err(match failed {
+                Ok(Err(why)) => ApiError::new(StatusCode::CONFLICT, why),
+                Err(unavailable) => unavailable.into(),
+                Ok(Ok(_)) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the move failed"),
+            });
+        }
+    };
     Ok(Json(json!({
         "ok": true,
         "session": member.record.session,
         "agent_id": member.record.agent_id,
         "imported": imported,
+        "plans": plans,
     })))
 }
 

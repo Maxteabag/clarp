@@ -3369,6 +3369,44 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     wait_for("the first Host's second answer", || {
         old_host.conversation(&session).len() == 4 && old_host.state(&session) == "done"
     });
+    // And it is committed to a goal there: a plan with steps, a step done, working notes,
+    // a checkpoint that says what is next.
+    let dir = old_place.root.clone();
+    let items = json!([
+        { "id": "probe", "title": "Probe it", "subtasks": [{ "id": "probe-a", "title": "A part" }] },
+        { "id": "build", "title": "Build it" },
+    ])
+    .to_string();
+    let commitment =
+        json!({ "outcome": "It is shipped", "criteria": ["It runs"], "limits": "None" })
+            .to_string();
+    let plan = goal(
+        &old_host,
+        &dir,
+        &["create", &session, "ship", "Ship it", &items, &commitment],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
+    goal(
+        &old_host,
+        &dir,
+        &["step", &plan_id, "0", "probe-a", "completed", "It behaves"],
+    );
+    let note = json!({
+        "name": "working-notes.md", "format": "markdown", "content": "# Notes\nFirst.",
+        "document_revision": 0, "reason": "Initial findings",
+    })
+    .to_string();
+    goal(&old_host, &dir, &["document", &plan_id, "1", &note]);
+    let checkpoint =
+        json!({ "progress": "Probed", "next_work": "Build it", "evidence": { "criterion-1": "ran it" } })
+            .to_string();
+    goal(&old_host, &dir, &["checkpoint", &plan_id, "2", &checkpoint]);
+    let without_now = |mut plan: Value| -> Value {
+        plan.as_object_mut().unwrap().remove("server_now");
+        plan
+    };
+    let plan_before = without_now(goal(&old_host, &dir, &["get", &plan_id]));
+    let notes_before = goal(&old_host, &dir, &["read", &plan_id, "working-notes.md"]);
     let before = old_host.conversation(&session);
 
     // The move, as its owner would run it.
@@ -3386,9 +3424,41 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     let told = String::from_utf8_lossy(&moved.stdout).into_owned();
     assert!(
-        told.contains("with the 4 rows of its conversation and 2 files it published (1 more"),
+        told.contains(
+            "with the 4 rows of its conversation, its plan and 2 files it published (1 more"
+        ),
         "{told}"
     );
+
+    // Its goal came with it: the plan as it stood, at its revision, with its steps, its
+    // history, its working notes, and the artifact it is shown as.
+    let new_dir = new_place.root.clone();
+    let plan_here = without_now(goal(&new_host, &new_dir, &["get", &plan_id]));
+    assert_eq!(plan_here, plan_before);
+    assert_eq!(
+        goal(&new_host, &new_dir, &["read", &plan_id, "working-notes.md"]),
+        notes_before
+    );
+    let listed = new_host.get(&format!("/task-plans?session={session}"));
+    assert_eq!(listed["plans"].as_array().unwrap().len(), 1);
+    let library = new_host.get(&format!("/artifacts?session={session}"));
+    assert_eq!(library["artifacts"][0]["type"], "plan");
+    assert_eq!(library["artifacts"][0]["plan"]["plan_id"], plan_id.as_str());
+    // And the agent goes on with it here: the next step follows the revision it had.
+    let revision = plan_before["revision"].as_i64().unwrap().to_string();
+    let stepped = goal(
+        &new_host,
+        &new_dir,
+        &[
+            "step",
+            &plan_id,
+            &revision,
+            "build",
+            "in_progress",
+            "Taking it up",
+        ],
+    );
+    assert_eq!(stepped["counts"]["in_progress"], 1);
 
     // What it published came with it, under the ids its conversation names: the image in
     // its gallery as it was, the bytes of both as they were.

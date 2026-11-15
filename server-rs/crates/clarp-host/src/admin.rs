@@ -26,9 +26,9 @@ Host's from CLARP_HOST_TOKEN.";
 
 pub const IMPORT_USAGE: &str =
     "usage: clarp-host import --from ADDR:PORT --session NAME [--host ADDR:PORT] [--files]
-Reads the agent NAME, its conversation and the files it published from the Host at --from and
-gives them to this Host. With --files only the files are read, for an agent that is here
-already: a move whose files did not all arrive is finished that way.
+Reads the agent NAME, its conversation, its plans and goals and the files it published from
+the Host at --from and gives them to this Host. With --files only the files are read, for an
+agent that is here already: a move whose files did not all arrive is finished that way.
 The other Host's token is read from CLARP_SOURCE_TOKEN, this Host's from CLARP_HOST_TOKEN.";
 
 /// How many rows of a conversation are asked for at a time.
@@ -318,7 +318,40 @@ pub fn import(
             came_with(arrived, missing)
         ));
     }
-    let asked = json!({ "agent": agent, "from": format!("http://{from}"), "turns": turns });
+    // What it is committed to: its plans as the other Host shows them, each goal with the
+    // newest of its documents.
+    let listed = get(
+        &from,
+        &format!("/task-plans?session={}", ids::in_a_link(&session)),
+        source_token,
+    )?;
+    let mut plans: Vec<Value> = Vec::new();
+    for plan in listed["plans"].as_array().cloned().unwrap_or_default() {
+        let plan_id = plan["plan_id"].as_str().unwrap_or("");
+        let named = plan["goal"]["documents"].as_array().cloned();
+        let mut documents: Vec<Value> = Vec::new();
+        for name in named
+            .iter()
+            .flatten()
+            .filter_map(|row| row["name"].as_str())
+        {
+            let path = format!(
+                "/task-plan/document?plan_id={}&name={}",
+                ids::in_a_link(plan_id),
+                ids::in_a_link(name)
+            );
+            documents.push(get(&from, &path, source_token)?["document"].clone());
+        }
+        plans.push(json!({ "plan": plan, "documents": documents }));
+    }
+    let committed = match plans.len() {
+        0 => String::new(),
+        1 => ", its plan".to_string(),
+        many => format!(", its {many} plans"),
+    };
+    let asked = json!({
+        "agent": agent, "from": format!("http://{from}"), "turns": turns, "plans": plans,
+    });
     let (status, answer) = post(&host, "/agents/import", token, &asked)?;
     if status != 200 {
         let why = answer["error"].as_str().unwrap_or("no reason given");
@@ -330,7 +363,7 @@ pub fn import(
         Err(why) => format!("none of its files ({why}): `clarp-host import --files` brings them"),
     };
     Ok(format!(
-        "{session} is on this Host now, with the {count} rows of its conversation and {followed}.\n\
+        "{session} is on this Host now, with the {count} rows of its conversation{committed} and {followed}.\n\
          It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns."
     ))
 }
