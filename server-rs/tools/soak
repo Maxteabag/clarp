@@ -16,7 +16,10 @@ told from an answer to another message. After each round it reads the conversati
   * a completed turn answered with the word that was asked for.
 
 A turn that ends without completing (a usage limit, a stop, a tool that failed) is counted as
-what it was, with the Host's own word for it: it is not a lost message. Every round is one
+what it was, with the Host's own sentence for why: it is not a lost message. A turn that has
+not ended when its round stops waiting (a turn that waits for an account may take half an hour)
+is written down as that, with what the Host says the agent is doing, and looked at again after
+every later round until it has ended: how it ended is a line of its own. Every round is one
 line of JSON in the evidence file, so the test can be read, and resumed, at any time. Each
 line also says which build the Host runs and since when its service has been up, so that a
 restart or an update of the Host between or during turns is on record.
@@ -134,7 +137,8 @@ def audit(rows: list, message_id: str, word: str) -> dict:
     """What the conversation says of one message: is it there once, did one turn end for it, and
     did a completed turn say the word."""
     places = [i for i, row in enumerate(rows) if row.get("id") == message_id]
-    found = {"message_rows": len(places), "turn_ends": 0, "status": "", "said_the_word": False, "replies": 0}
+    found = {"message_rows": len(places), "turn_ends": 0, "status": "", "said_the_word": False, "replies": 0,
+             "said_why": ""}
     if len(places) != 1:
         return found
     # The rows of its turn: from the message to the next message.
@@ -144,7 +148,11 @@ def audit(rows: list, message_id: str, word: str) -> dict:
         if isinstance(turn, dict):
             found["turn_ends"] += 1
             found["status"] = str(turn.get("status") or "")
-        if row.get("role") == "assistant" and not row.get("kind"):
+        if row.get("role") == "assistant" and row.get("origin") == "system":
+            # What the Host itself says of a turn that did not finish: why. Its own sentence,
+            # not the agent's: an account that was out, a tool that died.
+            found["said_why"] = " ".join(str(row.get("text") or "").split())[:200]
+        elif row.get("role") == "assistant" and not row.get("kind"):
             found["replies"] += 1
             # The word whole: `ack 7` is not in `ack 70`.
             if re.search(rf"\b{re.escape(word)}\b", str(row.get("text") or "")):
@@ -182,19 +190,33 @@ def one_round(host: Host, session: str, run: str, n: int, turn_timeout: float) -
         line["outcome"] = "host_unreachable"
         return line
     line.update(found)
-    if found["message_rows"] == 0:
-        line["outcome"] = "lost"
-    elif found["message_rows"] > 1 or found["turn_ends"] > 1:
-        line["outcome"] = "doubled"
-    elif found["turn_ends"] == 0:
-        line["outcome"] = "no_end_in_time"
-    elif found["status"] != "completed":
-        line["outcome"] = f"turn_{found['status'] or 'ended'}"
-    elif not found["said_the_word"]:
-        line["outcome"] = "wrong_answer"
-    else:
-        line["outcome"] = "ok"
+    line["outcome"] = judged(found)
+    if line["outcome"] == "no_end_in_time":
+        # What the Host says the agent is doing tells a turn that waits for an account, which
+        # may take half an hour, from one that hangs.
+        doing = (snapshot(host).get(session) or {}).get("live_activity") or {}
+        line["doing"] = {"state": str(doing.get("state") or ""), "headline": str(doing.get("headline") or "")[:200]}
+        if line["doing"]["state"] == "limited":
+            line["outcome"] = "waiting_for_account"
     return line
+
+
+def judged(found: dict) -> str:
+    """What an audit of one message comes to."""
+    if found["message_rows"] == 0:
+        return "lost"
+    if found["message_rows"] > 1 or found["turn_ends"] > 1:
+        return "doubled"
+    if found["turn_ends"] == 0:
+        return "no_end_in_time"
+    if found["status"] != "completed":
+        return f"turn_{found['status'] or 'ended'}"
+    if not found["said_the_word"]:
+        return "wrong_answer"
+    return "ok"
+
+
+UNENDED = ("no_end_in_time", "waiting_for_account")
 
 
 def whole(host: Host, session: str, run: str, upto: int) -> dict:
@@ -232,11 +254,25 @@ def run(args) -> int:
                 run_id, n = done["run"], done["n"]
     print(f"soak: run {run_id}, from round {n + 1}, agent {args.session} on {args.host}, every {args.every} s", flush=True)
     rounds = 0
+    # The rounds whose turn had not ended when the round stopped waiting for it: looked at again
+    # after every later round, so that how such a turn ended is written down too.
+    unended = []
     while args.rounds <= 0 or rounds < args.rounds:
         n, rounds = n + 1, rounds + 1
         line = one_round(host, args.session, run_id, n, args.turn_timeout)
         with evidence.open("a") as out:
             out.write(json.dumps(line, sort_keys=True) + "\n")
+            rows = all_rows(host, args.session) if unended else None
+            for earlier in list(unended if rows is not None else ()):
+                found = audit(rows, earlier["message_id"], f"ack {earlier['n']}")
+                if found["turn_ends"] >= 1 or found["message_rows"] != 1:
+                    unended.remove(earlier)
+                    out.write(json.dumps({"kind": "late_end", "at": int(time.time() * 1000), "run": run_id,
+                                          "of_round": earlier["n"], "outcome": judged(found), **found},
+                                         sort_keys=True) + "\n")
+                    print(f"soak: round {earlier['n']} ended after all: {judged(found)}", flush=True)
+            if line["outcome"] in UNENDED:
+                unended.append(line)
             if n % 12 == 0:
                 out.write(json.dumps({"at": int(time.time() * 1000), "run": run_id, **whole(host, args.session, run_id, n)},
                                      sort_keys=True) + "\n")
@@ -440,7 +476,8 @@ def report(args) -> int:
             lines.append(json.loads(raw))
         except ValueError:
             pass
-    rounds = [line for line in lines if "n" in line and "message_id" in line]
+    rounds = [line for line in lines if "n" in line and "message_id" in line and "kind" not in line]
+    late = [line for line in lines if line.get("kind") == "late_end"]
     audits = [line for line in lines if line.get("outcome") == "audit"]
     if not rounds:
         print("no rounds yet")
@@ -460,6 +497,25 @@ def report(args) -> int:
           f"({time.strftime('%d %b %H:%M', time.localtime(first / 1000))} to {time.strftime('%d %b %H:%M', time.localtime(last / 1000))})")
     for outcome in sorted(by, key=lambda name: (-by[name], name)):
         print(f"  {outcome}: {by[outcome]}")
+    # A turn that did not finish is not a message that was lost: the Host says under the
+    # message why. Counted by what it said (rounds written before 15 Nov 20:10 did not keep it).
+    why = {}
+    for line in rounds:
+        if str(line.get("outcome", "")).startswith("turn_") and line.get("outcome") != "turn_completed":
+            said = line.get("said_why") or "what the Host said was not written down"
+            why.setdefault(said, []).append(line["n"])
+    for said, numbers in sorted(why.items(), key=lambda item: item[1]):
+        print(f"  a turn that did not finish, round{'s' if len(numbers) > 1 else ''} "
+              f"{', '.join(str(n) for n in numbers)}: {said}")
+    # A turn that had not ended when its round stopped waiting, and how it ended after all.
+    for line in late:
+        by[line["outcome"]] = by.get(line["outcome"], 0) + (line["outcome"] in ("lost", "doubled", "wrong_answer"))
+    if late:
+        ended = {}
+        for line in late:
+            ended[line["outcome"]] = ended.get(line["outcome"], 0) + 1
+        print(f"  ended after their round had stopped waiting: {len(late)} "
+              f"({', '.join(f'{name}: {count}' for name, count in sorted(ended.items()))})")
     print(f"lost: {by.get('lost', 0)}   doubled: {by.get('doubled', 0)}   wrong answer: {by.get('wrong_answer', 0)}")
     print(f"restarts of the Host between rounds: {restarts}; during a round: {during}; builds it ran: {', '.join(versions) or 'unknown'}")
     if seconds:
