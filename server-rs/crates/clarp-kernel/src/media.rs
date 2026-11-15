@@ -164,6 +164,53 @@ pub fn safe_name(raw: &str, content_type: &str) -> String {
     cleaned.chars().take(128).collect()
 }
 
+/// The name a file is kept under that a user attached to what they say: what follows the
+/// last slash of what the app called it, letters, digits and a few signs only, no spaces, no
+/// leading dot, 128 characters at most. A file that is called nothing is called after its
+/// kind, and a name without an ending is given the ending of its kind, so that the tool an
+/// agent reads it with knows an image for one.
+pub fn upload_name(raw: &str, content_type: &str) -> String {
+    let unixed = raw.replace('\\', "/");
+    let base = unixed.rsplit('/').next().unwrap_or("").trim();
+    let kept: String = base
+        .chars()
+        .filter(|c| c.is_alphanumeric() || "._- ()".contains(*c))
+        .collect();
+    let cleaned = kept.trim().replace(' ', "_");
+    let cleaned = cleaned.trim_start_matches('.');
+    let extension = extension_of_type(&primary_type(content_type));
+    let named = if cleaned.is_empty() {
+        format!("upload{}", extension.unwrap_or(".bin"))
+    } else if cleaned.contains('.') {
+        cleaned.to_string()
+    } else {
+        format!("{cleaned}{}", extension.unwrap_or(""))
+    };
+    named.chars().take(128).collect()
+}
+
+/// The name of the directory an agent's uploads are kept in: its session name, as far as it
+/// is letters, digits, dots, dashes and underscores.
+pub fn upload_directory(session: &str) -> String {
+    let safe: String = session
+        .chars()
+        .filter(|c| c.is_alphanumeric() || "._-".contains(*c))
+        .collect();
+    if safe.is_empty() {
+        "unknown".to_string()
+    } else {
+        safe
+    }
+}
+
+/// The id an app gave an upload, when it is one: sent again under it, a file is the file
+/// that came before.
+pub fn upload_id(given: &str) -> Option<&str> {
+    let id = given.trim();
+    let plain = |byte: u8| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte);
+    ((1..=160).contains(&id.len()) && id.bytes().all(plain)).then_some(id)
+}
+
 /// What a file is: by its first bytes where they say it, else by what it was declared as,
 /// when its bytes do not speak against that. A declared kind of file whose bytes are not
 /// that kind is nothing that is taken.
