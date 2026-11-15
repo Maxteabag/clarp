@@ -518,7 +518,7 @@
       "cwd": "<ROOT>/workspace",
       "dreaming_enabled": false,
       "effort": "",
-      "focused": true,
+      "focused": false,
       "goal": null,
       "head_revision": 1,
       "heartbeat_enabled": false,
@@ -567,7 +567,7 @@
      }
     ],
     "available_mcp_servers": [],
-    "focus": "<id:2>",
+    "focus": null,
     "model_avatars": false,
     "roster": [
      "Claire"

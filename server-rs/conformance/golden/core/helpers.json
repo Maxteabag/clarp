@@ -435,7 +435,7 @@
       "cwd": "<ROOT>/workspace",
       "dreaming_enabled": false,
       "effort": "",
-      "focused": true,
+      "focused": false,
       "goal": null,
       "head_revision": 1,
       "heartbeat_enabled": false,
@@ -576,7 +576,7 @@
      }
     ],
     "available_mcp_servers": [],
-    "focus": "<id:2>",
+    "focus": null,
     "model_avatars": false,
     "roster": [
      "Claire"
@@ -927,7 +927,7 @@
       "cwd": "<ROOT>/workspace",
       "dreaming_enabled": false,
       "effort": "",
-      "focused": true,
+      "focused": false,
       "goal": null,
       "head_revision": 2,
       "heartbeat_enabled": false,
@@ -980,7 +980,7 @@
      }
     ],
     "available_mcp_servers": [],
-    "focus": "<id:1>",
+    "focus": null,
     "model_avatars": false,
     "roster": [
      "Claire"
@@ -1092,7 +1092,7 @@
       "cwd": "<ROOT>/workspace",
       "dreaming_enabled": false,
       "effort": "",
-      "focused": true,
+      "focused": false,
       "goal": null,
       "head_revision": 2,
       "heartbeat_enabled": false,
@@ -1149,7 +1149,7 @@
      "<agent:claire>"
     ],
     "available_mcp_servers": [],
-    "focus": "<id:1>",
+    "focus": null,
     "model_avatars": false,
     "roster": [
      "Claire"
@@ -1517,7 +1517,7 @@
       "cwd": "<ROOT>/workspace",
       "dreaming_enabled": false,
       "effort": "",
-      "focused": true,
+      "focused": false,
       "goal": null,
       "head_revision": 2,
       "heartbeat_enabled": false,
@@ -1570,7 +1570,7 @@
      }
     ],
     "available_mcp_servers": [],
-    "focus": "<id:1>",
+    "focus": null,
     "model_avatars": false,
     "roster": [
      "Claire"
@@ -1654,6 +1654,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "halfa",
+    "event_id": "<eid:agent-state#1@7169e8>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "helper-one",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@7169e8>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "session": "helper-one"
     },
@@ -1690,21 +1705,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@626a03>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "halfa",
-    "event_id": "<eid:agent-state#1@7169e8>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "helper-one",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@7169e8>"
   },
   {
    "data": {
