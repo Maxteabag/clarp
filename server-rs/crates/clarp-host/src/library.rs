@@ -24,6 +24,7 @@ use clarp_kernel::artifacts::{
 };
 use clarp_kernel::conversation::Message;
 use clarp_kernel::goals::GoalBook;
+use clarp_kernel::push;
 use clarp_kernel::python;
 use clarp_kernel::turn::{Admission, Origin};
 use serde_json::{Map, Value, json};
@@ -33,6 +34,7 @@ use crate::agent::View;
 use crate::edge::{ApiError, App};
 use crate::fleet::{AgentRecord, Member};
 use crate::ids;
+use crate::pusher::Requested;
 
 /// An agent's books as anyone may read them without asking the agent.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -648,9 +650,39 @@ pub(crate) async fn request(app: &App, data: &Map<String, Value>) -> Result<Valu
     let Some(member) = app.member(session.trim()) else {
         return Err(conflict(decisions::ask_of_nobody(&ask, app.clock.now_ms())));
     };
-    Ok(ask_agent(&member, Want::Request(Box::new(ask)))
+    let asked = ask_agent(&member, Want::Request(Box::new(ask)))
         .await?
-        .artifact)
+        .artifact;
+    push_request(app, &asked);
+    Ok(asked)
+}
+
+/// Tells the phones of a request that was just made. A request is the one thing an agent
+/// cannot finish without its user, and an agent that asks in the middle of a turn goes on
+/// working: without this the request would sit unseen until the user opened that chat.
+fn push_request(app: &App, artifact: &Value) {
+    let decision = &artifact["decision"];
+    let text = |value: &Value| value.as_str().unwrap_or("").to_string();
+    let decision_id = text(&decision["decision_id"]);
+    if decision_id.is_empty() || decision["status"].as_str().unwrap_or("pending") != "pending" {
+        return;
+    }
+    let or = |said: String, otherwise: String| if said.is_empty() { otherwise } else { said };
+    app.pusher.requested(Requested {
+        session: text(&artifact["session"]),
+        persona: or(text(&artifact["agent_name"]), "Clarp".to_string()),
+        title: text(&artifact["title"]),
+        question: or(text(&decision["question"]), text(&artifact["summary"])),
+        decision_id,
+        artifact_id: text(&artifact["artifact_id"]),
+        time_sensitive: push::needs_interruption(
+            decision["blocks_progress"] == true,
+            decision["urgency"].as_str().unwrap_or(""),
+        ),
+        text_input: decision["response_type"] == "text_input",
+        revision: decision["revision"].as_i64().unwrap_or(1),
+        expires_at: decision["expires_at"].as_i64(),
+    });
 }
 
 /// `POST /decisions/<id>/resolve`, `/dismiss` and `/withdraw`.

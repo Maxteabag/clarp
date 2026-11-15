@@ -33,12 +33,19 @@ pub struct Config {
     /// What an installer stamped this installation with: the content of `DEPLOYED_VERSION` in
     /// the data directory. Empty for a Host that was not installed by one.
     pub deployed_version: String,
+    /// The relay that carries pushes to phones, by its address. Empty: nothing is pushed.
+    /// A Host that is started bare speaks to nobody outside; an installation names its relay.
+    pub push_relay: String,
+    /// This Host's own credential at the relay, for phones that gave it no grant of their
+    /// own. Empty: only phones with a grant are reached.
+    pub push_credential: String,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
 [--engine sqlite|memory] [--codec zstd|none] [--launcher direct|systemd] [--shim PATH] \
-[--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N]
-The token the apps must present is read from CLARP_HOST_TOKEN.";
+[--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL]
+The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
+the push relay, when it has one, from CLARP_PUSH_CREDENTIAL.";
 
 fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
@@ -65,6 +72,7 @@ impl Config {
         let mut default_cwd = home();
         let mut keep_spools = false;
         let mut jobs_checked_every_ms = 30_000;
+        let mut push_relay = String::new();
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
             match arg.as_str() {
@@ -78,6 +86,16 @@ impl Config {
                 "--name" => name = value("a name")?,
                 "--cwd" => default_cwd = PathBuf::from(value("a directory")?),
                 "--keep-spools" => keep_spools = true,
+                "--push-relay" => {
+                    push_relay = value("an address")?.trim_end_matches('/').to_string();
+                    // What a phone is told goes over TLS, or stays on this machine.
+                    let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"];
+                    let safe = push_relay.starts_with("https://")
+                        || local.iter().any(|begin| push_relay.starts_with(begin));
+                    if !safe {
+                        return Err(format!("--push-relay {push_relay}: an https address"));
+                    }
+                }
                 "--jobs-checked-every-ms" => {
                     jobs_checked_every_ms = value("a number of milliseconds")?
                         .parse()
@@ -115,6 +133,8 @@ impl Config {
                 .map(|version| version.trim().to_string())
                 .unwrap_or_default(),
             data_dir,
+            push_relay,
+            push_credential: std::env::var("CLARP_PUSH_CREDENTIAL").unwrap_or_default(),
         })
     }
 }
@@ -178,5 +198,16 @@ mod tests {
         assert!(parse(&["--what"]).is_err());
         assert!(parse(&["--data"]).is_err());
         assert!(parse(&["--listen", "nowhere"]).is_err());
+        // A Host pushes nothing until it is given a relay, and only one it reaches over TLS
+        // or on this machine.
+        assert_eq!(config.push_relay, "");
+        assert_eq!(
+            parse(&["--push-relay", "https://relay.example/"])
+                .unwrap()
+                .push_relay,
+            "https://relay.example"
+        );
+        assert!(parse(&["--push-relay", "http://127.0.0.1:9"]).is_ok());
+        assert!(parse(&["--push-relay", "http://relay.example"]).is_err());
     }
 }

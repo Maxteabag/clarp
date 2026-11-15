@@ -216,6 +216,20 @@ written in one append with the mark that it was told, and gives the agent its to
 and forms, the media store with audio, video and file artifacts, countdowns (each says it is not available on
 this Host yet), and `/attention/inbox`.
 
+**The user is told, also when the phone is in a pocket** (15 Nov 2026). Who is told when a turn ends is the
+Python Host's rule (`clarp-kernel/src/notify.rs`, 86,016 recorded combinations): a reply for the user tells
+the user; what agents say to each other and what a schedule began tells nobody; a user who asked at the desk
+is not paged. A phone registers the token its push service gave it (`devices.rs`, 49 recorded calls;
+`POST`/`DELETE /devices`, `GET /devices/push-tokens`): a token belongs to the paired device that registered
+it. A push is handed to the relay (`relay.rs`, Clarp Audio Central) by the phone's own grant, for which the
+Host needs no key and no account, or by the Host's credential there; what is sent is the Python Host's
+payload, field for field (`push.rs`, 341 recorded payloads). A request an agent makes is pushed when it is
+made; while a desktop app says its user sits in front of it (`presence.rs`, `POST /desktop-presence`), no
+phone is paged; a token the push service calls dead is not sent to again. A Host pushes nothing until it is
+given a relay (`--push-relay`), which `tools/install-host` does. Held end to end by a Host with a paired
+phone and a stand-in relay. Not there: Android phones (FCM), Live Activities, the silent push that asks an
+app to sync, an agent's portrait in a push, muting an agent.
+
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
 other feature out of `capabilities.features`. The owner declined an install on 15 Nov: a Host an agent cannot

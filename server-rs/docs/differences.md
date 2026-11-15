@@ -56,4 +56,9 @@ it covers that exact difference and nothing else.
 | What | The Python Host | The Rust Host | Why |
 |---|---|---|---|
 | A plain send to a busy agent from something that is not a person | ends the running turn ("legacy other origins preempt", defect R7) | waits its turn | No automation ends a turn a person may be waiting for |
+| Pushes to phones | on by default, through the developer's relay | off until the Host is given a relay (`--push-relay`); `tools/install-host` names it | A Host that is started bare speaks to nobody outside. Tests and disposable Hosts never reach a real relay |
+| A paired device with limited scope registers a push token | registers a row nobody owns | refused, 403 | A limited device may read and send; it changes nothing on the Host |
+| Phones reached through FCM (Android) | pushed to through a Google service account | registered, not pushed to yet | Built when an Android phone is to be reached |
+| A push straight to Apple with the Host's own key, Live Activities, the silent push that asks an app to sync, the agent's portrait in a push | there | not there | A Host reaches a phone through the relay: by the phone's grant, or by the Host's credential there. The rest comes with the surfaces it belongs to |
+| A send from outside with origin `heartbeat` | accepted when heartbeats are on | always refused with the words for heartbeats that are off | This Host has no heartbeats yet |
 | The model an agent's row shows after a turn that was stopped | the model of the last answer in the tool's transcript | the model of the last completed turn | The same thing, read from what the Host has. A turn that was cut off may not have said its model yet |

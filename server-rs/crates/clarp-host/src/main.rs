@@ -5,7 +5,7 @@
 //! turns: they belong to their shims, and the next Host finds them.
 
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use clarp_host::config::{Config, USAGE};
 use clarp_host::edge::{self, App};
@@ -13,7 +13,10 @@ use clarp_host::fleet::{self, Works};
 use clarp_host::hub::Hub;
 use clarp_host::ids;
 use clarp_host::launcher::Launcher;
+use clarp_host::pusher;
+use clarp_host::relay::Relay;
 use clarp_host::revisions::Revisions;
+use clarp_kernel::presence::Presence;
 use clarp_ports::clock::{Clock, SystemClock};
 use clarp_ports::kv::KeyValueEngine;
 use clarp_ports::log::LogEngine;
@@ -77,6 +80,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // The first line says where the Host listens: with port 0 only the Host knows.
     let address = listener.local_addr().map_err(|error| error.to_string())?;
     let revisions = Arc::new(Revisions::new());
+    // What is to be pushed is taken from the first moment on; it goes out once the fleet,
+    // which knows the phones, is there.
+    let (pusher, to_push) = pusher::pusher();
     let works = Works {
         config: config.clone(),
         engine,
@@ -86,8 +92,19 @@ async fn serve(config: Config) -> Result<(), String> {
         hub: hub.clone(),
         revisions: revisions.clone(),
         tool_env: vec![(clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string())],
+        pusher: pusher.clone(),
     };
     let fleet = fleet::start(works, store)?;
+    let desks = Arc::new(Mutex::new(Presence::new()));
+    to_push.run(pusher::Works {
+        relay: Some(config.push_relay.as_str())
+            .filter(|relay| !relay.is_empty())
+            .map(|relay| Relay::new(relay, &config.push_credential)),
+        fleet: fleet.clone(),
+        desks: desks.clone(),
+        clock: clock.clone(),
+        server_id: server_id.clone(),
+    })?;
     let app = App {
         config: config.clone(),
         hub,
@@ -95,6 +112,8 @@ async fn serve(config: Config) -> Result<(), String> {
         clock,
         server_id,
         revisions,
+        pusher,
+        desks,
     };
     // The Host answers when it knows its agents: what they are doing, what runs for them. A
     // request that comes earlier waits at the door for that moment, it is not given half a view.

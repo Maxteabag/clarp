@@ -13,6 +13,7 @@ pub mod goals;
 pub mod jobs;
 pub mod journal;
 pub mod notify;
+pub mod presence;
 pub mod push;
 pub mod python;
 pub mod tools;

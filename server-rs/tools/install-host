@@ -4,7 +4,7 @@
 # unit. Nothing here compiles.
 #
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH]
-#                                [--start] [--files-only]
+#                                [--push-relay URL|off] [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
 #   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
@@ -15,6 +15,12 @@
 #                  machine runs (read from its unit, clarp-runtime.service), so that an agent
 #                  that moves is run by the same tool it was run by; without a Python Host, the
 #                  ones on the path. Run this again after the Python Host changed its tools
+#   --push-relay   the relay that carries pushes to phones (default: the one the Python Host
+#                  uses, Clarp Audio Central), or `off`. A phone that gave this Host a grant of
+#                  its own is reached with nothing more. To reach phones that gave none, the
+#                  Host needs a credential of its own at the relay: put
+#                  CLARP_PUSH_CREDENTIAL=... into ~/.config/clarp-host/env yourself. This script
+#                  never copies one from another Host
 #   --start        enable the unit and start it, or restart it when it runs (turns that are running
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
@@ -33,6 +39,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 from="$here/dist"; listen="127.0.0.1:7690"; name="$(hostname) Rust"; start=0; files_only=0; claude=""; codex=""
+push_relay="https://clarp-audio-central.peter-w-adams96.workers.dev"
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
@@ -40,9 +47,10 @@ while [ $# -gt 0 ]; do
         --name) name="$2"; shift 2 ;;
         --claude) claude="$2"; shift 2 ;;
         --codex) codex="$2"; shift 2 ;;
+        --push-relay) push_relay="$2"; [ "$push_relay" = off ] && push_relay=""; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -126,7 +134,7 @@ Environment="CLARP_CONFIG_DIR=$config"
 Environment="CLAUDE_PWA_CONFIG=$config/config.toml"
 Environment="CLARP_SHARE_DIR=$share"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name"
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name"${push_relay:+ --push-relay $push_relay}
 Restart=on-failure
 RestartSec=2
 
