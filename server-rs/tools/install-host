@@ -87,15 +87,15 @@ done
 # Host on this machine, so that the name is never looked for further along the path. What the
 # Host does not have yet it says so itself, and does nothing.
 tools=0
-for name in $( { printf '%s\n' clarp-agent-bg clarp-admin clarp-goal clarp-agent-artifacts; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
-    [ "$name" = clarp-sub-agent ] && continue
-    cat > "$share/tools/.$name.new" <<EOF
+for tool in $( { printf '%s\n' clarp-agent-bg clarp-admin clarp-goal clarp-agent-artifacts; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
+    [ "$tool" = clarp-sub-agent ] && continue
+    cat > "$share/tools/.$tool.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
-exec "$share/bin/clarp-host" tool $name "\$@"
+exec "$share/bin/clarp-host" tool $tool "\$@"
 EOF
-    chmod 755 "$share/tools/.$name.new"
-    mv -f "$share/tools/.$name.new" "$share/tools/$name"
+    chmod 755 "$share/tools/.$tool.new"
+    mv -f "$share/tools/.$tool.new" "$share/tools/$tool"
     tools=$((tools + 1))
 done
 # One tool is a program of its own: clarp-sub-agent, with which an agent starts helpers and
@@ -125,6 +125,10 @@ fi
 chmod 755 "$share/tools/.clarp-sub-agent.new"
 mv -f "$share/tools/.clarp-sub-agent.new" "$share/tools/clarp-sub-agent"
 tools=$((tools + 1))
+# The battle test's own program (docs/battle-test.md), so that a run of a week does not depend
+# on the checkout it was installed from.
+install -m 755 "$here/tools/soak" "$share/libexec/.soak.new"
+mv -f "$share/libexec/.soak.new" "$share/libexec/soak"
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 

@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""The battle test of an installed Rust Host: real messages, around the clock, each one audited.
+
+    server-rs/tools/soak run    [--host ADDR:PORT] [--session S] [--every SECONDS] [--evidence FILE]
+                                [--rounds N] [--turn-timeout SECONDS]
+    server-rs/tools/soak report [--evidence FILE]
+
+`run` writes to an agent of the Host every `--every` seconds (default 900) and waits for the
+turn to end. Every message asks for one exact word back (`ack <n>`), so that an answer can be
+told from an answer to another message. After each round it reads the conversation and checks:
+
+  * the message is there exactly once (not lost, not doubled);
+  * exactly one turn ended for it;
+  * a completed turn answered with the word that was asked for.
+
+A turn that ends without completing (a usage limit, a stop, a tool that failed) is counted as
+what it was, with the Host's own word for it: it is not a lost message. Every round is one
+line of JSON in the evidence file, so the test can be read, and resumed, at any time. Each
+line also says which build the Host runs and since when its service has been up, so that a
+restart or an update of the Host between or during turns is on record.
+
+The token is read from CLARP_HOST_TOKEN, or from the file the installer wrote
+(~/.config/clarp-host/env). Nothing but this Host is spoken to.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+HOME = pathlib.Path.home()
+CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "clarp-host"
+SHARE = pathlib.Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share") / "clarp-host"
+EVIDENCE = SHARE / "soak" / "evidence.jsonl"
+
+
+def token() -> str:
+    given = os.environ.get("CLARP_HOST_TOKEN", "")
+    if given:
+        return given
+    try:
+        for line in (CONFIG / "env").read_text().splitlines():
+            if line.startswith("CLARP_HOST_TOKEN="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+class Host:
+    def __init__(self, address: str, secret: str):
+        self.base, self.secret = f"http://{address}", secret
+
+    def ask(self, method: str, path: str, body=None, timeout: float = 30):
+        """One request: (status, body as JSON or text). Status 0: the Host did not answer."""
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(self.base + path, data=data, method=method)
+        request.add_header("Content-Type", "application/json")
+        if self.secret:
+            request.add_header("Authorization", f"Bearer {self.secret}")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as answer:
+                raw, status = answer.read(), answer.status
+        except urllib.error.HTTPError as refused:
+            raw, status = refused.read(), refused.code
+        except (urllib.error.URLError, OSError, TimeoutError) as failed:
+            return 0, str(getattr(failed, "reason", failed))
+        try:
+            return status, json.loads(raw)
+        except ValueError:
+            return status, raw.decode("utf-8", "replace")
+
+
+def up_since() -> str:
+    """Since when the Host's service has been up, as systemd says it. Changes with a restart."""
+    try:
+        out = subprocess.run(["systemctl", "--user", "show", "clarp-host.service", "-p", "ActiveEnterTimestamp", "--value"],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def rows_of(host: Host, session: str, limit: int = 200):
+    status, body = host.ask("GET", f"/log?session={urllib.parse.quote(session)}&limit={limit}")
+    return (body.get("turns") or []) if status == 200 and isinstance(body, dict) else None
+
+
+def all_rows(host: Host, session: str):
+    """The whole conversation, oldest first, read a page at a time the way an app pages back."""
+    status, body = host.ask("GET", f"/log?session={urllib.parse.quote(session)}&limit=200")
+    if status != 200 or not isinstance(body, dict):
+        return None
+    rows = list(body.get("turns") or [])
+    while body.get("has_more") and rows:
+        first = urllib.parse.quote(str(rows[0].get("id") or ""))
+        status, body = host.ask("GET", f"/log?session={urllib.parse.quote(session)}&limit=200&before={first}")
+        if status != 200 or not isinstance(body, dict):
+            return None
+        older = list(body.get("turns") or [])
+        if not older:
+            break
+        rows = older + rows
+    return rows
+
+
+def audit(rows: list, message_id: str, word: str) -> dict:
+    """What the conversation says of one message: is it there once, did one turn end for it, and
+    did a completed turn say the word."""
+    places = [i for i, row in enumerate(rows) if row.get("id") == message_id]
+    found = {"message_rows": len(places), "turn_ends": 0, "status": "", "said_the_word": False, "replies": 0}
+    if len(places) != 1:
+        return found
+    # The rows of its turn: from the message to the next message.
+    end = next((i for i in range(places[0] + 1, len(rows)) if rows[i].get("role") == "user"), len(rows))
+    for row in rows[places[0]:end]:
+        turn = row.get("turn")
+        if isinstance(turn, dict):
+            found["turn_ends"] += 1
+            found["status"] = str(turn.get("status") or "")
+        if row.get("role") == "assistant" and not row.get("kind"):
+            found["replies"] += 1
+            # The word whole: `ack 7` is not in `ack 70`.
+            if re.search(rf"\b{re.escape(word)}\b", str(row.get("text") or "")):
+                found["said_the_word"] = True
+    return found
+
+
+def one_round(host: Host, session: str, run: str, n: int, turn_timeout: float) -> dict:
+    client_id, word = f"soak-{run}-{n}", f"ack {n}"
+    line = {"at": int(time.time() * 1000), "run": run, "n": n, "message_id": f"u-{client_id}", "up_since": up_since()}
+    status, info = host.ask("GET", "/server-info")
+    line["host_version"] = info.get("version", "") if isinstance(info, dict) else ""
+    began = time.monotonic()
+    status, sent = host.ask("POST", "/send", {
+        "session": session, "client_msg_id": client_id, "synthesize_audio": False,
+        "text": f"Soak check {n}. Reply with exactly these two words and nothing else: {word}"})
+    line["send_status"] = status
+    if status != 200:
+        # Not accepted: nothing was promised. The same id is sent again by the next run of this
+        # round only if a person asks; a round is never repeated by itself.
+        line["outcome"] = "not_accepted"
+        line["detail"] = (sent if isinstance(sent, str) else json.dumps(sent))[:300]
+        return line
+    line["queued"] = bool(isinstance(sent, dict) and sent.get("queued"))
+    found, deadline = None, time.monotonic() + turn_timeout
+    while time.monotonic() < deadline:
+        rows = rows_of(host, session)
+        if rows is not None:
+            found = audit(rows, line["message_id"], word)
+            if found["turn_ends"] >= 1:
+                break
+        time.sleep(3)
+    line["seconds"] = round(time.monotonic() - began, 1)
+    line["up_since_after"] = up_since()
+    if found is None:
+        line["outcome"] = "host_unreachable"
+        return line
+    line.update(found)
+    if found["message_rows"] == 0:
+        line["outcome"] = "lost"
+    elif found["message_rows"] > 1 or found["turn_ends"] > 1:
+        line["outcome"] = "doubled"
+    elif found["turn_ends"] == 0:
+        line["outcome"] = "no_end_in_time"
+    elif found["status"] != "completed":
+        line["outcome"] = f"turn_{found['status'] or 'ended'}"
+    elif not found["said_the_word"]:
+        line["outcome"] = "wrong_answer"
+    else:
+        line["outcome"] = "ok"
+    return line
+
+
+def whole(host: Host, session: str, run: str, upto: int) -> dict:
+    """The whole conversation of this run, read again: every message once, every one with at most
+    one end. What a single round cannot see: a message that came a second time later."""
+    rows = all_rows(host, session)
+    if rows is None:
+        return {"outcome": "host_unreachable"}
+    prefix, seen, ends = f"u-soak-{run}-", {}, {}
+    current = None
+    for row in rows:
+        if row.get("role") == "user":
+            current = row.get("id") if str(row.get("id", "")).startswith(prefix) else None
+            if current:
+                seen[current] = seen.get(current, 0) + 1
+        if current and isinstance(row.get("turn"), dict):
+            ends[current] = ends.get(current, 0) + 1
+    return {"outcome": "audit", "messages": len(seen), "doubled": sorted(k for k, v in seen.items() if v > 1),
+            "ended_twice": sorted(k for k, v in ends.items() if v > 1), "upto": upto, "rows_read": len(rows)}
+
+
+def run(args) -> int:
+    host = Host(args.host, token())
+    evidence = pathlib.Path(args.evidence)
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    run_id, n = time.strftime("%m%d%H%M"), 0
+    # A run that is started again goes on counting where the file ends.
+    if evidence.exists():
+        for raw in evidence.read_text().splitlines():
+            try:
+                done = json.loads(raw)
+            except ValueError:
+                continue
+            if done.get("run") and isinstance(done.get("n"), int):
+                run_id, n = done["run"], done["n"]
+    print(f"soak: run {run_id}, from round {n + 1}, agent {args.session} on {args.host}, every {args.every} s", flush=True)
+    rounds = 0
+    while args.rounds <= 0 or rounds < args.rounds:
+        n, rounds = n + 1, rounds + 1
+        line = one_round(host, args.session, run_id, n, args.turn_timeout)
+        with evidence.open("a") as out:
+            out.write(json.dumps(line, sort_keys=True) + "\n")
+            if n % 12 == 0:
+                out.write(json.dumps({"at": int(time.time() * 1000), "run": run_id, **whole(host, args.session, run_id, n)},
+                                     sort_keys=True) + "\n")
+        print(f"soak: round {n}: {line['outcome']}" + (f" in {line.get('seconds')} s" if "seconds" in line else ""), flush=True)
+        if args.rounds <= 0 or rounds < args.rounds:
+            time.sleep(max(1.0, args.every))
+    return 0
+
+
+def report(args) -> int:
+    evidence = pathlib.Path(args.evidence)
+    if not evidence.exists():
+        print(f"no evidence yet: {evidence}")
+        return 1
+    lines = []
+    for raw in evidence.read_text().splitlines():
+        try:
+            lines.append(json.loads(raw))
+        except ValueError:
+            pass
+    rounds = [line for line in lines if "n" in line and "message_id" in line]
+    audits = [line for line in lines if line.get("outcome") == "audit"]
+    if not rounds:
+        print("no rounds yet")
+        return 1
+    by = {}
+    for line in rounds:
+        by[line["outcome"]] = by.get(line["outcome"], 0) + 1
+    first, last = rounds[0]["at"], rounds[-1]["at"]
+    restarts = sum(1 for a, b in zip(rounds, rounds[1:]) if a.get("up_since") and b.get("up_since") and a["up_since"] != b["up_since"])
+    during = sum(1 for line in rounds if line.get("up_since") and line.get("up_since_after") and line["up_since"] != line["up_since_after"])
+    versions = []
+    for line in rounds:
+        if line.get("host_version") and line["host_version"] not in versions:
+            versions.append(line["host_version"])
+    seconds = sorted(line["seconds"] for line in rounds if line.get("outcome") == "ok" and "seconds" in line)
+    print(f"rounds: {len(rounds)} over {(last - first) / 3600000:.1f} hours "
+          f"({time.strftime('%d %b %H:%M', time.localtime(first / 1000))} to {time.strftime('%d %b %H:%M', time.localtime(last / 1000))})")
+    for outcome in sorted(by, key=lambda name: (-by[name], name)):
+        print(f"  {outcome}: {by[outcome]}")
+    print(f"lost: {by.get('lost', 0)}   doubled: {by.get('doubled', 0)}   wrong answer: {by.get('wrong_answer', 0)}")
+    print(f"restarts of the Host between rounds: {restarts}; during a round: {during}; builds it ran: {', '.join(versions) or 'unknown'}")
+    if seconds:
+        print(f"a completed turn took: median {seconds[len(seconds) // 2]} s, longest {seconds[-1]} s")
+    if audits:
+        doubled = sum(len(a.get("doubled", [])) + len(a.get("ended_twice", [])) for a in audits)
+        print(f"whole-conversation audits: {len(audits)}, the last over {audits[-1].get('messages')} messages; doubled or ended twice: {doubled}")
+    bad = by.get("lost", 0) + by.get("doubled", 0) + by.get("wrong_answer", 0)
+    return 2 if bad else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="soak", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name in ("run", "report"):
+        command = sub.add_parser(name)
+        command.add_argument("--evidence", default=str(EVIDENCE))
+        if name == "run":
+            command.add_argument("--host", default="127.0.0.1:7690")
+            command.add_argument("--session", default="soak")
+            command.add_argument("--every", type=float, default=900)
+            command.add_argument("--rounds", type=int, default=0, help="stop after so many rounds (default: never)")
+            command.add_argument("--turn-timeout", type=float, default=900)
+    args = parser.parse_args()
+    return run(args) if args.command == "run" else report(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
