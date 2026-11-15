@@ -40,7 +40,9 @@ regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
-serde_json = "1"
+# The fields of a JSON object stay in the order they were given: what an agent wrote and what
+# a tool was called with are read in that order, as the Python Host reads them.
+serde_json = { version = "1", features = ["preserve_order"] }
 zstd = "0.13"
 
 [workspace.lints.rust]

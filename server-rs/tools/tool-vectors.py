@@ -3,8 +3,9 @@
 
 While an agent runs a tool, the apps show what it is doing: "Running npm test", "Reading
 src/main.rs". The Python Host makes those words in `server/lib/live_tools.py`
-(`classify_tool`: a tool's category, a short label, the command it runs) and
-`server/lib/live_core.py` (`tool_headline`). This calls both for many tool calls and writes
+(`classify_tool`: a tool's category, a short label, the command it runs),
+`server/lib/live_core.py` (`tool_headline`) and, for the event of a tool state,
+`server/lib/activity.py` (`summarize_tool_activity`). This calls them for many tool calls and writes
 what they answered to `crates/clarp-kernel/tests/fixtures/tool-vectors.json`.
 
     python3 server-rs/tools/tool-vectors.py
@@ -109,18 +110,53 @@ def cases() -> list[tuple[str, object]]:
     out.append(('Read', {'file_path': 12}))
     out.append(('Read', {'file_path': None, 'path': 'second/choice.rs'}))
     out.append(('Edit', {'file_path': 'a/b.rs', 'command': 'ignored for a known name'}))
+    # What the older summary of a tool call reads besides.
+    out.append(('Bash', {'command': 'npm test', 'description': 'Run the tests'}))
+    out.append(('Bash', {'command': 'c' * 300, 'description': '  '}))
+    out.append(('bash', {'description': 'd' * 300}))
+    out.append(('Bash', {'command': 0}))
+    for edits in ([], [{'old_string': 'a'}], [1, 2, 3], 'not a list'):
+        out.append(('MultiEdit', {'file_path': 'src/lib.rs', 'edits': edits}))
+        out.append(('MultiEdit', {'edits': edits}))
+    for name in ('Glob', 'glob_search', 'Grep', 'grep_search'):
+        out.append((name, {'pattern': '**/*.rs', 'path': '/home/user/project'}))
+        out.append((name, {'glob': '*.py'}))
+        out.append((name, {'path': 'only/a/path'}))
+        out.append((name, {}))
+        out.append((name, {'pattern': 'p' * 200, 'path': 'x'}))
+    for todos in ([], [{'content': 'First', 'status': 'completed'}, {'content': 'Second', 'status': 'in_progress'}],
+                  [{'content': 'Only', 'status': 'pending'}], [{'status': 'in_progress'}], ['not a dict'], 'nope',
+                  [{'content': 't' * 300, 'status': 'in_progress'}]):
+        out.append(('TodoWrite', {'todos': todos}))
+    for name in ('WebSearch', 'web_search', 'WebFetch', 'web_fetch', 'edit_file', 'read_file', 'write_file'):
+        out.append((name, {'query': 'what to look for', 'url': 'https://example.org/page', 'file_path': 'a/b/c.txt'}))
+        out.append((name, {}))
+    # A tool nobody knows is summed up by the first plain value it was given, in the order given.
+    out.append(('mcp__notes__add', {'title': 'Zeta first', 'body': 'Alpha second'}))
+    out.append(('mcp__notes__add', {'tags': ['a'], 'meta': {'k': 1}, 'zulu': 'after the containers', 'alpha': 'later'}))
+    out.append(('Custom', {'count': 3, 'name': 'x'}))
+    out.append(('Custom', {'flag': True}))
+    out.append(('Custom', {'nothing': None, 'then': 'something'}))
+    out.append(('Custom', {'empty': '', 'then': 'something'}))
+    out.append(('Custom', {'only': ['containers']}))
+    out.append(('Custom', {'long': 'l' * 300}))
+    out.append(('', {'x': 'unnamed tool'}))
     return out
 
 
 def main() -> int:
     sys.path.insert(0, str(REPO / 'server'))
+    from lib.activity import summarize_tool_activity
     from lib.live_core import tool_headline
     from lib.live_tools import classify_tool
     vectors = []
     for name, tool_input in cases():
         category, label, command = classify_tool(name, tool_input)
+        # The older summary, which the event of a tool state carries: an action, a summary, a path.
+        activity = summarize_tool_activity(name, tool_input if isinstance(tool_input, dict) else {})
         vectors.append({'name': name, 'input': tool_input, 'category': category, 'label': label,
-                        'command': command, 'headline': tool_headline(name, category, label)})
+                        'command': command, 'headline': tool_headline(name, category, label),
+                        'activity': activity})
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps({
         'about': 'Written by server-rs/tools/tool-vectors.py from server/lib/live_tools.py and live_core.py. '
