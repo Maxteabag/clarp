@@ -332,11 +332,15 @@ def test_the_first_tail_after_a_host_start_whose_file_grows(tmp_path, backend, s
                 assert (_decision(after), after["digest_reads"]) == ("tail_applied", ["added"])
 
 
+@pytest.mark.parametrize("when", ["read", "parse", "store"])
 @BACKENDS
-def test_an_audit_by_digest_whose_file_grows_is_still_the_audit(tmp_path, backend):
+def test_an_audit_by_digest_whose_file_grows_is_still_the_audit(tmp_path, backend, when):
     """With ``audit_grown_by_digest`` as well: the tail that audits read
     every imported byte, the file grows before it publishes, and the
-    frontier it keeps starts the audit's clock again."""
+    frontier it keeps starts the audit's clock again. Growth while the tail
+    is parsed costs a second read of the imported bytes, for the second
+    proof; without this switch the same import went on as a full one, which
+    parsed the whole file and read it again (the review of #339)."""
     how = {"settings": {"tail_keeps_frontier_when_grown": True, "audit_grown_by_digest": True,
                         "audit_every": 1}}
     reference, candidate, transcript = _world(tmp_path, backend, records=40)
@@ -347,11 +351,14 @@ def test_an_audit_by_digest_whose_file_grows_is_still_the_audit(tmp_path, backen
             _append(transcript, backend, 40)
             full.tick(1)
             assert _decision(actual.tick(1, faults=how)) == "tail_applied"
-            _append(transcript, backend, 41)
+            if when == "read":
+                _several_reads(transcript, backend, 41)
+            else:
+                _append(transcript, backend, 41)
             full.tick(2)
-            grown = actual.tick(2, faults={**how, **_moves("store")})
+            grown = actual.tick(2, faults={**how, **_moves(when)})
             assert _decision(grown) == "deferred_tail_source_changed"
-            assert grown["digest_reads"] == ["all"]
+            assert grown["digest_reads"] == (["all"] if when == "store" else ["all", "all"])
             assert {"audited_by_digest", "frontier_kept_source_grew"} <= set(_retentions(grown))
             with sqlite3.connect(candidate) as connection:
                 assert connection.execute(
