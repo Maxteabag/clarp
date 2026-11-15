@@ -11,7 +11,12 @@ It reads one stream-json user message from stdin and answers with system/init,
 an assistant message and a result. Markers in the prompt:
 
 - ``[qa-slow]``: wait up to 3 s before answering (a turn that is still running);
-- ``[replay-linger]``: on SIGTERM, keep running for 1.5 s before exiting.
+- ``[replay-linger]``: on SIGTERM, keep running for 1.5 s before exiting;
+- ``[qa-usage-limit]``: the account is out. What the real CLI did on 15 Nov 2026: an event that
+  says the limit rejected the request, its own sentence as the answer (an assistant message of
+  the model ``<synthetic>``, marked as an API error in the transcript), a result that is an
+  error, and exit code 1;
+- ``[qa-crash]``: the tool dies: a line on stderr, no result, exit code 1.
 
 Every process appends its lifecycle to ``$CLARP_QA_PROVIDER_ROOT/claude-procs.jsonl``.
 """
@@ -55,7 +60,7 @@ def transcript(session: str) -> Path | None:
     return path
 
 
-def record(path: Path | None, session: str, kind: str, parent: str | None, message: dict) -> str:
+def record(path: Path | None, session: str, kind: str, parent: str | None, message: dict, **more) -> str:
     """Appends one record the way the CLI writes it; returns the record's uuid."""
     ident = str(uuid.uuid4())
     if path is not None:
@@ -64,8 +69,29 @@ def record(path: Path | None, session: str, kind: str, parent: str | None, messa
             handle.write(json.dumps({
                 'type': kind, 'uuid': ident, 'parentUuid': parent, 'sessionId': session,
                 'cwd': os.getcwd(), 'timestamp': now, 'isSidechain': False, 'userType': 'external',
-                'message': message}) + '\n')
+                'message': message, **more}) + '\n')
     return ident
+
+
+# The CLI's own sentence when the account's window is spent, as it said it on 15 Nov 2026.
+LIMIT = "You've hit your 5-hour limit \u00b7 resets 3pm (Europe/Oslo)"
+
+
+def out_of_usage(path: Path | None, session: str, asked: str) -> int:
+    """The account is out: the limit's event, the CLI's sentence as the answer, an error result."""
+    emit({'type': 'rate_limit_event', 'session_id': session,
+          'rate_limit_info': {'status': 'rejected', 'rateLimitType': 'five_hour', 'resetsAt': 4102444800,
+                              'overageStatus': 'rejected', 'isUsingOverage': False}})
+    said = {'id': str(uuid.uuid4()), 'type': 'message', 'role': 'assistant', 'model': '<synthetic>',
+            'stop_reason': 'stop_sequence', 'content': [{'type': 'text', 'text': LIMIT}],
+            'usage': {'input_tokens': 0, 'output_tokens': 0}}
+    record(path, session, 'assistant', asked, said, isApiErrorMessage=True, error='rate_limit')
+    emit({'type': 'assistant', 'session_id': session, 'message': said, 'error': 'rate_limit'})
+    emit({'type': 'result', 'subtype': 'success', 'is_error': True, 'session_id': session,
+          'result': LIMIT, 'num_turns': 1, 'duration_ms': 1,
+          'usage': {'input_tokens': 0, 'output_tokens': 0}})
+    log('exit', how='usage-limit')
+    return 1
 
 
 def main() -> int:
@@ -97,6 +123,13 @@ def main() -> int:
     asked = record(path, session, 'user', None, {'role': 'user', 'content': text})
     if '[qa-slow]' in text:
         stopped.wait(3)
+    if '[qa-usage-limit]' in text:
+        return out_of_usage(path, session, asked)
+    if '[qa-crash]' in text:
+        sys.stderr.write('Error: the synthetic tool broke before it could answer\n')
+        sys.stderr.flush()
+        log('exit', how='crash')
+        return 1
     reply = 'Claude replay reply: ' + text
     said = {'id': 'msg_' + PROC, 'role': 'assistant', 'model': 'replay-fake',
             'content': [{'type': 'text', 'text': reply}],
