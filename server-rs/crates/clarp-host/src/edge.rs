@@ -87,6 +87,16 @@ impl ApiError {
         }
     }
 
+    /// The status this error is answered with.
+    pub(crate) fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    /// Why, in words.
+    pub(crate) fn message(&self) -> &str {
+        &self.error
+    }
+
     pub(crate) fn plain(status: StatusCode, text: impl Into<String>) -> Self {
         Self {
             status,

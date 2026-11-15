@@ -20,7 +20,7 @@ use crate::agent::Unavailable;
 use crate::edge::App;
 use crate::fleet::Member;
 use crate::goaltool::{self, About};
-use crate::{ids, process};
+use crate::{artifact_tool, ids, process};
 
 /// What a tool was called with.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -39,6 +39,10 @@ pub struct ToolCall {
     /// The process that called it.
     #[serde(default)]
     pub ppid: u32,
+    /// When the tool was called, on the clock of the machine: the same for every time it
+    /// asks again.
+    #[serde(default)]
+    pub started_ms: i64,
 }
 
 /// What the tool prints, and the code it exits with.
@@ -47,6 +51,10 @@ pub struct ToolAnswer {
     pub exit: i32,
     pub stdout: String,
     pub stderr: String,
+    /// The tool is to ask again after so long, with what it was called with: what it waits
+    /// for has not happened yet. Nothing is printed and nothing is exited with meanwhile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub again_ms: Option<u64>,
 }
 
 impl ToolAnswer {
@@ -57,12 +65,21 @@ impl ToolAnswer {
         }
     }
 
+    /// Tells the tool to ask again in a while.
+    pub(crate) fn again(after_ms: u64) -> Self {
+        Self {
+            again_ms: Some(after_ms),
+            ..Self::default()
+        }
+    }
+
     /// Exits with a line on standard error.
     pub(crate) fn said(exit: i32, line: impl AsRef<str>) -> Self {
         Self {
             exit,
             stdout: String::new(),
             stderr: format!("{}\n", line.as_ref()),
+            again_ms: None,
         }
     }
 
@@ -72,6 +89,7 @@ impl ToolAnswer {
             exit,
             stdout: format!("{}\n", line.as_ref()),
             stderr: String::new(),
+            again_ms: None,
         }
     }
 }
@@ -84,6 +102,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.tool.as_str() {
         "clarp-agent-bg" => agent_bg(app, call).await,
         "clarp-goal" | "clarp-agent-tasks" => goal(app, call).await,
+        "clarp-agent-artifacts" => artifact_tool::run(app, call).await,
         other => ToolAnswer::said(
             NOT_HERE,
             format!("{other}: not available on this Host yet (the Rust Host). Nothing was done."),
