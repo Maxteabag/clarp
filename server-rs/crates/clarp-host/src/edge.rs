@@ -76,6 +76,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("artifact_pins", 38),
     // `POST /devices` takes a phone's own grant, and the Host pushes by it.
     ("push_grants", 39),
+    // Agents that make agents: who made an agent, how a helper's work stands
+    // (`/agent-helper-state`), and what an agent's row says of the ones it made.
+    ("helper_agents", 13),
     // `GET /agents/snapshot?include_archived=0` and `GET /agents/archived`.
     ("snapshot_without_archived", 82),
     // `DELETE /devices` and `GET /devices/push-tokens`.
