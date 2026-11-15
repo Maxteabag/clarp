@@ -21,10 +21,6 @@ cdeb37c253ec  turn-timer: the second reply, which answered a message that had wa
 # acts out (the Python Host shows "[sigh]" there: reference defect R10).
 0d1fdd0f0ff9  voice-markup: the preview of the notification
 
-# A turn is counted from its own start (the Python Host counts a turn that follows one that
-# was stopped from the start of the stopped one: reference defect R11; issue 354).
-a46e99cc9bde  turn-timer-after-stop: turn_started_at while the next turn runs
-
 # After a turn that had waited in the queue, the last completed message is the agent's answer
 # (the Python Host still shows the user's message there: reference defect R12).
 d4b9221921eb  turn-timer: last_completed_message at rest, after the second turn
