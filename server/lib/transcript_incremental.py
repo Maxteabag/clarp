@@ -451,10 +451,32 @@ _BOUNDARY_MARKERS = {
 }
 
 
+def _opens_a_turn(backend: str, path: pathlib.Path, offset: int, length: int) -> bool:
+    """Whether the one record at ``offset``, parsed alone, is a user turn."""
+    turns = parse_range(backend, path, offset, offset + length)
+    return bool(turns) and turns[0].get("role") == "user"
+
+
 def boundary_candidates(backend: str, path: pathlib.Path, end: int,
-                        max_tail_bytes: int) -> list[tuple[int, dict]]:
-    """Latest offsets that may open the last user turn, newest first."""
+                        max_tail_bytes: int, *, turns_only: bool = False
+                        ) -> list[tuple[int, dict]]:
+    """Latest offsets that may open the last user turn, newest first.
+
+    A Claude user record that is not a tool result may open a turn, and many
+    do not: the records the harness injects (a task notification, an account
+    recovery, a system reminder) are user records the parser drops. A turn
+    that has run long enough to collect ``_CANDIDATES`` of them after its
+    prompt had no candidate left that could work, so its conversation got no
+    checkpoint and every import of it was a full one. With ``turns_only``
+    such a record is not counted: a candidate is a record that, parsed
+    alone, is a user turn. (Only for a backend whose turn opens at its
+    prompt, ``transcript_turn_opens_at_its_prompt``: a Codex turn opens at
+    task_started, which is no turn alone.) Whether a candidate is a boundary
+    is decided as before, by ``choose_boundary``."""
+    from . import backends
     marker = _BOUNDARY_MARKERS[backend]
+    alone = turns_only and getattr(backends.get(backend),
+                                   "transcript_turn_opens_at_its_prompt", False)
     found: list[tuple[int, dict]] = []
     for offset, raw in _lines(path, max(0, end - max_tail_bytes), end):
         if marker(raw.replace(b'": "', b'":"')):
@@ -462,8 +484,15 @@ def boundary_candidates(backend: str, path: pathlib.Path, end: int,
                 record = json.loads(raw)
             except ValueError:
                 continue
-            found.append((offset, record if isinstance(record, dict) else {}))
-    return found[::-1][:_CANDIDATES]
+            found.append((offset, record if isinstance(record, dict) else {}, len(raw)))
+    kept: list[tuple[int, dict]] = []
+    for offset, record, length in reversed(found):
+        if alone and not _opens_a_turn(backend, path, offset, length):
+            continue
+        kept.append((offset, record))
+        if len(kept) == _CANDIDATES:
+            break
+    return kept
 
 
 # ---- checkpoints -----------------------------------------------------------
@@ -625,12 +654,14 @@ class Boundary:
 
 def choose_boundary(backend: str, path: pathlib.Path, turns: list[dict],
                     digests: list[bytes], ident: Identity,
-                    max_tail_bytes: int) -> tuple[Boundary | None, str]:
+                    max_tail_bytes: int, *, turns_only: bool = False
+                    ) -> tuple[Boundary | None, str]:
     """The latest user-turn boundary whose tail, parsed alone, reproduces the
     full parse's tail exactly and refers to nothing before it."""
     complete = complete_size(path, ident.size)
     reasons = []
-    for offset, record in boundary_candidates(backend, path, complete, max_tail_bytes):
+    for offset, record in boundary_candidates(backend, path, complete, max_tail_bytes,
+                                              turns_only=turns_only):
         tail = parse_range(backend, path, offset, ident.size)
         seq = len(turns) - len(tail)
         if seq < 0 or not tail or tail[0].get("role") != "user" or tail != turns[seq:]:
@@ -690,6 +721,11 @@ _DEFAULTS = {
     "max_io_pressure": 10.0,
     "max_memory_pressure": 10.0,
     "max_tail_bytes": 16 * 1024 * 1024,
+    # Off unless switched on: a full import looks for its boundary among the
+    # records that ARE user turns, not among every user record. False: the
+    # records the harness injects into a turn count as candidates, and six
+    # of them after a prompt leave the conversation without a checkpoint.
+    "boundary_skips_dropped_records": False,
     "audit_every": 50,
     "audit_seconds": 3600.0,
     # True: read and digest every imported byte of the file at every tail
@@ -1772,8 +1808,9 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
         elif complete_size(path, before.size) != before.size:
             refusal = "partial_record"
         else:
-            boundary, why = choose_boundary(backend, path, turns, turn_digests(turns), before,
-                                            int(conf["max_tail_bytes"]))
+            boundary, why = choose_boundary(
+                backend, path, turns, turn_digests(turns), before, int(conf["max_tail_bytes"]),
+                turns_only=bool(conf.get("boundary_skips_dropped_records")))
             if boundary is None:
                 refusal = "no_safe_boundary_" + why
             elif (effects := _prefix_effects(turns[:boundary.seq])) == "open":
