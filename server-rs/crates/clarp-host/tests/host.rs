@@ -6844,3 +6844,113 @@ fn the_user_is_shown_what_agents_made_a_page_at_a_time() {
     let features = info["capabilities"]["features"].as_array().unwrap();
     assert!(features.contains(&json!("attention_index")), "{info}");
 }
+
+#[test]
+fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
+    let place = Place::new("apps");
+    let token = "apps-token";
+    let host = place.start_with_token(token);
+    let (first, second) = (host.new_agent("First"), host.new_agent("Second"));
+    let focus = |host: &Host| host.get("/agents/snapshot")["focus"].clone();
+    let agent_id = |host: &Host, session: &str| -> Value {
+        let agents = host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let found = agents
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .unwrap();
+        found["agent_id"].clone()
+    };
+
+    // Which agent the user looks at: said, it is the focus. Nobody is nothing to look at,
+    // and no error either.
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({ "session": second })));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(focus(&host), agent_id(&host, &second));
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({ "session": first })));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(focus(&host), agent_id(&host, &first));
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({ "session": "nobody-here" })));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(
+        focus(&host),
+        agent_id(&host, &first),
+        "the focus stays where it was"
+    );
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({})));
+    assert_eq!((status, &said["error"]), (400, &json!("session required")));
+    let raw = fetch(&host, token, "POST", "/focus", &[], b"not json");
+    assert_eq!(raw.status, 400);
+    assert!(raw.text().contains("bad json"), "{}", raw.text());
+
+    // Whether the app is in front: a report holds for the copy of the app that made it, and
+    // one that is not newer than the last changes nothing.
+    let copy = "0a1b2c3d-0000-4000-8000-0000000000aa";
+    let report = |sequence: i64, more: Value| -> Value {
+        let mut report = json!({ "instance_id": copy, "sequence": sequence, "foreground": true,
+                                 "input_age_ms": 1_000, "sent_at_ms": now_ms() });
+        report
+            .as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        report
+    };
+    let send = |host: &Host, token: &str, body: &Value| {
+        host.ask_as(token, "POST", "/application-activity", Some(body))
+    };
+    let (status, said) = send(&host, token, &report(1, json!({})));
+    assert_eq!((status, &said), (200, &json!({ "accepted": true })));
+    let (status, said) = send(&host, token, &report(1, json!({ "foreground": false })));
+    assert_eq!((status, &said), (200, &json!({ "accepted": false })));
+    let (status, said) = send(&host, token, &report(2, json!({ "foreground": false })));
+    assert_eq!((status, &said), (200, &json!({ "accepted": true })));
+    for (wrong, why) in [
+        (json!({ "sent_at_ms": 1 }), "stale activity report"),
+        (
+            json!({ "instance_id": "not-an-id" }),
+            "instance_id must be a UUID",
+        ),
+        (json!({ "sequence": 0 }), "invalid principal or sequence"),
+        (
+            json!({ "foreground": "yes" }),
+            "invalid foreground or input age",
+        ),
+    ] {
+        let (status, said) = send(&host, token, &report(3, wrong));
+        assert_eq!((status, &said["error"]), (400, &json!(why)));
+    }
+    let raw = fetch(&host, token, "POST", "/application-activity", &[], b"[1]");
+    assert_eq!(raw.status, 400);
+    assert!(raw.text().contains("object required"), "{}", raw.text());
+    // A device speaks for a person when it has full scope, and only then.
+    let (full, _) = pair(&host, "phone", "full");
+    let (limited, _) = pair(&host, "watch", "limited");
+    let (status, said) = send(&host, &full, &report(1, json!({})));
+    assert_eq!(
+        (status, &said),
+        (200, &json!({ "accepted": true })),
+        "a device counts for itself"
+    );
+    let (status, _) = send(&host, &limited, &report(1, json!({})));
+    assert_eq!(status, 403);
+    // A device with limited scope may still say what its user looks at.
+    let (status, said) = host.ask_as(
+        &limited,
+        "POST",
+        "/focus",
+        Some(&json!({ "session": second })),
+    );
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(focus(&host), agent_id(&host, &second));
+
+    // On a Host that asks for no token, nobody is known to be a person.
+    let open_place = Place::new("apps-open");
+    let open = open_place.start();
+    let (status, said) = open.ask("POST", "/application-activity", Some(&report(1, json!({}))));
+    assert_eq!(
+        (status, &said["error"]),
+        (401, &json!("authentication required"))
+    );
+}
