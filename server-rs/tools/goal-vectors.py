@@ -114,6 +114,29 @@ class World:
         return step
 
 
+    def user(self, action: str, data: dict, note: str = '') -> dict:
+        """What an app does to the goal for its user (`POST /task-plan/action`): the same
+        rules, with the user as the one who acts. Written down as `[action, plan, revision,
+        data]` under `by: user`, with the plan it answers or the words it refuses with."""
+        from lib import goal_ledger, task_goal_state
+        self.now += STEP_MS
+        step = {'by': 'user', 'argv': [action, self.plan, str(self.revision), json.dumps(data)], 'at': self.now}
+        try:
+            with goal_ledger.acting_as('user'):
+                result = task_goal_state.mutate(self.plan, revision=self.revision, action=action, data=data)
+        except (ValueError, TypeError) as exc:  # what the route answers 409 with
+            step.update(exit=1, stdout=None, stderr=str(exc))
+        else:
+            step.update(exit=0, stdout=result, stderr='')
+            self.plan, self.revision = result['plan_id'], result['revision']
+            if result.get('goal'):
+                step['wake_prompt'] = self.wake_prompt(result['plan_id'])
+        if note:
+            step['note'] = note
+        self.steps.append(step)
+        return step
+
+
 def j(value) -> str:
     return json.dumps(value)
 
@@ -233,11 +256,42 @@ def a_goal_waits_for_something(w: World) -> None:
     w.run('get', '{plan}')
 
 
+def the_user_acts_on_a_goal(w: World) -> None:
+    w.run('create', '{session}', 'ship', 'Ship the thing', j(ITEMS), j(GOAL))
+    w.run('act', '{plan}', '{rev}', 'waive', j({'criterion_id': 'criterion-2', 'reason': 'Not needed'}),
+          note='refused: only the user sets a criterion aside')
+    w.user('waive', {'criterion_id': 'criterion-9', 'reason': 'x'}, note='no such criterion')
+    w.user('waive', {'criterion_id': 'criterion-2'}, note='no reason')
+    w.user('waive', {'criterion_id': 'criterion-2', 'reason': 'The document is not needed after all'})
+    w.run('get', '{plan}')
+    w.user('unwaive', {'criterion_id': 'criterion-1'}, note='not waived')
+    w.user('unwaive', {'criterion_id': 'criterion-2'})
+    w.run('act', '{plan}', '{rev}', 'unwaive', j({'criterion_id': 'criterion-2'}), note='refused: only the user')
+    w.user('waive', {'criterion_id': 'criterion-2', 'reason': 'Set aside again'})
+    w.user('pause', {}, note='a control needs a reason from the user too')
+    w.user('pause', {'reason': 'User paused this goal'})
+    w.user('resume', {'reason': 'User explicitly resumed this goal'})
+    w.user('checkpoint', {'progress': 'Seen by the user', 'next_work': 'Finish', 'evidence': {'criterion-1': 'ran it'}})
+    w.user('frobnicate', {}, note='no such action')
+    w.user('add_step', {'id': 'tell', 'title': 'Tell the owner', 'reason': 'The user wants to hear of it', 'required': False})
+    w.run('step', '{plan}', '{rev}', 'probe', 'completed', 'It behaves')
+    w.run('step', '{plan}', '{rev}', 'part', 'completed')
+    w.run('step', '{plan}', '{rev}', 'build', 'completed')
+    w.run('complete', '{plan}', '{rev}', note='one criterion has evidence, the other was set aside')
+    w.run('get', '{plan}')
+    w.user('cancel', {'reason': 'Too late'}, note='refused: closed')
+
+
 SCENARIOS = [a_goal_from_start_to_completion, what_the_tool_refuses, a_goal_is_paused_resumed_blocked_and_cancelled,
-             a_plan_changes_and_keeps_its_notes, a_goal_waits_for_something]
+             a_plan_changes_and_keeps_its_notes, a_goal_waits_for_something, the_user_acts_on_a_goal]
 
 
 def main(argv: list[str]) -> int:
+    if os.environ.get('PYTHONHASHSEED') != '0':
+        # The Python Host counts a plan's steps by status in the order a set gives them, which
+        # is another one in every process. With the seed fixed, the vectors are the same file
+        # every time they are written.
+        os.execve(sys.executable, [sys.executable, *argv], {**os.environ, 'PYTHONHASHSEED': '0'})
     isolate()
     scenarios = []
     for number, scenario in enumerate(SCENARIOS, start=1):

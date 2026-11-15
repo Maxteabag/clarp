@@ -3,7 +3,9 @@
 //! `fixtures/goal-vectors.json` is written by `server-rs/tools/goal-vectors.py`: sequences of
 //! `clarp-goal` commands run against the Python Host's goal rules with a fixed clock and fixed
 //! ids, each with what the tool printed and how it exited. Here the same commands are given
-//! to this Host's tool with the same clock and ids, and must be answered the same.
+//! to this Host's tool with the same clock and ids, and must be answered the same. Among them
+//! is what an app does to a goal for its user (`POST /task-plan/action`), which goes by the
+//! same rules with the user as the one who acts.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -69,6 +71,7 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
     let vectors: Value = serde_json::from_str(include_str!("fixtures/goal-vectors.json")).unwrap();
     let mut compared = 0;
     let mut prompts = 0;
+    let mut users = 0;
     let mut wrong: Vec<String> = Vec::new();
     for scenario in vectors["scenarios"].as_array().unwrap() {
         let name = scenario["name"].as_str().unwrap();
@@ -93,7 +96,20 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
             let at = step["at"].as_i64().unwrap();
             let verb = argv.first().map_or("", String::as_str);
             let context = format!("{name}, step {number} ({verb})");
-            let said = match goaltool::parse(&argv) {
+            // What an app asks for its user is written down as [action, plan, revision, data].
+            let by_user = step["by"] == "user";
+            let asked = if by_user {
+                users += 1;
+                Ok(goaltool::Ask::UserAct {
+                    plan_id: argv[1].clone(),
+                    revision: argv[2].parse().unwrap(),
+                    action: argv[0].clone(),
+                    data: serde_json::from_str(&argv[3]).unwrap(),
+                })
+            } else {
+                goaltool::parse(&argv)
+            };
+            let said = match asked {
                 Err(said) => said,
                 Ok(ask) => {
                     let ours = match ask.about() {
@@ -159,10 +175,15 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
             let stderr = step["stderr"].as_str().unwrap();
             // What Python itself says of a text that is no JSON is Python's to word.
             let pythons_own = stderr.starts_with("agent_tasks: Expecting ");
-            if !pythons_own && said.stderr.trim() != stderr {
+            // A route answers with the refusal alone, the tool with its name before it.
+            let ours = if by_user {
+                goaltool::refusal(&said)
+            } else {
+                said.stderr.trim()
+            };
+            if !pythons_own && ours != stderr {
                 found.push(format!(
-                    "stderr: here {:?}, the Python Host's {stderr:?}",
-                    said.stderr.trim()
+                    "stderr: here {ours:?}, the Python Host's {stderr:?}"
                 ));
             }
             // With every goal it printed, the Python Host says what it would wake the goal's
@@ -189,6 +210,10 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
         wrong.len(),
         wrong.join("\n")
     );
-    assert!(compared >= 70, "only {compared} steps were compared");
-    assert!(prompts >= 35, "only {prompts} wake messages were compared");
+    assert!(compared >= 90, "only {compared} steps were compared");
+    assert!(prompts >= 50, "only {prompts} wake messages were compared");
+    assert!(
+        users >= 12,
+        "only {users} of the user's own steps were compared"
+    );
 }
