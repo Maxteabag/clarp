@@ -153,6 +153,71 @@ pub fn import(
     ))
 }
 
+/// What a tool run by an agent ended with: its exit code, and what it prints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolOutcome {
+    pub exit: u8,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// `clarp-host tool NAME [ARGS...]`: one of an agent's own tools. It is a pipe: what it was
+/// called with goes to the Host the agent runs on, and what the Host answers is printed. The
+/// Host is found by what it told the turn (`CLARP_HOST_ADDR`); a tool that is called where no
+/// Host said so does nothing and says why.
+pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome {
+    let unavailable = |why: String| ToolOutcome {
+        exit: 69,
+        stdout: String::new(),
+        stderr: format!("{why}\n"),
+    };
+    let Some(name) = args.next() else {
+        return ToolOutcome {
+            exit: 2,
+            stdout: String::new(),
+            stderr: "usage: clarp-host tool NAME [ARGS...]\n".to_string(),
+        };
+    };
+    let Ok(address) = std::env::var(crate::TOOL_ADDR_ENV) else {
+        return unavailable(format!(
+            "{name}: this agent's Host is not known ({} is not set). Nothing was done.",
+            crate::TOOL_ADDR_ENV
+        ));
+    };
+    // What the Host may need to know of where the tool was called. Never a token.
+    let env: std::collections::BTreeMap<String, String> = std::env::vars()
+        .filter(|(key, _)| key.starts_with("CLARP_") || key.starts_with("CLAUDE_PWA_"))
+        .filter(|(key, _)| key != "CLARP_HOST_TOKEN" && key != "CLARP_SOURCE_TOKEN")
+        .collect();
+    let cwd = std::env::current_dir()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_default();
+    let asked = json!({
+        "tool": name,
+        "argv": args.collect::<Vec<_>>(),
+        "cwd": cwd,
+        "env": env,
+        "ppid": std::os::unix::process::parent_id(),
+    });
+    match post(&address, "/tools/run", token, &asked) {
+        Ok((200, answer)) => ToolOutcome {
+            exit: answer["exit"]
+                .as_i64()
+                .and_then(|code| u8::try_from(code).ok())
+                .unwrap_or(1),
+            stdout: answer["stdout"].as_str().unwrap_or("").to_string(),
+            stderr: answer["stderr"].as_str().unwrap_or("").to_string(),
+        },
+        Ok((status, answer)) => unavailable(format!(
+            "{name}: the Host at {address} refused ({status}): {}",
+            answer["error"].as_str().unwrap_or("no reason given")
+        )),
+        Err(why) => unavailable(format!(
+            "{name}: the Host at {address} does not answer: {why}"
+        )),
+    }
+}
+
 /// `clarp-host pair`: has the running Host issue a pairing code, and returns what to show.
 pub fn pair(mut args: impl Iterator<Item = String>, token: &str) -> Result<String, String> {
     let (mut url, mut name, mut scope, mut ttl) =

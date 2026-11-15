@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, Sse};
@@ -19,6 +19,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_kernel::conversation::{Message, Sender};
+use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::clock::Clock;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
@@ -38,7 +39,8 @@ use crate::fleet::{AgentRecord, FleetHandle, Member};
 use crate::hub::{Hub, Published};
 use crate::pairing::{self, Device, Scope};
 use crate::revisions::Revisions;
-use crate::{ids, wire};
+use crate::tools::{self, ToolAnswer, ToolCall};
+use crate::{ids, joblog, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -113,7 +115,7 @@ impl IntoResponse for ApiError {
 
 impl App {
     /// The agent with this session name, when the Host has one.
-    fn member(&self, session: &str) -> Option<Arc<Member>> {
+    pub(crate) fn member(&self, session: &str) -> Option<Arc<Member>> {
         self.fleet.directory().by_session(session).cloned()
     }
 }
@@ -140,6 +142,12 @@ pub fn router(app: App) -> Router {
         .route("/pairing/issue", post(pairing_issue))
         .route("/paired-devices", get(paired_devices))
         .route("/paired-devices/revoke", post(revoke_device))
+        .route("/background-jobs", get(background_jobs))
+        .route(
+            "/background-jobs/{job_id}",
+            get(background_job).delete(cancel_background_job),
+        )
+        .route("/tools/run", post(run_tool))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }
@@ -196,6 +204,10 @@ const LIMITED_POSTS: &[&str] = &["/send", "/select"];
 
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
+    // An agent's own tools speak as the Host's administrator, from this machine. No device does.
+    if path.starts_with("/tools/") {
+        return !matches!(principal, Principal::Administrator);
+    }
     let Principal::Device {
         scope: Scope::Limited,
         ..
@@ -315,14 +327,22 @@ async fn snapshot(State(app): State<App>) -> Json<Value> {
         .map(|member| {
             let view = member.agent.view();
             let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
-            wire::summary(
+            let mut row = wire::summary(
                 &member.record,
                 &view.status,
                 view.backend,
                 view.newest.as_ref(),
                 view.ended.as_ref(),
                 focused,
-            )
+            );
+            // What runs for the agent besides its turn.
+            let running = view
+                .jobs
+                .iter()
+                .filter(|job| job.status.is_active())
+                .count();
+            row["background_jobs"]["count"] = json!(running);
+            row
         })
         .collect();
     let roster: Vec<&str> = directory
@@ -628,6 +648,236 @@ async fn select(
         })),
         None => Err(ApiError::new(StatusCode::NOT_FOUND, "no such session")),
     }
+}
+
+// ---- background jobs, and the agents' own tools ----------------------------------------------
+
+/// An agent's own tool, calling its Host.
+async fn run_tool(State(app): State<App>, Json(call): Json<ToolCall>) -> Json<ToolAnswer> {
+    Json(tools::run(&app, &call).await)
+}
+
+/// Every job the Host knows that is worth showing, with the agent it belongs to.
+fn shown_jobs(app: &App) -> Vec<(Arc<Member>, Job)> {
+    let directory = app.fleet.directory();
+    let mut jobs: Vec<(Arc<Member>, Job)> = directory
+        .members
+        .iter()
+        .flat_map(|member| {
+            let view = member.agent.view();
+            view.jobs
+                .iter()
+                .map(|job| (member.clone(), job.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    // What runs first, then what ended; within each, the last changed first.
+    jobs.sort_by_key(|(_, job)| {
+        (
+            job.status.is_terminal(),
+            std::cmp::Reverse(job.updated_at_ms),
+        )
+    });
+    jobs
+}
+
+/// `GET /background-jobs`: what runs, and what ended within a day.
+async fn background_jobs(State(app): State<App>) -> Json<Value> {
+    let now = app.clock.now_ms();
+    let jobs = shown_jobs(&app);
+    let (active, ended): (Vec<_>, Vec<_>) =
+        jobs.iter().partition(|(_, job)| job.status.is_active());
+    let listed: Vec<Value> = active
+        .iter()
+        .chain(ended.iter().take(100))
+        .map(|(member, job)| wire::job(&member.record, job, now))
+        .collect();
+    Json(json!({
+        "jobs": listed,
+        "snapshot_revision": app.revisions.latest(),
+        "observed_at": now,
+    }))
+}
+
+/// The agent a job belongs to, with the job as it stands.
+async fn job_and_owner(app: &App, job_id: &str) -> Result<Option<(Arc<Member>, Job)>, ApiError> {
+    let Some(agent_id) = app.fleet.job_owner(job_id.to_string()).await? else {
+        return Ok(None);
+    };
+    let directory = app.fleet.directory();
+    let Some(member) = directory
+        .members
+        .iter()
+        .find(|member| member.record.agent_id == agent_id)
+    else {
+        return Ok(None);
+    };
+    let view = member.agent.view();
+    Ok(view
+        .jobs
+        .iter()
+        .find(|job| job.id == job_id)
+        .map(|job| (member.clone(), job.clone())))
+}
+
+/// `GET /background-jobs/<id>`: one job with its timeline, its progress and the end of its log.
+async fn background_job(
+    State(app): State<App>,
+    Path(job_id): Path<String>,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<Value>, ApiError> {
+    let Some((member, job)) = job_and_owner(&app, &job_id).await? else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
+    };
+    let now = app.clock.now_ms();
+    let timeline = member.agent.job_timeline(job.id.clone(), 200).await?;
+    // A log may hold anything its worker printed: a device with limited scope is shown the
+    // timeline and the progress, not the file.
+    let limited = matches!(
+        principal,
+        Principal::Device {
+            scope: Scope::Limited,
+            ..
+        }
+    );
+    let log = if limited {
+        joblog::forbidden()
+    } else {
+        let roots = joblog::roots(&job.worker_cwd, &member.record.cwd);
+        joblog::tail(&job.log_path, &roots, joblog::TAIL_BYTES)
+    };
+    Ok(Json(json!({
+        "job": wire::job(&member.record, &job, now),
+        "handle": job.handle(),
+        "is_process": true,
+        "owner_session": member.record.session,
+        "owner_agent_id": member.record.agent_id,
+        "started_trace_id": job.started_trace_id,
+        "helper_session": "",
+        "progress": { "text": job.progress_text, "at": job.progress_at_ms },
+        "timeline": wire::job_timeline(&timeline),
+        "log": log,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelQuery {
+    expected_generation: Option<String>,
+}
+
+/// The largest generation a JSON client can hold exactly.
+const MAX_GENERATION: u64 = (1 << 53) - 1;
+
+/// The run a cancel names: in the address, or else in the body. `Err` for one that is no
+/// run's number. Absent means "whatever run there is".
+fn expected_generation(query: &CancelQuery, body: &[u8]) -> Result<Option<u64>, ()> {
+    let in_range = |value: u64| (1..=MAX_GENERATION).contains(&value);
+    if let Some(raw) = &query.expected_generation {
+        let raw = raw.trim();
+        if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(());
+        }
+        return raw
+            .parse()
+            .ok()
+            .filter(|v| in_range(*v))
+            .map(Some)
+            .ok_or(());
+    }
+    if body.is_empty() {
+        return Ok(None);
+    }
+    let Ok(Value::Object(fields)) = serde_json::from_slice::<Value>(body) else {
+        return Err(());
+    };
+    match fields.get("expected_generation") {
+        None => Ok(None),
+        Some(value) => value.as_u64().filter(|v| in_range(*v)).map(Some).ok_or(()),
+    }
+}
+
+/// `DELETE /background-jobs/<id>`: the user ends a job. With `expected_generation`, only if it
+/// is still that run.
+async fn cancel_background_job(
+    State(app): State<App>,
+    Path(job_id): Path<String>,
+    Query(query): Query<CancelQuery>,
+    body: axum::body::Bytes,
+) -> Result<Response, ApiError> {
+    let Ok(expected) = expected_generation(&query, &body) else {
+        let refused = json!({ "ok": false, "error": "invalid expected_generation" });
+        return Ok((StatusCode::BAD_REQUEST, Json(refused)).into_response());
+    };
+    let Some((member, _)) = job_and_owner(&app, &job_id).await? else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
+    };
+    let command = JobCommand::Cancel {
+        id: job_id.clone(),
+        expected_generation: expected,
+        reason: "user_cancelled".to_string(),
+    };
+    let change = member
+        .agent
+        .job(command)
+        .await?
+        .map_err(|refusal| ApiError::new(StatusCode::BAD_REQUEST, refusal.to_string()))?;
+    let Some(job) = change.job else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
+    };
+    let changed = change.record.is_some();
+    let now = app.clock.now_ms();
+    let mut receipt = json!({
+        "changed": changed,
+        "job": wire::job(&member.record, &job, now),
+        "job_handle": job.handle(),
+    });
+    let conflict = |receipt: &mut Value, error: String| {
+        receipt["ok"] = json!(false);
+        receipt["error"] = json!(error);
+        (StatusCode::CONFLICT, Json(receipt.clone())).into_response()
+    };
+    if change.generation_mismatch {
+        receipt["expected_generation"] = json!(expected);
+        receipt["current_generation"] = json!(job.generation);
+        return Ok(conflict(&mut receipt, "generation_mismatch".to_string()));
+    }
+    if job.status != clarp_kernel::jobs::JobStatus::Cancelled {
+        let error = format!("job already {}", job.status.as_str());
+        return Ok(conflict(&mut receipt, error));
+    }
+    if changed {
+        // The job is closed for its worker from this moment. The owner is told, so that it
+        // can clean up what the worker left; nothing depends on that message arriving.
+        let worker_pid = match job.worker.pid {
+            0 => "unknown".to_string(),
+            pid => pid.to_string(),
+        };
+        let token = match job.worker.start_token.as_str() {
+            "" => "unknown",
+            token => token,
+        };
+        let handle = job.handle();
+        let text = format!(
+            "the user cancelled background job {}: {} (handle {handle}; pid={worker_pid} \
+             start_token={token}). Before stopping anything, run `clarp-agent-bg {} job-cancelled \
+             {handle}`. Proceed only if it returns 0 and the target process still matches that \
+             exact worker identity; otherwise this cleanup was superseded by a newer generation.",
+            job.id, job.title, member.record.session
+        );
+        let message = Message {
+            id: format!("u-{}", ids::uuid()),
+            text,
+            origin: Origin::Trigger {
+                name: "automation".to_string(),
+            },
+            trace_id: Some(ids::hex(8)),
+            sender: None,
+            client: None,
+        };
+        let _ = member.agent.send(message, Admission::Queue).await;
+    }
+    receipt["ok"] = json!(true);
+    Ok(Json(receipt).into_response())
 }
 
 #[derive(Debug, Deserialize)]

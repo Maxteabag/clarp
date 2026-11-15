@@ -96,6 +96,19 @@ async fn serve(config: Config) -> Result<(), String> {
         server_id,
         revisions,
     };
+    // The Host answers when it knows its agents: what they are doing, what runs for them. A
+    // request that comes earlier waits at the door for that moment, it is not given half a view.
+    let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    while tokio::time::Instant::now() < opened_by
+        && app
+            .fleet
+            .directory()
+            .members
+            .iter()
+            .any(|member| member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING))
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, launcher {})",
@@ -149,6 +162,14 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         };
+    }
+    if args.peek().map(String::as_str) == Some("tool") {
+        args.next();
+        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        let outcome = clarp_host::admin::tool(args, &token);
+        print!("{}", outcome.stdout);
+        eprint!("{}", outcome.stderr);
+        return ExitCode::from(outcome.exit);
     }
     if args.peek().map(String::as_str) == Some("import") {
         args.next();
