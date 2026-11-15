@@ -312,3 +312,7 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #                                   # from BEGIN IMMEDIATE, so on a long conversation it
 #                                   # yields before its first row, and a commit in that gap
 #                                   # refuses its publication. Off by default.
+# tail_keeps_frontier_when_grown = false  # true: a tail whose file only grew while it was
+#                                   # imported keeps its frontier for the bytes it parsed, and
+#                                   # the next import is a tail. false: the next is full. Off
+#                                   # by default.
