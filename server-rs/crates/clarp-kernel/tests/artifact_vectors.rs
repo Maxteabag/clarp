@@ -1,0 +1,620 @@
+//! Artifacts and decisions against the Python Host's.
+//!
+//! `fixtures/artifact-vectors.json` is written by `server-rs/tools/artifact-vectors.py`:
+//! sequences of calls of `server/lib/artifacts.py` with a fixed clock and fixed ids, each with
+//! what it answered or refused. Here the same calls are made of this Host's books, driven
+//! the way the Host drives them, and must come to the same.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
+use clarp_kernel::artifacts::{
+    self, Artifact, ArtifactBook, Ctx, Listing, Maker, New, Refused, Shelf, Why,
+};
+use clarp_kernel::goals::{Change, GoalBook, Owner, World, item_key};
+use serde_json::{Value, json};
+
+/// Where two values differ, as paths into them.
+fn differences(path: &str, ours: &Value, theirs: &Value, found: &mut Vec<String>) {
+    match (ours, theirs) {
+        (Value::Object(a), Value::Object(b)) => {
+            for (key, value) in a {
+                match b.get(key) {
+                    Some(other) => differences(&format!("{path}.{key}"), value, other, found),
+                    None => found.push(format!("{path}.{key}: only here: {value}")),
+                }
+            }
+            for (key, value) in b {
+                if !a.contains_key(key) {
+                    found.push(format!("{path}.{key}: only in the Python Host's: {value}"));
+                }
+            }
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => {
+            for (index, (value, other)) in a.iter().zip(b).enumerate() {
+                differences(&format!("{path}[{index}]"), value, other, found);
+            }
+        }
+        _ if ours == theirs => {}
+        _ => found.push(format!("{path}: here {ours}, the Python Host's {theirs}")),
+    }
+}
+
+struct Agent {
+    agent_id: String,
+    session: String,
+    persona: String,
+    artifacts: ArtifactBook,
+    goals: GoalBook,
+}
+
+impl Agent {
+    fn maker(&self) -> Maker<'_> {
+        Maker {
+            agent_id: &self.agent_id,
+            session: &self.session,
+            persona: &self.persona,
+        }
+    }
+
+    fn keep(&mut self, artifact: &Artifact, now: i64) {
+        let record = ArtifactBook::record(artifact, now);
+        let read = serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+        assert_eq!(record, read, "a record is read as it was written");
+        self.artifacts.apply(&read);
+    }
+}
+
+/// The agents of a scenario, driven the way the Host drives them.
+struct Fleet {
+    agents: Vec<Agent>,
+    ids: u64,
+}
+
+type Said = Result<Value, Refused>;
+
+fn refused(why: Why, message: &str) -> Said {
+    Err(Refused {
+        why,
+        message: message.to_string(),
+    })
+}
+
+fn text(args: &Value, name: &str) -> String {
+    args[name].as_str().unwrap_or("").to_string()
+}
+
+impl Fleet {
+    fn token(ids: &mut u64, bytes: usize) -> String {
+        *ids += 1;
+        format!("{:0width$x}", *ids, width = bytes * 2)
+    }
+
+    fn by_session(&self, session: &str) -> Option<usize> {
+        self.agents
+            .iter()
+            .position(|agent| agent.session == session.trim())
+    }
+
+    fn holding(&self, artifact_id: &str) -> Option<usize> {
+        self.agents
+            .iter()
+            .position(|agent| agent.artifacts.any(artifact_id).is_some())
+    }
+
+    fn asked(&self, decision_id: &str) -> Option<usize> {
+        self.agents
+            .iter()
+            .position(|agent| agent.artifacts.of_decision(decision_id).is_some())
+    }
+
+    fn of_plan(&self, plan_id: &str) -> Option<usize> {
+        self.agents
+            .iter()
+            .position(|agent| agent.goals.plan(plan_id).is_some())
+    }
+
+    fn shelves(&self) -> Vec<Shelf<'_>> {
+        self.agents
+            .iter()
+            .map(|agent| Shelf {
+                maker: agent.maker(),
+                artifacts: &agent.artifacts,
+                goals: &agent.goals,
+            })
+            .collect()
+    }
+
+    fn shown(&self, at: usize, artifact: &Artifact, now: i64) -> Value {
+        let agent = &self.agents[at];
+        artifact.public(&agent.persona, &agent.goals, now)
+    }
+
+    /// Makes an artifact for a session, with the ids the whole fleet counts.
+    fn make(
+        &mut self,
+        session: &str,
+        now: i64,
+        nobody: impl FnOnce() -> Refused,
+        make: impl FnOnce(&ArtifactBook, Maker<'_>, &mut Ctx<'_>) -> Result<Artifact, Refused>,
+    ) -> Said {
+        let Some(at) = self.by_session(session) else {
+            return Err(nobody());
+        };
+        let made = {
+            let agents = &self.agents;
+            let ids = &mut self.ids;
+            let mut ctx = Ctx {
+                now_ms: now,
+                token_hex: &mut |bytes| Self::token(ids, bytes),
+                taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
+            };
+            make(&agents[at].artifacts, agents[at].maker(), &mut ctx)?
+        };
+        self.agents[at].keep(&made, now);
+        Ok(self.shown(at, &made, now))
+    }
+
+    /// A change of one artifact, by the agent that holds it: kept, and shown with whether
+    /// it changed anything.
+    fn change(
+        &mut self,
+        at: Option<usize>,
+        missing: &str,
+        now: i64,
+        change: impl FnOnce(&ArtifactBook) -> Result<(Artifact, bool), Refused>,
+    ) -> Said {
+        let Some(at) = at else {
+            return refused(Why::Value, missing);
+        };
+        let (artifact, changed) = change(&self.agents[at].artifacts)?;
+        if changed {
+            self.agents[at].keep(&artifact, now);
+        }
+        Ok(json!([self.shown(at, &artifact, now), changed]))
+    }
+
+    /// A change to a plan, and the artifact the plan is shown as following it.
+    fn plan(
+        &mut self,
+        at: Option<usize>,
+        missing: &str,
+        made_now: bool,
+        now: i64,
+        change: impl FnOnce(
+            &GoalBook,
+            Owner<'_>,
+            &mut World<'_>,
+        ) -> Result<(Change, String), clarp_kernel::goals::Refused>,
+    ) -> Said {
+        let Some(at) = at else {
+            return refused(Why::Value, missing);
+        };
+        let (changed, title) = {
+            let agent = &self.agents[at];
+            let ids = &mut self.ids;
+            let mut world = World {
+                now_ms: now,
+                native_session: "",
+                queue_revision: 0,
+                token_hex: &mut |bytes| Self::token(ids, bytes),
+                has_job: &|_, _| false,
+            };
+            let owner = Owner {
+                agent_id: &agent.agent_id,
+                session: &agent.session,
+            };
+            change(&agent.goals, owner, &mut world).map_err(|why| Refused {
+                why: Why::Value,
+                message: why.0,
+            })?
+        };
+        let record = self.agents[at].goals.record(&changed, now);
+        self.agents[at].goals.apply(&record);
+        let synced = {
+            let agents = &self.agents;
+            let ids = &mut self.ids;
+            let mut ctx = Ctx {
+                now_ms: now,
+                token_hex: &mut |bytes| Self::token(ids, bytes),
+                taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
+            };
+            agents[at].artifacts.plan_synced(
+                agents[at].maker(),
+                &changed.plan,
+                &title,
+                made_now,
+                &mut ctx,
+            )?
+        };
+        self.agents[at].keep(&synced, now);
+        Ok(self.agents[at]
+            .goals
+            .get(&changed.plan.plan_id, now)
+            .unwrap())
+    }
+
+    /// The requests whose time ran out are closed before anything is answered about them.
+    fn expire(&mut self, now: i64) {
+        for agent in &mut self.agents {
+            for artifact in agent.artifacts.expired(now) {
+                agent.keep(&artifact, now);
+            }
+        }
+    }
+
+    fn call(&mut self, name: &str, args: &Value, now: i64) -> Said {
+        let given = |name: &str| args.get(name).filter(|value| !value.is_null());
+        match name {
+            "create" => {
+                let new = New {
+                    kind: text(args, "type"),
+                    title: text(args, "title"),
+                    summary: text(args, "summary"),
+                    status: given("status")
+                        .map_or("ready".to_string(), |s| s.as_str().unwrap().to_string()),
+                    reference_id: text(args, "reference_id"),
+                    payload: args.get("payload").cloned(),
+                    artifact_id: text(args, "artifact_id"),
+                };
+                let nobody = || artifacts::create_of_nobody(&new);
+                self.make(&text(args, "session"), now, nobody, |book, maker, ctx| {
+                    book.create(maker, &new, ctx)
+                })
+            }
+            "create_decision" => {
+                let mut ask = Ask {
+                    title: text(args, "title"),
+                    payload: args.get("payload").cloned(),
+                    reference_id: text(args, "reference_id"),
+                    ..Ask::default()
+                };
+                let set = |slot: &mut Value, name: &str| {
+                    if let Some(value) = args.get(name) {
+                        *slot = value.clone();
+                    }
+                };
+                set(&mut ask.question, "question");
+                set(&mut ask.context, "context");
+                set(&mut ask.yes_label, "yes_label");
+                set(&mut ask.no_label, "no_label");
+                set(&mut ask.response_type, "response_type");
+                set(&mut ask.blocks_progress, "blocks_progress");
+                set(&mut ask.priority_reason, "priority_reason");
+                set(&mut ask.urgency, "urgency");
+                set(&mut ask.response_effort, "response_effort");
+                ask.expires_at = args.get("expires_at").cloned();
+                ask.options = args.get("options").cloned();
+                ask.allow_custom_text = args.get("allow_custom_text").cloned();
+                ask.recommended_option_id = args.get("recommended_option_id").cloned();
+                ask.deadline_at = args.get("deadline_at").cloned();
+                ask.input_hint = args.get("input_hint").cloned();
+                let nobody = || decisions::ask_of_nobody(&ask, now);
+                self.make(&text(args, "session"), now, nobody, |book, maker, ctx| {
+                    book.ask(maker, &ask, ctx)
+                })
+            }
+            "get" => Ok(
+                artifacts::get(&self.shelves(), &text(args, "artifact_id"), now)
+                    .unwrap_or(Value::Null),
+            ),
+            "list" => {
+                self.expire(now);
+                let listing = Listing {
+                    session: text(args, "session"),
+                    agent_id: text(args, "agent_id"),
+                    kind: text(args, "type"),
+                    search: text(args, "search"),
+                    created_from: given("created_from").and_then(Value::as_i64),
+                    created_to: given("created_to").and_then(Value::as_i64),
+                    limit: given("limit").and_then(Value::as_i64).unwrap_or(100),
+                    offset: given("offset").and_then(Value::as_i64).unwrap_or(0),
+                    by_creation: args["order"] == "created",
+                };
+                Ok(json!(artifacts::list(&self.shelves(), &listing, now)))
+            }
+            "list_pinned" => {
+                let limit = given("limit").and_then(Value::as_i64).unwrap_or(100);
+                Ok(json!(artifacts::list_pinned(&self.shelves(), limit, now)))
+            }
+            "update" => {
+                let id = text(args, "artifact_id");
+                let Some(at) = self
+                    .agents
+                    .iter()
+                    .position(|a| a.artifacts.get(&id).is_some())
+                else {
+                    return refused(Why::Value, "artifact not found");
+                };
+                let artifact = self.agents[at].artifacts.update(&id, &args["data"], now)?;
+                self.agents[at].keep(&artifact, now);
+                Ok(self.shown(at, &artifact, now))
+            }
+            "archive" => {
+                let Some(archived) = args["archived"].as_bool() else {
+                    return refused(Why::Value, "archived must be a boolean");
+                };
+                let expected =
+                    decisions::integer(&args["expected_updated_at"], "expected_updated_at", 0)?;
+                let id = text(args, "artifact_id");
+                let at = self
+                    .agents
+                    .iter()
+                    .position(|a| a.artifacts.get(&id).is_some());
+                self.change(at, "artifact not found", now, |book| {
+                    book.archive(&id, archived, expected, now)
+                })
+            }
+            "discard" => {
+                let expected =
+                    decisions::integer(&args["expected_updated_at"], "expected_updated_at", 0)?;
+                let id = text(args, "artifact_id");
+                self.change(self.holding(&id), "artifact not found", now, |book| {
+                    book.discard(&id, expected, now)
+                })
+            }
+            "pin" => {
+                let Some(pinned) = args["pinned"].as_bool() else {
+                    return refused(Why::Value, "pinned must be a boolean");
+                };
+                let id = text(args, "artifact_id");
+                let at = self
+                    .agents
+                    .iter()
+                    .position(|a| a.artifacts.get(&id).is_some());
+                self.change(at, "artifact not found", now, |book| {
+                    book.pin(&id, pinned, now)
+                })
+            }
+            "resolve" => {
+                let none = Value::Null;
+                let revision = args.get("expected_revision").unwrap_or(&none);
+                let expected = decisions::integer(revision, "expected_revision", 1)?;
+                self.expire(now);
+                let id = text(args, "decision_id");
+                let sessions: Vec<String> = self.agents.iter().map(|a| a.session.clone()).collect();
+                self.change(self.asked(&id), "decision not found", now, |book| {
+                    let given = Given {
+                        expected_revision: expected,
+                        choice: args.get("choice"),
+                        answer: args.get("answer"),
+                    };
+                    let known = |session: &str| sessions.iter().any(|known| known == session);
+                    book.resolve(&id, &given, &OnBehalf::default(), &known, now)
+                })
+            }
+            "dismiss" => {
+                let expected =
+                    decisions::integer(&args["expected_revision"], "expected_revision", 1)?;
+                self.expire(now);
+                let id = text(args, "decision_id");
+                self.change(self.asked(&id), "decision not found", now, |book| {
+                    book.dismiss(&id, expected, now)
+                })
+            }
+            "withdraw" => {
+                let session = text(args, "session");
+                if session.trim().is_empty() {
+                    return refused(Why::Value, "session required");
+                }
+                let id = text(args, "decision_id");
+                self.change(self.asked(&id), "decision not found", now, |book| {
+                    book.withdraw(&id, &session, now)
+                })
+            }
+            "attention" => {
+                self.expire(now);
+                let flag = |name: &str| args[name].as_bool().unwrap_or(false);
+                let items = decisions::attention(
+                    &self.shelves(),
+                    flag("include_questions"),
+                    flag("include_archived"),
+                    now,
+                );
+                Ok(json!(items))
+            }
+            "pending_deliveries" => {
+                let shelves = self.shelves();
+                let rows: Vec<Value> = decisions::pending_deliveries(&shelves)
+                    .into_iter()
+                    .map(|artifact| {
+                        let mut row = decisions::delivery_row(artifact).unwrap();
+                        row["prompt"] = json!(decisions::delivery_prompt(artifact).unwrap());
+                        row
+                    })
+                    .collect();
+                Ok(json!(rows))
+            }
+            "mark_delivered" => {
+                let id = text(args, "decision_id");
+                if let Some(at) = self.asked(&id)
+                    && let Some(artifact) = self.agents[at].artifacts.delivered(&id, now)
+                {
+                    self.agents[at].keep(&artifact, now);
+                }
+                Ok(Value::Null)
+            }
+            "delivery_pending" => {
+                let id = text(args, "decision_id");
+                let pending = self.asked(&id).is_some_and(|at| {
+                    let artifact = self.agents[at].artifacts.of_decision(&id).unwrap();
+                    artifact.decision.as_ref().unwrap().delivery_pending()
+                });
+                Ok(json!(pending))
+            }
+            "has_blocking_decision" | "has_pending_decision" => {
+                let id = text(args, "agent_id");
+                let agent = self.agents.iter().find(|agent| agent.agent_id == id.trim());
+                Ok(json!(agent.is_some_and(|agent| {
+                    if name == "has_blocking_decision" {
+                        agent.artifacts.has_blocking_decision(now)
+                    } else {
+                        agent.artifacts.has_pending_decision(now)
+                    }
+                })))
+            }
+            "cancel_for_agent" => {
+                let id = text(args, "agent_id");
+                if let Some(agent) = self.agents.iter_mut().find(|agent| agent.agent_id == id) {
+                    for artifact in agent.artifacts.cancelled_with_agent(now) {
+                        agent.keep(&artifact, now);
+                    }
+                }
+                Ok(Value::Null)
+            }
+            "plan_create" => {
+                let title = text(args, "title");
+                let at = self.by_session(&text(args, "session"));
+                self.plan(
+                    at,
+                    "agent session not found",
+                    true,
+                    now,
+                    |goals, owner, world| {
+                        let made = goals.create(
+                            owner,
+                            &text(args, "plan_id"),
+                            &title,
+                            &args["items"],
+                            args.get("goal"),
+                            world,
+                        )?;
+                        Ok((made, title.trim().to_string()))
+                    },
+                )
+            }
+            "plan_step" | "plan_act" | "plan_finish" => {
+                let plan_id = text(args, "plan_id");
+                let revision = args["revision"].as_i64().unwrap();
+                self.plan(
+                    self.of_plan(&plan_id),
+                    "task plan not found",
+                    false,
+                    now,
+                    |goals, _, world| {
+                        let changed = match name {
+                            "plan_step" => {
+                                let item = item_key(&plan_id, &text(args, "item"), world.token_hex);
+                                let detail = args.get("detail").and_then(Value::as_str);
+                                goals.step(
+                                    &item,
+                                    Some(revision),
+                                    &text(args, "status"),
+                                    detail,
+                                    world.now_ms,
+                                )?
+                            }
+                            "plan_act" => goals.act(
+                                &plan_id,
+                                revision,
+                                &text(args, "action"),
+                                &args["data"],
+                                world,
+                            )?,
+                            _ => goals.finish(
+                                &plan_id,
+                                "completed",
+                                "",
+                                Some(revision),
+                                world.now_ms,
+                            )?,
+                        };
+                        let title = changed.plan.title.clone();
+                        Ok((changed, title))
+                    },
+                )
+            }
+            other => panic!("the vectors make a call this test does not know: {other}"),
+        }
+    }
+}
+
+#[test]
+fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("fixtures/artifact-vectors.json")).unwrap();
+    let mut wrong: Vec<String> = Vec::new();
+    let mut compared = 0;
+    for scenario in vectors["scenarios"].as_array().unwrap() {
+        let name = scenario["name"].as_str().unwrap();
+        let agents = scenario["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|agent| Agent {
+                agent_id: text(agent, "agent_id"),
+                session: text(agent, "session"),
+                persona: text(agent, "persona"),
+                artifacts: ArtifactBook::new(),
+                goals: GoalBook::new(),
+            });
+        let mut fleet = Fleet {
+            agents: agents.collect(),
+            ids: 0,
+        };
+        for (number, call) in scenario["calls"].as_array().unwrap().iter().enumerate() {
+            let what = call["call"].as_str().unwrap();
+            let now = call["at"].as_i64().unwrap();
+            let ids_before = fleet.ids;
+            let said = fleet.call(what, &call["args"], now);
+            let context = format!("{name}, call {number} ({what} {})", call["args"]);
+            compared += 1;
+            let mut found = Vec::new();
+            match (&said, call.get("result"), call.get("error")) {
+                (Ok(ours), Some(theirs), _) => {
+                    let mut theirs = theirs.clone();
+                    // The Python Host answers a discard with the row as it read it before:
+                    // it still says pinned when the pin is gone. Here the row is what it is.
+                    if what == "discard" {
+                        theirs[0]["pinned"] = json!(!theirs[0]["pinned_at"].is_null());
+                    }
+                    differences("result", ours, &theirs, &mut found);
+                }
+                (Err(ours), _, Some(theirs)) => {
+                    let kind = match ours.why {
+                        Why::Value => "ValueError",
+                        Why::Permission => "PermissionError",
+                        Why::Integrity => "IntegrityError",
+                    };
+                    if kind != theirs["kind"] || ours.message != theirs["message"].as_str().unwrap()
+                    {
+                        found.push(format!(
+                            "refused here as {kind}: {}; there as {theirs}",
+                            ours.message
+                        ));
+                    }
+                }
+                (Ok(ours), None, Some(theirs)) => {
+                    let ours = ours.to_string();
+                    let shown: String = ours.chars().take(300).collect();
+                    found.push(format!("answered here: {shown}; refused there: {theirs}"));
+                }
+                (Err(ours), Some(theirs), _) => {
+                    let theirs = theirs.to_string();
+                    let shown: String = theirs.chars().take(300).collect();
+                    found.push(format!(
+                        "refused here: {}; answered there: {shown}",
+                        ours.message
+                    ));
+                }
+                _ => found.push("the vector has neither a result nor an error".to_string()),
+            }
+            let used = fleet.ids - ids_before;
+            if Some(used) != call["ids"].as_u64() {
+                found.push(format!("ids made: here {used}, there {}", call["ids"]));
+            }
+            if !found.is_empty() {
+                found.truncate(8);
+                wrong.push(format!("{context}:\n    {}", found.join("\n    ")));
+            }
+        }
+    }
+    let shown: Vec<&str> = wrong.iter().take(30).map(String::as_str).collect();
+    assert!(
+        wrong.is_empty(),
+        "{} of {compared} calls differ:\n{}",
+        wrong.len(),
+        shown.join("\n")
+    );
+    assert!(compared >= 250, "only {compared} calls were compared");
+}

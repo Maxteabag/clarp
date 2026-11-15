@@ -16,6 +16,7 @@ use serde_json::{Map, Value, json};
 
 use super::{Change, Goal, GoalBook, Plan, World, generation, plain, remember, set, truthy};
 use crate::jobs::{Job, parse_handle};
+use crate::python::dumps as python_json;
 
 /// What the id of a wake begins with: of the message it is sent as, and of its trace.
 pub const WAKE_PREFIX: &str = "task-goal-";
@@ -113,24 +114,6 @@ fn preview(text: &str, limit: usize) -> String {
         text.to_string()
     } else {
         format!("{}{TRUNCATED}", super::clip(text, limit))
-    }
-}
-
-/// A value as Python's `json.dumps` writes it: a space after every comma and colon.
-fn python_json(value: &Value) -> String {
-    match value {
-        Value::Array(items) => {
-            let items: Vec<String> = items.iter().map(python_json).collect();
-            format!("[{}]", items.join(", "))
-        }
-        Value::Object(fields) => {
-            let fields: Vec<String> = fields
-                .iter()
-                .map(|(key, value)| format!("{}: {}", json!(key), python_json(value)))
-                .collect();
-            format!("{{{}}}", fields.join(", "))
-        }
-        plain => plain.to_string(),
     }
 }
 
