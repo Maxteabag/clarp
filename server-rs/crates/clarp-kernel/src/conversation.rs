@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::journal::kind;
-use crate::turn::Origin;
+use crate::turn::{Origin, Outcome, Settled};
 
 /// Who wrote a message that came from another agent.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -82,6 +82,45 @@ pub struct Notice {
     pub text: String,
 }
 
+/// How a turn ended. It is not a row of the conversation: it belongs to the row that closed
+/// the turn, which is the last thing the turn put there, or the message itself when the turn
+/// put nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnEnd {
+    pub id: String,
+    pub turn: u64,
+    /// The id of the row that closed the turn.
+    pub closes: String,
+    /// `completed`, `failed` or `interrupted`: the three ends a client tells apart.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<i64>,
+    pub ended_at_ms: i64,
+    pub tool_count: u32,
+}
+
+impl TurnEnd {
+    /// The end of a settled turn, for the row with the id `closes`. A turn that was taken back
+    /// before it started has no end to tell.
+    pub fn of(settled: &Settled, closes: &str) -> Option<Self> {
+        let status = match &settled.outcome {
+            Outcome::Completed => "completed",
+            Outcome::Failed { .. } => "failed",
+            Outcome::Stopped { .. } | Outcome::Interrupted { .. } => "interrupted",
+            Outcome::Withdrawn { .. } => return None,
+        };
+        Some(Self {
+            id: format!("t-{}", settled.id.0),
+            turn: settled.id.0,
+            closes: closes.to_string(),
+            status: status.to_string(),
+            started_at_ms: settled.started_at_ms,
+            ended_at_ms: settled.ended_at_ms,
+            tool_count: settled.tool_count,
+        })
+    }
+}
+
 /// Any one thing a conversation holds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entry {
@@ -89,6 +128,7 @@ pub enum Entry {
     Reply(Reply),
     Tool(ToolCall),
     Notice(Notice),
+    TurnEnd(TurnEnd),
 }
 
 impl Entry {
@@ -98,6 +138,7 @@ impl Entry {
             Self::Reply(_) => kind::REPLY,
             Self::Tool(_) => kind::TOOL,
             Self::Notice(_) => kind::NOTICE,
+            Self::TurnEnd(_) => kind::TURN_END,
         }
     }
 
@@ -108,6 +149,7 @@ impl Entry {
             Self::Reply(reply) => &reply.id,
             Self::Tool(tool) => &tool.id,
             Self::Notice(notice) => &notice.id,
+            Self::TurnEnd(end) => &end.id,
         }
     }
 
@@ -117,6 +159,7 @@ impl Entry {
             Self::Reply(reply) => Some(reply.turn),
             Self::Tool(tool) => Some(tool.turn),
             Self::Notice(notice) => notice.turn,
+            Self::TurnEnd(end) => Some(end.turn),
         }
     }
 
@@ -127,6 +170,7 @@ impl Entry {
             Self::Reply(reply) => serde_json::to_vec(reply),
             Self::Tool(tool) => serde_json::to_vec(tool),
             Self::Notice(notice) => serde_json::to_vec(notice),
+            Self::TurnEnd(end) => serde_json::to_vec(end),
         }?;
         let mut item = NewItem::new(self.kind(), ts_ms, body).keyed(self.id());
         item.turn = self.turn();
@@ -140,6 +184,7 @@ impl Entry {
             kind::REPLY => Self::Reply(serde_json::from_slice(&item.body)?),
             kind::TOOL => Self::Tool(serde_json::from_slice(&item.body)?),
             kind::NOTICE => Self::Notice(serde_json::from_slice(&item.body)?),
+            kind::TURN_END => Self::TurnEnd(serde_json::from_slice(&item.body)?),
             _ => return Ok(None),
         }))
     }
@@ -181,6 +226,15 @@ mod tests {
                 turn: Some(3),
                 code: "usage-limit".to_string(),
                 text: "The usage limit was reached.".to_string(),
+            }),
+            Entry::TurnEnd(TurnEnd {
+                id: "t-3".to_string(),
+                turn: 3,
+                closes: "r-msg_1".to_string(),
+                status: "completed".to_string(),
+                started_at_ms: Some(5),
+                ended_at_ms: 30,
+                tool_count: 1,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

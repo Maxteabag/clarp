@@ -45,6 +45,7 @@ impl World {
         let profile = Profile {
             agent_id: "a1".to_string(),
             session: "maximus".to_string(),
+            conversation_id: "conv-1".to_string(),
             dir: root.join("agents/a1"),
             run_dir: root.join("run"),
             cwd: root.join("work"),
@@ -188,6 +189,7 @@ fn shown(actor: &Actor) -> Vec<(String, String)> {
                 Entry::Reply(reply) => format!("agent: {}", reply.text),
                 Entry::Tool(call) => format!("{} {:?} {:?}", call.name, call.status, call.output),
                 Entry::Notice(notice) => format!("notice: {}", notice.code),
+                Entry::TurnEnd(end) => format!("end: {}", end.status),
             };
             (version.entry.id().to_string(), says)
         })
@@ -488,6 +490,7 @@ fn a_conversation_is_read_in_pages() {
     let mut caught = Vec::new();
     loop {
         let page = actor.after(cursor, 5).unwrap();
+        // A row that changed is given again: the reply a turn ended on, when the turn ends.
         caught.extend(ids(&page));
         assert!(page.latest_revision >= cursor);
         cursor = page.latest_revision;
@@ -495,8 +498,32 @@ fn a_conversation_is_read_in_pages() {
             break;
         }
     }
-    assert_eq!(caught, ids(&actor.tail(100).unwrap()));
+    let everything = ids(&actor.tail(100).unwrap());
+    let mut once = Vec::new();
+    for id in &caught {
+        if !once.contains(id) {
+            once.push(id.clone());
+        }
+    }
+    assert_eq!(once, everything, "everything, in the order it first came");
     assert_eq!(cursor, actor.head_revision());
+    // And the rows that closed a turn say how it ended.
+    let closed: Vec<String> = actor
+        .tail(100)
+        .unwrap()
+        .entries
+        .iter()
+        .filter(|row| {
+            row.turn
+                .as_ref()
+                .is_some_and(|end| end.status == "completed")
+        })
+        .map(|row| row.entry.id().to_string())
+        .collect();
+    assert_eq!(
+        closed,
+        vec!["r-1-1", "r-2-1", "r-3-1", "r-4-1", "r-5-1", "r-6-1"]
+    );
 }
 
 // ---- restarts -------------------------------------------------------------------------------

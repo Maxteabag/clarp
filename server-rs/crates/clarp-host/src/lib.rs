@@ -9,6 +9,9 @@
 //! Nothing in this crate decides what an agent does. A thread here asks its actor, does what the
 //! actor answers, and tells the hub what changed.
 
+// The snapshot's row is one literal with every field of the contract.
+#![recursion_limit = "256"]
+
 pub mod admin;
 pub mod agent;
 pub mod config;

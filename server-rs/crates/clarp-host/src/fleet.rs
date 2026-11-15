@@ -14,7 +14,6 @@ use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::kv::KeyValue;
 use clarp_ports::log::LogEngine;
-use clarp_protocol::events::{AgentFocus, AgentRoster, Event};
 use clarp_protocol::requests::CreateAgentRequest;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
@@ -25,6 +24,7 @@ use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::Launcher;
 use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
+use crate::wire;
 
 const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
@@ -228,6 +228,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
     let profile = Profile {
         agent_id: record.agent_id.clone(),
         session: record.session.clone(),
+        conversation_id: record.conversation_id.clone(),
         dir: works.config.data_dir.join("agents").join(&record.agent_id),
         run_dir: works.config.run_dir.clone(),
         cwd: PathBuf::from(&record.cwd),
@@ -358,11 +359,9 @@ impl Fleet {
     }
 
     fn tell_roster(&self, kind: &str, session: &str) {
-        let event = Event::AgentRoster(AgentRoster {
-            kind: Some(kind.to_string()),
-            session: Some(session.to_string()),
-        });
-        self.works.hub.publish(event, self.now_ms());
+        self.works
+            .hub
+            .publish(wire::roster(kind, session), self.now_ms());
     }
 
     fn taken(&self, session: &str) -> bool {
@@ -460,11 +459,7 @@ impl Fleet {
             .map_err(|error| Unavailable(error.to_string()))?;
         self.focus = Some(record.agent_id.clone());
         self.publish();
-        let event = Event::AgentFocus(AgentFocus {
-            session: Some(record.session.clone()),
-            agent_id: Some(record.agent_id.clone()),
-        });
-        self.works.hub.publish(event, self.now_ms());
+        self.works.hub.publish(wire::focus(&record), self.now_ms());
         Ok(Some(record))
     }
 

@@ -248,7 +248,11 @@ fn a_message_is_answered_and_the_apps_are_told() {
 
     let session = host.new_agent("Echo");
     assert_eq!(session, "echo");
-    assert_eq!(host.state(&session), "idle");
+    assert_eq!(
+        host.state(&session),
+        "spawned",
+        "an agent that has never run a turn"
+    );
     let heard = host.listen();
 
     let sent = host.send(&session, "hello there", "m1");
@@ -304,7 +308,19 @@ fn a_message_is_answered_and_the_apps_are_told() {
     );
 
     // What the Host does not know, it says so.
-    assert_eq!(host.ask("GET", "/log?session=nobody", None).0, 404);
+    // An agent the Host does not have has no conversation, and cannot be chosen or written to.
+    assert_eq!(host.get("/log?session=nobody")["missing"], true);
+    let select = host.ask("POST", "/select", Some(&json!({ "session": "nobody" })));
+    assert_eq!(
+        (select.0, &select.1["error"]),
+        (404, &json!("no such session"))
+    );
+    let lost = host.ask(
+        "POST",
+        "/send",
+        Some(&json!({ "session": "nobody", "text": "x" })),
+    );
+    assert_eq!(lost.0, 404);
     assert_eq!(
         host.ask(
             "POST",
@@ -341,16 +357,20 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
         "the stop did not wait for the sleep"
     );
     let held = host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(held["paused"], true);
+    assert_eq!(held["items"].as_array().unwrap().len(), 1);
     assert_eq!(
-        (
-            held["queued"].as_array().unwrap().len(),
-            &held["queue_paused"]
-        ),
-        (1, &json!(true))
+        (&held["items"][0]["id"], &held["items"][0]["text"]),
+        (&json!("m2"), &json!("later")),
+        "what waits is named as the client named it"
     );
 
     let resumed = host.post("/turn-queue/resume", json!({ "session": session }));
-    assert_eq!(resumed["resumed"], true);
+    assert_eq!(
+        (&resumed["paused"], &resumed["count"]),
+        (&json!(false), &json!(0))
+    );
+    assert!(resumed["revision"].as_u64().unwrap() > held["revision"].as_u64().unwrap());
     wait_for("the held message to be answered", || {
         host.conversation(&session)
             .contains(&said("assistant", "later"))

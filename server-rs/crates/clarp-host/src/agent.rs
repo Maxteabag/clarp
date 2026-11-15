@@ -11,19 +11,21 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use clarp_actor::conversation::Page;
-use clarp_actor::{Action, Actor, ActorError, Changed, Outputs, Profile, Sent, Status};
+use clarp_actor::conversation::{Page, Versioned};
+use clarp_actor::{
+    Action, Actor, ActorError, Changed, Outputs, Profile, QueueState, Sent, Status, Waiting,
+};
 use clarp_backend::Backend;
-use clarp_kernel::conversation::Message;
-use clarp_kernel::turn::{Admission, TurnId};
+use clarp_kernel::conversation::{Entry, Message};
+use clarp_kernel::turn::{Activity, Admission, Outcome, TurnId};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
-use clarp_protocol::events::AgentStateKind;
 use tokio::sync::{oneshot, watch};
 
 use crate::fleet::AgentRecord;
 use crate::hub::Hub;
+use crate::ids;
 use crate::launcher::{self, Launcher, Told};
 use crate::wire;
 
@@ -47,13 +49,19 @@ pub enum Ask {
         admission: Admission,
         answer: Answer<Sent>,
     },
+    /// Answers how many turns were told to end, and where the queue stands after.
     Stop {
         by: String,
-        answer: Answer<u32>,
+        answer: Answer<(u32, QueueState)>,
     },
+    /// Answers whether the mailbox was held, and where the queue stands after.
     Resume {
         by: String,
-        answer: Answer<bool>,
+        answer: Answer<(bool, QueueState)>,
+    },
+    /// What waits, in the order it will run.
+    Queue {
+        answer: Answer<(Vec<Waiting>, QueueState)>,
     },
     Withdraw {
         turn: TurnId,
@@ -93,6 +101,8 @@ pub enum Ask {
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub status: Status,
+    /// The newest row of the conversation: what a list of chats shows of it.
+    pub newest: Option<Versioned>,
     pub backend: &'static str,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
@@ -137,12 +147,16 @@ impl AgentHandle {
         .await
     }
 
-    pub async fn stop(&self, by: String) -> Result<u32, Unavailable> {
+    pub async fn stop(&self, by: String) -> Result<(u32, QueueState), Unavailable> {
         self.ask(|answer| Ask::Stop { by, answer }).await
     }
 
-    pub async fn resume(&self, by: String) -> Result<bool, Unavailable> {
+    pub async fn resume(&self, by: String) -> Result<(bool, QueueState), Unavailable> {
         self.ask(|answer| Ask::Resume { by, answer }).await
+    }
+
+    pub async fn queue(&self) -> Result<(Vec<Waiting>, QueueState), Unavailable> {
+        self.ask(|answer| Ask::Queue { answer }).await
     }
 
     pub async fn withdraw(&self, turn: TurnId, by: String) -> Result<bool, Unavailable> {
@@ -185,11 +199,13 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         last: None,
         waiting: Vec::new(),
         paused: false,
+        queue_revision: 0,
         head_revision: 0,
         backend_session: None,
     };
     let (view_tx, view) = watch::channel(Arc::new(View {
         status: idle,
+        newest: None,
         backend: setup.backend.id(),
         broken: Some("the agent is being opened".to_string()),
     }));
@@ -198,8 +214,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         actor: None,
         tx: tx.clone(),
         view: view_tx,
-        told_state: None,
-        queue_revision: 0,
+        told: None,
+        newest: None,
         transcript_sent: None,
         transcript_due: None,
     };
@@ -219,9 +235,10 @@ struct Worker {
     /// The way to this thread, for the turns' threads.
     tx: mpsc::Sender<Ask>,
     view: watch::Sender<Arc<View>>,
-    /// The state the clients were last told, so that only a change is told.
-    told_state: Option<(AgentStateKind, Option<String>)>,
-    queue_revision: u64,
+    /// What the clients were last told, so that only a change is told.
+    told: Option<Status>,
+    /// The newest row of the conversation.
+    newest: Option<Versioned>,
     transcript_sent: Option<Instant>,
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
@@ -297,16 +314,12 @@ impl Worker {
         )
         .map_err(|error| error.to_string())?;
         self.actor = Some(actor);
-        // A queue revision above every one given out before this thread started.
-        self.queue_revision = self
-            .queue_revision
-            .max(u64::try_from(self.now_ms()).unwrap_or(0));
+        // What the agent is doing when it is opened is not news: a client that connects is
+        // told to look at everything anyway. What follows from opening it is.
+        self.told = self.actor.as_ref().map(Actor::status);
+        self.newest = self.newest_row();
+        self.publish_view();
         self.after(out);
-        self.show(Changed {
-            conversation: false,
-            status: true,
-            queue: false,
-        });
         Ok(())
     }
 
@@ -321,8 +334,20 @@ impl Worker {
                 admission,
                 answer,
             } => answered(actor.send(&message, admission, now), answer)?,
-            Ask::Stop { by, answer } => answered(actor.stop(&by, now), answer)?,
-            Ask::Resume { by, answer } => answered(actor.resume(&by, now), answer)?,
+            Ask::Stop { by, answer } => {
+                let stopped = actor.stop(&by, now);
+                let queue = actor.queue_state();
+                answered(stopped.map(|(told, out)| ((told, queue), out)), answer)?
+            }
+            Ask::Resume { by, answer } => {
+                let resumed = actor.resume(&by, now);
+                let queue = actor.queue_state();
+                answered(resumed.map(|(held, out)| ((held, queue), out)), answer)?
+            }
+            Ask::Queue { answer } => {
+                let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
+                return read(waiting, answer);
+            }
             Ask::Withdraw { turn, by, answer } => answered(actor.withdraw(turn, &by, now), answer)?,
             Ask::Tail { limit, answer } => return read(actor.tail(limit), answer),
             Ask::After {
@@ -382,46 +407,92 @@ impl Worker {
         }
     }
 
-    /// Publishes the agent's view and the events for what changed.
-    fn show(&mut self, changed: Changed) {
+    /// The newest row of the conversation, as the actor has it now.
+    fn newest_row(&self) -> Option<Versioned> {
+        let page = self.actor.as_ref()?.tail(1).ok()?;
+        page.entries.into_iter().last()
+    }
+
+    fn publish_view(&self) {
         let Some(actor) = &self.actor else {
             return;
         };
-        if !(changed.conversation || changed.status || changed.queue) {
-            return;
-        }
-        let status = actor.status();
-        let now = self.now_ms();
-        let record = &self.setup.record;
-        if changed.status {
-            let kind = wire::state_kind(&status);
-            let tool = status.live.as_ref().and_then(|live| match &live.activity {
-                clarp_kernel::turn::Activity::Tool { name } => Some(name.clone()),
-                _ => None,
-            });
-            let state = (kind, tool);
-            // A tool call is told every time; any other state only when it changes.
-            if self.told_state.as_ref() != Some(&state) || state.1.is_some() {
-                self.setup
-                    .hub
-                    .publish(wire::state_event(record, &status, now), now);
-                if let Some(activity) = wire::activity_event(record, &status, now) {
-                    self.setup.hub.publish(activity, now);
-                }
-                self.told_state = Some(state);
-            }
-        }
-        if changed.queue {
-            self.queue_revision += 1;
-            self.setup
-                .hub
-                .publish(wire::queue_event(record, &status, self.queue_revision), now);
-        }
         self.view.send_replace(Arc::new(View {
-            status,
+            status: actor.status(),
+            newest: self.newest.clone(),
             backend: actor.backend_id(),
             broken: None,
         }));
+    }
+
+    /// Publishes the agent's view and tells the clients what changed since they were last told.
+    fn show(&mut self, changed: Changed) {
+        if !(changed.conversation || changed.status || changed.queue) {
+            return;
+        }
+        let Some(actor) = &self.actor else {
+            return;
+        };
+        let status = actor.status();
+        let backend = actor.backend_id();
+        if changed.conversation {
+            self.newest = self.newest_row();
+        }
+        let now = self.now_ms();
+        let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
+        let before = self.told.take();
+        let was_live = before.as_ref().and_then(|told| told.live.as_ref());
+
+        // A turn began: the word a send is answered with, for every client that did not send it.
+        if let Some(live) = &status.live
+            && was_live.map(|was| was.turn) != Some(live.turn)
+        {
+            let waited = before
+                .as_ref()
+                .is_some_and(|told| told.waiting.contains(&live.turn));
+            hub.publish(
+                wire::dispatched(&record, live, waited, status.waiting.len()),
+                now,
+            );
+        }
+        // What the agent is doing changed: its state, and the line that describes it.
+        if before.as_ref().map(told_state) != Some(told_state(&status)) {
+            if status.live.is_none()
+                && let Some(at_once) = wire::stopped(&record, &status, now)
+            {
+                hub.publish(at_once, now);
+            }
+            hub.publish(wire::state(&record, &status, backend, now), now);
+            hub.publish(wire::activity(&record, &status, now), now);
+        }
+        // A turn ended with an answer: the user is told, once.
+        let ended = status.last.as_ref().filter(|last| {
+            last.outcome == Outcome::Completed
+                && before
+                    .as_ref()
+                    .and_then(|told| told.last.as_ref())
+                    .map(|was| was.id)
+                    != Some(last.id)
+        });
+        if let (Some(ended), Some(reply)) = (ended, &self.newest)
+            && matches!(reply.entry, Entry::Reply(_))
+            && reply.turn_number == Some(ended.id.0)
+        {
+            let asked = was_live
+                .filter(|was| was.turn == ended.id)
+                .map(|was| was.message_id.clone())
+                .unwrap_or_default();
+            let id = format!("pn-{}", ids::hex(6));
+            hub.publish(
+                wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms),
+                now,
+            );
+        }
+        if changed.queue {
+            hub.publish(wire::queue_updated(&record, &status), now);
+        }
+        self.told = Some(status);
+        self.publish_view();
         if changed.conversation {
             let now = Instant::now();
             match self.transcript_sent {
@@ -436,11 +507,10 @@ impl Worker {
     fn tell_transcript(&mut self) {
         self.transcript_due = None;
         self.transcript_sent = Some(Instant::now());
-        let status = self.view.borrow().status.clone();
         let now = self.now_ms();
         self.setup
             .hub
-            .publish(wire::transcript_event(&self.setup.record, &status), now);
+            .publish(wire::transcript_updated(&self.setup.record), now);
     }
 
     fn show_broken(&self, why: &str) {
@@ -448,6 +518,22 @@ impl Worker {
         view.broken = Some(why.to_string());
         self.view.send_replace(Arc::new(view));
     }
+}
+
+/// What a client is shown as an agent's state: which turn runs and what it does, or which
+/// turn ended last. A change in any of it is told.
+fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>) {
+    let live = status.live.as_ref();
+    let tool = match live.map(|live| &live.activity) {
+        Some(Activity::Tool { name }) => name.clone(),
+        _ => String::new(),
+    };
+    (
+        live.map(|live| live.turn),
+        wire::state_name(&wire::state_kind(status)),
+        tool,
+        status.last.as_ref().map(|last| last.id),
+    )
 }
 
 /// Passes what a turn's thread says on to the agent's thread.
@@ -500,9 +586,9 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
         match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             Ok(Ask::Send { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
-            Ok(Ask::Resume { answer, .. } | Ask::Withdraw { answer, .. }) => {
-                drop(answer.send(Err(refusal())));
-            }
+            Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
             }
