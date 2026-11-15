@@ -193,12 +193,15 @@ scheme word for word.
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
 the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
 evening of 15 Nov an agent brings more than its conversation: the files it published, under the ids its
-conversation names them by, so that an image in an old reply still shows; and its plans and goals, each as it
-stood, at its revision, with its steps, its history, how its work goes on and the newest of its documents (most
-of the owner's agents work toward a goal: 88 plans in the week that was counted). It arrives with what it is
-committed to or not at all. And it arrives held: what its user says to it runs, and what would start by itself
-waits for a resume, because until it is archived where it came from it is on both Hosts and both would wake it.
-Not moving yet: its library (what it made and asked), its portrait and voice.
+conversation names them by, so that an image in an old reply still shows; its library, each artifact as it was
+shown, a report with every version it had, a request to the user as open or as answered as it was; and its
+plans and goals, each as it stood, at its revision, with its steps, its history, how its work goes on and the
+newest of its documents (most of the owner's agents work toward a goal: 88 plans in the week that was
+counted). Nothing of it is made anew or judged anew here: the kernel takes what was shown
+(`GoalBook::taken_over`, `artifacts/moved.rs`), and what one book shows another shows the same after it. It
+arrives with what it made and what it is committed to or not at all. And it arrives held: what its user says to
+it runs, and what would start by itself waits for a resume, because until it is archived where it came from it
+is on both Hosts and both would wake it. Not moving yet: its portrait and voice.
 
 **Stage 3 has begun, on the agent's side first** (15 Nov 2026). An agent on this Host has its background jobs
 (`clarp-agent-bg`, the apps' view of them and the cancel), its own status label, and its goals: `clarp-goal`

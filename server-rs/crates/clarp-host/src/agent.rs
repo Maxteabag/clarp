@@ -19,6 +19,7 @@ use clarp_actor::{
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
+use clarp_kernel::artifacts::reports;
 use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Shelf};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
@@ -150,6 +151,13 @@ pub enum Ask {
     Artifact {
         want: Box<Want>,
         answer: Answer<Result<Done, Refused>>,
+    },
+    /// What the agent made and asked on the Host it comes from: each artifact as that Host
+    /// showed it, a report with the versions it had. Answers how many there are now, or
+    /// why one cannot be taken.
+    TakeLibrary {
+        artifacts: Vec<(Value, Vec<Value>)>,
+        answer: Answer<Result<usize, String>>,
     },
     /// Holds the agent's mailbox without ending or pausing anything: what would start by
     /// itself waits for a resume. For an agent that has just arrived from another Host.
@@ -371,6 +379,16 @@ impl AgentHandle {
     pub async fn artifact(&self, want: Want) -> Result<Result<Done, Refused>, Unavailable> {
         let want = Box::new(want);
         self.ask(|answer| Ask::Artifact { want, answer }).await
+    }
+
+    /// Gives the agent the library it had where it comes from. The inner error is an
+    /// artifact that cannot be taken.
+    pub async fn take_library(
+        &self,
+        artifacts: Vec<(Value, Vec<Value>)>,
+    ) -> Result<Result<usize, String>, Unavailable> {
+        self.ask(|answer| Ask::TakeLibrary { artifacts, answer })
+            .await
     }
 
     /// Holds the agent's mailbox: nothing starts by itself until it is resumed.
@@ -943,6 +961,63 @@ impl Worker {
         }
     }
 
+    /// Takes the library an agent brings from the Host it was on: every artifact as it
+    /// was shown there, the pages of its reports kept first, all of it in one write.
+    fn handle_library(
+        &mut self,
+        artifacts: &[(Value, Vec<Value>)],
+        answer: Answer<Result<usize, String>>,
+    ) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let record = &self.setup.record;
+        let maker = Maker {
+            agent_id: &record.agent_id,
+            session: &record.session,
+            persona: &record.persona,
+        };
+        let mut arrived: Vec<Artifact> = Vec::new();
+        for (shown, revisions) in artifacts {
+            let here = |id: &str| {
+                actor.artifacts().any(id).is_some()
+                    || arrived.iter().any(|artifact| artifact.artifact_id == id)
+            };
+            let came = match actor.artifacts().taken_over(maker, shown, revisions, &here) {
+                Ok(came) => came,
+                Err(refused) => {
+                    let _ = answer.send(Ok(Err(refused.message)));
+                    return Ok(());
+                }
+            };
+            for content in &came.pages {
+                let name = reports::Page::of(content).blob();
+                if let Err(error) = self.setup.blobs.put(&name, content.as_bytes()) {
+                    let error = ActorError::Io(format!("a report's page was not kept: {error}"));
+                    let _ = answer.send(Err(unavailable(&error)));
+                    return Err(error);
+                }
+            }
+            arrived.push(came.artifact);
+        }
+        let kept = Kept {
+            artifacts: &arrived,
+            ..Kept::default()
+        };
+        match actor.keep(&kept, now) {
+            Ok(out) => {
+                self.after(out);
+                let _ = answer.send(Ok(Ok(arrived.len())));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = answer.send(Err(unavailable(&error)));
+                Err(error)
+            }
+        }
+    }
+
     /// Takes the plans an agent brings from the Host it was on: each is written as it
     /// stood there, with the artifact it is shown as, and published before the answer.
     fn handle_plans(
@@ -968,8 +1043,20 @@ impl Worker {
                     break;
                 }
             };
+            // A plan whose artifact came with the library is shown as that artifact, as
+            // it was: only a plan that has none is given one.
             let title = change.plan.title.clone();
-            match keep_goal(actor, &self.setup.record, &change, Some(&title), now) {
+            let shown = actor.artifacts().of_plan(&change.plan.plan_id).is_some();
+            let written = if shown {
+                let kept = Kept {
+                    goal: Some(&change),
+                    ..Kept::default()
+                };
+                actor.keep(&kept, now)
+            } else {
+                keep_goal(actor, &self.setup.record, &change, Some(&title), now)
+            };
+            match written {
                 Ok(out) => outs.push(out),
                 Err(error) => {
                     let _ = answer.send(Err(unavailable(&error)));
@@ -989,6 +1076,9 @@ impl Worker {
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::TakePlans { plans, answer } => return self.handle_plans(&plans, answer),
+            Ask::TakeLibrary { artifacts, answer } => {
+                return self.handle_library(&artifacts, answer);
+            }
             Ask::Goal { ask, answer } => return self.handle_goal(&ask, answer),
             Ask::Amended { record, taken } => {
                 self.amended(*record);
@@ -1093,6 +1183,7 @@ impl Worker {
             Ask::Artifact { .. }
             | Ask::Goal { .. }
             | Ask::Amended { .. }
+            | Ask::TakeLibrary { .. }
             | Ask::TakePlans { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
@@ -1622,6 +1713,7 @@ fn refuse_for(
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Publish { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakePlans { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::TakeLibrary { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
