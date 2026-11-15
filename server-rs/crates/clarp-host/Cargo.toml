@@ -1,0 +1,25 @@
+[package]
+name = "clarp-host"
+description = "The Clarp Host: one process that serves the apps and runs the agents"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum.workspace = true
+clarp-actor.workspace = true
+clarp-backend.workspace = true
+clarp-codec.workspace = true
+clarp-kernel.workspace = true
+clarp-ports.workspace = true
+clarp-protocol.workspace = true
+clarp-shim.workspace = true
+clarp-store-mem.workspace = true
+clarp-store-sqlite.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

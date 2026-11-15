@@ -1,14 +1,15 @@
-//! A log engine that keeps everything in memory.
+//! Engines that keep everything in memory: an agent's log, and the fleet's small tables.
 //!
 //! The engine is the "disk": a log opened twice in the same directory is the same log, so a test
 //! or the simulator can drop a log, as a crash would, and open it again. Bodies are stored
 //! through the codecs, exactly as a durable engine stores them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use clarp_ports::codec::{CodecSet, CodecTag};
+use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError};
 use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
 
 struct Row {
@@ -137,5 +138,68 @@ impl AgentLog for MemLog {
             }
         }
         Ok(None)
+    }
+}
+
+type Tables = Arc<Mutex<BTreeMap<(String, String), Vec<u8>>>>;
+
+/// The fleet's tables in memory. As with the log engine, the engine is the disk.
+#[derive(Default)]
+pub struct MemKeyValue {
+    disks: Mutex<HashMap<PathBuf, Tables>>,
+}
+
+impl MemKeyValue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+fn lost() -> StoreError {
+    StoreError("a writer panicked while holding the in-memory store".to_string())
+}
+
+impl KeyValueEngine for MemKeyValue {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+
+    fn open(&self, path: &Path) -> Result<Box<dyn KeyValue>, StoreError> {
+        let mut disks = self.disks.lock().map_err(|_| lost())?;
+        let tables = disks.entry(path.to_path_buf()).or_default().clone();
+        Ok(Box::new(MemTables { tables }))
+    }
+}
+
+struct MemTables {
+    tables: Tables,
+}
+
+impl KeyValue for MemTables {
+    fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let tables = self.tables.lock().map_err(|_| lost())?;
+        Ok(tables.get(&(table.to_string(), key.to_string())).cloned())
+    }
+
+    fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError> {
+        let mut tables = self.tables.lock().map_err(|_| lost())?;
+        tables.insert((table.to_string(), key.to_string()), value.to_vec());
+        Ok(())
+    }
+
+    fn delete(&mut self, table: &str, key: &str) -> Result<bool, StoreError> {
+        let mut tables = self.tables.lock().map_err(|_| lost())?;
+        Ok(tables
+            .remove(&(table.to_string(), key.to_string()))
+            .is_some())
+    }
+
+    fn list(&self, table: &str) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
+        let tables = self.tables.lock().map_err(|_| lost())?;
+        Ok(tables
+            .iter()
+            .filter(|((in_table, _), _)| in_table == table)
+            .map(|((_, key), value)| (key.clone(), value.clone()))
+            .collect())
     }
 }

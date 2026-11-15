@@ -3,8 +3,8 @@
 
 use clarp_codec::standard_set;
 use clarp_ports::log::{Kinds, LogEngine, NewItem};
-use clarp_ports::testkit::{log_engine_conformance, scratch_dir};
-use clarp_store_sqlite::{LOG_FILE, SqliteEngine};
+use clarp_ports::testkit::{key_value_conformance, log_engine_conformance, scratch_dir};
+use clarp_store_sqlite::{LOG_FILE, SqliteEngine, SqliteKeyValue};
 
 #[test]
 fn sqlite_passes_the_log_engine_suite() {
@@ -147,6 +147,17 @@ fn a_log_from_a_newer_build_is_refused() {
             .open(&dir, standard_set("none").unwrap())
             .is_err(),
         "older code does not open a newer log"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sqlite_passes_the_key_value_suite() {
+    let root = scratch_dir("sqlite-kv");
+    key_value_conformance(
+        &SqliteKeyValue::new(),
+        &root.join("a/fleet.db"),
+        &root.join("b/fleet.db"),
     );
     std::fs::remove_dir_all(root).unwrap();
 }

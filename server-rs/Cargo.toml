@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/clarp-host",
     "crates/clarp-actor",
     "crates/clarp-backend",
     "crates/clarp-ports",
@@ -25,6 +26,12 @@ clarp-store-mem = { path = "crates/clarp-store-mem" }
 clarp-kernel = { path = "crates/clarp-kernel" }
 clarp-backend = { path = "crates/clarp-backend" }
 clarp-actor = { path = "crates/clarp-actor" }
+clarp-protocol = { path = "crates/clarp-protocol" }
+clarp-shim = { path = "crates/clarp-shim" }
+clarp-store-sqlite = { path = "crates/clarp-store-sqlite" }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 clarp-spool = { path = "crates/clarp-spool" }
 nix = { version = "0.29", features = ["signal", "process"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

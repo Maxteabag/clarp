@@ -11,6 +11,7 @@
 
 pub mod events;
 pub mod log;
+pub mod requests;
 pub mod responses;
 pub mod server_info;
 pub mod snapshot;

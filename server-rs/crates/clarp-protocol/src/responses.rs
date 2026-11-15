@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The answer to `POST /send`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SendResponse {
     pub ok: bool,
     pub session: String,
@@ -25,7 +25,7 @@ pub struct SendResponse {
 }
 
 /// The answer to `POST /stop`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StopResponse {
     pub ok: bool,
     /// How many running turns were ended.

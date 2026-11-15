@@ -37,15 +37,14 @@ impl Scripted {
         }
     }
 
-    /// A tool that answers every message with the message's first line.
+    /// A tool that answers every message with the message's first line. A message that begins
+    /// with `sleep` and a number of seconds is answered after that long, which is how a test
+    /// gets a turn that is still running when it wants one.
     pub fn echo() -> Self {
-        Self::new(
-            "sh",
-            vec![
-                "-c".to_string(),
-                "IFS= read -r message; printf '%s\\n' \"$message\"".to_string(),
-            ],
-        )
+        let script = "IFS= read -r message; \
+            case \"$message\" in sleep\\ [0-9]*) sleep \"${message#sleep }\";; esac; \
+            printf '%s\\n' \"$message\"";
+        Self::new("sh", vec!["-c".to_string(), script.to_string()])
     }
 }
 
