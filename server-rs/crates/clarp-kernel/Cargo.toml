@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 clarp-ports.workspace = true
 clarp-speech.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
