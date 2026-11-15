@@ -34,6 +34,9 @@ pub struct TurnSpec {
     pub prompt: String,
     /// The tool's own session to continue, when the agent has one.
     pub backend_session: Option<String>,
+    /// The name the Host wants the tool to give a session it starts. A tool that can be told
+    /// uses it, so that the conversation has its name before the tool has said a word.
+    pub new_session: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
     /// What the agent is told about who it is, on top of the tool's own instructions.

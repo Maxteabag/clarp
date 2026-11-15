@@ -17,7 +17,7 @@
 //!    waits its turn, and runs even while the mailbox is held, without lifting the hold. It never
 //!    ends a turn that has not started: two direct messages in a row both run, in order.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -132,6 +132,11 @@ pub struct Agent {
     stopping: Option<String>,
     paused: bool,
     settled: u64,
+    /// How often what waits, or whether it is held, has changed. A message that starts at once
+    /// never waited and does not count: this is the number a client orders queue news by.
+    queue_revision: u64,
+    /// The turns that had to wait: each counts once when it joins and once when it leaves.
+    waited: BTreeSet<TurnId>,
     /// The last turn that held the agent and ended.
     last: Option<Settled>,
     /// The tool's own session, as the tool last named it: where the next turn continues.
@@ -147,6 +152,8 @@ impl Default for Agent {
             stopping: None,
             paused: false,
             settled: 0,
+            queue_revision: 0,
+            waited: BTreeSet::new(),
             last: None,
             backend_session: None,
         }
@@ -173,6 +180,12 @@ impl Agent {
     /// How many turns have ended, however they ended.
     pub fn settled(&self) -> u64 {
         self.settled
+    }
+
+    /// How often the queue has changed: a message had to wait, a waiting one started or was
+    /// taken back, the mailbox was held or let go.
+    pub fn queue_revision(&self) -> u64 {
+        self.queue_revision
     }
 
     /// The last turn that held the agent and ended. A message that was taken back never did.
@@ -340,8 +353,14 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
-            AgentEvent::Paused { .. } => self.paused = true,
-            AgentEvent::Resumed { .. } => self.paused = false,
+            AgentEvent::Paused { .. } => {
+                self.paused = true;
+                self.queue_revision += 1;
+            }
+            AgentEvent::Resumed { .. } => {
+                self.paused = false;
+                self.queue_revision += 1;
+            }
             AgentEvent::StopRequested { turn, by, .. } => {
                 if self.live_id() != Some(*turn) {
                     return Err(IllegalTransition {
@@ -367,6 +386,12 @@ impl Agent {
                 });
             }
             if let Turn::Queued(queued) = Turn::begin(change)? {
+                // Does it have to wait: behind a turn, behind others, or because of a hold?
+                let held = self.paused && queued.admission != Admission::Direct;
+                if self.live.is_some() || !self.mailbox.is_empty() || held {
+                    self.waited.insert(turn);
+                    self.queue_revision += 1;
+                }
                 if queued.admission == Admission::Direct {
                     // Ahead of what waits its turn, behind the direct messages already waiting.
                     let at = self
@@ -418,6 +443,9 @@ impl Agent {
         let Some(queued) = self.mailbox.remove(index) else {
             return Ok(());
         };
+        if self.waited.remove(&turn) {
+            self.queue_revision += 1;
+        }
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(_) => self.settled += 1,
             next => self.live = Some(next),
@@ -742,6 +770,46 @@ mod tests {
             vec![TurnId(1), TurnId(3), TurnId(4), TurnId(2)],
             "every message ran exactly once"
         );
+    }
+
+    #[test]
+    fn the_queue_has_a_revision_that_counts_only_what_waited() {
+        let mut a = Driven::new();
+        a.user(10);
+        assert_eq!(
+            a.agent.queue_revision(),
+            0,
+            "a message that starts at once never waited"
+        );
+        a.user(11);
+        assert_eq!(a.agent.queue_revision(), 1, "a message joined the queue");
+        a.send(Command::Stop {
+            by: "peter".to_string(),
+        })
+        .unwrap();
+        assert_eq!(a.agent.queue_revision(), 2, "the queue is held");
+        a.finish(1);
+        assert_eq!(
+            a.agent.queue_revision(),
+            2,
+            "a turn that ends changes nothing about the queue"
+        );
+        a.send(Command::Resume {
+            by: "peter".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            a.agent.queue_revision(),
+            4,
+            "let go, and the waiting message left it to run"
+        );
+        a.user(12);
+        a.send(Command::Withdraw {
+            turn: TurnId(3),
+            by: "peter".to_string(),
+        })
+        .unwrap();
+        assert_eq!(a.agent.queue_revision(), 6, "joined, and was taken back");
     }
 
     #[test]

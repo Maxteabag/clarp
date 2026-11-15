@@ -5,8 +5,12 @@
 //! the log: an item at position `seq` has revision `seq * REVISION_STEP`. A reply that is still
 //! being written is not in the log; it takes the revisions in between, one for each change, and
 //! the item that finally stores it is above them all.
+//!
+//! How a turn ended is stored once, when it ends, and belongs to the row that closed the turn.
+//! That row changed when the turn ended, so it carries the end's revision from then on, and a
+//! client that asks what is newer is given the row again.
 
-use clarp_kernel::conversation::{Entry, Reply};
+use clarp_kernel::conversation::{Entry, Reply, TurnEnd};
 use clarp_kernel::journal::kind;
 use clarp_ports::log::{AgentLog, Item, Seq};
 
@@ -24,6 +28,10 @@ pub struct Versioned {
     pub ts_ms: i64,
     /// Still being written: it will change again, and what stores it will have the same id.
     pub live: bool,
+    /// The turn this thing belongs to.
+    pub turn_number: Option<u64>,
+    /// How that turn ended, when this is the row that closed it.
+    pub turn: Option<TurnEnd>,
 }
 
 /// A page of a conversation.
@@ -61,6 +69,8 @@ impl Draft {
             revision: self.revision,
             ts_ms: self.ts_ms,
             live: true,
+            turn_number: Some(self.turn),
+            turn: None,
         }
     }
 }
@@ -81,37 +91,118 @@ fn corrupt(item: &Item, error: serde_json::Error) -> ActorError {
     ))
 }
 
-/// The newest version of each thing among these items, which are oldest first.
-fn newest_versions(items: &[Item], place: Place) -> Result<Vec<Versioned>, ActorError> {
-    let mut found: Vec<(String, Versioned)> = Vec::with_capacity(items.len());
+fn row(item: &Item, entry: Entry) -> Versioned {
+    Versioned {
+        turn_number: item.turn.or(entry.turn()),
+        entry,
+        revision: item.seq * REVISION_STEP,
+        ts_ms: item.ts_ms,
+        live: false,
+        turn: None,
+    }
+}
+
+/// Gives a row the end of the turn it closed. The row changed when the turn ended.
+fn close(row: &mut Versioned, end: TurnEnd, end_revision: u64) {
+    row.revision = row.revision.max(end_revision);
+    row.turn = Some(end);
+}
+
+/// The rows among these items, which are oldest first: the newest version of each thing, with
+/// the turns' ends on the rows that closed them.
+fn rows(log: &dyn AgentLog, items: &[Item], place: Place) -> Result<Vec<Versioned>, ActorError> {
+    let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
         let Some(entry) = Entry::from_item(item).map_err(|error| corrupt(item, error))? else {
             continue;
         };
-        let id = entry.id().to_string();
-        let version = Versioned {
-            entry,
-            revision: item.seq * REVISION_STEP,
-            ts_ms: item.ts_ms,
-            live: false,
+        let end = match entry {
+            Entry::TurnEnd(end) => end,
+            entry => {
+                let version = row(item, entry);
+                match found
+                    .iter()
+                    .position(|known| known.entry.id() == version.entry.id())
+                {
+                    Some(at) if place == Place::First => {
+                        // It keeps the place and the time of its first appearance, and what
+                        // it was told about its turn.
+                        let (ts_ms, turn) = (found[at].ts_ms, found[at].turn.take());
+                        found[at] = Versioned {
+                            ts_ms,
+                            turn,
+                            ..version
+                        };
+                    }
+                    Some(at) => {
+                        let turn = found.remove(at).turn;
+                        found.push(Versioned { turn, ..version });
+                    }
+                    None => found.push(version),
+                }
+                continue;
+            }
         };
-        match found.iter().position(|(known, _)| *known == id) {
-            Some(at) if place == Place::First => {
-                // It keeps the place and the time of its first appearance.
-                let first_ts = found[at].1.ts_ms;
-                found[at].1 = Versioned {
-                    ts_ms: first_ts,
-                    ..version
-                };
-            }
+        let end_revision = item.seq * REVISION_STEP;
+        match found
+            .iter()
+            .position(|known| known.entry.id() == end.closes)
+        {
+            Some(at) if place == Place::First => close(&mut found[at], end, end_revision),
             Some(at) => {
-                found.remove(at);
-                found.push((id, version));
+                // The row changed now: among changes, this is where it stands.
+                let mut closed = found.remove(at);
+                close(&mut closed, end, end_revision);
+                found.push(closed);
             }
-            None => found.push((id, version)),
+            // The row is older than this page. Someone who asks what is newer needs it again,
+            // because it changed; a page of a chat simply does not reach back to it.
+            None if place == Place::Newest => {
+                if let Some(stored) = log.find(&end.closes)? {
+                    let entry =
+                        Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?;
+                    if let Some(entry) = entry {
+                        let mut closed = row(&stored, entry);
+                        close(&mut closed, end, end_revision);
+                        found.push(closed);
+                    }
+                }
+            }
+            None => {}
         }
     }
-    Ok(found.into_iter().map(|(_, version)| version).collect())
+    // A turn whose end lies after this page: its closing row is here, the end is not.
+    let mut asked: Vec<u64> = Vec::new();
+    for at in (0..found.len()).rev() {
+        let Some(turn) = found[at].turn_number else {
+            continue;
+        };
+        if asked.contains(&turn) {
+            continue;
+        }
+        asked.push(turn);
+        if found
+            .iter()
+            .any(|known| known.turn.as_ref().is_some_and(|end| end.turn == turn))
+        {
+            continue;
+        }
+        let Some(stored) = log.find(&format!("t-{turn}"))? else {
+            continue;
+        };
+        let Some(Entry::TurnEnd(end)) =
+            Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
+        else {
+            continue;
+        };
+        if let Some(closing) = found
+            .iter_mut()
+            .find(|known| known.entry.id() == end.closes)
+        {
+            close(closing, end, stored.seq * REVISION_STEP);
+        }
+    }
+    Ok(found)
 }
 
 /// The newest `limit` things, in the order a chat shows them, with the replies being written.
@@ -132,12 +223,13 @@ pub(crate) fn older(
     head_revision: u64,
     limit: usize,
 ) -> Result<Page, ActorError> {
-    let mut items = log.read_before(before, kind::CONVERSATION, limit.saturating_add(1))?;
+    // A page is counted in rows. How the turns ended is looked up for the rows that are in it.
+    let mut items = log.read_before(before, kind::ROWS, limit.saturating_add(1))?;
     let has_more = items.len() > limit;
     if has_more {
         items.remove(0);
     }
-    let mut entries = newest_versions(&items, Place::First)?;
+    let mut entries = rows(log, &items, Place::First)?;
     // A reply being written is shown where its finished version will be: at the end.
     for draft in drafts {
         if !entries.iter().any(|known| known.entry.id() == draft.id) {
@@ -167,10 +259,11 @@ pub(crate) fn after(
     )?;
     let has_more = items.len() > limit;
     items.truncate(limit);
-    let mut entries = newest_versions(&items, Place::Newest)?;
+    let cursor = items.last().map(|last| last.seq * REVISION_STEP);
+    let mut entries = rows(log, &items, Place::Newest)?;
     let latest_revision = if has_more {
-        // There is more in the log than this page: the cursor stops at what was given.
-        entries.last().map_or(revision, |last| last.revision)
+        // There is more in the log than this page: the cursor stops at what was read.
+        cursor.unwrap_or(revision)
     } else {
         for draft in drafts {
             if draft.revision > revision {

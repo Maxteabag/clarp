@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{ConnectInfo, Path, Query, Request, State};
-use axum::http::{HeaderMap, Method, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, Sse};
 use axum::response::{IntoResponse, Response};
@@ -20,11 +20,9 @@ use axum::{Json, Router};
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::clock::Clock;
-use clarp_protocol::log::LogResponse;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
 use clarp_protocol::responses::{SelectResponse, SendResponse, StopResponse};
 use clarp_protocol::server_info::{Capabilities, Contract, ServerInfo};
-use clarp_protocol::snapshot::Snapshot;
 use futures_util::stream::{self, Stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -60,11 +58,13 @@ pub struct App {
     pub server_id: String,
 }
 
-/// A request that cannot be met, as the contract says it: a status and `{"ok": false, "error"}`.
+/// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
+/// or, on the one route where the Python Host does so, with plain text.
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
     error: String,
+    plain: bool,
 }
 
 impl ApiError {
@@ -72,6 +72,15 @@ impl ApiError {
         Self {
             status,
             error: error.into(),
+            plain: false,
+        }
+    }
+
+    fn plain(status: StatusCode, text: impl Into<String>) -> Self {
+        Self {
+            status,
+            error: text.into(),
+            plain: true,
         }
     }
 }
@@ -84,20 +93,19 @@ impl From<Unavailable> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = json!({ "ok": false, "error": self.error });
-        (self.status, Json(body)).into_response()
+        if self.plain {
+            let kind = [(header::CONTENT_TYPE, "text/plain")];
+            (self.status, kind, self.error).into_response()
+        } else {
+            (self.status, Json(json!({ "error": self.error }))).into_response()
+        }
     }
 }
 
 impl App {
-    fn member(&self, session: &str) -> Result<Arc<Member>, ApiError> {
-        self.fleet
-            .directory()
-            .by_session(session)
-            .cloned()
-            .ok_or_else(|| {
-                ApiError::new(StatusCode::NOT_FOUND, format!("unknown session {session}"))
-            })
+    /// The agent with this session name, when the Host has one.
+    fn member(&self, session: &str) -> Option<Arc<Member>> {
+        self.fleet.directory().by_session(session).cloned()
     }
 }
 
@@ -215,17 +223,26 @@ fn who(app: &App, request: &Request) -> Option<Principal> {
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
-    if path == EXCHANGE {
-        return next.run(request).await;
-    }
-    let Some(principal) = who(&app, &request) else {
-        return ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    let mut response = if path == EXCHANGE {
+        next.run(request).await
+    } else {
+        match who(&app, &request) {
+            None => ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
+            Some(principal) if out_of_scope(&principal, request.method(), &path) => {
+                ApiError::new(StatusCode::FORBIDDEN, "this device may not do that").into_response()
+            }
+            Some(principal) => {
+                request.extensions_mut().insert(principal);
+                next.run(request).await
+            }
+        }
     };
-    if out_of_scope(&principal, request.method(), &path) {
-        return ApiError::new(StatusCode::FORBIDDEN, "this device may not do that").into_response();
-    }
-    request.extensions_mut().insert(principal);
-    next.run(request).await
+    // What the Host answers is true now and may not be a moment later: nothing keeps it.
+    response
+        .headers_mut()
+        .entry(header::CACHE_CONTROL)
+        .or_insert(HeaderValue::from_static("no-store"));
+    response
 }
 
 // ---- who the Host is, and who its agents are ------------------------------------------------
@@ -262,29 +279,38 @@ fn identity(app: &App) -> ServerInfo {
     }
 }
 
-async fn snapshot(State(app): State<App>) -> Json<Snapshot> {
+async fn snapshot(State(app): State<App>) -> Json<Value> {
     let directory = app.fleet.directory();
-    let agents = directory
+    let now = app.clock.now_ms();
+    let agents: Vec<Value> = directory
         .members
         .iter()
         .map(|member| {
             let view = member.agent.view();
             let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
-            wire::summary(&member.record, &view.status, view.backend, focused)
+            wire::summary(
+                &member.record,
+                &view.status,
+                view.backend,
+                view.newest.as_ref(),
+                focused,
+                now,
+            )
         })
         .collect();
-    let roster = directory
+    let roster: Vec<&str> = directory
         .members
         .iter()
-        .map(|member| member.record.persona.clone())
+        .map(|member| member.record.persona.as_str())
         .collect();
-    Json(Snapshot {
-        agents,
-        focus: directory.focus.clone(),
-        roster: Some(roster),
-        personas: Some(Vec::new()),
-        available_mcp_servers: Some(Vec::new()),
-    })
+    Json(json!({
+        "agents": agents,
+        "focus": directory.focus,
+        "roster": roster,
+        "personas": [],
+        "available_mcp_servers": [],
+        "model_avatars": false,
+    }))
 }
 
 async fn create_agent(
@@ -331,8 +357,13 @@ struct LogQuery {
 async fn log(
     State(app): State<App>,
     Query(query): Query<LogQuery>,
-) -> Result<Json<LogResponse>, ApiError> {
-    let member = app.member(&query.session)?;
+) -> Result<Json<Value>, ApiError> {
+    let Some(member) = app.member(&query.session) else {
+        // An agent the Host does not have has no conversation: the answer is the one for an
+        // agent that has not said anything yet, and not an error.
+        let home = std::env::var("HOME").unwrap_or_default();
+        return Ok(Json(wire::no_conversation(&home)));
+    };
     let limit = query.limit.unwrap_or(100).clamp(1, 5_000);
     let (page, replace) = if let Some(revision) = query.after_revision {
         let page = member.agent.after(revision, limit).await?;
@@ -346,7 +377,13 @@ async fn log(
     } else {
         (member.agent.tail(limit).await?, false)
     };
-    Ok(Json(wire::log_response(&member.record, &page, replace)))
+    let status = &member.agent.view().status;
+    Ok(Json(wire::log_response(
+        &member.record,
+        status,
+        &page,
+        replace,
+    )))
 }
 
 // ---- the commands ----------------------------------------------------------------------------
@@ -385,12 +422,15 @@ async fn send(
     State(app): State<App>,
     Json(request): Json<SendRequest>,
 ) -> Result<Json<SendResponse>, ApiError> {
-    let member = app.member(&request.session)?;
-    if request.text.trim().is_empty() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "a message needs text",
+    let Some(member) = app.member(&request.session) else {
+        // The Python Host's words for a message that names an agent it does not have.
+        return Err(ApiError::plain(
+            StatusCode::NOT_FOUND,
+            "unknown forced agent",
         ));
+    };
+    if request.text.trim().is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
     }
     let from_agent = request.origin.as_deref() == Some("agent");
     let sender = if from_agent {
@@ -422,14 +462,14 @@ async fn send(
         client: request.client,
     };
     let sent = member.agent.send(message, admission).await?;
-    let waiting = member.agent.view().status.waiting.len() as u64;
     Ok(Json(SendResponse {
         ok: true,
         session: member.record.session.clone(),
         dispatch: member.record.backend.clone(),
         trace_id,
         queued: Some(sent.queued),
-        queue_depth: Some(waiting),
+        queue_depth: Some(sent.queue.waiting as u64),
+        queue_revision: Some(sent.queue.revision),
         ..SendResponse::default()
     }))
 }
@@ -438,14 +478,23 @@ async fn stop(
     State(app): State<App>,
     Json(request): Json<SessionRequest>,
 ) -> Result<Json<StopResponse>, ApiError> {
-    let member = app.member(&request.session)?;
-    let terminated = member.agent.stop("user".to_string()).await?;
-    Ok(Json(StopResponse {
+    let answer = StopResponse {
         ok: true,
-        terminated: u64::from(terminated),
         stop_actor: Some("user".to_string()),
-        queue_paused: Some(true),
+        stop_actor_verified: Some(false),
+        stop_reason: Some(String::new()),
         ..StopResponse::default()
+    };
+    let Some(member) = app.member(&request.session) else {
+        // Nothing runs under a name the Host does not have: nothing was ended, and that is all.
+        return Ok(Json(answer));
+    };
+    let (terminated, queue) = member.agent.stop("user".to_string()).await?;
+    Ok(Json(StopResponse {
+        terminated: u64::from(terminated),
+        queue_paused: Some(queue.paused),
+        goals_paused: Some(0),
+        ..answer
     }))
 }
 
@@ -458,10 +507,7 @@ async fn select(
             ok: true,
             session: record.session,
         })),
-        None => Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            format!("unknown session {}", request.session),
-        )),
+        None => Err(ApiError::new(StatusCode::NOT_FOUND, "no such session")),
     }
 }
 
@@ -475,19 +521,26 @@ async fn queue(
     State(app): State<App>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let member = app.member(&query.session)?;
-    let view = member.agent.view();
-    let waiting: Vec<Value> = view
-        .status
-        .waiting
+    let member = app
+        .member(&query.session)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
+    let (waiting, state) = member.agent.queue().await?;
+    let items: Vec<Value> = waiting
         .iter()
-        .map(|turn| json!({ "id": turn.0 }))
+        .map(|message| {
+            json!({
+                // A waiting message is named as the client named it.
+                "id": message.message_id.strip_prefix("u-").unwrap_or(&message.message_id),
+                "text": message.text,
+                "enqueued_at": message.accepted_at_ms,
+                "synthesize_audio": false,
+            })
+        })
         .collect();
     Ok(Json(json!({
-        "ok": true,
-        "session": member.record.session,
-        "queued": waiting,
-        "queue_paused": view.status.paused,
+        "items": items,
+        "paused": state.paused,
+        "revision": state.revision,
     })))
 }
 
@@ -496,9 +549,16 @@ async fn resume(
     State(app): State<App>,
     Json(request): Json<SessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let member = app.member(&request.session)?;
-    let resumed = member.agent.resume("user".to_string()).await?;
-    Ok(Json(json!({ "ok": true, "resumed": resumed })))
+    let member = app
+        .member(&request.session)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
+    let (_, state) = member.agent.resume("user".to_string()).await?;
+    Ok(Json(json!({
+        "session": member.record.session,
+        "count": state.waiting,
+        "paused": state.paused,
+        "revision": state.revision,
+    })))
 }
 
 // ---- devices ---------------------------------------------------------------------------------
@@ -652,9 +712,6 @@ async fn events(
     // while it was away for longer than the hub remembers, the snapshot and the conversations
     // will tell.
     let mut first = VecDeque::with_capacity(missed.len() + 2);
-    first.push_back(unnumbered(
-        &json!({ "type": "server-version", "version": VERSION }),
-    ));
     first.extend(missed.iter().map(|published| numbered(published)));
     first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
     let clock = app.clock.clone();

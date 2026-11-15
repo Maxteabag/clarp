@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use clarp_protocol::events::{Envelope, Event};
+use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 /// How long an event is kept for clients that reconnect.
@@ -51,15 +51,15 @@ impl Hub {
     }
 
     /// Numbers an event, keeps it for those who reconnect and sends it to those who listen.
-    pub fn publish(&self, event: Event, now_ms: i64) -> u64 {
+    /// The event is the object a client will read; its number is added to it here.
+    pub fn publish(&self, mut event: Value, now_ms: i64) -> u64 {
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;
         recent.next_id += 1;
-        let envelope = Envelope {
-            event_id: Some(id),
-            event,
-        };
-        let json = serde_json::to_string(&envelope).unwrap_or_else(|_| "{}".to_string());
+        if let Some(fields) = event.as_object_mut() {
+            fields.insert("event_id".to_string(), json!(id));
+        }
+        let json = event.to_string();
         let published = Arc::new(Published {
             id,
             at_ms: now_ms,
@@ -100,15 +100,10 @@ impl Hub {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use clarp_protocol::events::AgentRoster;
-
     use super::*;
 
-    fn roster(kind: &str) -> Event {
-        Event::AgentRoster(AgentRoster {
-            kind: Some(kind.to_string()),
-            session: None,
-        })
+    fn roster(kind: &str) -> Value {
+        json!({ "type": "agent-roster", "kind": kind })
     }
 
     #[test]

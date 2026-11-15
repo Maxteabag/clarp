@@ -77,8 +77,17 @@ impl Backend for Claude {
         option("--model", &spec.model);
         option("--effort", &spec.effort);
         option("--append-system-prompt", &spec.identity);
-        // No session of its own yet: the tool makes one and names it in its first line.
-        option("--resume", &spec.backend_session);
+        // A session it has: continue it. None yet: start one under the name the Host chose,
+        // or, with no name given, under one of the tool's own, which its first line tells.
+        if spec
+            .backend_session
+            .as_ref()
+            .is_some_and(|session| !session.is_empty())
+        {
+            option("--resume", &spec.backend_session);
+        } else {
+            option("--session-id", &spec.new_session);
+        }
         let message = json!({
             "type": "user",
             "message": {"role": "user", "content": [{"type": "text", "text": spec.prompt}]},
@@ -884,6 +893,7 @@ mod tests {
             cwd: PathBuf::from("/work"),
             prompt: "say \"hi\"\nplease".to_string(),
             backend_session: None,
+            new_session: None,
             model: Some("opus".to_string()),
             effort: Some(String::new()),
             identity: None,
@@ -916,10 +926,26 @@ mod tests {
         let sent: Value = serde_json::from_slice(&fresh.stdin).unwrap();
         assert_eq!(sent["message"]["content"][0]["text"], "say \"hi\"\nplease");
 
+        let named = Claude::new().launch(&TurnSpec {
+            new_session: Some("conv-1".to_string()),
+            ..spec.clone()
+        });
+        assert!(
+            named
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--session-id", "conv-1"]),
+            "a first turn starts the session under the name the Host chose"
+        );
         let resumed = Claude::with_program("/opt/claude").launch(&TurnSpec {
             backend_session: Some("sess-1".to_string()),
+            new_session: Some("conv-1".to_string()),
             ..spec
         });
+        assert!(
+            !resumed.args.iter().any(|arg| arg == "--session-id"),
+            "a session that exists is continued, not named again"
+        );
         assert_eq!(resumed.program, "/opt/claude");
         assert!(
             resumed

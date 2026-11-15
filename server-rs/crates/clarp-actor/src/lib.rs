@@ -32,8 +32,8 @@ use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect};
-use clarp_kernel::conversation::{Entry, Message, Notice, Reply};
-use clarp_kernel::journal::{Incoming, JournalError, Recorder, kind};
+use clarp_kernel::conversation::{Entry, Message, Notice, Reply, TurnEnd};
+use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
 use clarp_kernel::turn::{Activity, Admission, RunOutcome, Settled, Turn, TurnId};
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
@@ -51,6 +51,9 @@ pub struct Profile {
     pub agent_id: String,
     /// The agent's session name: what its tools know it by.
     pub session: String,
+    /// The name of the agent's conversation. A tool that can be told starts its own session
+    /// under this name, so the conversation is called the same from its first message on.
+    pub conversation_id: String,
     /// The agent's own directory. Its turns' spools are in `spool/` under it.
     pub dir: PathBuf,
     /// Where the shims' sockets are. A socket's path has to be short, so not under `dir`.
@@ -176,12 +179,38 @@ pub struct Sent {
     pub queued: bool,
     /// The agent already had this message. Nothing was done.
     pub duplicate: bool,
+    /// Where the queue stands with this message taken.
+    pub queue: QueueState,
+}
+
+/// Where an agent's queue stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QueueState {
+    /// How many messages wait.
+    pub waiting: usize,
+    /// The mailbox is held: what waits runs only after a resume.
+    pub paused: bool,
+    /// Grows with every change of the two above.
+    pub revision: u64,
+}
+
+/// A message that waits its turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    pub turn: TurnId,
+    /// The message's id in the conversation.
+    pub message_id: String,
+    pub text: String,
+    pub accepted_at_ms: i64,
 }
 
 /// The turn that holds the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStatus {
     pub turn: TurnId,
+    /// The id of the message this turn answers, and the trace it travels under.
+    pub message_id: String,
+    pub trace_id: Option<String>,
     /// Its tool has not said anything yet.
     pub starting: bool,
     pub activity: Activity,
@@ -200,6 +229,7 @@ pub struct Status {
     /// The turns that wait, in the order they will run.
     pub waiting: Vec<TurnId>,
     pub paused: bool,
+    pub queue_revision: u64,
     pub head_revision: u64,
     /// The tool's own session, where the next turn continues.
     pub backend_session: Option<String>,
@@ -208,6 +238,12 @@ pub struct Status {
 /// The turn that holds the agent, as the actor follows it.
 struct LiveTurn {
     turn: TurnId,
+    /// The message this turn answers.
+    message_id: String,
+    trace_id: Option<String>,
+    /// The last row this turn put into the conversation: the message itself until the turn
+    /// says something. It is the row that is told how the turn ended.
+    last_row: String,
     interpreter: Box<dyn Interpreter>,
     /// How far the turn's spool has been read. Never behind the position in the log.
     offset: u64,
@@ -260,6 +296,12 @@ fn written(piece: &Entry, ts_ms: i64) -> Result<NewItem, ActorError> {
     piece.to_item(ts_ms).map_err(|error| {
         ActorError::Corrupt(format!("a piece of a turn could not be written: {error}"))
     })
+}
+
+/// How the turn that has just ended in this batch ended, for the row that closed it.
+fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str) -> Option<Entry> {
+    let ended = batch.agent().last().filter(|last| last.id == turn)?;
+    TurnEnd::of(ended, closes).map(Entry::TurnEnd)
 }
 
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, live: LiveReply, ts_ms: i64) {
@@ -321,9 +363,15 @@ impl Actor {
     pub fn status(&self) -> Status {
         let agent = self.recorder.agent();
         let stopping = agent.stopping().is_some();
+        let (message_id, trace_id) = match &self.live {
+            Some(live) => (live.message_id.clone(), live.trace_id.clone()),
+            None => (String::new(), None),
+        };
         let live = match agent.live() {
             Some(Turn::Starting(turn)) => Some(LiveStatus {
                 turn: turn.id,
+                message_id,
+                trace_id,
                 starting: true,
                 activity: Activity::Thinking,
                 started_at_ms: turn.started_at_ms,
@@ -332,6 +380,8 @@ impl Actor {
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
                 turn: turn.id,
+                message_id,
+                trace_id,
                 starting: false,
                 activity: turn.activity.clone(),
                 started_at_ms: turn.started_at_ms,
@@ -345,9 +395,56 @@ impl Actor {
             last: agent.last().cloned(),
             waiting: agent.waiting().map(|queued| queued.id).collect(),
             paused: agent.is_paused(),
+            queue_revision: agent.queue_revision(),
             head_revision: self.head_revision(),
             backend_session: agent.backend_session().map(str::to_string),
         }
+    }
+
+    /// Where the queue stands right now.
+    pub fn queue_state(&self) -> QueueState {
+        let agent = self.recorder.agent();
+        QueueState {
+            waiting: agent.waiting().count(),
+            paused: agent.is_paused(),
+            revision: agent.queue_revision(),
+        }
+    }
+
+    /// The messages that wait, in the order they will run.
+    pub fn queue(&self) -> Result<Vec<Waiting>, ActorError> {
+        let mut waiting = Vec::new();
+        for queued in self.recorder.agent().waiting() {
+            let message = self.message_at(queued.message_seq)?;
+            waiting.push(Waiting {
+                turn: queued.id,
+                message_id: message.id,
+                text: message.text,
+                accepted_at_ms: queued.accepted_at_ms,
+            });
+        }
+        Ok(waiting)
+    }
+
+    /// The message the log holds at this position.
+    fn message_at(&self, message_seq: Seq) -> Result<Message, ActorError> {
+        let stored = self
+            .recorder
+            .log()
+            .read_after(message_seq.saturating_sub(1), Kinds::only(kind::MESSAGE), 1)?
+            .into_iter()
+            .next()
+            .filter(|item| item.seq == message_seq)
+            .ok_or_else(|| {
+                ActorError::Corrupt(format!(
+                    "a turn answers the message at {message_seq}, and the log has none there"
+                ))
+            })?;
+        serde_json::from_slice(&stored.body).map_err(|error| {
+            ActorError::Corrupt(format!(
+                "the message at {message_seq} cannot be read: {error}"
+            ))
+        })
     }
 
     fn drafts(&self) -> &[Draft] {
@@ -419,6 +516,7 @@ impl Actor {
                 turn: None,
                 queued: false,
                 duplicate: true,
+                queue: self.queue_state(),
             };
             return Ok((sent, out));
         }
@@ -437,6 +535,7 @@ impl Actor {
             turn: accepted.turn,
             queued: !started,
             duplicate: false,
+            queue: self.queue_state(),
         };
         Ok((sent, out))
     }
@@ -543,6 +642,11 @@ impl Actor {
         }
         // What the agent had written and nobody stored is kept: the user saw it.
         let unfinished = self.drafts().to_vec();
+        let mut closes = self
+            .live
+            .as_ref()
+            .map(|live| live.last_row.clone())
+            .unwrap_or_default();
         let mut batch = self.recorder.batch();
         for draft in unfinished {
             let piece = Entry::Reply(Reply {
@@ -550,10 +654,8 @@ impl Actor {
                 turn: draft.turn,
                 text: draft.text,
             });
-            let item = piece.to_item(now_ms).map_err(|error| {
-                ActorError::Corrupt(format!("a reply could not be written: {error}"))
-            })?;
-            batch.item(item);
+            closes = piece.id().to_string();
+            batch.item(written(&piece, now_ms)?);
         }
         let told = match &command {
             _ if batch.agent().stopping().is_some() => None,
@@ -564,10 +666,14 @@ impl Actor {
             } => Some(ending_notice(turn, "turn-interrupted", reason)),
             _ => None,
         };
-        if batch.command(command, now_ms).is_ok()
-            && let Some(notice) = told
-        {
-            batch.item(written(&notice, now_ms)?);
+        if batch.command(command, now_ms).is_ok() {
+            if let Some(notice) = told {
+                closes = notice.id().to_string();
+                batch.item(written(&notice, now_ms)?);
+            }
+            if let Some(end) = closing(&batch, turn, &closes) {
+                batch.item(written(&end, now_ms)?);
+            }
         }
         let effects = batch.commit()?.effects;
         self.unstored_changes = 0;
@@ -611,31 +717,18 @@ impl Actor {
         message_seq: Seq,
         out: &mut Outputs,
     ) -> Result<(), ActorError> {
-        let stored = self
-            .recorder
-            .log()
-            .read_after(message_seq.saturating_sub(1), Kinds::only(kind::MESSAGE), 1)?
-            .into_iter()
-            .next()
-            .filter(|item| item.seq == message_seq)
-            .ok_or_else(|| {
-                ActorError::Corrupt(format!(
-                    "turn {} answers the message at {message_seq}, and the log has none there",
-                    turn.0
-                ))
-            })?;
-        let message: Message = serde_json::from_slice(&stored.body).map_err(|error| {
-            ActorError::Corrupt(format!(
-                "the message at {message_seq} cannot be read: {error}"
-            ))
-        })?;
+        let message = self.message_at(message_seq)?;
+        let backend_session = self.recorder.agent().backend_session().map(str::to_string);
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
             turn: turn.0,
             cwd: self.profile.cwd.clone(),
             prompt: message.text,
-            backend_session: self.recorder.agent().backend_session().map(str::to_string),
+            // The first turn starts the tool's session under the conversation's own name.
+            new_session: Some(self.profile.conversation_id.clone())
+                .filter(|name| backend_session.is_none() && !name.is_empty()),
+            backend_session,
             model: self.profile.model.clone(),
             effort: self.profile.effort.clone(),
             identity: self.profile.identity.clone(),
@@ -644,6 +737,9 @@ impl Actor {
         write_whole(&stdin_file, &launch.stdin)?;
         self.live = Some(LiveTurn {
             turn,
+            last_row: message.id.clone(),
+            message_id: message.id,
+            trace_id: message.trace_id,
             interpreter: self.backend.interpreter(turn.0),
             offset: 0,
             drafts: Vec::new(),
@@ -684,13 +780,23 @@ impl Actor {
                     reason: "the record of the turn's tool is gone".to_string(),
                 },
             };
-            let effects = self.recorder.handle(command, now_ms)?;
+            let closes = self.message_at(message_seq)?.id;
+            let mut batch = self.recorder.batch();
+            if batch.command(command, now_ms).is_ok()
+                && let Some(end) = closing(&batch, turn, &closes)
+            {
+                batch.item(written(&end, now_ms)?);
+            }
+            let effects = batch.commit()?.effects;
             out.changed.status = true;
+            out.changed.conversation = true;
             return self.carry_out(effects, out);
         }
         // A shim took this turn. Read its spool up to the position in the log, only to be where
         // the actor before this one was: what those lines meant is in the log already.
         let until = self.recorder.spool_offset(turn);
+        let message = self.message_at(message_seq)?;
+        let mut last_row = message.id.clone();
         let mut interpreter = self.backend.interpreter(turn.0);
         let mut drafts = Vec::new();
         let mut signals = Vec::new();
@@ -707,7 +813,12 @@ impl Actor {
                 for signal in signals.drain(..) {
                     match signal {
                         Signal::Live(live) => show(&mut drafts, turn, live, record.t),
-                        Signal::Reply(reply) => drafts.retain(|draft| draft.id != reply.id),
+                        Signal::Reply(reply) => {
+                            drafts.retain(|draft| draft.id != reply.id);
+                            last_row = reply.id;
+                        }
+                        Signal::Tool(call) => last_row = call.id,
+                        Signal::Notice(notice) => last_row = notice.id,
                         _ => {}
                     }
                 }
@@ -727,6 +838,9 @@ impl Actor {
         }
         self.live = Some(LiveTurn {
             turn,
+            message_id: message.id,
+            trace_id: message.trace_id,
+            last_row,
             interpreter,
             offset,
             drafts,
@@ -794,7 +908,12 @@ impl Actor {
                             .command(Command::StartFailed { turn, reason }, t)
                             .is_ok();
                         if failed && !stopping {
-                            batch.item(written(&ending_notice(turn, "turn-failed", error), t)?);
+                            let notice = ending_notice(turn, "turn-failed", error);
+                            live.last_row = notice.id().to_string();
+                            batch.item(written(&notice, t)?);
+                        }
+                        if failed && let Some(end) = closing(&batch, turn, &live.last_row) {
+                            batch.item(written(&end, t)?);
                         }
                         live.over = true;
                     }
@@ -832,7 +951,11 @@ impl Actor {
                                 .command(Command::TurnEnded { turn, outcome }, t)
                                 .is_ok();
                             if let (true, Some(notice)) = (ended, told) {
+                                live.last_row = notice.id().to_string();
                                 batch.item(written(&notice, t)?);
+                            }
+                            if ended && let Some(end) = closing(&batch, turn, &live.last_row) {
+                                batch.item(written(&end, t)?);
                             }
                             continue;
                         }
@@ -851,6 +974,7 @@ impl Actor {
                         Signal::Tool(call) => Entry::Tool(call),
                         Signal::Notice(notice) => Entry::Notice(notice),
                     };
+                    live.last_row = piece.id().to_string();
                     batch.item(written(&piece, t)?);
                 }
             }
@@ -865,10 +989,12 @@ impl Actor {
                     .command(Command::TurnEnded { turn, outcome }, now_ms)
                     .is_ok();
                 if ended && !stopping {
-                    batch.item(written(
-                        &ending_notice(turn, "turn-interrupted", reason),
-                        now_ms,
-                    )?);
+                    let notice = ending_notice(turn, "turn-interrupted", reason);
+                    live.last_row = notice.id().to_string();
+                    batch.item(written(&notice, now_ms)?);
+                }
+                if ended && let Some(end) = closing(&batch, turn, &live.last_row) {
+                    batch.item(written(&end, now_ms)?);
                 }
             }
             let wrote = !batch.is_empty();

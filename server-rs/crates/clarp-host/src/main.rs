@@ -62,6 +62,12 @@ async fn serve(config: Config) -> Result<(), String> {
     };
 
     let hub = Arc::new(Hub::new(clock.now_ms()));
+    // The first event of a Host's life says which version it is. A client that connects while
+    // the hub still keeps it learns that the Host was started again, and with what.
+    hub.publish(
+        clarp_host::wire::server_version(clarp_host::VERSION, clock.now_ms()),
+        clock.now_ms(),
+    );
     let works = Works {
         config: config.clone(),
         engine,

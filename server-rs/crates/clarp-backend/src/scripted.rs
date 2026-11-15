@@ -322,6 +322,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/work"),
             prompt: "hello there".to_string(),
             backend_session: None,
+            new_session: None,
             model: None,
             effort: None,
             identity: None,

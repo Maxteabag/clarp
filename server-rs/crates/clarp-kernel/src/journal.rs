@@ -32,11 +32,15 @@ pub mod kind {
     pub const TOOL: u16 = 102;
     /// A [`Notice`](crate::conversation::Notice) from the Host.
     pub const NOTICE: u16 = 103;
+    /// A [`TurnEnd`](crate::conversation::TurnEnd): how a turn ended, for the row that closed it.
+    pub const TURN_END: u16 = 104;
 
     /// What an agent is rebuilt from.
     pub const MACHINERY: Kinds = Kinds::range(1, 99);
     /// What a conversation is read from.
     pub const CONVERSATION: Kinds = Kinds::range(100, 199);
+    /// The rows of a conversation: what a page of a chat is counted in.
+    pub const ROWS: Kinds = Kinds::range(MESSAGE, NOTICE);
 }
 
 const PAGE: usize = 1_000;
