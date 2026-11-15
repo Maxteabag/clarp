@@ -17,6 +17,7 @@ pub mod agent;
 pub mod config;
 pub mod edge;
 pub mod fleet;
+pub mod goaltool;
 pub mod hub;
 pub mod ids;
 pub mod joblog;

@@ -19,6 +19,7 @@ use clarp_actor::{
 };
 use clarp_backend::Backend;
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
+use clarp_kernel::goals::{Owner, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
 use clarp_kernel::turn::{Activity, Admission, Outcome, TurnId};
 use clarp_ports::clock::Clock;
@@ -27,10 +28,12 @@ use clarp_ports::log::LogEngine;
 use tokio::sync::{oneshot, watch};
 
 use crate::fleet::AgentRecord;
+use crate::goaltool;
 use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::{self, Launcher, Told};
 use crate::revisions::Revisions;
+use crate::tools::ToolAnswer;
 use crate::{process, wire};
 
 /// The least time between two "the conversation changed" events for one agent. A reply that
@@ -116,6 +119,11 @@ pub enum Ask {
     Job {
         command: JobCommand,
         answer: Answer<Result<JobChange, JobRefusal>>,
+    },
+    /// The agent's goal tool was called about this agent's goals. Answers what it prints.
+    Goal {
+        ask: goaltool::Ask,
+        answer: Answer<ToolAnswer>,
     },
     /// The newest changes of a job, oldest first.
     JobTimeline {
@@ -267,6 +275,11 @@ impl AgentHandle {
     }
 
     /// What the agent is doing, as it last said.
+    /// Answers the goal tool from this agent's goals.
+    pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
+        self.ask(|answer| Ask::Goal { ask, answer }).await
+    }
+
     pub fn view(&self) -> Arc<View> {
         self.view.borrow().clone()
     }
@@ -504,6 +517,33 @@ impl Worker {
             }
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
+            }
+            Ask::Goal { ask, answer } => {
+                let status = actor.status();
+                let jobs = actor.jobs();
+                let (said, change) = goaltool::answer(
+                    actor.goals(),
+                    Owner {
+                        agent_id: &self.setup.record.agent_id,
+                        session: &self.setup.record.session,
+                    },
+                    &ask,
+                    &mut World {
+                        now_ms: now,
+                        native_session: status.backend_session.as_deref().unwrap_or(""),
+                        queue_revision: status.queue_revision,
+                        token_hex: &mut ids::hex,
+                        has_job: &|id, generation| {
+                            jobs.get(id).is_some_and(|job| job.generation == generation)
+                        },
+                    },
+                );
+                // What the tool prints of a change is true once the change is written.
+                let written = match &change {
+                    Some(change) => actor.goal(change, now),
+                    None => Ok(Outputs::default()),
+                };
+                answered(written.map(|out| (said, out)), answer)?
             }
             Ask::SpoolChanged => actor.spool_changed(now)?,
             Ask::ShimGone { turn } => actor.shim_gone(turn, now)?,
@@ -859,6 +899,7 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
             Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}
             Ok(Ask::Close) | Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,

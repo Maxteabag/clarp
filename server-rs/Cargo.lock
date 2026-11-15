@@ -134,6 +134,7 @@ dependencies = [
  "clarp-ports",
  "clarp-spool",
  "clarp-store-mem",
+ "serde",
  "serde_json",
 ]
 
@@ -186,6 +187,7 @@ dependencies = [
  "clarp-store-mem",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
