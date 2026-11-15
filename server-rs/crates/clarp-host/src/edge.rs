@@ -788,12 +788,17 @@ async fn import_agent(
             });
         }
     };
+    // It is here, and until its owner says it lives here it is on the other Host too. So it
+    // takes no turn of its own yet: a goal that is due, or anything else that would start by
+    // itself, waits for a resume. What its user says to it runs.
+    let held = member.agent.hold().await.is_ok();
     Ok(Json(json!({
         "ok": true,
         "session": member.record.session,
         "agent_id": member.record.agent_id,
         "imported": imported,
         "plans": plans,
+        "held": held,
     })))
 }
 

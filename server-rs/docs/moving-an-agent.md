@@ -63,6 +63,11 @@ built yet.
 2. **Point the app at the Rust Host**: `clarp-host pair --url <the address the phone reaches it at>`
    prints the link to open on the phone.
 3. Send it a message. Its first turn here resumes the tool's session.
+4. **Resume it here.** An agent arrives held: what its user says to it runs, and what would
+   start by itself (a goal that is due, an answer that waits to be told) waits, because until
+   step 1 is done the agent is on both Hosts and both would wake it. When it is archived on the
+   Python Host, resume it on the Rust Host: the app's Resume, or `POST /turn-queue/resume`
+   with its session. Its goals arrive as they stood, not paused: the hold is on its mailbox.
 
 ## Back again
 

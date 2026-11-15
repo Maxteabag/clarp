@@ -191,7 +191,14 @@ scheme word for word.
 
 **An agent moves** (`clarp-host import`, `docs/moving-an-agent.md`): rehearsed on 15 Nov against the live Python
 Host, reads only, into a scratch Rust Host. A move that is kept waits for the owner: he chooses the agent, and
-the Rust Host has to run on his machine as a service of its own first.
+the Rust Host has to run on his machine as a service of its own first (it does, since 15 Nov 17:14). Since the
+evening of 15 Nov an agent brings more than its conversation: the files it published, under the ids its
+conversation names them by, so that an image in an old reply still shows; and its plans and goals, each as it
+stood, at its revision, with its steps, its history, how its work goes on and the newest of its documents (most
+of the owner's agents work toward a goal: 88 plans in the week that was counted). It arrives with what it is
+committed to or not at all. And it arrives held: what its user says to it runs, and what would start by itself
+waits for a resume, because until it is archived where it came from it is on both Hosts and both would wake it.
+Not moving yet: its library (what it made and asked), its portrait and voice.
 
 **Stage 3 has begun, on the agent's side first** (15 Nov 2026). An agent on this Host has its background jobs
 (`clarp-agent-bg`, the apps' view of them and the cancel), its own status label, and its goals: `clarp-goal`
