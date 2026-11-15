@@ -12,8 +12,11 @@
 //! and is kept in that agent's log; what the apps ask across agents (the library, the inbox)
 //! is answered from the agents' books together, by the functions here that take several.
 //!
-//! Not here yet: HTML forms and reports, audio, video and files (they need the media
-//! store), and countdowns. Asking for one says so.
+//! A recording, a film and a file are artifacts that name a file their agent published
+//! ([`crate::media`]): one of its own, and as what it is.
+//!
+//! Not here yet: HTML forms and reports, countdowns, and podcast episodes. Asking for one
+//! says so.
 
 use std::collections::BTreeMap;
 
@@ -22,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::goals::{GoalBook, Plan};
+use crate::media::MediaBook;
 use crate::python;
 
 pub mod decisions;
@@ -47,7 +51,7 @@ const TYPES: [&str; 15] = [
     "workflow_run",
 ];
 /// The kinds this Host cannot make yet.
-const NOT_HERE: [&str; 5] = ["countdown", "html_form", "audio", "video", "file"];
+const NOT_HERE: [&str; 2] = ["countdown", "html_form"];
 const STATUSES: [&str; 7] = [
     "draft",
     "active",
@@ -261,6 +265,8 @@ pub struct Ctx<'a> {
     pub token_hex: &'a mut dyn FnMut(usize) -> String,
     /// Whether an artifact has this id anywhere on the Host.
     pub taken: &'a dyn Fn(&str) -> bool,
+    /// The files the artifact's agent published: what a recording, a film or a file names.
+    pub published: &'a MediaBook,
 }
 
 /// What an artifact is to be made from.
@@ -393,6 +399,10 @@ fn payload(value: Option<&Value>) -> Result<Map<String, Value>, Refused> {
     {
         return refuse("payload all_day must be a boolean");
     }
+    // An episode of a podcast is a recording with more to it than this Host has yet.
+    if payload.contains_key("podcast") {
+        return refuse("podcast episodes are not available on this Host yet (the Rust Host)");
+    }
     Ok(payload)
 }
 
@@ -514,8 +524,62 @@ fn required_fields(kind: &str) -> &'static [&'static str] {
     }
 }
 
+/// Refuses a recording, a film or a file that does not name a file its agent published, as
+/// what that file is.
+fn require_published(
+    kind: &str,
+    payload: &Map<String, Value>,
+    published: &MediaBook,
+) -> Result<(), Refused> {
+    let field = |name: &str| payload.get(name).map(text_of).unwrap_or_default();
+    let mime = field("mime_type");
+    let begins = match kind {
+        "audio" => "audio/",
+        "video" => "video/",
+        _ => "",
+    };
+    if !mime.to_lowercase().starts_with(begins) {
+        return refuse(format!(
+            "{kind} artifact mime_type must start with {begins}"
+        ));
+    }
+    // Where this Host serves a published file, and nowhere else.
+    let url = field("url");
+    let plain = |id: &&str| {
+        (1..=180).contains(&id.len())
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    };
+    let Some(asset_id) = url.strip_prefix("/media/").filter(plain) else {
+        return refuse(format!(
+            "{kind} artifact url must be a same-origin media path"
+        ));
+    };
+    let Some(asset) = published.get(asset_id) else {
+        return refuse(format!(
+            "{kind} artifact media asset not found for this session"
+        ));
+    };
+    if asset.mime_type != mime {
+        return refuse(format!(
+            "{kind} artifact mime_type must match its media asset"
+        ));
+    }
+    if asset.source_name != field("file_name") {
+        return refuse(format!(
+            "{kind} artifact file_name must match its media asset"
+        ));
+    }
+    Ok(())
+}
+
 /// Refuses a payload that cannot show what its kind is for.
-fn require_payload(kind: &str, payload: &Map<String, Value>) -> Result<(), Refused> {
+fn require_payload(
+    kind: &str,
+    payload: &Map<String, Value>,
+    published: &MediaBook,
+) -> Result<(), Refused> {
     if matches!(kind, "decision" | "question" | "plan") {
         return Ok(());
     }
@@ -603,6 +667,7 @@ fn require_payload(kind: &str, payload: &Map<String, Value>) -> Result<(), Refus
             }
             Ok(())
         }
+        "audio" | "video" | "file" => require_published(kind, payload, published),
         _ => Ok(()),
     }
 }
@@ -850,7 +915,7 @@ impl ArtifactBook {
             ));
         }
         let payload = payload(new.payload.as_ref())?;
-        require_payload(&kind, &payload)?;
+        require_payload(&kind, &payload, ctx.published)?;
         let reference_id = clip(strip_hidden_blocks(&new.reference_id).trim(), 500);
         if (ctx.taken)(&artifact_id) {
             return taken("artifacts.artifact_id");
@@ -884,7 +949,13 @@ impl ArtifactBook {
 
     /// Changes an artifact of a plain kind: its status, its title and summary, its payload
     /// as a whole or in part.
-    pub fn update(&self, artifact_id: &str, data: &Value, now: i64) -> Result<Artifact, Refused> {
+    pub fn update(
+        &self,
+        artifact_id: &str,
+        data: &Value,
+        now: i64,
+        published: &MediaBook,
+    ) -> Result<Artifact, Refused> {
         let Some(current) = self.get(artifact_id) else {
             return refuse("artifact not found");
         };
@@ -913,7 +984,7 @@ impl ArtifactBook {
             (None, None) => current.payload.clone(),
         };
         if whole.is_some() || patch.is_some() {
-            require_payload(&current.kind, &new_payload)?;
+            require_payload(&current.kind, &new_payload, published)?;
         }
         let title = given("title").map_or_else(|| current.title.clone(), text_of);
         let title = strip_hidden_blocks(&title).trim().to_string();

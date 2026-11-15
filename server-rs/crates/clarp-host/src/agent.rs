@@ -19,7 +19,7 @@ use clarp_actor::{
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
-use clarp_kernel::artifacts::{Artifact, ArtifactBook, Ctx, Maker, Refused, Shelf};
+use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Shelf};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
@@ -534,7 +534,7 @@ fn kept_goal(change: &GoalChange) -> Kept<'_> {
 /// The artifact a plan is shown as in the apps, as a change of the plan leaves it: made
 /// with the plan, under the title the plan was given, and following its state from then on.
 fn plan_shown(
-    artifacts: &ArtifactBook,
+    actor: &Actor,
     record: &AgentRecord,
     change: &GoalChange,
     title: Option<&str>,
@@ -550,9 +550,11 @@ fn plan_shown(
         token_hex: &mut ids::hex,
         // An id of twelve random bytes is nobody else's.
         taken: &|_| false,
+        published: actor.media(),
     };
     let given = title.unwrap_or(&change.plan.title);
-    artifacts
+    actor
+        .artifacts()
         .plan_synced(maker, &change.plan, given, title.is_some(), &mut ctx)
         .ok()
 }
@@ -565,7 +567,7 @@ fn keep_goal(
     title: Option<&str>,
     now_ms: i64,
 ) -> Result<Outputs, ActorError> {
-    let shown = plan_shown(actor.artifacts(), record, change, title, now_ms);
+    let shown = plan_shown(actor, record, change, title, now_ms);
     let kept = Kept {
         goal: Some(change),
         artifacts: shown.as_slice(),

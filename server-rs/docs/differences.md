@@ -87,4 +87,6 @@ it covers that exact difference and nothing else.
 | A published file that is text, fetched by a client that takes gzip | compressed | as it is | What agents publish is mostly compressed already; a client that asks for gzip is given a file it can read either way |
 | What a file with no usable name or extension is called and kept as | by the machine's table of file types (`mimetypes`, which reads `/etc/mime.types` where there is one) | by Python's own built-in table, the part of it a published file can ask for | The same file is read the same on every machine. An image is told by its first bytes on both |
 | `POST /tools/media` | not there | the same as `POST /media`, for the token a turn is given for its agent's tools | That token opens `/tools/` and nothing else, and publishing a file is a tool's act |
+| An artifact that names a published file, after its agent's session has another name | not found for this session: the file is looked up by the session name it was published under | found: an agent's files are in the agent's own log | A file belongs to the agent that published it, whatever the agent is called |
+| An artifact with a `podcast` in its payload | read as an episode (`podcast_live`) | refused: podcast episodes are not available on this Host yet | Not built. What is not there says so |
 

@@ -3665,13 +3665,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 2,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 0,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 2,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -3811,13 +3811,13 @@
         "legacy": false,
         "completion_verified": false,
         "counts": {
-         "pending": 2,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 2,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [
          {
@@ -3958,13 +3958,13 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 2,
-        "deferred": 0,
-        "in_progress": 0,
-        "removed": 0,
+        "blocked": 0,
         "completed": 0,
-        "skipped": 0,
-        "blocked": 0
+        "pending": 2,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
        },
        "items": [
         {
@@ -4123,13 +4123,13 @@
         "legacy": false,
         "completion_verified": false,
         "counts": {
-         "pending": 2,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 2,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [
          {
@@ -4262,13 +4262,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 1,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -4418,13 +4418,13 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 1,
-        "deferred": 0,
-        "in_progress": 0,
-        "removed": 0,
+        "blocked": 0,
         "completed": 1,
-        "skipped": 0,
-        "blocked": 0
+        "pending": 1,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
        },
        "items": [
         {
@@ -4568,13 +4568,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 1,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -4735,13 +4735,13 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 1,
-        "deferred": 0,
-        "in_progress": 0,
-        "removed": 0,
+        "blocked": 0,
         "completed": 1,
-        "skipped": 0,
-        "blocked": 0
+        "pending": 1,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
        },
        "items": [
         {
@@ -4893,13 +4893,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 1,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -5068,13 +5068,13 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 1,
-        "deferred": 0,
-        "in_progress": 0,
-        "removed": 0,
+        "blocked": 0,
         "completed": 1,
-        "skipped": 0,
-        "blocked": 0
+        "pending": 1,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
        },
        "items": [
         {
@@ -5235,13 +5235,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 1,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -5410,13 +5410,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 0,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 2,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 0,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -5613,13 +5613,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 0,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 2,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 0,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -5816,13 +5816,13 @@
       "legacy": false,
       "completion_verified": true,
       "counts": {
-       "pending": 0,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 2,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 0,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -6041,13 +6041,13 @@
        "legacy": false,
        "completion_verified": true,
        "counts": {
-        "pending": 0,
-        "deferred": 0,
-        "in_progress": 0,
-        "removed": 0,
+        "blocked": 0,
         "completed": 2,
-        "skipped": 0,
-        "blocked": 0
+        "pending": 0,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
        },
        "items": [
         {
@@ -6122,13 +6122,13 @@
       "legacy": true,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 0,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [
        {
@@ -6201,13 +6201,13 @@
         "legacy": true,
         "completion_verified": false,
         "counts": {
-         "pending": 1,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 1,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [
          {
@@ -6318,13 +6318,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 0,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 0,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 0,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [],
       "completed_count": 0,
@@ -6421,13 +6421,13 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 0,
-       "deferred": 0,
-       "in_progress": 0,
-       "removed": 0,
+       "blocked": 0,
        "completed": 0,
-       "skipped": 0,
-       "blocked": 0
+       "pending": 0,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
       },
       "items": [],
       "completed_count": 0,
@@ -6543,13 +6543,13 @@
         "legacy": false,
         "completion_verified": false,
         "counts": {
-         "pending": 0,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 0,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [],
         "completed_count": 0,
@@ -6596,13 +6596,13 @@
         "legacy": true,
         "completion_verified": false,
         "counts": {
-         "pending": 1,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 1,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [
          {
@@ -6739,13 +6739,13 @@
         "legacy": false,
         "completion_verified": false,
         "counts": {
-         "pending": 0,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 0,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [],
         "completed_count": 0,
@@ -6792,13 +6792,13 @@
         "legacy": true,
         "completion_verified": false,
         "counts": {
-         "pending": 1,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 0,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 1,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [
          {
@@ -6993,13 +6993,13 @@
         "legacy": false,
         "completion_verified": true,
         "counts": {
-         "pending": 0,
-         "deferred": 0,
-         "in_progress": 0,
-         "removed": 0,
+         "blocked": 0,
          "completed": 2,
-         "skipped": 0,
-         "blocked": 0
+         "pending": 0,
+         "removed": 0,
+         "in_progress": 0,
+         "deferred": 0,
+         "skipped": 0
         },
         "items": [
          {
@@ -12868,6 +12868,1474 @@
       "kind": "ValueError",
       "message": "artifact not found"
      },
+     "ids": 0
+    }
+   ]
+  },
+  {
+   "name": "what_names_a_published_file",
+   "agents": [
+    {
+     "agent_id": "0801aaaabbbbcccc",
+     "session": "vera8",
+     "persona": "Vera"
+    },
+    {
+     "agent_id": "0802aaaabbbbcccc",
+     "session": "omar8",
+     "persona": "Omar"
+    }
+   ],
+   "calls": [
+    {
+     "call": "publish",
+     "args": {
+      "session": "vera8",
+      "blob_hex": "494433040000000000000000000000000000",
+      "source_name": "voice note.mp3",
+      "content_type": "audio/mpeg",
+      "caption": "A note"
+     },
+     "at": 1801712001000,
+     "result": {
+      "asset_id": "asset_000000000000000000000001",
+      "session": "vera8",
+      "source_name": "voice_note.mp3",
+      "file_name": "voice_note.mp3",
+      "mime_type": "audio/mpeg",
+      "bytes": 18,
+      "size_bytes": 18,
+      "width": null,
+      "height": null,
+      "caption": "A note",
+      "created_by": "agent",
+      "created_at": 1801712001000,
+      "url": "/media/asset_000000000000000000000001",
+      "uri": "clarp-media://asset/asset_000000000000000000000001",
+      "markdown": "",
+      "sha256": "8f077786361bd70624303c7e6310a110fb40d108977ec86aab69399a6aae1522"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "vera8",
+      "blob_hex": "00000018667479706d703432000000006d70343269736f6d",
+      "source_name": "clip.mp4",
+      "content_type": "video/mp4"
+     },
+     "at": 1801712002000,
+     "result": {
+      "asset_id": "asset_000000000000000000000002",
+      "session": "vera8",
+      "source_name": "clip.mp4",
+      "file_name": "clip.mp4",
+      "mime_type": "video/mp4",
+      "bytes": 24,
+      "size_bytes": 24,
+      "width": null,
+      "height": null,
+      "caption": "",
+      "created_by": "agent",
+      "created_at": 1801712002000,
+      "url": "/media/asset_000000000000000000000002",
+      "uri": "clarp-media://asset/asset_000000000000000000000002",
+      "markdown": "",
+      "sha256": "3bee83cd93579b8504f6102a3ea57af43d230bdfefd60acc239c198aebb2136d"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "vera8",
+      "blob_hex": "255044462d312e370a312030206f626a0a",
+      "source_name": "report.pdf",
+      "content_type": "application/pdf"
+     },
+     "at": 1801712003000,
+     "result": {
+      "asset_id": "asset_000000000000000000000003",
+      "session": "vera8",
+      "source_name": "report.pdf",
+      "file_name": "report.pdf",
+      "mime_type": "application/pdf",
+      "bytes": 17,
+      "size_bytes": 17,
+      "width": null,
+      "height": null,
+      "caption": "",
+      "created_by": "agent",
+      "created_at": 1801712003000,
+      "url": "/media/asset_000000000000000000000003",
+      "uri": "clarp-media://asset/asset_000000000000000000000003",
+      "markdown": "",
+      "sha256": "f5117edb193052414d3b7496857953fd5c40d289c84ce675aa0bd361d40ffd76"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "vera8",
+      "blob_hex": "89504e470d0a1a0a0000000d4948445200000280000001e00806000000",
+      "source_name": "chart.png",
+      "content_type": "image/png"
+     },
+     "at": 1801712004000,
+     "result": {
+      "asset_id": "asset_000000000000000000000004",
+      "session": "vera8",
+      "source_name": "chart.png",
+      "file_name": "chart.png",
+      "mime_type": "image/png",
+      "bytes": 29,
+      "size_bytes": 29,
+      "width": 640,
+      "height": 480,
+      "caption": "",
+      "created_by": "agent",
+      "created_at": 1801712004000,
+      "url": "/media/asset_000000000000000000000004",
+      "uri": "clarp-media://asset/asset_000000000000000000000004",
+      "markdown": "![chart.png](clarp-media://asset/asset_000000000000000000000004)",
+      "sha256": "5c8494fe23013d51b181e66d5cc668451c7ece86b085ebb9f0fd7a51840a876a"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "omar8",
+      "blob_hex": "255044462d312e370a312030206f626a0a",
+      "source_name": "other.pdf",
+      "content_type": "application/pdf"
+     },
+     "at": 1801712005000,
+     "result": {
+      "asset_id": "asset_000000000000000000000005",
+      "session": "omar8",
+      "source_name": "other.pdf",
+      "file_name": "other.pdf",
+      "mime_type": "application/pdf",
+      "bytes": 17,
+      "size_bytes": 17,
+      "width": null,
+      "height": null,
+      "caption": "",
+      "created_by": "agent",
+      "created_at": 1801712005000,
+      "url": "/media/asset_000000000000000000000005",
+      "uri": "clarp-media://asset/asset_000000000000000000000005",
+      "markdown": "",
+      "sha256": "f5117edb193052414d3b7496857953fd5c40d289c84ce675aa0bd361d40ffd76"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "nobody",
+      "blob_hex": "255044462d312e370a312030206f626a0a",
+      "source_name": "x.pdf",
+      "content_type": "application/pdf"
+     },
+     "at": 1801712006000,
+     "error": {
+      "kind": "MediaError",
+      "message": "unknown session"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "vera8",
+      "blob_hex": "23212f62696e2f73680a",
+      "source_name": "run.sh",
+      "content_type": "application/x-sh"
+     },
+     "at": 1801712007000,
+     "error": {
+      "kind": "MediaError",
+      "message": "unsupported media type"
+     },
+     "ids": 0
+    },
+    {
+     "call": "publish",
+     "args": {
+      "session": "vera8",
+      "blob_hex": "",
+      "source_name": "empty.pdf",
+      "content_type": "application/pdf"
+     },
+     "at": 1801712008000,
+     "error": {
+      "kind": "MediaError",
+      "message": "bad size"
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "audio",
+      "title": "A voice note",
+      "summary": "Two minutes",
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3",
+       "duration_ms": 120000,
+       "size_bytes": 18
+      }
+     },
+     "at": 1801712009000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "audio",
+      "title": "A voice note",
+      "summary": "Two minutes",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712009000,
+      "updated_at": 1801712009000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3",
+       "duration_ms": 120000,
+       "size_bytes": 18
+      },
+      "url": "/media/asset_000000000000000000000001",
+      "mime_type": "audio/mpeg",
+      "file_name": "voice_note.mp3",
+      "duration_ms": 120000,
+      "size_bytes": 18
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "video",
+      "title": "A clip",
+      "payload": {
+       "url": "/media/asset_000000000000000000000002",
+       "mime_type": "video/mp4",
+       "file_name": "clip.mp4",
+       "duration_ms": 4000,
+       "thumbnail_url": "/media/asset_000000000000000000000004"
+      }
+     },
+     "at": 1801712010000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000002",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "video",
+      "title": "A clip",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712010000,
+      "updated_at": 1801712010000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000002",
+       "mime_type": "video/mp4",
+       "file_name": "clip.mp4",
+       "duration_ms": 4000,
+       "thumbnail_url": "/media/asset_000000000000000000000004"
+      },
+      "url": "/media/asset_000000000000000000000002",
+      "thumbnail_url": "/media/asset_000000000000000000000004",
+      "mime_type": "video/mp4",
+      "file_name": "clip.mp4",
+      "duration_ms": 4000
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "The report",
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712011000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "file",
+      "title": "The report",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712011000,
+      "updated_at": 1801712011000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      },
+      "url": "/media/asset_000000000000000000000003",
+      "mime_type": "application/pdf",
+      "file_name": "report.pdf"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "A picture as a file",
+      "payload": {
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      }
+     },
+     "at": 1801712012000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000004",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "file",
+      "title": "A picture as a file",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712012000,
+      "updated_at": 1801712012000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      },
+      "url": "/media/asset_000000000000000000000004",
+      "mime_type": "image/png",
+      "file_name": "chart.png"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "A recording as a file",
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3"
+      }
+     },
+     "at": 1801712013000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000005",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "file",
+      "title": "A recording as a file",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712013000,
+      "updated_at": 1801712013000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3"
+      },
+      "url": "/media/asset_000000000000000000000001",
+      "mime_type": "audio/mpeg",
+      "file_name": "voice_note.mp3"
+     },
+     "ids": 1
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000001"
+     },
+     "at": 1801712014000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "audio",
+      "title": "A voice note",
+      "summary": "Two minutes",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712009000,
+      "updated_at": 1801712009000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3",
+       "duration_ms": 120000,
+       "size_bytes": 18
+      },
+      "url": "/media/asset_000000000000000000000001",
+      "mime_type": "audio/mpeg",
+      "file_name": "voice_note.mp3",
+      "duration_ms": 120000,
+      "size_bytes": 18
+     },
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "session": "vera8",
+      "type": "audio"
+     },
+     "at": 1801712015000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000001",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "audio",
+       "title": "A voice note",
+       "summary": "Two minutes",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712009000,
+       "updated_at": 1801712009000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000001",
+        "mime_type": "audio/mpeg",
+        "file_name": "voice_note.mp3",
+        "duration_ms": 120000,
+        "size_bytes": 18
+       },
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3",
+       "duration_ms": 120000,
+       "size_bytes": 18
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "session": "vera8"
+     },
+     "at": 1801712016000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000005",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "file",
+       "title": "A recording as a file",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712013000,
+       "updated_at": 1801712013000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000001",
+        "mime_type": "audio/mpeg",
+        "file_name": "voice_note.mp3"
+       },
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3"
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000004",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "file",
+       "title": "A picture as a file",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712012000,
+       "updated_at": 1801712012000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000004",
+        "mime_type": "image/png",
+        "file_name": "chart.png"
+       },
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000003",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "file",
+       "title": "The report",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712011000,
+       "updated_at": 1801712011000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000003",
+        "mime_type": "application/pdf",
+        "file_name": "report.pdf"
+       },
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000002",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "video",
+       "title": "A clip",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712010000,
+       "updated_at": 1801712010000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000002",
+        "mime_type": "video/mp4",
+        "file_name": "clip.mp4",
+        "duration_ms": 4000,
+        "thumbnail_url": "/media/asset_000000000000000000000004"
+       },
+       "url": "/media/asset_000000000000000000000002",
+       "thumbnail_url": "/media/asset_000000000000000000000004",
+       "mime_type": "video/mp4",
+       "file_name": "clip.mp4",
+       "duration_ms": 4000
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000001",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "audio",
+       "title": "A voice note",
+       "summary": "Two minutes",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712009000,
+       "updated_at": 1801712009000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000001",
+        "mime_type": "audio/mpeg",
+        "file_name": "voice_note.mp3",
+        "duration_ms": 120000,
+        "size_bytes": 18
+       },
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3",
+       "duration_ms": 120000,
+       "size_bytes": 18
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "audio",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000002",
+       "mime_type": "video/mp4",
+       "file_name": "clip.mp4"
+      }
+     },
+     "at": 1801712017000,
+     "error": {
+      "kind": "ValueError",
+      "message": "audio artifact mime_type must start with audio/"
+     },
+     "ids": 1,
+     "note": "a film is no recording"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "video",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3"
+      }
+     },
+     "at": 1801712018000,
+     "error": {
+      "kind": "ValueError",
+      "message": "video artifact mime_type must start with video/"
+     },
+     "ids": 1,
+     "note": "a recording is no film"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "audio",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "AUDIO/MPEG",
+       "file_name": "voice_note.mp3"
+      }
+     },
+     "at": 1801712019000,
+     "error": {
+      "kind": "ValueError",
+      "message": "audio artifact mime_type must match its media asset"
+     },
+     "ids": 1,
+     "note": "the kind is read without its case, the file's own is not"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "audio",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg"
+      }
+     },
+     "at": 1801712020000,
+     "error": {
+      "kind": "ValueError",
+      "message": "audio artifact requires payload field(s): file_name"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "",
+       "mime_type": "",
+       "file_name": ""
+      }
+     },
+     "at": 1801712021000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact requires payload field(s): url, mime_type, file_name"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": 7,
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712022000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload url must be a string"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "https://example.org/report.pdf",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712023000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712024000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/a/b",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712025000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712026000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000003?x=1",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712027000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712028000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_nothing",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712029000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact media asset not found for this session"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": " /media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712030000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact url must be a same-origin media path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000005",
+       "mime_type": "application/pdf",
+       "file_name": "other.pdf"
+      }
+     },
+     "at": 1801712031000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact media asset not found for this session"
+     },
+     "ids": 1,
+     "note": "another agent's file"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar8",
+      "type": "file",
+      "title": "Theirs",
+      "payload": {
+       "url": "/media/asset_000000000000000000000005",
+       "mime_type": "application/pdf",
+       "file_name": "other.pdf"
+      }
+     },
+     "at": 1801712032000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000015",
+      "agent_id": "0802aaaabbbbcccc",
+      "session": "omar8",
+      "type": "file",
+      "title": "Theirs",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712032000,
+      "updated_at": 1801712032000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000005",
+       "mime_type": "application/pdf",
+       "file_name": "other.pdf"
+      },
+      "url": "/media/asset_000000000000000000000005",
+      "mime_type": "application/pdf",
+      "file_name": "other.pdf"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "text/plain",
+       "file_name": "report.pdf"
+      }
+     },
+     "at": 1801712033000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact mime_type must match its media asset"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "other.pdf"
+      }
+     },
+     "at": 1801712034000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact file_name must match its media asset"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf",
+       "thumbnail_url": "http://example.org/t.png"
+      }
+     },
+     "at": 1801712035000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload thumbnail_url must be an HTTPS URL or safe same-origin path"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera8",
+      "type": "file",
+      "title": "T",
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf",
+       "size_bytes": "17"
+      }
+     },
+     "at": 1801712036000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload size_bytes must be an integer"
+     },
+     "ids": 1
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "payload_patch": {
+        "notes": "Read page 2"
+       }
+      }
+     },
+     "at": 1801712037000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "file",
+      "title": "The report",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712011000,
+      "updated_at": 1801712037000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000003",
+       "mime_type": "application/pdf",
+       "file_name": "report.pdf",
+       "notes": "Read page 2"
+      },
+      "url": "/media/asset_000000000000000000000003",
+      "mime_type": "application/pdf",
+      "file_name": "report.pdf",
+      "notes": "Read page 2"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "payload_patch": {
+        "file_name": "renamed.pdf"
+       }
+      }
+     },
+     "at": 1801712038000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact file_name must match its media asset"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "payload": {
+        "url": "/media/asset_000000000000000000000004",
+        "mime_type": "image/png",
+        "file_name": "chart.png"
+       }
+      }
+     },
+     "at": 1801712039000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "file",
+      "title": "The report",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712011000,
+      "updated_at": 1801712039000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      },
+      "url": "/media/asset_000000000000000000000004",
+      "mime_type": "image/png",
+      "file_name": "chart.png"
+     },
+     "ids": 0,
+     "note": "the same artifact, another of the agent's files"
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "payload": {
+        "url": "/media/asset_000000000000000000000005",
+        "mime_type": "application/pdf",
+        "file_name": "other.pdf"
+       }
+      }
+     },
+     "at": 1801712040000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact media asset not found for this session"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "data": {
+       "payload": {
+        "url": "/media/asset_000000000000000000000003"
+       }
+      }
+     },
+     "at": 1801712041000,
+     "error": {
+      "kind": "ValueError",
+      "message": "file artifact requires payload field(s): mime_type, file_name"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "data": {
+       "payload": {
+        "url": "/media/asset_000000000000000000000002",
+        "mime_type": "video/mp4",
+        "file_name": "clip.mp4"
+       }
+      }
+     },
+     "at": 1801712042000,
+     "error": {
+      "kind": "ValueError",
+      "message": "audio artifact mime_type must start with audio/"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "data": {
+       "status": "completed",
+       "summary": "Heard"
+      }
+     },
+     "at": 1801712043000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "audio",
+      "title": "A voice note",
+      "summary": "Heard",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712009000,
+      "updated_at": 1801712043000,
+      "completed_at": 1801712043000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3",
+       "duration_ms": 120000,
+       "size_bytes": 18
+      },
+      "url": "/media/asset_000000000000000000000001",
+      "mime_type": "audio/mpeg",
+      "file_name": "voice_note.mp3",
+      "duration_ms": 120000,
+      "size_bytes": 18
+     },
+     "ids": 0
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000003"
+     },
+     "at": 1801712044000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0801aaaabbbbcccc",
+      "session": "vera8",
+      "type": "file",
+      "title": "The report",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1801712011000,
+      "updated_at": 1801712039000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      },
+      "url": "/media/asset_000000000000000000000004",
+      "mime_type": "image/png",
+      "file_name": "chart.png"
+     },
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "type": "file"
+     },
+     "at": 1801712045000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000003",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "file",
+       "title": "The report",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712011000,
+       "updated_at": 1801712039000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000004",
+        "mime_type": "image/png",
+        "file_name": "chart.png"
+       },
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000015",
+       "agent_id": "0802aaaabbbbcccc",
+       "session": "omar8",
+       "type": "file",
+       "title": "Theirs",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712032000,
+       "updated_at": 1801712032000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Omar",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000005",
+        "mime_type": "application/pdf",
+        "file_name": "other.pdf"
+       },
+       "url": "/media/asset_000000000000000000000005",
+       "mime_type": "application/pdf",
+       "file_name": "other.pdf"
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000005",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "file",
+       "title": "A recording as a file",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712013000,
+       "updated_at": 1801712013000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000001",
+        "mime_type": "audio/mpeg",
+        "file_name": "voice_note.mp3"
+       },
+       "url": "/media/asset_000000000000000000000001",
+       "mime_type": "audio/mpeg",
+       "file_name": "voice_note.mp3"
+      },
+      {
+       "artifact_id": "artifact-000000000000000000000004",
+       "agent_id": "0801aaaabbbbcccc",
+       "session": "vera8",
+       "type": "file",
+       "title": "A picture as a file",
+       "summary": "",
+       "status": "ready",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1801712012000,
+       "updated_at": 1801712012000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "url": "/media/asset_000000000000000000000004",
+        "mime_type": "image/png",
+        "file_name": "chart.png"
+       },
+       "url": "/media/asset_000000000000000000000004",
+       "mime_type": "image/png",
+       "file_name": "chart.png"
+      }
+     ],
      "ids": 0
     }
    ]

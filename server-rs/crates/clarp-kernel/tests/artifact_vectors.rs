@@ -12,7 +12,9 @@ use clarp_kernel::artifacts::{
     self, Artifact, ArtifactBook, Ctx, Listing, Maker, New, Refused, Shelf, Why,
 };
 use clarp_kernel::goals::{Change, GoalBook, Owner, World, item_key};
+use clarp_kernel::media::{self, Asset, MediaBook};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 /// Where two values differ, as paths into them.
 fn differences(path: &str, ours: &Value, theirs: &Value, found: &mut Vec<String>) {
@@ -46,6 +48,8 @@ struct Agent {
     persona: String,
     artifacts: ArtifactBook,
     goals: GoalBook,
+    /// The files it published.
+    media: MediaBook,
 }
 
 impl Agent {
@@ -69,6 +73,8 @@ impl Agent {
 struct Fleet {
     agents: Vec<Agent>,
     ids: u64,
+    /// How many files were published: the Python Host's ids in the vectors are counted.
+    files: u64,
 }
 
 type Said = Result<Value, Refused>;
@@ -148,6 +154,7 @@ impl Fleet {
                 now_ms: now,
                 token_hex: &mut |bytes| Self::token(ids, bytes),
                 taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
+                published: &agents[at].media,
             };
             make(&agents[at].artifacts, agents[at].maker(), &mut ctx)?
         };
@@ -218,6 +225,7 @@ impl Fleet {
                 now_ms: now,
                 token_hex: &mut |bytes| Self::token(ids, bytes),
                 taken: &|id| agents.iter().any(|agent| agent.artifacts.any(id).is_some()),
+                published: &agents[at].media,
             };
             agents[at].artifacts.plan_synced(
                 agents[at].maker(),
@@ -243,9 +251,65 @@ impl Fleet {
         }
     }
 
+    /// An agent publishes a file, the way the Host does it: read by the kernel's rules, in
+    /// the order the Python Host refuses in, with an id counted as the vectors' Host counts.
+    fn publish(&mut self, args: &Value, now: i64) -> Said {
+        let hex = text(args, "blob_hex");
+        let blob: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+            .collect();
+        let session = text(args, "session");
+        if session.trim().is_empty() {
+            return refused(Why::Value, "session required");
+        }
+        if blob.is_empty() || blob.len() > media::MAX_BYTES {
+            return refused(Why::Value, "bad size");
+        }
+        let Some(at) = self.by_session(&session) else {
+            return refused(Why::Value, "unknown session");
+        };
+        let read = media::read(
+            &blob,
+            &text(args, "source_name"),
+            &text(args, "content_type"),
+        );
+        let reading = match read {
+            Ok(reading) => reading,
+            Err(why) => return refused(Why::Value, why.words()),
+        };
+        self.files += 1;
+        let sha256: String = Sha256::digest(&blob)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let asset = Asset {
+            asset_id: format!("asset_{:024}", self.files),
+            session: self.agents[at].session.clone(),
+            source_name: reading.name,
+            sha256,
+            extension: reading.extension,
+            mime_type: reading.mime,
+            bytes: blob.len() as u64,
+            width: reading.width,
+            height: reading.height,
+            caption: media::kept_caption(&text(args, "caption")),
+            created_by: media::kept_publisher(""),
+            created_at: now,
+        };
+        // A record is read as it was written.
+        let read: Asset = serde_json::from_slice(&serde_json::to_vec(&asset).unwrap()).unwrap();
+        assert_eq!(asset, read);
+        self.agents[at].media.apply(&read);
+        let mut row = asset.public();
+        row["sha256"] = json!(asset.sha256);
+        Ok(row)
+    }
+
     fn call(&mut self, name: &str, args: &Value, now: i64) -> Said {
         let given = |name: &str| args.get(name).filter(|value| !value.is_null());
         match name {
+            "publish" => self.publish(args, now),
             "create" => {
                 let new = New {
                     kind: text(args, "type"),
@@ -326,7 +390,10 @@ impl Fleet {
                 else {
                     return refused(Why::Value, "artifact not found");
                 };
-                let artifact = self.agents[at].artifacts.update(&id, &args["data"], now)?;
+                let agent = &self.agents[at];
+                let artifact = agent
+                    .artifacts
+                    .update(&id, &args["data"], now, &agent.media)?;
                 self.agents[at].keep(&artifact, now);
                 Ok(self.shown(at, &artifact, now))
             }
@@ -547,10 +614,12 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
                 persona: text(agent, "persona"),
                 artifacts: ArtifactBook::new(),
                 goals: GoalBook::new(),
+                media: MediaBook::new(),
             });
         let mut fleet = Fleet {
             agents: agents.collect(),
             ids: 0,
+            files: 0,
         };
         for (number, call) in scenario["calls"].as_array().unwrap().iter().enumerate() {
             let what = call["call"].as_str().unwrap();
@@ -572,6 +641,8 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
                 }
                 (Err(ours), _, Some(theirs)) => {
                     let kind = match ours.why {
+                        // What the store of published files refuses has a name of its own.
+                        Why::Value if what == "publish" => "MediaError",
                         Why::Value => "ValueError",
                         Why::Permission => "PermissionError",
                         Why::Integrity => "IntegrityError",
@@ -616,5 +687,5 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
         wrong.len(),
         shown.join("\n")
     );
-    assert!(compared >= 250, "only {compared} calls were compared");
+    assert!(compared >= 300, "only {compared} calls were compared");
 }

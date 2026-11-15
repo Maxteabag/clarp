@@ -215,8 +215,8 @@ serves them as the Python Host does (`library.rs`: `/artifacts`, `/pinned-artifa
 `/attention`, the events `artifact-updated` and `attention-updated`), tells an agent its answer as a message
 written in one append with the mark that it was told, and gives the agent its tool (`clarp-agent-artifacts`,
 `artifact_tool.rs`). Four conformance scenarios hold the routes to the Python Host. Not there: HTML reports
-and forms, the media store with audio, video and file artifacts, countdowns (each says it is not available on
-this Host yet), and `/attention/inbox`.
+and forms, countdowns, podcast episodes (each says it is not available on this Host yet), and
+`/attention/inbox`. Recordings, films and files came with what an agent publishes, below.
 
 **The user is told, also when the phone is in a pocket** (15 Nov 2026). Who is told when a turn ends is the
 Python Host's rule (`clarp-kernel/src/notify.rs`, 86,016 recorded combinations): a reply for the user tells
@@ -349,8 +349,13 @@ is the repository's own `scripts/clarp-media-publish.py`, the program the skills
 installed beside the Host: in a turn it is told where the door for tools is and given that token; a worker an
 agent left running finds its Host in the file the installer wrote. It is not rewritten as a pipe of words
 because a pipe of words does not carry a file. Held end to end with that program (`tests/host.rs`, an agent
-publishes a file) and by the scenario `media`. Not there yet: artifacts of the kinds audio, video and file,
-which name a published file, and HTML reports and forms.
+publishes a file) and by the scenario `media`. A recording, a film and a file are artifacts that name a
+published file, which is what the skills for audio, video and files make after they publish: the artifact
+must name one of its agent's own files, where this Host serves it, as the kind and under the name the file
+has (`artifacts.rs`, the Python Host's rule and words, 45 recorded calls with the files published through the
+Python store itself). The rule reads the agent's own book of published files, on the agent's thread: nothing
+is asked of another agent, and another agent's file is not found. Not there yet: HTML reports and forms,
+countdowns and podcast episodes.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can

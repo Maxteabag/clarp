@@ -5628,6 +5628,55 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
         );
     }
 
+    // What the skills for recordings, films and files do next: an artifact that names the
+    // file, made with what the tool answered. The agent's own artifact tool makes it.
+    let payload = json!({
+        "url": notes["url"], "mime_type": notes["mime_type"], "file_name": notes["file_name"],
+    })
+    .to_string();
+    let create = |session: &str, kind: &str, payload: &str| {
+        let args = [
+            "clarp-agent-artifacts",
+            "create",
+            session,
+            kind,
+            "The notes",
+            "As a file",
+            payload,
+        ];
+        tool(&host, &work, None, &args)
+    };
+    let (code, out, err) = create(&maker, "file", &payload);
+    assert_eq!(code, 0, "{out}{err}");
+    let made: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&made["type"], &made["url"], &made["file_name"]),
+        (&json!("file"), &notes["url"], &json!("notes.md"))
+    );
+    let library = host.get(&format!("/artifacts?session={maker}"));
+    assert_eq!(library["artifacts"][0]["artifact_id"], made["artifact_id"]);
+    // Notes are no recording; and an agent's artifact names a file of its own, not one
+    // another agent published, and not one elsewhere.
+    let (code, _, err) = create(&maker, "audio", &payload);
+    assert_ne!(code, 0);
+    assert!(
+        err.contains("audio artifact mime_type must start with audio/"),
+        "{err}"
+    );
+    let (code, _, err) = create(&other, "file", &payload);
+    assert_ne!(code, 0);
+    assert!(
+        err.contains("file artifact media asset not found for this session"),
+        "{err}"
+    );
+    let elsewhere = payload.replace("/media/", "https://example.org/");
+    let (code, _, err) = create(&maker, "file", &elsewhere);
+    assert_ne!(code, 0);
+    assert!(
+        err.contains("file artifact url must be a same-origin media path"),
+        "{err}"
+    );
+
     // A phone that may only read fetches a file and lists a gallery, and publishes nothing.
     let (phone, _) = pair(&host, "phone", "limited");
     let read = fetch(&host, &phone, "GET", &format!("/media/{id}"), &[], b"");
