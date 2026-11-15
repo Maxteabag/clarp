@@ -4,6 +4,7 @@
 //! list as a whole whenever it changes, so that everyone else reads a list that is complete and
 //! never waits for the fleet to find an agent.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -23,10 +24,15 @@ use crate::config::Config;
 use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::Launcher;
+use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
 
 const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
 const FOCUS: &str = "focus";
+/// Pairing codes that wait to be handed in, by the digest of the code.
+const CODES: &str = "pairing-code";
+/// Paired devices, by device id.
+const DEVICES: &str = "device";
 
 /// How long a tool gets to end by itself when its turn is stopped.
 const STOP_GRACE_MS: u64 = 5_000;
@@ -64,6 +70,8 @@ pub struct Directory {
     pub members: Vec<Arc<Member>>,
     /// The agent that is open, by id.
     pub focus: Option<String>,
+    /// The paired devices that may speak, by the digest of their token.
+    pub devices: HashMap<String, Arc<Device>>,
 }
 
 impl Directory {
@@ -71,6 +79,14 @@ impl Directory {
         self.members
             .iter()
             .find(|member| member.record.session == session)
+    }
+
+    /// The device that presents this token, when it is paired and not revoked.
+    pub fn device(&self, token: &str) -> Option<&Arc<Device>> {
+        if !pairing::looks_like_a_token(token) {
+            return None;
+        }
+        self.devices.get(&pairing::digest(token))
     }
 }
 
@@ -97,6 +113,21 @@ enum Ask {
     Select {
         session: String,
         answer: Answer<Option<AgentRecord>>,
+    },
+    Issue {
+        device_name: String,
+        scope: Scope,
+        ttl_seconds: i64,
+        answer: Answer<Result<Issued, String>>,
+    },
+    Exchange {
+        code: String,
+        device_name: String,
+        answer: Answer<Result<Paired, String>>,
+    },
+    Revoke {
+        device_id: String,
+        answer: Answer<bool>,
     },
 }
 
@@ -140,6 +171,41 @@ impl FleetHandle {
     pub async fn select(&self, session: String) -> Result<Option<AgentRecord>, Unavailable> {
         self.ask(|answer| Ask::Select { session, answer }).await
     }
+
+    /// Issues a pairing code. The inner error says why the request cannot be met.
+    pub async fn issue(
+        &self,
+        device_name: String,
+        scope: Scope,
+        ttl_seconds: i64,
+    ) -> Result<Result<Issued, String>, Unavailable> {
+        self.ask(|answer| Ask::Issue {
+            device_name,
+            scope,
+            ttl_seconds,
+            answer,
+        })
+        .await
+    }
+
+    /// Hands a pairing code in. The inner error says why it was not taken.
+    pub async fn exchange(
+        &self,
+        code: String,
+        device_name: String,
+    ) -> Result<Result<Paired, String>, Unavailable> {
+        self.ask(|answer| Ask::Exchange {
+            code,
+            device_name,
+            answer,
+        })
+        .await
+    }
+
+    /// Takes a device's right to speak away. Returns whether it had one.
+    pub async fn revoke(&self, device_id: String) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::Revoke { device_id, answer }).await
+    }
 }
 
 struct Fleet {
@@ -147,6 +213,8 @@ struct Fleet {
     store: Box<dyn KeyValue>,
     members: Vec<Arc<Member>>,
     focus: Option<String>,
+    /// The devices that may speak, by the digest of their token.
+    devices: HashMap<String, Arc<Device>>,
     directory: watch::Sender<Arc<Directory>>,
 }
 
@@ -210,9 +278,18 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
                 .iter()
                 .any(|member| member.record.agent_id == *agent_id)
         });
+    let mut devices = HashMap::new();
+    for (device_id, stored) in store.list(DEVICES).map_err(|error| error.to_string())? {
+        let device: Device = serde_json::from_slice(&stored)
+            .map_err(|error| format!("the entry for device {device_id} cannot be read: {error}"))?;
+        if device.revoked_at.is_none() {
+            devices.insert(device.token_hash.clone(), Arc::new(device));
+        }
+    }
     let (directory, read) = watch::channel(Arc::new(Directory {
         members: members.clone(),
         focus: focus.clone(),
+        devices: devices.clone(),
     }));
     let (tx, rx) = mpsc::channel();
     let fleet = Fleet {
@@ -220,6 +297,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         store,
         members,
         focus,
+        devices,
         directory,
     };
     std::thread::Builder::new()
@@ -245,6 +323,24 @@ impl Fleet {
                 Ask::Select { session, answer } => {
                     let _ = answer.send(self.select(&session));
                 }
+                Ask::Issue {
+                    device_name,
+                    scope,
+                    ttl_seconds,
+                    answer,
+                } => {
+                    let _ = answer.send(Ok(self.issue(&device_name, scope, ttl_seconds)));
+                }
+                Ask::Exchange {
+                    code,
+                    device_name,
+                    answer,
+                } => {
+                    let _ = answer.send(Ok(self.exchange(&code, &device_name)));
+                }
+                Ask::Revoke { device_id, answer } => {
+                    let _ = answer.send(self.revoke(&device_id));
+                }
             }
         }
     }
@@ -257,6 +353,7 @@ impl Fleet {
         self.directory.send_replace(Arc::new(Directory {
             members: self.members.clone(),
             focus: self.focus.clone(),
+            devices: self.devices.clone(),
         }));
     }
 
@@ -369,5 +466,77 @@ impl Fleet {
         });
         self.works.hub.publish(event, self.now_ms());
         Ok(Some(record))
+    }
+
+    fn issue(
+        &mut self,
+        device_name: &str,
+        scope: Scope,
+        ttl_seconds: i64,
+    ) -> Result<Issued, String> {
+        let now = self.now_ms();
+        let (issued, pending) = pairing::issue(device_name, scope, ttl_seconds, now)?;
+        // Codes that ran out are swept when the next one is made.
+        for (digest, stored) in self.store.list(CODES).map_err(|error| error.to_string())? {
+            let expired = serde_json::from_slice::<PendingCode>(&stored)
+                .map_or(true, |code| code.expires_at < now);
+            if expired {
+                let _ = self.store.delete(CODES, &digest);
+            }
+        }
+        let stored = serde_json::to_vec(&pending).map_err(|error| error.to_string())?;
+        self.store
+            .put(CODES, &pairing::digest(&issued.code), &stored)
+            .map_err(|error| error.to_string())?;
+        Ok(issued)
+    }
+
+    fn exchange(&mut self, code: &str, device_name: &str) -> Result<Paired, String> {
+        let code = code.trim();
+        if !pairing::looks_like_a_code(code) {
+            return Err("invalid pairing code".to_string());
+        }
+        let digest = pairing::digest(code);
+        let pending = self
+            .store
+            .get(CODES, &digest)
+            .map_err(|error| error.to_string())?
+            .and_then(|stored| serde_json::from_slice::<PendingCode>(&stored).ok())
+            .ok_or("pairing code is invalid or already used")?;
+        let (paired, device) = pairing::redeem(&pending, device_name, self.now_ms())?;
+        let stored = serde_json::to_vec(&device).map_err(|error| error.to_string())?;
+        // The device first, then the code is gone: a crash between the two leaves a device
+        // nobody has the token of, never a code that works twice.
+        self.store
+            .put(DEVICES, &device.device_id, &stored)
+            .map_err(|error| error.to_string())?;
+        self.store
+            .delete(CODES, &digest)
+            .map_err(|error| error.to_string())?;
+        self.devices
+            .insert(device.token_hash.clone(), Arc::new(device));
+        self.publish();
+        Ok(paired)
+    }
+
+    fn revoke(&mut self, device_id: &str) -> Result<bool, Unavailable> {
+        let Some(device) = self
+            .devices
+            .values()
+            .find(|device| device.device_id == device_id)
+            .cloned()
+        else {
+            return Ok(false);
+        };
+        let mut revoked = (*device).clone();
+        revoked.revoked_at = Some(self.now_ms());
+        let stored =
+            serde_json::to_vec(&revoked).map_err(|error| Unavailable(error.to_string()))?;
+        self.store
+            .put(DEVICES, device_id, &stored)
+            .map_err(|error| Unavailable(error.to_string()))?;
+        self.devices.remove(&device.token_hash);
+        self.publish();
+        Ok(true)
     }
 }

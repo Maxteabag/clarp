@@ -6,11 +6,12 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Path, Query, Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{ConnectInfo, Path, Query, Request, State};
+use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, Sse};
 use axum::response::{IntoResponse, Response};
@@ -34,6 +35,7 @@ use crate::agent::Unavailable;
 use crate::config::Config;
 use crate::fleet::{FleetHandle, Member};
 use crate::hub::{Hub, Published};
+use crate::pairing::{self, Device, Scope};
 use crate::{ids, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
@@ -112,6 +114,10 @@ pub fn router(app: App) -> Router {
         .route("/select", post(select))
         .route("/turn-queue", get(queue))
         .route("/turn-queue/resume", post(resume))
+        .route("/pairing/exchange", post(pairing_exchange))
+        .route("/pairing/issue", post(pairing_issue))
+        .route("/paired-devices", get(paired_devices))
+        .route("/paired-devices/revoke", post(revoke_device))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }
@@ -149,22 +155,88 @@ fn same_token(presented: &str, expected: &str) -> bool {
     different == 0
 }
 
-async fn authorize(State(app): State<App>, request: Request, next: Next) -> Response {
-    let expected = &app.config.auth_token;
-    let allowed = expected.is_empty()
-        || presented(request.headers(), request.uri().query())
-            .is_some_and(|token| same_token(&token, expected));
-    if allowed {
-        next.run(request).await
-    } else {
-        ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response()
+/// Who is asking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Principal {
+    /// The Host's own token, presented from this machine; or anyone, on a Host that has none.
+    Administrator,
+    Device {
+        device_id: String,
+        scope: Scope,
+    },
+}
+
+/// The only route a caller without a token may use: a device that has a code has no token yet.
+const EXCHANGE: &str = "/pairing/exchange";
+
+/// What a device with limited scope may send. Whatever it may read, it may read.
+const LIMITED_POSTS: &[&str] = &["/send", "/select"];
+
+/// Whether this caller is kept from this request by its scope.
+fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
+    let Principal::Device {
+        scope: Scope::Limited,
+        ..
+    } = principal
+    else {
+        return false;
+    };
+    if path.starts_with("/paired-devices") || path.starts_with("/pairing/issue") {
+        return true;
     }
+    if method == Method::GET || method == Method::HEAD {
+        return false;
+    }
+    !(method == Method::POST && LIMITED_POSTS.contains(&path))
+}
+
+fn who(app: &App, request: &Request) -> Option<Principal> {
+    let expected = &app.config.auth_token;
+    if expected.is_empty() {
+        return Some(Principal::Administrator);
+    }
+    let token = presented(request.headers(), request.uri().query())?;
+    // The administrator's token opens the Host only from the machine it runs on. From
+    // anywhere else a device presents a token of its own, which can be taken away again.
+    let local = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .is_some_and(|peer| peer.0.ip().is_loopback());
+    if local && same_token(&token, expected) {
+        return Some(Principal::Administrator);
+    }
+    let directory = app.fleet.directory();
+    let device = directory.device(&token)?;
+    Some(Principal::Device {
+        device_id: device.device_id.clone(),
+        scope: device.scope,
+    })
+}
+
+async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_string();
+    if path == EXCHANGE {
+        return next.run(request).await;
+    }
+    let Some(principal) = who(&app, &request) else {
+        return ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    };
+    if out_of_scope(&principal, request.method(), &path) {
+        return ApiError::new(StatusCode::FORBIDDEN, "this device may not do that").into_response();
+    }
+    request.extensions_mut().insert(principal);
+    next.run(request).await
 }
 
 // ---- who the Host is, and who its agents are ------------------------------------------------
 
 async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
-    Json(ServerInfo {
+    Json(identity(&app))
+}
+
+/// Who this Host is: what `GET /server-info` answers and what a pairing hands the new device.
+fn identity(app: &App) -> ServerInfo {
+    ServerInfo {
         server_id: app.server_id.clone(),
         name: app.config.name.clone(),
         deployment_mode: "native".to_string(),
@@ -187,7 +259,7 @@ async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
         },
         client: None,
         local_connection: None,
-    })
+    }
 }
 
 async fn snapshot(State(app): State<App>) -> Json<Snapshot> {
@@ -429,6 +501,125 @@ async fn resume(
     Ok(Json(json!({ "ok": true, "resumed": resumed })))
 }
 
+// ---- devices ---------------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct ExchangeRequest {
+    #[serde(default)]
+    code: String,
+    #[serde(default)]
+    device_name: String,
+}
+
+/// A device hands in its code and is given a token of its own. Needs no token: the code is
+/// the proof.
+async fn pairing_exchange(
+    State(app): State<App>,
+    Json(request): Json<ExchangeRequest>,
+) -> Result<Response, ApiError> {
+    match app
+        .fleet
+        .exchange(request.code, request.device_name)
+        .await?
+    {
+        Ok(device) => {
+            let body = json!({ "device": device, "server": identity(&app) });
+            Ok((StatusCode::CREATED, Json(body)).into_response())
+        }
+        Err(why) => Err(ApiError::new(StatusCode::CONFLICT, why)),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct IssueRequest {
+    #[serde(default)]
+    device_name: String,
+    #[serde(default)]
+    scope: String,
+    ttl_seconds: Option<i64>,
+    /// The address the device will reach this Host at. With it the answer carries the link
+    /// that pairs a device when it is opened there.
+    url: Option<String>,
+}
+
+/// A value as it may stand in the query of a link.
+fn in_a_link(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// The administrator has a code made for a device.
+async fn pairing_issue(
+    State(app): State<App>,
+    Json(request): Json<IssueRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let scope = Scope::parse(&request.scope)
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "scope must be full or limited"))?;
+    let ttl = request.ttl_seconds.unwrap_or(pairing::DEFAULT_TTL_SECONDS);
+    let issued = app
+        .fleet
+        .issue(request.device_name, scope, ttl)
+        .await?
+        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    let mut answer = json!({
+        "code": issued.code,
+        "device_name": issued.device_name,
+        "scope": issued.scope,
+        "created_at": issued.created_at,
+        "expires_at": issued.expires_at,
+    });
+    if let Some(url) = request.url.filter(|url| !url.trim().is_empty()) {
+        let uri = format!(
+            "clarp://pair?name={}&url={}&code={}",
+            in_a_link(&app.config.name),
+            in_a_link(url.trim()),
+            in_a_link(&issued.code)
+        );
+        answer["url"] = json!(url.trim());
+        answer["uri"] = json!(uri);
+    }
+    Ok(Json(answer))
+}
+
+async fn paired_devices(State(app): State<App>) -> Json<Value> {
+    let directory = app.fleet.directory();
+    let mut devices: Vec<Device> = directory
+        .devices
+        .values()
+        .map(|device| device.public())
+        .collect();
+    devices.sort_by_key(|device| std::cmp::Reverse(device.created_at));
+    Json(json!({ "devices": devices }))
+}
+
+#[derive(Debug, Deserialize)]
+struct RevokeRequest {
+    #[serde(default)]
+    device_id: String,
+}
+
+async fn revoke_device(
+    State(app): State<App>,
+    Json(request): Json<RevokeRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let device_id = request.device_id.trim().to_string();
+    if device_id.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "device_id required"));
+    }
+    if app.fleet.revoke(device_id).await? {
+        Ok(Json(json!({ "ok": true })))
+    } else {
+        Err(ApiError::new(StatusCode::NOT_FOUND, "device not found"))
+    }
+}
+
 // ---- the stream of events --------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -519,6 +710,48 @@ mod tests {
             HeaderValue::from_static("Bearer h-token"),
         );
         assert_eq!(presented(&headers, None).as_deref(), Some("h-token"));
+    }
+
+    #[test]
+    fn a_limited_device_may_read_and_send_and_nothing_else() {
+        let limited = Principal::Device {
+            device_id: "device_1".to_string(),
+            scope: Scope::Limited,
+        };
+        let full = Principal::Device {
+            device_id: "device_2".to_string(),
+            scope: Scope::Full,
+        };
+        for (method, path, kept_out) in [
+            (Method::GET, "/log", false),
+            (Method::GET, "/agents/snapshot", false),
+            (Method::POST, "/send", false),
+            (Method::POST, "/select", false),
+            (Method::POST, "/stop", true),
+            (Method::POST, "/agents", true),
+            (Method::DELETE, "/agents/echo", true),
+            (Method::GET, "/paired-devices", true),
+            (Method::POST, "/paired-devices/revoke", true),
+            (Method::POST, "/pairing/issue", true),
+        ] {
+            assert_eq!(
+                out_of_scope(&limited, &method, path),
+                kept_out,
+                "{method} {path}"
+            );
+            assert!(!out_of_scope(&full, &method, path), "{method} {path}");
+            assert!(!out_of_scope(&Principal::Administrator, &method, path));
+        }
+    }
+
+    #[test]
+    fn a_pairing_link_carries_its_values_whole() {
+        assert_eq!(in_a_link("Clarp Host (Rust)"), "Clarp%20Host%20%28Rust%29");
+        assert_eq!(
+            in_a_link("https://host.example:7690"),
+            "https%3A%2F%2Fhost.example%3A7690"
+        );
+        assert_eq!(in_a_link("clp_Abc-123_x.y~z"), "clp_Abc-123_x.y~z");
     }
 
     #[test]

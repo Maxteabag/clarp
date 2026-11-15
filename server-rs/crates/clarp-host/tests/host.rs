@@ -33,12 +33,17 @@ impl Place {
 
     /// Starts a Host process in this place and waits until it listens.
     fn start(&self) -> Host {
+        self.start_with_token("")
+    }
+
+    /// Starts a Host that asks for this token (none when it is empty).
+    fn start_with_token(&self, token: &str) -> Host {
         let mut process = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
             .args(["--data", self.root.join("data").to_str().unwrap()])
             .args(["--run", self.root.join("run").to_str().unwrap()])
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
-            .env_remove("CLARP_HOST_TOKEN")
+            .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -57,7 +62,11 @@ impl Place {
             let mut rest = String::new();
             let _ = said.read_to_string(&mut rest);
         });
-        Host { process, address }
+        Host {
+            process,
+            address,
+            token: token.to_string(),
+        }
     }
 }
 
@@ -70,18 +79,30 @@ impl Drop for Place {
 struct Host {
     process: Child,
     address: String,
+    /// The token this test's own requests present, when the Host asks for one.
+    token: String,
 }
 
 impl Host {
     /// One request, one answer: the status and the body as JSON.
     fn ask(&self, method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
+        self.ask_as(&self.token, method, path, body)
+    }
+
+    /// A request that presents this token, or none when it is empty.
+    fn ask_as(&self, token: &str, method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
         let mut stream = TcpStream::connect(&self.address).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(20)))
             .unwrap();
         let body = body.map(Value::to_string).unwrap_or_default();
+        let authorization = if token.is_empty() {
+            String::new()
+        } else {
+            format!("Authorization: Bearer {token}\r\n")
+        };
         let request = format!(
-            "{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            "{method} {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         stream.write_all(request.as_bytes()).unwrap();
@@ -458,4 +479,157 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
                         .is_some_and(|text| text.contains("spool-survived"))
             })
     });
+}
+
+#[test]
+fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away() {
+    let place = Place::new("pair");
+    let host = place.start_with_token("the-administrators-token");
+    // Without a token nothing answers; with the administrator's, from this machine, all does.
+    assert_eq!(host.ask_as("", "GET", "/agents/snapshot", None).0, 401);
+    assert_eq!(host.ask_as("wrong", "GET", "/agents/snapshot", None).0, 401);
+    assert_eq!(host.ask("GET", "/agents/snapshot", None).0, 200);
+    host.new_agent("Echo");
+
+    // The administrator has a code made; the answer carries the link a phone opens.
+    let issued = host.post(
+        "/pairing/issue",
+        json!({ "device_name": "Test phone", "scope": "limited", "url": "https://host.example:7690" }),
+    );
+    let code = issued["code"].as_str().unwrap().to_string();
+    assert!(code.starts_with("clp_"));
+    assert!(
+        issued["uri"]
+            .as_str()
+            .unwrap()
+            .starts_with("clarp://pair?name=")
+            && issued["uri"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("&code={code}"))
+    );
+
+    // The command line asks the same Host for the same thing.
+    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args([
+            "pair",
+            "--url",
+            "https://host.example:7690",
+            "--host",
+            &host.address,
+        ])
+        .env("CLARP_HOST_TOKEN", "the-administrators-token")
+        .output()
+        .unwrap();
+    assert!(
+        shown.status.success(),
+        "{}",
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    assert!(String::from_utf8_lossy(&shown.stdout).starts_with("clarp://pair?name="));
+    let refused = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args([
+            "pair",
+            "--url",
+            "https://host.example:7690",
+            "--host",
+            &host.address,
+        ])
+        .env("CLARP_HOST_TOKEN", "not-the-token")
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+
+    // The device hands the code in, with no token, and is given one of its own.
+    let (status, paired) = host.ask_as(
+        "",
+        "POST",
+        "/pairing/exchange",
+        Some(&json!({ "code": code, "device_name": "" })),
+    );
+    assert_eq!(status, 201, "{paired}");
+    let token = paired["device"]["token"].as_str().unwrap().to_string();
+    let device_id = paired["device"]["device_id"].as_str().unwrap().to_string();
+    assert!(token.starts_with("cld_"));
+    assert_eq!(paired["device"]["device_name"], "Test phone");
+    assert_eq!(paired["device"]["scope"], "limited");
+    assert_eq!(
+        paired["server"]["server_id"],
+        host.get("/server-info")["server_id"]
+    );
+    // A code works once.
+    let again = host.ask_as(
+        "",
+        "POST",
+        "/pairing/exchange",
+        Some(&json!({ "code": code })),
+    );
+    assert_eq!(again.0, 409);
+    assert_eq!(
+        host.ask_as(
+            "",
+            "POST",
+            "/pairing/exchange",
+            Some(&json!({ "code": "clp_nonsense" }))
+        )
+        .0,
+        409
+    );
+
+    // With its token the device reads and sends, and its limited scope keeps it from the rest.
+    assert_eq!(host.ask_as(&token, "GET", "/agents/snapshot", None).0, 200);
+    let sent = host.ask_as(
+        &token,
+        "POST",
+        "/send",
+        Some(&json!({ "session": "echo", "text": "from the phone", "client_msg_id": "p1" })),
+    );
+    assert_eq!(sent.0, 200, "{}", sent.1);
+    assert_eq!(
+        host.ask_as(&token, "POST", "/agents", Some(&json!({ "name": "X" })))
+            .0,
+        403
+    );
+    assert_eq!(host.ask_as(&token, "GET", "/paired-devices", None).0, 403);
+    assert_eq!(
+        host.ask_as(&token, "POST", "/stop", Some(&json!({ "session": "echo" })))
+            .0,
+        403
+    );
+
+    // The administrator sees the device, without anything that could speak as it.
+    let devices = host.get("/paired-devices");
+    assert_eq!(devices["devices"].as_array().unwrap().len(), 1);
+    assert_eq!(devices["devices"][0]["device_id"], device_id);
+    assert!(devices["devices"][0].get("token_hash").is_none());
+    assert!(!devices.to_string().contains(&token));
+
+    // A restart forgets nothing: the device is still paired.
+    host.kill();
+    let host = place.start_with_token("the-administrators-token");
+    assert_eq!(host.ask_as(&token, "GET", "/agents/snapshot", None).0, 200);
+
+    // Revoked, the token opens nothing, at once and after another restart.
+    let revoked = host.post("/paired-devices/revoke", json!({ "device_id": device_id }));
+    assert_eq!(revoked["ok"], true);
+    assert_eq!(host.ask_as(&token, "GET", "/agents/snapshot", None).0, 401);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/paired-devices/revoke",
+            Some(&json!({ "device_id": device_id }))
+        )
+        .0,
+        404
+    );
+    host.kill();
+    let host = place.start_with_token("the-administrators-token");
+    assert_eq!(host.ask_as(&token, "GET", "/agents/snapshot", None).0, 401);
+    assert_eq!(
+        host.get("/paired-devices")["devices"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 }

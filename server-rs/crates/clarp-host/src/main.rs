@@ -93,7 +93,9 @@ async fn serve(config: Config) -> Result<(), String> {
         config.codec,
         config.launcher
     );
-    axum::serve(listener, edge::router(app))
+    // The edge is told who connected: the administrator's token opens the Host only from here.
+    let service = edge::router(app).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    axum::serve(listener, service)
         .with_graceful_shutdown(told_to_stop())
         .await
         .map_err(|error| error.to_string())
@@ -118,7 +120,25 @@ async fn told_to_stop() {
 }
 
 fn main() -> ExitCode {
-    let config = match Config::from_args(std::env::args().skip(1)) {
+    let mut args = std::env::args().skip(1).peekable();
+    if args.peek().map(String::as_str) == Some("pair") {
+        args.next();
+        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        return match clarp_host::admin::pair(args, &token) {
+            Ok(shown) => {
+                println!("{shown}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!(
+                    "clarp-host pair: {error}\n{}",
+                    clarp_host::admin::PAIR_USAGE
+                );
+                ExitCode::from(2)
+            }
+        };
+    }
+    let config = match Config::from_args(args) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("clarp-host: {error}\n{USAGE}");
