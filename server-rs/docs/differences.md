@@ -46,6 +46,7 @@ it covers that exact difference and nothing else.
 | The preview of a notification for a spoken reply | shows an emotion tag the engine acts out, `[sigh]` (defect R10) | does not | A notification shows the reply as every other place shows it |
 | `phase` of the reply that closes a later turn | `null` when the turn before had settled, `final` otherwise (defect R6) | `final` | A reply that closes a completed turn is the agent's final word in it, whenever it is read |
 | `turn_started_at` while a turn runs after one that did not complete (it was stopped, or failed) | the start of the earlier turn (defect R11) | the start of the turn that runs | The apps count the running turn from it (issue 354): a turn is counted from its own start |
+| `last_completed_message` after a turn that had waited in the queue | the user's message, though the agent has answered it (defect R12) | the agent's answer | A list of chats shows what the agent last said, whichever way the turn began |
 
 ## Differences the conformance corpus does not reach
 

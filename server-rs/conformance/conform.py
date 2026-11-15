@@ -231,16 +231,16 @@ def run_step(host, events, step, http, variables, clock=None):
     elif op == 'wait_busy':
         replay._poll('busy state', lambda: agent(host, session).get('busy') is step['busy'])
     elif op == 'wait_running':
-        # The turn of this message runs: the message is in the conversation, the agent is busy,
-        # and what the snapshot says the turn began at is the same in two readings.
-        replay._poll('the message in the conversation',
-                     lambda: any(turn.get('id') == step['message'] for turn in turns(host, session)))
+        # A turn runs and nothing waits behind it: the agent is busy, its queue is empty, and what
+        # the snapshot says the turn began at is the same in two readings. Read off the snapshot
+        # alone: when a message enters the conversation is each Host's own.
         last = {'began': None}
 
         def running():
             row = agent(host, session)
             began = row.get('turn_started_at')
-            steady = row.get('busy') is True and bool(began) and began == last['began']
+            steady = (row.get('busy') is True and not row.get('queued_turn_count')
+                      and bool(began) and began == last['began'])
             last['began'] = began
             return steady
         replay._poll('the turn running', running)
