@@ -356,6 +356,78 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                     raise sqlite3.OperationalError("synthetic progress failure")
 
                 stack.enter_context(patch.object(inc, "write_checkpoint", broken_checkpoint))
+            if faults.get("source_moves"):
+                # The transcript changes while a tail has it. "when": "parse"
+                # (the parser has read its last byte and not yet returned),
+                # "read" (its reader has taken some of the range and not all
+                # of it; the report's ``source_moved_at`` is how far it was),
+                # "before_parse" (its bytes were hashed, the parser has not
+                # opened it yet) or "store" (parsed, about to be stored and
+                # published). "how":
+                # "grow" (a record is appended), "touch" (only the mtime
+                # moves), "rewrite" (a record is appended AND a byte of the
+                # last old record changes in place), "rewrite_at" (the
+                # same, the byte where "words" begin: a record an earlier
+                # tail imported, one the reader has passed, one it has not),
+                # "replace" (the same bytes in a new file under the name).
+                moves, moved = faults["source_moves"], []
+
+                def move_source():
+                    if moved:
+                        return
+                    moved.append(True)
+                    stat, how = transcript.stat(), moves["how"]
+                    if how in ("grow", "rewrite", "rewrite_at"):
+                        if how != "grow":
+                            data = transcript.read_bytes()
+                            at = data.rindex(b"synthetic") if how == "rewrite" \
+                                else data.index(moves["words"].encode())
+                            with transcript.open("r+b") as output:
+                                output.seek(at)
+                                output.write(b"S")
+                        with transcript.open("ab") as output:
+                            output.write(append_bytes(backend, 900 + tick))
+                    elif how == "touch":
+                        os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+                    elif how == "replace":
+                        other = transcript.with_suffix(".new")
+                        other.write_bytes(transcript.read_bytes() + append_bytes(backend, 900 + tick))
+                        os.replace(other, transcript)
+                    else:
+                        raise ValueError(how)
+
+                if moves["when"] == "read":
+                    native_readinto = inc._Range.readinto
+
+                    def readinto_then_move(self, buffer):
+                        count = native_readinto(self, buffer)
+                        if count and self._left > 0 and not moved:
+                            metrics["source_moved_at"] = self._file.tell()
+                            move_source()
+                        return count
+
+                    stack.enter_context(patch.object(inc._Range, "readinto", readinto_then_move))
+                elif moves["when"] in ("parse", "before_parse"):
+                    parser = type(backends.by_id(backend))
+                    native_parse = parser.parse_transcript
+
+                    def parse_then_move(self, path, *args, **kwargs):
+                        if moves["when"] == "before_parse":
+                            move_source()
+                        turns = native_parse(self, path, *args, **kwargs)
+                        move_source()
+                        return turns
+
+                    stack.enter_context(patch.object(parser, "parse_transcript", parse_then_move))
+                else:
+                    store_tail = message_writes.store_transcript_tail
+
+                    def move_then_store(*args, **kwargs):
+                        move_source()
+                        return store_tail(*args, **kwargs)
+
+                    stack.enter_context(patch.object(
+                        message_writes, "store_transcript_tail", move_then_store))
             if faults.get("team"):
                 from lib import team_store
                 original_capture = team_store.capture_assistant_message

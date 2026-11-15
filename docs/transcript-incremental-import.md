@@ -476,6 +476,25 @@ went or was bound to another call refuses it
 A checkpoint over such settled effects is logged as
 `transcriptTailRetention code=checkpoint_closed_effects`.
 
+A file that moves while a tail has it. A transcript is appended to while its
+agent works, so a tail often finds the file longer when it is done than when
+it began. Found after the parse, the same import goes on as a full one
+(`full_file_moved_during_parse`); found at publication, the rows are stored
+but the frontier is dropped and the next import is full
+(`publication_file_moved`). With `tail_keeps_frontier_when_grown = true` a
+file that only grew (the same inode, longer, its mtime not earlier) does not
+end the tail: it goes on for the bytes it parsed and publishes its frontier
+for them, the import is reported as not complete so that it comes again
+(`deferred_tail_source_changed`, with `transcriptTailRetention
+code=frontier_kept_source_grew`), and the import that comes is a tail. Growth
+found after the parse needs two proofs that the parsed bytes are the file's
+still, because the file is known to have been written meanwhile: the bytes
+the parser was handed hash as the same range read afterwards, and the bytes
+hashed before the parse hash the same read again. A file that was touched
+without growing, rewritten in place or replaced is refused as before. A full
+import has had the same allowance all along (`growing_prefix`). Off by
+default.
+
 Residual risk: a same-length in-place edit that misses every sampled block
 before the boundary is not detected by the hashes; the periodic audit (a full
 import) repairs it, and in shadow mode the turn digest comparison reports it.
