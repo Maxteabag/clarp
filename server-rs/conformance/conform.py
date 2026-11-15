@@ -510,6 +510,11 @@ def differences(a: dict, b: dict, chosen, view: str = 'full') -> diff.Report:
     return report
 
 
+def place(difference: dict) -> tuple:
+    """Where a difference is: the channel and the place in it, whatever the values are."""
+    return difference['channel'], difference['locator']
+
+
 def run_errors(seen: dict, label: str) -> list:
     return [f'{label} / {scenario}: {views["full"]["error"]}' for scenario, views in sorted(seen.items())
             if views['full']['error']]
@@ -638,19 +643,27 @@ def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run
     errors = run_errors(seen, 'rust')
     report, held_to = diff.Report(), []
     for scenario in steady(chosen):
-        nearest = None
-        for number, recording in enumerate(recordings, start=1):
-            one = differences(recording, seen, [scenario], view='core')
-            unexplained = sum(1 for d in one.items if d['id'] not in intended)
-            if nearest is None or unexplained < nearest[0]:
-                nearest = (unexplained, number, one)
-        report.items.extend(nearest[2].items)
-        if nearest[1] != 1:
-            held_to.append(f"{scenario['id']}: recording {nearest[1]}")
+        against = [differences(recording, seen, [scenario], view='core').items for recording in recordings]
+        # A place counts when the Rust Host differs there from every recording. Where it gives
+        # what one recording gave and another did not, the reference itself answers in more
+        # than one way at that place, and the Rust Host gives one of its answers.
+        places = [{place(d) for d in items} for items in against]
+        everywhere = set.intersection(*places)
+        counted = [[d for d in items if place(d) in everywhere] for items in against]
+        nearest = min(range(len(recordings)),
+                      key=lambda n: sum(1 for d in counted[n] if d['id'] not in intended))
+        report.items.extend(counted[nearest])
+        if nearest:
+            held_to.append(f"{scenario['id']}: recording {nearest + 1}")
+        elsewhere = sorted(set().union(*places) - everywhere)
+        if elsewhere:
+            held_to.append(f"{scenario['id']}: at {len(elsewhere)} place(s) the recordings differ and the Rust "
+                           f"Host gives one of their answers ({'; '.join(' / '.join(p) for p in elsewhere[:6])}"
+                           f"{' ...' if len(elsewhere) > 6 else ''})")
     unexplained = [d for d in report.items if d['id'] not in intended]
     lines = [diff.render(report, intended, 'the Python Host (base) against the Rust Host (head)', errors)]
     if held_to:
-        lines += ['', 'compared with another recording than the first: ' + '; '.join(held_to)]
+        lines += ['', 'held to more than the first recording:', *(f'  {line}' for line in held_to)]
     lines += ['', '# The same differences by shape', *diff.shapes(report, top=200)]
     ok = not errors and not unexplained
     lines.append('')
