@@ -88,9 +88,32 @@ The soak agent runs on a small model, in a directory of its own, and is asked fo
 hour apart: the load on the owner's accounts is small on purpose. Heavier work comes with agents the owner
 chooses to move.
 
+## A restart with turns running
+
+`tools/soak restart` is the second rule on the installed Host: a running turn survives any restart of the
+server. It gives each of its agents (`restart-1` to `restart-N`, made once, muted, on the small model) one
+command that takes a while and leaves a mark in a file, and a word to answer with afterwards. When every one
+of them is in its command, the Host's service is restarted. Afterwards every message must be in its
+conversation once, with one turn end, completed and answered with its word, and every command must have run
+exactly once: a turn that was run a second time would leave a second mark.
+
+```sh
+~/.local/share/clarp-host/libexec/soak restart --agents 10                    # the service is restarted
+~/.local/share/clarp-host/libexec/soak restart --agents 3 \
+    --by "server-rs/tools/install-host --start"                               # an update, with turns running
+```
+
+The result is in the same evidence file, one line for each agent and one for the exercise, and `soak report`
+names every exercise.
+
+On 15 Nov 2026, on the build of `d9868bea`: at 17:31 two turns of two, and at 17:33 ten turns of ten, were
+in their commands (`sleep 45` under a real Claude Code) when the service was restarted. The Host answered
+again 102 ms after the restart and had all ten turns. All ten ended completed, each message once, each
+command run once, in 52 to 54 seconds from the message: the length of the command and no more.
+
 ## What a round does not prove
 
-The soak holds the first rule (an accepted message is never lost and never runs twice) and, across the
-updates of the week, the second (a running turn survives a restart). It does not exercise goals, jobs,
+The soak holds the first rule (an accepted message is never lost and never runs twice); the restart
+exercise holds the second (a running turn survives a restart). Neither exercises goals, jobs,
 helpers, requests or push on the installed Host: those are held by the tests and the conformance suite
 until an agent that uses them lives there.
