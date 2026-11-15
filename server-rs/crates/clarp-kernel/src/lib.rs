@@ -11,6 +11,7 @@ pub mod conversation;
 pub mod goals;
 pub mod jobs;
 pub mod journal;
+pub mod notify;
 pub mod python;
 pub mod tools;
 pub mod turn;

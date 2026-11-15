@@ -10,6 +10,7 @@ use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
 use clarp_kernel::jobs::{Job, JobRecord};
+use clarp_kernel::notify;
 use clarp_kernel::turn::{Activity, Outcome};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
@@ -540,21 +541,46 @@ pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
     Some((cut(written, NOTIFICATION_PREVIEW_MAX, false), "text-reply"))
 }
 
+/// The message a finished turn answered, as far as telling the user of the turn looks at it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Asked<'a> {
+    /// The message's id.
+    pub message_id: &'a str,
+    /// The app that sent it, when it said.
+    pub client: &'a str,
+}
+
 /// A finished turn the user should know about: what an app badges and marks unread from.
-/// `None` when the reply it ended on has nothing for the user in it.
+/// `None` when the rule says nobody is told ([`clarp_kernel::notify`]): the reply it ended on
+/// has nothing for the user in it, or the turn was talk between agents.
 pub fn user_notification(
     record: &AgentRecord,
     notification_id: &str,
-    cause_message_id: &str,
+    asked: &Asked<'_>,
     reply: &Versioned,
     done_ms: i64,
 ) -> Option<Value> {
-    let (preview, reason, origin) = match &reply.entry {
-        Entry::Reply(reply) => {
-            let (preview, reason) = notification_preview(&reply.text)?;
-            (preview, reason, reply.origin.name())
-        }
-        _ => return None,
+    let Entry::Reply(said) = &reply.entry else {
+        return None;
+    };
+    let (preview, kind) = notification_preview(&said.text).unzip();
+    let turn = notify::Completed {
+        agent_id: &record.agent_id,
+        has_cause: !asked.message_id.is_empty(),
+        content: kind.unwrap_or(""),
+        interrupted: false,
+        client: asked.client,
+    };
+    // Nothing mutes an agent on this Host yet, and no setting treats automation specially.
+    let agent = notify::Capabilities::default();
+    let notify::Decision::Notify {
+        reason,
+        push,
+        muted,
+        ..
+    } = notify::decide(said.origin.name(), &turn, &agent, false)
+    else {
+        return None;
     };
     Some(json!({
         "type": "user-notification",
@@ -562,16 +588,16 @@ pub fn user_notification(
         "agent_id": record.agent_id,
         "session": record.session,
         "persona": record.persona,
-        "origin": origin,
+        "origin": said.origin.name(),
         "reason": reason,
-        "cause_message_id": cause_message_id,
+        "cause_message_id": asked.message_id,
         "source_message_id": reply.entry.id(),
-        "preview": preview,
+        "preview": preview.unwrap_or_default(),
         "done_ts": done_ms,
         "badge": true,
         "unread": true,
-        "push": true,
-        "muted": false,
+        "push": push,
+        "muted": muted,
     }))
 }
 
@@ -1615,7 +1641,11 @@ mod tests {
             9,
             None,
         );
-        let told = user_notification(&record(), "pn-abc", "u-1", &reply, 4_000).unwrap();
+        let from = |client: &'static str| Asked {
+            message_id: "u-1",
+            client,
+        };
+        let told = user_notification(&record(), "pn-abc", &from(""), &reply, 4_000).unwrap();
         assert_eq!(
             (
                 &told["type"],
@@ -1635,6 +1665,51 @@ mod tests {
             (&json!(true), &json!(true), &json!(true))
         );
         assert_eq!(told["reason"], "text-reply");
+
+        // A user who asked at the desk is told, and not paged.
+        let at_the_desk =
+            user_notification(&record(), "pn-abc", &from("desktop"), &reply, 4_000).unwrap();
+        assert_eq!(
+            (&at_the_desk["reason"], &at_the_desk["push"]),
+            (&json!("text-reply-desktop"), &json!(false))
+        );
+        // What one agent answers another tells nobody.
+        let between_agents = version(
+            Entry::Reply(Reply {
+                origin: Origin::Agent {
+                    agent_id: "a2".to_string(),
+                },
+                id: "r-2".to_string(),
+                turn: 2,
+                text: "Done as you asked.".to_string(),
+                trace_id: None,
+            }),
+            12,
+            None,
+        );
+        assert_eq!(
+            user_notification(&record(), "pn-abc", &from(""), &between_agents, 4_000),
+            None
+        );
+        // What the Host brought the agent for its user (an answer, a goal) is told.
+        let by_itself = version(
+            Entry::Reply(Reply {
+                origin: Origin::Trigger {
+                    name: "automation".to_string(),
+                },
+                id: "r-3".to_string(),
+                turn: 3,
+                text: "The goal is reached.".to_string(),
+                trace_id: None,
+            }),
+            15,
+            None,
+        );
+        let told = user_notification(&record(), "pn-abc", &from(""), &by_itself, 4_000).unwrap();
+        assert_eq!(
+            (&told["origin"], &told["push"]),
+            (&json!("automation"), &json!(true))
+        );
     }
 
     #[test]
