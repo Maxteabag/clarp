@@ -1,0 +1,790 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "Only the synthetic service.",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "no_label": "Hold",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "Deploy the synthetic thing?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 1,
+      "status": "pending",
+      "urgency": "normal",
+      "yes_label": "Deploy"
+     },
+     "deleted_at": null,
+     "payload": {
+      "version": "1.2"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "deploy-1",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "Deploy the synthetic thing?",
+     "title": "Synthetic deploy?",
+     "type": "decision",
+     "updated_at": "<time>",
+     "version": "1.2"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 201,
+   "step": "ask"
+  },
+  {
+   "body": {
+    "count": 1,
+    "decision_format": 2,
+    "items": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "Only the synthetic service.",
+      "created_at": "<time>",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "kind": "decision",
+      "no_label": "Hold",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "Deploy the synthetic thing?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 1,
+      "session": "claire",
+      "status": "pending",
+      "summary": "Deploy the synthetic thing?",
+      "title": "Synthetic deploy?",
+      "updated_at": "<time>",
+      "urgency": "normal",
+      "yes_label": "Deploy"
+     }
+    ],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "get /attention"
+  },
+  {
+   "body": {
+    "error": "decision revision changed"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:3>/resolve",
+   "status": 409,
+   "step": "answer what was not seen"
+  },
+  {
+   "body": {
+    "count": 1,
+    "decision_format": 2,
+    "items": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "Only the synthetic service.",
+      "created_at": "<time>",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "kind": "decision",
+      "no_label": "Hold",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "Deploy the synthetic thing?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 1,
+      "session": "claire",
+      "status": "pending",
+      "summary": "Deploy the synthetic thing?",
+      "title": "Synthetic deploy?",
+      "updated_at": "<time>",
+      "urgency": "normal",
+      "yes_label": "Deploy"
+     }
+    ],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "the inbox, still"
+  },
+  {
+   "body": {
+    "error": "exactly one of choice or answer is required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:3>/resolve",
+   "status": 400,
+   "step": "answer with nothing"
+  },
+  {
+   "body": {
+    "count": 1,
+    "decision_format": 2,
+    "items": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "Only the synthetic service.",
+      "created_at": "<time>",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "kind": "decision",
+      "no_label": "Hold",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "Deploy the synthetic thing?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 1,
+      "session": "claire",
+      "status": "pending",
+      "summary": "Deploy the synthetic thing?",
+      "title": "Synthetic deploy?",
+      "updated_at": "<time>",
+      "urgency": "normal",
+      "yes_label": "Deploy"
+     }
+    ],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "the inbox, again"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": "<time>",
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": false,
+      "answer": {
+       "choice": "accepted"
+      },
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "Only the synthetic service.",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": true,
+      "expires_at": null,
+      "no_label": "Hold",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "Deploy the synthetic thing?",
+      "recommended_option_id": null,
+      "resolved_at": "<time>",
+      "resolved_by": "user",
+      "resolved_choice": "accepted",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 2,
+      "status": "accepted",
+      "urgency": "normal",
+      "yes_label": "Deploy"
+     },
+     "deleted_at": null,
+     "payload": {
+      "version": "1.2"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "deploy-1",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "completed",
+     "summary": "Deploy the synthetic thing?",
+     "title": "Synthetic deploy?",
+     "type": "decision",
+     "updated_at": "<time>",
+     "version": "1.2"
+    },
+    "changed": true,
+    "delivery_pending": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:3>/resolve",
+   "status": 200,
+   "step": "give the approval"
+  },
+  {
+   "body": {
+    "count": 0,
+    "decision_format": 2,
+    "items": [],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "the inbox, empty"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "completed_at": "<time>",
+      "created_at": "<time>",
+      "decision": {
+       "allow_custom_text": false,
+       "answer": {
+        "choice": "accepted"
+       },
+       "archived_at": null,
+       "artifact_id": "artifact-<id:1>",
+       "blocks_progress": false,
+       "context": "Only the synthetic service.",
+       "deadline_at": null,
+       "decision_id": "decision-<id:3>",
+       "delivery_pending": false,
+       "expires_at": null,
+       "no_label": "Hold",
+       "options": [],
+       "priority": 100,
+       "priority_reason": "",
+       "question": "Deploy the synthetic thing?",
+       "recommended_option_id": null,
+       "resolved_at": "<time>",
+       "resolved_by": "user",
+       "resolved_choice": "accepted",
+       "response_effort": "review",
+       "response_type": "approval",
+       "revision": 2,
+       "status": "accepted",
+       "urgency": "normal",
+       "yes_label": "Deploy"
+      },
+      "deleted_at": null,
+      "payload": {
+       "version": "1.2"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "deploy-1",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "completed",
+      "summary": "Deploy the synthetic thing?",
+      "title": "Synthetic deploy?",
+      "type": "decision",
+      "updated_at": "<time>",
+      "version": "1.2"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "get /artifacts?session=claire&type=decision"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:4>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:4>.jsonl",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 2,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-decision-decision-<id:3>",
+      "kind": null,
+      "origin": "automation",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "[Clarp decision resolved]\nDecision ID: decision-<id:3>\nArtifact ID: artifact-<id:1>\nResolved by: user\nQuestion: Deploy the synthetic thing?\nContext: Only the synthetic service.\nReference: deploy-1\nPayload: {\"version\":\"1.2\"}\nThe user approved this exact action: Deploy the synthetic thing? Approved scope/context: Only the synthetic service. Proceed with exactly that action and scope after revalidating the target and payload. This does not approve any broader, additional, or repeated action.",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "automation",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: [Clarp decision resolved]\nDecision ID: decision-<id:3>\nArtifact ID: artifact-<id:1>\nResolved by: user\nQuestion: Deploy the synthetic thing?\nContext: Only the synthetic service.\nReference: deploy-1\nPayload: {\"version\":\"1.2\"}\nThe user approved this exact action: Deploy the synthetic thing? Approved scope/context: Only the synthetic service. Proceed with exactly that action and scope after revalidating the target and payload. This does not approve any broader, additional, or repeated action.",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:5>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:2>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:2>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:4>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:4>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 2,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: [Clarp decision resolved] Decision ID: decision-<id:3>[:19]\u2026",
+      "last_message": "Claude replay reply: [Clarp decision resolved] Decision ID: decision-<id:3>[:19]\u2026",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:5>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:2>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "get /agents/snapshot"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "approval",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#1@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#1@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#1@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#1@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#2@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#2@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#2@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#2@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "event_id": "<eid:transcript-updated#1@45bbad>",
+    "session": "claire",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@45bbad>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "client_msg_id": "decision-decision-<id:3>",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:5>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "detail": {
+     "backend_session_id": "<id:4>",
+     "dispatch": "claude",
+     "origin": "automation",
+     "source": "pwa",
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:2>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "automation",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:2>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "badge": true,
+    "cause_message_id": "u-decision-decision-<id:3>",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:6>",
+    "origin": "automation",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [Clarp decision resolved] Decision ID: decision-<id:3> Artifact ID: artifact-<id:1> Resolved by: user Question: Deploy the\u2026",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  }
+ ]
+}

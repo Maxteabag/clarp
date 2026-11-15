@@ -1,0 +1,1258 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make a document"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "table-1",
+     "chart": {
+      "kind": "bar",
+      "value_column": "count"
+     },
+     "columns": [
+      "name",
+      "count"
+     ],
+     "completed_at": null,
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "chart": {
+       "kind": "bar",
+       "value_column": "count"
+      },
+      "columns": [
+       "name",
+       "count"
+      ],
+      "progress": 0.5,
+      "rows": [
+       [
+        "a",
+        1
+       ],
+       [
+        "b",
+        2.5
+       ]
+      ]
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "progress": 0.5,
+     "reference_id": "ref-1",
+     "rows": [
+      [
+       "a",
+       1
+      ],
+      [
+       "b",
+       2.5
+      ]
+     ],
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "",
+     "title": "Synthetic table",
+     "type": "data",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make a table"
+  },
+  {
+   "body": {
+    "error": "reserved artifact type"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 409,
+   "step": "a kind that is not made this way"
+  },
+  {
+   "body": {
+    "error": "unknown agent session"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 409,
+   "step": "for nobody"
+  },
+  {
+   "body": {
+    "error": "document artifact requires payload field(s): content"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 409,
+   "step": "with nothing to show"
+  },
+  {
+   "body": {
+    "error": "UNIQUE constraint failed: artifacts.artifact_id"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 409,
+   "step": "under an id that is taken"
+  },
+  {
+   "body": {
+    "error": "workflow_run URL must identify a GitHub Actions run"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 409,
+   "step": "a run that is not on GitHub"
+  },
+  {
+   "body": {
+    "error": "json object required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "with a body that is no object"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts/notes-1",
+   "status": 200,
+   "step": "get /artifacts/notes-1"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts/notes-1",
+   "status": 200,
+   "step": "the document, flat"
+  },
+  {
+   "body": {
+    "error": "artifact not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts/no-such",
+   "status": 404,
+   "step": "get /artifacts/no-such"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "table-1",
+      "chart": {
+       "kind": "bar",
+       "value_column": "count"
+      },
+      "columns": [
+       "name",
+       "count"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "chart": {
+        "kind": "bar",
+        "value_column": "count"
+       },
+       "columns": [
+        "name",
+        "count"
+       ],
+       "progress": 0.5,
+       "rows": [
+        [
+         "a",
+         1
+        ],
+        [
+         "b",
+         2.5
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "progress": 0.5,
+      "reference_id": "ref-1",
+      "rows": [
+       [
+        "a",
+        1
+       ],
+       [
+        "b",
+        2.5
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "notes-1",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes",
+       "kept": {
+        "as": [
+         "it",
+         "is"
+        ]
+       }
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "What was found",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "get /artifacts?session=claire"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "table-1",
+      "chart": {
+       "kind": "bar",
+       "value_column": "count"
+      },
+      "columns": [
+       "name",
+       "count"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "progress": 0.5,
+      "reference_id": "ref-1",
+      "rows": [
+       [
+        "a",
+        1
+       ],
+       [
+        "b",
+        2.5
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "notes-1",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "What was found",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "the library, summed up"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "table-1",
+      "chart": {
+       "kind": "bar",
+       "value_column": "count"
+      },
+      "columns": [
+       "name",
+       "count"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "chart": {
+        "kind": "bar",
+        "value_column": "count"
+       },
+       "columns": [
+        "name",
+        "count"
+       ],
+       "progress": 0.5,
+       "rows": [
+        [
+         "a",
+         1
+        ],
+        [
+         "b",
+         2.5
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "progress": 0.5,
+      "reference_id": "ref-1",
+      "rows": [
+       [
+        "a",
+        1
+       ],
+       [
+        "b",
+        2.5
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "the library, searched"
+  },
+  {
+   "body": {
+    "error": "unsupported artifact representation"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "the library, in a representation nobody knows"
+  },
+  {
+   "body": {
+    "error": "invalid limit"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "the library, with a limit that is no number"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "table-1",
+     "chart": {
+      "kind": "bar",
+      "value_column": "count"
+     },
+     "columns": [
+      "name",
+      "count"
+     ],
+     "completed_at": "<time>",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "chart": {
+       "kind": "bar",
+       "value_column": "count"
+      },
+      "columns": [
+       "name",
+       "count"
+      ],
+      "progress": 1,
+      "rows": [
+       [
+        "a",
+        1
+       ],
+       [
+        "b",
+        2.5
+       ]
+      ]
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "progress": 1,
+     "reference_id": "ref-1",
+     "rows": [
+      [
+       "a",
+       1
+      ],
+      [
+       "b",
+       2.5
+      ]
+     ],
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "completed",
+     "summary": "All of it",
+     "title": "Synthetic table",
+     "type": "data",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/table-1",
+   "status": 200,
+   "step": "change the table"
+  },
+  {
+   "body": {
+    "error": "unsupported artifact status"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/table-1",
+   "status": 409,
+   "step": "a status nobody knows"
+  },
+  {
+   "body": {
+    "error": "data artifact rows must match the column count"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/table-1",
+   "status": 409,
+   "step": "rows that do not fit"
+  },
+  {
+   "body": {
+    "error": "artifact not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/no-such",
+   "status": 409,
+   "step": "change what is not there"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    },
+    "changed": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/pin",
+   "status": 200,
+   "step": "post /artifacts/notes-1/pin"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    },
+    "changed": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/pin",
+   "status": 200,
+   "step": "pin it again"
+  },
+  {
+   "body": {
+    "error": "pinned must be a boolean"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/pin",
+   "status": 400,
+   "step": "pin with no truth value"
+  },
+  {
+   "body": {
+    "error": "artifact not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/no-such/pin",
+   "status": 404,
+   "step": "pin what is not there"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "notes-1",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes",
+       "kept": {
+        "as": [
+         "it",
+         "is"
+        ]
+       }
+      },
+      "payload_version": 1,
+      "pinned": true,
+      "pinned_at": "<time>",
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "What was found",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/pinned-artifacts",
+   "status": 200,
+   "step": "get /pinned-artifacts"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": "<time>",
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    },
+    "changed": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/archive",
+   "status": 200,
+   "step": "archive it"
+  },
+  {
+   "body": {
+    "error": "artifact changed"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/archive",
+   "status": 409,
+   "step": "restore it, as it once was"
+  },
+  {
+   "body": {
+    "error": "archived must be a boolean"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/archive",
+   "status": 400,
+   "step": "archive with no truth value"
+  },
+  {
+   "body": {
+    "error": "expected_updated_at must be an integer"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/archive",
+   "status": 400,
+   "step": "archive without saying when it was seen"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": "<time>",
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts/notes-1",
+   "status": 200,
+   "step": "the document, archived"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": "<time>",
+     "artifact_id": "notes-1",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": "<time>",
+     "payload": {
+      "content": "# Synthetic notes",
+      "kept": {
+       "as": [
+        "it",
+        "is"
+       ]
+      }
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "What was found",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    },
+    "changed": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/notes-1/discard",
+   "status": 200,
+   "step": "discard it"
+  },
+  {
+   "body": {
+    "error": "artifact not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts/notes-1",
+   "status": 404,
+   "step": "the document, discarded"
+  },
+  {
+   "body": {
+    "artifacts": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/pinned-artifacts",
+   "status": 200,
+   "step": "nothing is pinned"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:1>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "table-1",
+      "chart": {
+       "kind": "bar",
+       "value_column": "count"
+      },
+      "columns": [
+       "name",
+       "count"
+      ],
+      "completed_at": "<time>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "chart": {
+        "kind": "bar",
+        "value_column": "count"
+       },
+       "columns": [
+        "name",
+        "count"
+       ],
+       "progress": 1,
+       "rows": [
+        [
+         "a",
+         1
+        ],
+        [
+         "b",
+         2.5
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "progress": 1,
+      "reference_id": "ref-1",
+      "rows": [
+       [
+        "a",
+        1
+       ],
+       [
+        "b",
+        2.5
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "completed",
+      "summary": "All of it",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "the library, after"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "library",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "notes-1",
+    "event_id": "<eid:artifact-updated#1@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#1@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#1@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#1@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "table-1",
+    "event_id": "<eid:artifact-updated#2@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#2@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#2@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#2@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "table-1",
+    "event_id": "<eid:artifact-updated#3@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#3@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#3@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#3@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "notes-1",
+    "event_id": "<eid:artifact-updated#4@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#4@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#4@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#4@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "notes-1",
+    "event_id": "<eid:artifact-updated#5@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#5@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#5@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#5@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "notes-1",
+    "event_id": "<eid:artifact-updated#6@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#6@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#6@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#6@cf004e>"
+  }
+ ]
+}
