@@ -278,9 +278,21 @@ words (`failures::told`, 764 tellings): the agent's state carries the kind, the 
 and the provider's words, and that the message is kept; under the message that caused it the Host says why
 in a row of its own (`marker-<message>`); and the turn's end is told on the last thing the turn itself put
 into the conversation, which is the message when the turn said nothing. The gauge of how full the
-conversation is keeps what a turn last said of it: a tool that dies says nothing. Held to the Python Host by
-the scenario `failed-turns`. Not there yet: trying again (the Python Host tries a dropped connection three
-times) and waiting for an account. Today every failure ends the turn, and says so.
+conversation is, when a turn last ran to its end and which model answered last are kept through turns that
+do not finish: a tool that dies says nothing. Held to the Python Host by the scenario `failed-turns`.
+
+**A turn has attempts** (15 Nov 2026). A connection that drops under a turn, or a tool that stalls, does not
+end the turn: the turn waits a moment and is tried again, three attempts in all, a second after the first
+and two after the second (`clarp-kernel/src/recovery.rs`, the Python Host's rule). Between two attempts a
+turn is in a state of its own in the kernel (`Parked`): it holds the agent like a turn that runs, and has no
+tool process, so a Stop ends it there and then, and what its last attempt's shim still says is late news.
+Every attempt has a spool, a socket and an interpreter of its own (`7.jsonl`, then `7.2.jsonl`); what a
+shim's follower reports names its attempt. The next attempt is given the same message and is started on the
+session the tool named before. The wait is in the log: a Host that is killed while a turn waits takes the
+wait up, and a crash at any step of it leaves the agent where it was (`journal.rs`, the crash script). While
+it waits the apps are told that the turn reconnects, as busy as before; when the last attempt fails too, the
+turn ends on that failure and says after how many attempts. Held to the Python Host by the scenario
+`retried-turns`. Not there yet: waiting for an account. A turn whose account is out still ends, and says so.
 
 **Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
 Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token

@@ -467,7 +467,7 @@ fn a_turn_whose_shim_is_gone_without_a_word_is_interrupted_and_the_next_one_runs
     // The shim dies with its tool: no last record. All the server learns is that nobody answers.
     world.shims.remove(&1);
     let now = world.tick();
-    let out = actor.shim_gone(TurnId(1), now).unwrap();
+    let out = actor.shim_gone(TurnId(1), 1, now).unwrap();
     assert!(out.changed.status);
     world.carry_out(&mut actor, out);
     assert!(matches!(
@@ -482,7 +482,10 @@ fn a_turn_whose_shim_is_gone_without_a_word_is_interrupted_and_the_next_one_runs
     assert_eq!(actor.status().live.unwrap().turn, TurnId(2));
     // News about a turn that is over changes nothing.
     let now = world.tick();
-    assert_eq!(actor.shim_gone(TurnId(1), now).unwrap(), Outputs::default());
+    assert_eq!(
+        actor.shim_gone(TurnId(1), 1, now).unwrap(),
+        Outputs::default()
+    );
 }
 
 #[test]
@@ -497,7 +500,7 @@ fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
     // The world could not start the shim at all.
     let now = world.tick();
     let out = actor
-        .launch_failed(TurnId(1), "clarp-shim: no such file", now)
+        .launch_failed(TurnId(1), 1, "clarp-shim: no such file", now)
         .unwrap();
     assert!(out.actions.is_empty());
     assert_eq!(

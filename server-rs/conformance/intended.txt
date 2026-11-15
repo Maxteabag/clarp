@@ -57,3 +57,11 @@ ddf864060396  roster-edits: the same, in the snapshot with the agent put away
 b552ef3283ca  roster-edits: the same, in the snapshot asked for in another word
 6fabd674f43e  roster-edits: the same, in the list of the agents put away
 46022bbcdc67  roster-edits: the same, in that list one to a page
+
+# What a tool that died left on stderr is given without the end of its last line in the state
+# of the failed turn (the Python Host gives the tool's bytes as they came).
+bf8a0c0234d1  failed-turns: detail.error of the tool that died
+d7c35cb7c0f7  failed-turns: the same, of the tool that died after a turn that worked
+
+# The last thing a turn said before it failed has no phase (the Python Host calls it `final`).
+59a4ff8c8349  failed-turns: phase of what the turn had said when its account was out

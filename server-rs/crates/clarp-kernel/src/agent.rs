@@ -22,8 +22,8 @@ use std::collections::{BTreeSet, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::turn::{
-    Activity, Admission, IllegalTransition, Origin, Outcome, Queued, RunOutcome, Settled,
-    StartOutcome, Turn, TurnEvent, TurnId,
+    Activity, Admission, IllegalTransition, Origin, Outcome, Parked, Queued, RunOutcome, Settled,
+    StartOutcome, Turn, TurnEvent, TurnId, Wait,
 };
 
 /// Who stopped a turn that a direct message replaced.
@@ -62,6 +62,18 @@ pub enum Command {
     TurnMoved { turn: TurnId, activity: Activity },
     /// The shim: the tool process is gone, and this is how it went.
     TurnEnded { turn: TurnId, outcome: RunOutcome },
+    /// The tool process is gone on a failure that does not end the turn: it waits for its
+    /// next attempt. `kind` and `reason` are the failure, read and in the tool's words.
+    TurnParked {
+        turn: TurnId,
+        wait: Wait,
+        kind: String,
+        reason: String,
+    },
+    /// The wait is over: start the turn's next attempt.
+    TurnRetried { turn: TurnId },
+    /// The wait did not end well: the turn ends on the failure it waited on.
+    WaitOver { turn: TurnId },
     /// The agent comes from another Host, with the tool's session it had there.
     Adopt {
         from: String,
@@ -108,8 +120,19 @@ pub enum AgentEvent {
 /// What the actor must do after the events are in the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    StartTurn { turn: TurnId, message_seq: u64 },
-    StopTurn { turn: TurnId },
+    StartTurn {
+        turn: TurnId,
+        message_seq: u64,
+    },
+    /// Start the tool again for a turn that has run before: its attempt number `attempt`.
+    RetryTurn {
+        turn: TurnId,
+        message_seq: u64,
+        attempt: u32,
+    },
+    StopTurn {
+        turn: TurnId,
+    },
 }
 
 /// The answer to a command: what to record, then what to do.
@@ -126,6 +149,8 @@ pub enum Refusal {
     NotWaiting(TurnId),
     /// A signal about a turn that is not the live one: late, or from a shim we no longer follow.
     NotLive(TurnId),
+    /// The turn does not wait between two attempts.
+    NotParked(TurnId),
     /// A resume for an agent that is not held.
     NotPaused,
     /// An agent that has run a turn here is not one that just arrived.
@@ -137,6 +162,7 @@ impl std::fmt::Display for Refusal {
         match self {
             Self::NotWaiting(turn) => write!(f, "turn {} is not waiting", turn.0),
             Self::NotLive(turn) => write!(f, "turn {} is not the live turn", turn.0),
+            Self::NotParked(turn) => write!(f, "turn {} does not wait for an attempt", turn.0),
             Self::NotPaused => write!(f, "the agent is not paused"),
             Self::AlreadyAtWork => write!(f, "the agent has already worked on this Host"),
         }
@@ -321,14 +347,7 @@ impl Agent {
                 });
                 if admission == Admission::Direct {
                     // The live turn makes way. One that is already on its way out is left to it.
-                    if let (Some(live), None) = (work.agent.live_id(), &work.agent.stopping) {
-                        work.record(AgentEvent::StopRequested {
-                            turn: live,
-                            by: preempted_by(turn),
-                            at_ms: now_ms,
-                        });
-                        work.decision.effects.push(Effect::StopTurn { turn: live });
-                    }
+                    work.stop_live(preempted_by(turn), now_ms);
                 }
             }
             Command::Withdraw { turn, by } => {
@@ -344,14 +363,7 @@ impl Agent {
                 });
             }
             Command::Stop { by } => {
-                if let (Some(turn), None) = (work.agent.live_id(), &work.agent.stopping) {
-                    work.record(AgentEvent::StopRequested {
-                        turn,
-                        by: by.clone(),
-                        at_ms: now_ms,
-                    });
-                    work.decision.effects.push(Effect::StopTurn { turn });
-                }
+                work.stop_live(by.clone(), now_ms);
                 // A stop holds everything that waits, also what an earlier hold let through.
                 if !work.agent.paused || !work.agent.unheld.is_empty() {
                     work.record(AgentEvent::Paused { by, at_ms: now_ms });
@@ -383,7 +395,7 @@ impl Agent {
                 });
             }
             Command::TurnStarted { turn } => {
-                work.must_be_live(turn)?;
+                work.must_have_process(turn)?;
                 if matches!(work.agent.live, Some(Turn::Starting(_))) {
                     work.record(AgentEvent::Turn {
                         turn,
@@ -395,7 +407,7 @@ impl Agent {
                 }
             }
             Command::StartFailed { turn, reason } => {
-                work.must_be_live(turn)?;
+                work.must_have_process(turn)?;
                 let outcome = match work.agent.stopping.clone() {
                     Some(by) => Outcome::Stopped { by },
                     None => Outcome::not_started(reason),
@@ -412,7 +424,7 @@ impl Agent {
                 turn,
                 backend_session,
             } => {
-                work.must_be_live(turn)?;
+                work.must_have_process(turn)?;
                 work.running(turn, now_ms);
                 work.record(AgentEvent::Turn {
                     turn,
@@ -420,7 +432,7 @@ impl Agent {
                 });
             }
             Command::TurnMoved { turn, activity } => {
-                work.must_be_live(turn)?;
+                work.must_have_process(turn)?;
                 work.running(turn, now_ms);
                 work.record(AgentEvent::Turn {
                     turn,
@@ -431,7 +443,7 @@ impl Agent {
                 });
             }
             Command::TurnEnded { turn, outcome } => {
-                work.must_be_live(turn)?;
+                work.must_have_process(turn)?;
                 let outcome = match (work.agent.stopping.clone(), outcome) {
                     // Whatever the process said on its way out, it went because it was told to.
                     (Some(by), _) => Outcome::Stopped { by },
@@ -443,6 +455,59 @@ impl Agent {
                     (None, RunOutcome::Failed { reason }) => Outcome::failed(reason),
                     (None, RunOutcome::Stopped { by }) => Outcome::Stopped { by },
                     (None, RunOutcome::Interrupted { reason }) => Outcome::Interrupted { reason },
+                };
+                work.record(AgentEvent::Turn {
+                    turn,
+                    change: TurnEvent::Settled {
+                        outcome,
+                        at_ms: now_ms,
+                    },
+                });
+            }
+            Command::TurnParked {
+                turn,
+                wait,
+                kind,
+                reason,
+            } => {
+                work.must_have_process(turn)?;
+                let change = match work.agent.stopping.clone() {
+                    // It went because it was told to: nothing is tried again.
+                    Some(by) => TurnEvent::Settled {
+                        outcome: Outcome::Stopped { by },
+                        at_ms: now_ms,
+                    },
+                    None => {
+                        // A tool that failed before it said it had started did still run.
+                        work.running(turn, now_ms);
+                        TurnEvent::Parked {
+                            wait,
+                            kind,
+                            reason,
+                            at_ms: now_ms,
+                        }
+                    }
+                };
+                work.record(AgentEvent::Turn { turn, change });
+            }
+            Command::TurnRetried { turn } => {
+                let parked = work.parked(turn)?;
+                let (message_seq, attempt) = (parked.message_seq, parked.attempts + 1);
+                work.record(AgentEvent::Turn {
+                    turn,
+                    change: TurnEvent::Retried { at_ms: now_ms },
+                });
+                work.decision.effects.push(Effect::RetryTurn {
+                    turn,
+                    message_seq,
+                    attempt,
+                });
+            }
+            Command::WaitOver { turn } => {
+                let parked = work.parked(turn)?;
+                let outcome = Outcome::Failed {
+                    reason: parked.reason.clone(),
+                    kind: parked.kind.clone(),
                 };
                 work.record(AgentEvent::Turn {
                     turn,
@@ -619,11 +684,48 @@ impl Work {
         }
     }
 
-    fn must_be_live(&self, turn: TurnId) -> Result<(), Refusal> {
-        if self.agent.live_id() == Some(turn) {
-            Ok(())
-        } else {
-            Err(Refusal::NotLive(turn))
+    /// A signal of a tool process is about the live turn, and the live turn has one. News
+    /// of an attempt that is over is late news.
+    fn must_have_process(&self, turn: TurnId) -> Result<(), Refusal> {
+        match &self.agent.live {
+            Some(live) if live.id() == turn && live.has_process() => Ok(()),
+            _ => Err(Refusal::NotLive(turn)),
+        }
+    }
+
+    /// The live turn, when it is this one and waits between two attempts.
+    fn parked(&self, turn: TurnId) -> Result<&Parked, Refusal> {
+        match &self.agent.live {
+            Some(Turn::Parked(parked)) if parked.id == turn => Ok(parked),
+            _ => Err(Refusal::NotParked(turn)),
+        }
+    }
+
+    /// Ends the live turn for someone: a turn with a tool process is asked to stop and ends
+    /// when the process is gone; a turn that waits between two attempts has none, and ends
+    /// here. One that is already on its way out is left to it.
+    fn stop_live(&mut self, by: String, now_ms: i64) {
+        match (&self.agent.live, &self.agent.stopping) {
+            (Some(Turn::Parked(parked)), _) => {
+                let turn = parked.id;
+                self.record(AgentEvent::Turn {
+                    turn,
+                    change: TurnEvent::Settled {
+                        outcome: Outcome::Stopped { by },
+                        at_ms: now_ms,
+                    },
+                });
+            }
+            (Some(live), None) => {
+                let turn = live.id();
+                self.record(AgentEvent::StopRequested {
+                    turn,
+                    by,
+                    at_ms: now_ms,
+                });
+                self.decision.effects.push(Effect::StopTurn { turn });
+            }
+            _ => {}
         }
     }
 
@@ -754,6 +856,155 @@ mod tests {
         fn live(&self) -> Option<u64> {
             self.agent.live().map(|turn| turn.id().0)
         }
+    }
+
+    /// The connection of the live turn's tool drops: the turn waits a moment for its next attempt.
+    fn dropped(turn: u64) -> Command {
+        Command::TurnParked {
+            turn: TurnId(turn),
+            wait: Wait::Retry { until_ms: 5_000 },
+            kind: "connection".to_string(),
+            reason: "read ECONNRESET".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_turn_that_waits_for_its_next_attempt_holds_the_agent_and_is_tried_again() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        // The tool is gone and the turn is not over: nothing else starts.
+        assert_eq!(a.send(dropped(1)).unwrap(), vec![]);
+        assert_eq!((a.live(), a.waiting()), (Some(1), vec![2]));
+        assert!(matches!(a.agent.live(), Some(Turn::Parked(parked)) if parked.attempts == 1));
+        // What the attempt that is over still says is late news.
+        assert_eq!(
+            a.send(Command::TurnEnded {
+                turn: TurnId(1),
+                outcome: RunOutcome::Completed
+            }),
+            Err(Refusal::NotLive(TurnId(1)))
+        );
+        assert_eq!(
+            a.send(Command::TurnMoved {
+                turn: TurnId(1),
+                activity: Activity::Thinking
+            }),
+            Err(Refusal::NotLive(TurnId(1)))
+        );
+        // The wait is over: the same turn, its second attempt.
+        assert_eq!(
+            a.send(Command::TurnRetried { turn: TurnId(1) }).unwrap(),
+            vec![Effect::RetryTurn {
+                turn: TurnId(1),
+                message_seq: 10,
+                attempt: 2
+            }]
+        );
+        assert!(matches!(a.agent.live(), Some(Turn::Starting(starting)) if starting.attempt == 2));
+        // A turn is tried again only while it waits.
+        assert_eq!(
+            a.send(Command::TurnRetried { turn: TurnId(1) }),
+            Err(Refusal::NotParked(TurnId(1)))
+        );
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        // It works this time, and the message that waited runs.
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert_eq!(a.agent.last().unwrap().outcome, Outcome::Completed);
+    }
+
+    #[test]
+    fn a_wait_that_does_not_end_well_ends_the_turn_on_the_failure_it_waited_on() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(dropped(1)).unwrap();
+        assert_eq!(
+            a.send(Command::WaitOver { turn: TurnId(1) }).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert_eq!(
+            a.agent.last().unwrap().outcome,
+            Outcome::Failed {
+                reason: "read ECONNRESET".to_string(),
+                kind: "connection".to_string()
+            }
+        );
+        // Only a turn that waits can give up.
+        assert_eq!(
+            a.send(Command::WaitOver { turn: TurnId(2) }),
+            Err(Refusal::NotParked(TurnId(2)))
+        );
+    }
+
+    #[test]
+    fn a_stop_ends_a_turn_that_waits_at_once_and_a_direct_message_takes_its_place() {
+        // A stop: there is no tool to wait for, and what waits is held.
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(dropped(1)).unwrap();
+        assert_eq!(
+            a.send(Command::Stop {
+                by: "user".to_string()
+            })
+            .unwrap(),
+            vec![]
+        );
+        assert_eq!(
+            a.agent.last().unwrap().outcome,
+            Outcome::Stopped {
+                by: "user".to_string()
+            }
+        );
+        assert_eq!((a.live(), a.waiting()), (None, vec![2]));
+        assert!(a.agent.is_paused());
+        assert_eq!(a.agent.stopping(), None);
+
+        // A direct message: the turn that waits makes way without a word from a tool.
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(dropped(1)).unwrap();
+        assert_eq!(
+            a.direct(11),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert_eq!(
+            a.agent.last().unwrap().outcome,
+            Outcome::Stopped {
+                by: preempted_by(TurnId(2))
+            }
+        );
+
+        // A tool that is told to stop and then drops its connection was stopped: it is not
+        // tried again.
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::Stop {
+            by: "user".to_string(),
+        })
+        .unwrap();
+        a.send(dropped(1)).unwrap();
+        assert_eq!(
+            a.agent.last().unwrap().outcome,
+            Outcome::Stopped {
+                by: "user".to_string()
+            }
+        );
+        assert_eq!(a.live(), None);
     }
 
     #[test]

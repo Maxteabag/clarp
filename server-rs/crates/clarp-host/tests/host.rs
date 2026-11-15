@@ -4680,6 +4680,204 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
 }
 
 #[test]
+fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_says_so() {
+    let place = Place::new("retried");
+    // A stand-in for Claude Code whose connection drops as often as the message says: it
+    // counts, in a file named after the message, how often it was given it.
+    let counts = place.root.join("counts");
+    std::fs::create_dir_all(&counts).unwrap();
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\n",
+        "key=$(printf '%s' \"$message\" | cksum | cut -d' ' -f1)\n",
+        &format!("file=\"{}/$key\"\n", counts.display()),
+        "before=$(cat \"$file\" 2>/dev/null || echo 0)\n",
+        "echo $((before + 1)) > \"$file\"\n",
+        "case \"$message\" in\n*once*) drops=1 ;;\n*always*) drops=9 ;;\n*) drops=0 ;;\nesac\n",
+        "if [ \"$before\" -lt \"$drops\" ]; then\n",
+        init,
+        "echo 'API Error: socket connection was closed unexpectedly' >&2\nexit 1\nfi\n",
+        // It answers, under an id no other answer has: the message's, and which attempt.
+        init,
+        "printf '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_%s_%s\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}\\n' \"$key\" \"$before\"\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let events = host.listen();
+    // How often the stand-in was started, for all messages together.
+    let started = || -> u64 {
+        std::fs::read_dir(&counts)
+            .unwrap()
+            .map(|file| {
+                std::fs::read_to_string(file.unwrap().path())
+                    .unwrap()
+                    .trim()
+                    .parse::<u64>()
+                    .unwrap()
+            })
+            .sum()
+    };
+
+    // The connection drops once. The turn is tried again, and answers: one turn, one answer,
+    // and nothing in the conversation says that it took two attempts.
+    host.send(&agent, "drop once", "quebec");
+    wait_for("the answer", || {
+        host.turns(&agent).len() == 2 && host.state(&agent) == "done"
+    });
+    assert_eq!(started(), 2, "the tool was started twice");
+    let rows = host.turns(&agent);
+    assert_eq!(
+        (&rows[0]["id"], &rows[0]["turn"]),
+        (&json!("u-quebec"), &Value::Null)
+    );
+    assert_eq!(
+        (&rows[1]["role"], &rows[1]["turn"]["status"]),
+        (&json!("assistant"), &json!("completed"))
+    );
+    // While it waited for its second attempt, the apps were told that it reconnects: as busy
+    // as before, and which attempt comes after how long.
+    let told = |kind: &str| -> Vec<Value> {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == kind)
+            .cloned()
+            .collect()
+    };
+    let reconnects: Vec<Value> = told("agent-state")
+        .into_iter()
+        .filter(|event| event["detail"]["action"] == "reconnecting")
+        .collect();
+    assert_eq!(reconnects.len(), 1, "{reconnects:?}");
+    assert_eq!(
+        (&reconnects[0]["kind"], &reconnects[0]["detail"]),
+        (
+            &json!("thinking"),
+            &json!({
+                "action": "reconnecting",
+                "after_ms": 1000,
+                "dispatch": "claude",
+                "of": 3,
+                "origin": "user",
+                "reconnect": 2,
+                "summary": "Reconnecting… Your message is saved.",
+            })
+        )
+    );
+    assert!(told("agent-activity").iter().any(|event| {
+        event["action"] == "reconnecting"
+            && event["status"] == "running"
+            && event["summary"] == "Reconnecting… Your message is saved."
+    }));
+    // The apps never saw the agent at rest between the two attempts.
+    assert!(
+        !events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-state" && event["kind"] == "interrupted"),
+        "a turn that is tried again has not failed"
+    );
+
+    // It drops every time: three attempts, and then the turn says so.
+    host.send(&agent, "drop always", "romeo");
+    wait_for("the turn to give up", || {
+        host.turns(&agent).len() == 4 && host.state(&agent) == "interrupted"
+    });
+    assert_eq!(started(), 5, "three attempts and no more");
+    let rows = host.turns(&agent);
+    assert_eq!(
+        (&rows[2]["id"], &rows[2]["turn"]["status"]),
+        (&json!("u-romeo"), &json!("failed"))
+    );
+    assert_eq!(
+        (&rows[3]["id"], &rows[3]["text"]),
+        (
+            &json!("marker-u-romeo"),
+            &json!(
+                "Connection lost — retries exhausted.\n\nAPI Error: socket connection was closed unexpectedly"
+            )
+        )
+    );
+    let detail = events
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "agent-state" && event["kind"] == "interrupted")
+        .map(|event| event["detail"].clone())
+        .expect("the apps were told the turn failed");
+    assert_eq!(
+        (&detail["reason"], &detail["attempts"], &detail["message"]),
+        (
+            &json!("connection"),
+            &json!(3),
+            &json!("Connection lost — retries exhausted")
+        )
+    );
+
+    // A turn that waits for its next attempt and is stopped ends there: nothing is started
+    // again. (The next attempt is a second away.)
+    host.send(&agent, "drop always, again", "sierra");
+    wait_for("the first attempt to fail", || started() == 6);
+    let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": agent })));
+    assert_eq!(status, 200);
+    wait_for("the stop", || host.state(&agent) == "interrupted");
+    std::thread::sleep(Duration::from_millis(1_500));
+    assert_eq!(started(), 6, "a stopped turn is not tried again");
+
+    // And a Host that is started again while a turn waits takes the wait up.
+    let (status, _) = host.ask(
+        "POST",
+        "/turn-queue/resume",
+        Some(&json!({ "session": agent })),
+    );
+    assert_eq!(status, 200);
+    host.send(&agent, "drop once more", "tango");
+    wait_for("the first attempt to fail", || started() == 7);
+    host.kill();
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    wait_for("the second attempt after the restart", || started() >= 8);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let (rows, state) = (host.turns(&agent), host.state(&agent));
+        let answered = rows
+            .last()
+            .is_some_and(|row| row["turn"]["status"] == "completed");
+        if answered && state == "done" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no answer after the restart: the tool was started {} times, the agent is {state}, \
+             and the conversation ends with {:#?}",
+            started(),
+            &rows[rows.len().saturating_sub(3)..]
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(
+        started(),
+        8,
+        "the second attempt ran after the restart, once"
+    );
+}
+
+#[test]
 fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
     // no Host anything itself: it calls clarp-admin and clarp-agent-bg by name. Here those

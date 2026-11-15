@@ -641,8 +641,9 @@ SCENARIOS.append({
         {'op': 'quiesce'},
         {**LOG, 'name': 'log after a turn that was tried twice'},
         {**SNAPSHOT, 'name': 'snapshot after a turn that was tried twice'},
-        # It drops every time: the turn gives up.
-        send(SLOW + '[qa-drops:9] synthetic work romeo', 'romeo'),
+        # It drops every time: the turn gives up. (Nothing slows the tool down here: the
+        # turn is busy for the three seconds between its attempts.)
+        send('[qa-drops:9] synthetic work romeo', 'romeo'),
         {'op': 'wait_busy', 'busy': True},
         {'op': 'wait_busy', 'busy': False},
         {'op': 'quiesce'},

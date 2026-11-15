@@ -148,7 +148,7 @@ def main() -> int:
         log('exit', how='dropped')
         return 1
     if '[qa-says-first]' in text:
-        first = {'id': 'msg_first_' + PROC, 'role': 'assistant', 'model': 'replay-fake',
+        first = {'id': 'msg_' + uuid.uuid4().hex[:12], 'role': 'assistant', 'model': 'replay-fake',
                  'content': [{'type': 'text', 'text': 'Claude replay first words: ' + text}],
                  'usage': {'input_tokens': 5, 'output_tokens': 3}}
         asked = record(path, session, 'assistant', asked, {**first, 'type': 'message'})
