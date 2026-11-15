@@ -13,6 +13,7 @@ use clarp_host::fleet::{self, Works};
 use clarp_host::hub::Hub;
 use clarp_host::ids;
 use clarp_host::launcher::Launcher;
+use clarp_host::revisions::Revisions;
 use clarp_ports::clock::{Clock, SystemClock};
 use clarp_ports::kv::KeyValueEngine;
 use clarp_ports::log::LogEngine;
@@ -68,6 +69,14 @@ async fn serve(config: Config) -> Result<(), String> {
         clarp_host::wire::server_version(clarp_host::VERSION, clock.now_ms()),
         clock.now_ms(),
     );
+    // The Host listens before its agents are opened: a turn that is rejoined, and every turn
+    // after it, is told where the agent's own tools find the Host.
+    let listener = tokio::net::TcpListener::bind(config.listen)
+        .await
+        .map_err(|error| format!("{}: {error}", config.listen))?;
+    // The first line says where the Host listens: with port 0 only the Host knows.
+    let address = listener.local_addr().map_err(|error| error.to_string())?;
+    let revisions = Arc::new(Revisions::new());
     let works = Works {
         config: config.clone(),
         engine,
@@ -75,6 +84,8 @@ async fn serve(config: Config) -> Result<(), String> {
         launcher: Arc::new(launcher),
         clock: clock.clone(),
         hub: hub.clone(),
+        revisions: revisions.clone(),
+        tool_env: vec![(clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string())],
     };
     let fleet = fleet::start(works, store)?;
     let app = App {
@@ -83,13 +94,8 @@ async fn serve(config: Config) -> Result<(), String> {
         fleet,
         clock,
         server_id,
+        revisions,
     };
-
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
-        .map_err(|error| format!("{}: {error}", config.listen))?;
-    // The first line says where the Host listens: with port 0 only the Host knows.
-    let address = listener.local_addr().map_err(|error| error.to_string())?;
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, launcher {})",

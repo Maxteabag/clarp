@@ -7,6 +7,7 @@
 //! When the actor reports that its log or files failed, the thread drops it and opens it again
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -18,6 +19,7 @@ use clarp_actor::{
 };
 use clarp_backend::Backend;
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
+use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
 use clarp_kernel::turn::{Activity, Admission, Outcome, TurnId};
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
@@ -28,11 +30,23 @@ use crate::fleet::AgentRecord;
 use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::{self, Launcher, Told};
-use crate::wire;
+use crate::revisions::Revisions;
+use crate::{process, wire};
 
 /// The least time between two "the conversation changed" events for one agent. A reply that
 /// grows is told a few times a second, and once more when it stops growing.
 const TRANSCRIPT_EVERY: Duration = Duration::from_millis(250);
+
+/// How often an agent that has running jobs looks whether somebody still runs them.
+const JOBS_CHECKED_EVERY: Duration = Duration::from_secs(30);
+/// A job nobody is named for is remarked on after this long without a sign of life, and
+/// given up after twice as long: the Python Host's `job_stale_after_minutes` and its grace.
+const JOB_STALE_AFTER_MS: i64 = 15 * 60_000;
+const JOB_LOST_AFTER_MS: i64 = 30 * 60_000;
+/// How long a job that has ended is still shown.
+pub const JOB_SHOWN_FOR_MS: i64 = 24 * 60 * 60_000;
+/// The wall clock went this much further than the time that passed here: the machine slept.
+const CLOCK_JUMP_MS: i64 = 5_000;
 
 const REOPEN_FIRST: Duration = Duration::from_millis(200);
 const REOPEN_MOST: Duration = Duration::from_secs(30);
@@ -91,6 +105,18 @@ pub enum Ask {
         limit: usize,
         answer: Answer<Option<Page>>,
     },
+    /// Something asked of one of the agent's background jobs. The inner error is a command
+    /// that makes no sense.
+    Job {
+        command: JobCommand,
+        answer: Answer<Result<JobChange, JobRefusal>>,
+    },
+    /// The newest changes of a job, oldest first.
+    JobTimeline {
+        id: String,
+        limit: usize,
+        answer: Answer<Vec<JobRecord>>,
+    },
     /// From a turn's thread: the live turn's spool may have grown.
     SpoolChanged,
     /// From a turn's thread: nothing answers at the turn's shim any more.
@@ -115,6 +141,8 @@ pub struct View {
     /// How the last turn ended, with what its tool said of itself.
     pub ended: Option<TurnEnd>,
     pub backend: &'static str,
+    /// The agent's background jobs: the ones that run, and the ones that ended within a day.
+    pub jobs: Vec<Job>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
 }
@@ -129,6 +157,7 @@ pub struct Setup {
     pub launcher: Arc<Launcher>,
     pub clock: Arc<dyn Clock + Send + Sync>,
     pub hub: Arc<Hub>,
+    pub revisions: Arc<Revisions>,
 }
 
 /// The way to an agent's thread.
@@ -207,6 +236,23 @@ impl AgentHandle {
         self.ask(|answer| Ask::Before { id, limit, answer }).await
     }
 
+    /// Asks something of one of the agent's background jobs.
+    pub async fn job(
+        &self,
+        command: JobCommand,
+    ) -> Result<Result<JobChange, JobRefusal>, Unavailable> {
+        self.ask(|answer| Ask::Job { command, answer }).await
+    }
+
+    pub async fn job_timeline(
+        &self,
+        id: String,
+        limit: usize,
+    ) -> Result<Vec<JobRecord>, Unavailable> {
+        self.ask(|answer| Ask::JobTimeline { id, limit, answer })
+            .await
+    }
+
     /// What the agent is doing, as it last said.
     pub fn view(&self) -> Arc<View> {
         self.view.borrow().clone()
@@ -235,8 +281,10 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         newest: None,
         ended: None,
         backend: setup.backend.id(),
+        jobs: Vec::new(),
         broken: Some("the agent is being opened".to_string()),
     }));
+    let now_ms = setup.clock.now_ms();
     let worker = Worker {
         setup,
         actor: None,
@@ -247,6 +295,9 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         ended: None,
         transcript_sent: None,
         transcript_due: None,
+        jobs_told: BTreeMap::new(),
+        jobs_checked: Instant::now(),
+        clock_seen: (Instant::now(), now_ms),
     };
     let name = format!("agent-{}", worker.setup.record.session);
     let spawned = std::thread::Builder::new()
@@ -273,6 +324,12 @@ struct Worker {
     transcript_sent: Option<Instant>,
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
+    /// The revision of each job the clients were last told.
+    jobs_told: BTreeMap<String, u64>,
+    /// When the running jobs were last looked at.
+    jobs_checked: Instant,
+    /// The two clocks as they were read together last: what tells a sleep of the machine.
+    clock_seen: (Instant, i64),
 }
 
 fn unavailable(error: &ActorError) -> Unavailable {
@@ -300,7 +357,17 @@ impl Worker {
                     }
                 }
             }
-            let ask = match self.transcript_due {
+            // An agent with running jobs wakes on its own now and then to look after them.
+            let has_jobs = self
+                .actor
+                .as_ref()
+                .is_some_and(|actor| actor.jobs().active().next().is_some());
+            let jobs_due = has_jobs.then(|| self.jobs_checked + JOBS_CHECKED_EVERY);
+            let due = match (self.transcript_due, jobs_due) {
+                (Some(transcript), Some(jobs)) => Some(transcript.min(jobs)),
+                (transcript, jobs) => transcript.or(jobs),
+            };
+            let ask = match due {
                 None => match rx.recv() {
                     Ok(ask) => ask,
                     Err(_) => return,
@@ -308,7 +375,19 @@ impl Worker {
                 Some(due) => match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
                     Ok(ask) => ask,
                     Err(RecvTimeoutError::Timeout) => {
-                        self.tell_transcript();
+                        let now = Instant::now();
+                        if self.transcript_due.is_some_and(|due| due <= now) {
+                            self.tell_transcript();
+                        }
+                        if jobs_due.is_some_and(|due| due <= now)
+                            && let Err(error) = self.check_jobs()
+                        {
+                            eprintln!(
+                                "clarp-host: agent {} failed and is opened again: {error}",
+                                self.setup.record.session
+                            );
+                            self.actor = None;
+                        }
                         continue;
                     }
                     Err(RecvTimeoutError::Disconnected) => return,
@@ -348,6 +427,13 @@ impl Worker {
         // What the agent is doing when it is opened is not news: a client that connects is
         // told to look at everything anyway. What follows from opening it is.
         self.told = self.actor.as_ref().map(Actor::status);
+        // Nor are the jobs it has: only what changes from here on is told.
+        self.jobs_told = self
+            .actor
+            .iter()
+            .flat_map(|actor| actor.jobs().jobs())
+            .map(|job| (job.id.clone(), job.revision))
+            .collect();
         self.newest = self.newest_row();
         self.ended = self.last_end();
         self.publish_view();
@@ -394,6 +480,13 @@ impl Worker {
                 answer,
             } => return read(actor.after(revision, limit), answer),
             Ask::Before { id, limit, answer } => return read(actor.before(&id, limit), answer),
+            Ask::Job { command, answer } => {
+                let revision = self.setup.revisions.next(now);
+                answered(actor.job(command, now, revision), answer)?
+            }
+            Ask::JobTimeline { id, limit, answer } => {
+                return read(actor.job_timeline(&id, limit), answer);
+            }
             Ask::SpoolChanged => actor.spool_changed(now)?,
             Ask::ShimGone { turn } => actor.shim_gone(turn, now)?,
             Ask::LaunchFailed { turn, reason } => actor.launch_failed(turn, &reason, now)?,
@@ -445,6 +538,38 @@ impl Worker {
         }
     }
 
+    /// Looks whether somebody still runs the agent's running jobs, and ends the ones nobody
+    /// does. A job whose process is gone drops out here at once, not a timeout later.
+    fn check_jobs(&mut self) -> Result<(), ActorError> {
+        let checked = Instant::now();
+        let now = self.now_ms();
+        let (seen_at, seen_ms) = self.clock_seen;
+        let passed_here = i64::try_from(checked.duration_since(seen_at).as_millis()).unwrap_or(0);
+        let slept = (now - seen_ms) - passed_here > CLOCK_JUMP_MS;
+        self.clock_seen = (checked, now);
+        self.jobs_checked = checked;
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        if slept {
+            // What was not heard while the machine slept says nothing about the workers.
+            actor.jobs_heard_at(now);
+            return Ok(());
+        }
+        let alive = |worker: &JobWorker| process::is_alive(worker.pid, &worker.start_token);
+        let overdue = actor
+            .jobs()
+            .overdue(now, JOB_STALE_AFTER_MS, JOB_LOST_AFTER_MS, &alive);
+        let mut all = Outputs::default();
+        for command in overdue {
+            let revision = self.setup.revisions.next(now);
+            let (_, out) = actor.job(command, now, revision)?;
+            all.changed.jobs |= out.changed.jobs;
+        }
+        self.after(all);
+        Ok(())
+    }
+
     /// The newest row of the conversation, as the actor has it now.
     fn newest_row(&self) -> Option<Versioned> {
         let page = self.actor.as_ref()?.tail(1).ok()?;
@@ -460,18 +585,25 @@ impl Worker {
         let Some(actor) = &self.actor else {
             return;
         };
+        let shown_since = self.now_ms() - JOB_SHOWN_FOR_MS;
         self.view.send_replace(Arc::new(View {
             status: actor.status(),
             newest: self.newest.clone(),
             ended: self.ended.clone(),
             backend: actor.backend_id(),
+            jobs: actor
+                .jobs()
+                .jobs()
+                .filter(|job| job.status.is_active() || job.updated_at_ms >= shown_since)
+                .cloned()
+                .collect(),
             broken: None,
         }));
     }
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
     fn show(&mut self, changed: Changed) {
-        if !(changed.conversation || changed.status || changed.queue) {
+        if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
         let Some(actor) = &self.actor else {
@@ -593,6 +725,15 @@ impl Worker {
                 hub.publish(told, now);
             }
         }
+        // A job changed: the clients are told the job as it now stands, once for each change.
+        if changed.jobs {
+            for job in actor.jobs().jobs() {
+                if self.jobs_told.get(&job.id) != Some(&job.revision) {
+                    self.jobs_told.insert(job.id.clone(), job.revision);
+                    hub.publish(wire::job_updated(&record, job, now), now);
+                }
+            }
+        }
         self.told = Some(status);
         self.publish_view();
         if changed.conversation {
@@ -696,6 +837,8 @@ fn refuse_for(rx: &mpsc::Receiver<Ask>, wait: Duration, why: &str) -> bool {
                 drop(answer.send(Err(refusal())));
             }
             Ok(Ask::Before { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SpoolChanged | Ask::ShimGone { .. } | Ask::LaunchFailed { .. }) => {}
             Ok(Ask::Close) | Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,

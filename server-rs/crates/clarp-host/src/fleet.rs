@@ -24,6 +24,7 @@ use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::Launcher;
 use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
+use crate::revisions::Revisions;
 use crate::wire;
 
 const AGENTS: &str = "agent";
@@ -98,6 +99,10 @@ pub struct Works {
     pub launcher: Arc<Launcher>,
     pub clock: Arc<dyn Clock + Send + Sync>,
     pub hub: Arc<Hub>,
+    /// The numbers for changes the whole Host counts in one row.
+    pub revisions: Arc<Revisions>,
+    /// What every turn's tool is told: where the agent's own tools find this Host.
+    pub tool_env: Vec<(String, String)>,
 }
 
 enum Ask {
@@ -266,6 +271,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         model: non_empty(&record.model),
         effort: non_empty(&record.effort),
         identity: None,
+        tool_env: works.tool_env.clone(),
         stop_grace_ms: STOP_GRACE_MS,
         keep_spools: works.config.keep_spools,
     };
@@ -278,6 +284,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         launcher: works.launcher.clone(),
         clock: works.clock.clone(),
         hub: works.hub.clone(),
+        revisions: works.revisions.clone(),
     })
 }
 

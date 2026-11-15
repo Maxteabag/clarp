@@ -8,6 +8,7 @@
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{LiveStatus, Status};
 use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
+use clarp_kernel::jobs::{Job, JobRecord, LOST_REASONS};
 use clarp_kernel::turn::{Activity, Origin, Outcome};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
@@ -343,6 +344,111 @@ pub fn queue_updated(
         event["client_msg_id"] = json!(client_id(message_id));
     }
     event
+}
+
+/// A background job as the apps are given it: what is kept of it, and what is read off it
+/// at this moment (how long ago it was heard from, whether that is still fresh).
+pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
+    let active = job.status.is_active();
+    // Lost is not failed: nobody heard from it any more, which says nothing about its work.
+    let lost = LOST_REASONS.contains(&job.terminal_reason.as_str());
+    let signs = [job.heartbeat_at_ms, job.progress_at_ms];
+    let last_sign = signs.iter().flatten().max();
+    let freshness = match last_sign {
+        _ if lost => "stale",
+        None => "unknown",
+        Some(at) if (now_ms - at).max(0) <= job.heartbeat_timeout_ms => "fresh",
+        Some(_) => "stale",
+    };
+    let outcome = if lost {
+        "unknown"
+    } else if active {
+        "pending"
+    } else {
+        job.status.as_str()
+    };
+    let agent_name = if record.persona.is_empty() {
+        &record.session
+    } else {
+        &record.persona
+    };
+    json!({
+        "job_id": job.id,
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "kind": job.kind,
+        "title": job.title,
+        "detail": job.detail,
+        "status": job.status.as_str(),
+        "started_at": job.started_at_ms,
+        "updated_at": job.updated_at_ms,
+        "cancelled_at": job.cancelled_at_ms,
+        "heartbeat_at": job.heartbeat_at_ms,
+        "heartbeat_timeout_ms": job.heartbeat_timeout_ms,
+        "heartbeat_source": job.heartbeat_source,
+        "worker_pid": (job.worker.pid != 0).then_some(job.worker.pid),
+        "worker_start_token": job.worker.start_token,
+        "terminal_at": job.terminal_at_ms,
+        "terminal_reason": job.terminal_reason,
+        "revision": job.revision,
+        "generation": job.generation,
+        "owner_kind": "agent",
+        "computer_id": null,
+        "progress_text": job.progress_text,
+        "progress_at": job.progress_at_ms,
+        "log_path": job.log_path,
+        "worker_cwd": job.worker_cwd,
+        "started_trace_id": job.started_trace_id,
+        "metadata": if job.metadata.is_object() { job.metadata.clone() } else { json!({}) },
+        "agent_name": agent_name,
+        "heartbeat_age_ms": job.heartbeat_at_ms.map(|at| (now_ms - at).max(0)),
+        "worker_freshness": freshness,
+        "is_terminal": !active,
+        "can_cancel": active,
+        "elapsed_ms": (job.terminal_at_ms.unwrap_or(now_ms) - job.started_at_ms).max(0),
+        "outcome_state": outcome,
+    })
+}
+
+/// A background job changed: the job as it now stands, under the number of the change.
+pub fn job_updated(record: &AgentRecord, changed: &Job, now_ms: i64) -> Value {
+    json!({
+        "type": "background-job-updated",
+        "change_revision": changed.revision,
+        "observed_at": now_ms,
+        "job_id": changed.id,
+        "session": record.session,
+        "agent_id": record.agent_id,
+        "status": changed.status.as_str(),
+        "job": job(record, changed, now_ms),
+    })
+}
+
+/// A job's timeline as `GET /background-jobs/<id>` gives it: each change with what kind of
+/// change it was, read off the entry before it.
+pub fn job_timeline(entries: &[JobRecord]) -> Vec<Value> {
+    let mut before: Option<&str> = None;
+    entries
+        .iter()
+        .map(|entry| {
+            let status = entry.job.status.as_str();
+            let change = if before != Some(status) {
+                "status"
+            } else if !entry.note.is_empty() {
+                "progress"
+            } else {
+                "update"
+            };
+            before = Some(status);
+            json!({
+                "event_id": entry.job.revision,
+                "observed_at": entry.at_ms,
+                "status": status,
+                "note": entry.note,
+                "change": change,
+            })
+        })
+        .collect()
 }
 
 /// A text cut to `max` characters, the last of them an ellipsis when something was left out.
