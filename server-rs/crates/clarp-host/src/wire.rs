@@ -80,6 +80,8 @@ pub fn state_kind(status: &Status) -> AgentStateKind {
             Activity::Waiting => AgentStateKind::Waiting,
             Activity::Compacting => AgentStateKind::Compacting,
         },
+        // An agent that came from another Host with its conversation, and has not run here yet.
+        (None, None) if status.head_revision > 0 => AgentStateKind::Idle,
         // An agent that has never run a turn. The Python Host calls it `spawned`.
         (None, None) => AgentStateKind::Spawned,
         (None, Some(last)) => match &last.outcome {
@@ -776,7 +778,14 @@ mod tests {
     #[test]
     fn an_agents_state_is_named_as_the_apps_know_it() {
         let name = |live, last| state_name(&state_kind(&status(live, last)));
-        assert_eq!(name(None, None), "spawned");
+        let mut new = status(None, None);
+        new.head_revision = 0;
+        assert_eq!(state_name(&state_kind(&new)), "spawned");
+        assert_eq!(
+            name(None, None),
+            "idle",
+            "it has a conversation and no turn here yet: it came from another Host"
+        );
         assert_eq!(name(Some(Activity::Thinking), None), "thinking");
         assert_eq!(
             name(Some(Activity::Responding), Some(Outcome::Completed)),
@@ -971,6 +980,11 @@ mod tests {
             conversation_id(&record(), &fresh),
             "conv-1",
             "the name the Host chose"
+        );
+        assert_eq!(
+            state_kind(&fresh),
+            AgentStateKind::Idle,
+            "an agent that arrived with a conversation is not new"
         );
         assert_eq!(
             conversation_id(&record(), &status(None, None)),
