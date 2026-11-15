@@ -14339,6 +14339,2227 @@
      "ids": 0
     }
    ]
+  },
+  {
+   "name": "a_report_and_its_revisions",
+   "agents": [
+    {
+     "agent_id": "0901aaaabbbbcccc",
+     "session": "vera9",
+     "persona": "Vera"
+    },
+    {
+     "agent_id": "0902aaaabbbbcccc",
+     "session": "omar9",
+     "persona": "Omar"
+    }
+   ],
+   "calls": [
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "summary": "Day one"
+     },
+     "at": 1802576001000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day one",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576001000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>First.</p>",
+      "version": "v1",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "report-1"
+     },
+     "at": 1802576002000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day one",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576001000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>First.</p>",
+      "version": "v1",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1"
+     },
+     "at": 1802576003000,
+     "result": [
+      {
+       "version": "v1",
+       "title": "A report",
+       "summary": "Day one",
+       "created_at": 1802576001000
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "represent",
+     "args": {
+      "artifact_id": "report-1",
+      "representation": "summary-v1"
+     },
+     "at": 1802576004000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day one",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576001000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "version": "v1",
+      "read_only": true,
+      "content_omitted": {
+       "reason": "summary",
+       "bytes": 38,
+       "sha256": "c1:22d0e3af572719057a2a110ff1d57da3a7abe7c619ac12aab70541222ff3837d",
+       "version": "v1",
+       "updated_at": 1802576001000
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "represent",
+     "args": {
+      "artifact_id": "report-1",
+      "representation": "flat-v1"
+     },
+     "at": 1802576005000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day one",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576001000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "content": "<h1>Synthetic report</h1><p>First.</p>",
+      "version": "v1",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2"
+      },
+      "summary": "Day two"
+     },
+     "at": 1802576006000,
+     "error": {
+      "kind": "ValueError",
+      "message": "expected_version must match the current report version"
+     },
+     "ids": 0,
+     "note": "without the version it follows"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2"
+      },
+      "summary": "Day two",
+      "expected_version": "v0"
+     },
+     "at": 1802576007000,
+     "error": {
+      "kind": "ValueError",
+      "message": "expected_version must match the current report version"
+     },
+     "ids": 0,
+     "note": "following a version that is not the current"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2"
+      },
+      "summary": "Day two",
+      "expected_version": "v1"
+     },
+     "at": 1802576008000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576008000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "v2",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2"
+      },
+      "summary": "Day two",
+      "expected_version": "v1"
+     },
+     "at": 1802576009000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576008000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "v2",
+      "read_only": true
+     },
+     "ids": 0,
+     "note": "the same again: a retry is answered with the report as it is"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2"
+      },
+      "summary": "Day two"
+     },
+     "at": 1802576010000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576008000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "v2",
+      "read_only": true
+     },
+     "ids": 0,
+     "note": "and once more, without the version it follows"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v2"
+      },
+      "expected_version": "v2"
+     },
+     "at": 1802576011000,
+     "error": {
+      "kind": "ValueError",
+      "message": "report version already used for different content; choose a new version"
+     },
+     "ids": 0,
+     "note": "a version that was used for other content"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "expected_version": "v2"
+     },
+     "at": 1802576012000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576008000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "v2",
+      "read_only": true
+     },
+     "ids": 0,
+     "note": "an old version as it was: answered with the current"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      }
+     },
+     "at": 1802576013000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576008000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "v2",
+      "read_only": true
+     },
+     "ids": 0,
+     "note": "the same, without the version it follows"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v9"
+      },
+      "expected_version": "v2"
+     },
+     "at": 1802576014000,
+     "error": {
+      "kind": "ValueError",
+      "message": "report artifact belongs to another agent"
+     },
+     "ids": 0,
+     "note": "the report of another agent"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true
+      },
+      "expected_version": "v2"
+     },
+     "at": 1802576015000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): version"
+     },
+     "ids": 0,
+     "note": "no version given, nothing changed"
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report, again",
+      "artifact_id": "report-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true
+      },
+      "expected_version": "v2"
+     },
+     "at": 1802576016000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): version"
+     },
+     "ids": 0,
+     "note": "no version given, and changed: it is given one"
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "report-1"
+     },
+     "at": 1802576017000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576008000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "v2",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "content": "<p>Third.</p>"
+       }
+      }
+     },
+     "at": 1802576018000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576018000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Third.</p>",
+       "read_only": true,
+       "version": "revision-00000000000000000000000000000001",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<p>Third.</p>",
+      "version": "revision-00000000000000000000000000000001",
+      "read_only": true
+     },
+     "ids": 1
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {},
+       "title": "A report, renamed"
+      }
+     },
+     "at": 1802576019000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report, renamed",
+      "summary": "Day two",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576019000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Third.</p>",
+       "read_only": true,
+       "version": "revision-00000000000000000000000000000001",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<p>Third.</p>",
+      "version": "revision-00000000000000000000000000000001",
+      "read_only": true
+     },
+     "ids": 0,
+     "note": "nothing of the page changes: no new version"
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "v4"
+       },
+       "summary": "Day four",
+       "expected_version": "nope"
+      }
+     },
+     "at": 1802576020000,
+     "error": {
+      "kind": "ValueError",
+      "message": "expected_version must match the current report version"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "v4"
+       },
+       "summary": "Day four"
+      }
+     },
+     "at": 1802576021000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A report, renamed",
+      "summary": "Day four",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576021000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "v4",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<p>Fourth.</p>",
+      "version": "v4",
+      "read_only": true
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "v4"
+       },
+       "title": "A fourth"
+      }
+     },
+     "at": 1802576022000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A fourth",
+      "summary": "Day four",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576022000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "v4",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<p>Fourth.</p>",
+      "version": "v4",
+      "read_only": true
+     },
+     "ids": 0,
+     "note": "the same page under the same version: the title changes"
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload": {
+        "content": "<p>x</p>",
+        "read_only": true,
+        "version": "v5"
+       },
+       "payload_patch": {}
+      }
+     },
+     "at": 1802576023000,
+     "error": {
+      "kind": "ValueError",
+      "message": "provide payload or payload_patch, not both"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload": "text"
+      }
+     },
+     "at": 1802576024000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload must be an object"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": [
+        "list"
+       ]
+      }
+     },
+     "at": 1802576025000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload must be an object"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload": {
+        "content": "<p>x</p>",
+        "version": "v6"
+       }
+      }
+     },
+     "at": 1802576026000,
+     "error": {
+      "kind": "ValueError",
+      "message": "a report revision must remain read-only"
+     },
+     "ids": 0,
+     "note": "a revision stays a report"
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "read_only": false
+       }
+      }
+     },
+     "at": 1802576027000,
+     "error": {
+      "kind": "ValueError",
+      "message": "a report revision must remain read-only"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "connect_origins": [
+         "https://EXAMPLE.org:443"
+        ]
+       }
+      }
+     },
+     "at": 1802576028000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A fourth",
+      "summary": "Day four",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576028000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "revision-00000000000000000000000000000002",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       },
+       "connect_origins": [
+        "https://example.org"
+       ]
+      },
+      "content": "<p>Fourth.</p>",
+      "version": "revision-00000000000000000000000000000002",
+      "read_only": true,
+      "connect_origins": [
+       "https://example.org"
+      ]
+     },
+     "ids": 1
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "connect_origins": [
+         "http://example.org"
+        ]
+       }
+      }
+     },
+     "at": 1802576029000,
+     "error": {
+      "kind": "ValueError",
+      "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "version": "not a version"
+       }
+      }
+     },
+     "at": 1802576030000,
+     "error": {
+      "kind": "ValueError",
+      "message": "HTML form requires a stable version string"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "version": "v1"
+       }
+      }
+     },
+     "at": 1802576031000,
+     "error": {
+      "kind": "ValueError",
+      "message": "report version already used for different content; choose a new version"
+     },
+     "ids": 0,
+     "note": "back to a version that was another page"
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "content": ""
+       }
+      }
+     },
+     "at": 1802576032000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): content"
+     },
+     "ids": 1
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "content": 7
+       }
+      }
+     },
+     "at": 1802576033000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload content must be a string"
+     },
+     "ids": 0
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "status": "completed"
+      }
+     },
+     "at": 1802576034000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A fourth",
+      "summary": "Day four",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576034000,
+      "completed_at": 1802576034000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "revision-00000000000000000000000000000002",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       },
+       "connect_origins": [
+        "https://example.org"
+       ]
+      },
+      "content": "<p>Fourth.</p>",
+      "version": "revision-00000000000000000000000000000002",
+      "read_only": true,
+      "connect_origins": [
+       "https://example.org"
+      ]
+     },
+     "ids": 0,
+     "note": "its state is no revision"
+    },
+    {
+     "call": "update",
+     "args": {
+      "artifact_id": "report-1",
+      "data": {
+       "payload_patch": {
+        "notes": "A note beside the page"
+       },
+       "expected_version": "v4"
+      }
+     },
+     "at": 1802576035000,
+     "error": {
+      "kind": "ValueError",
+      "message": "expected_version must match the current report version"
+     },
+     "ids": 1,
+     "note": "following a version that is no longer the current"
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1"
+     },
+     "at": 1802576036000,
+     "result": [
+      {
+       "version": "revision-00000000000000000000000000000002",
+       "title": "A fourth",
+       "summary": "Day four",
+       "created_at": 1802576028000
+      },
+      {
+       "version": "v4",
+       "title": "A report, renamed",
+       "summary": "Day four",
+       "created_at": 1802576021000
+      },
+      {
+       "version": "revision-00000000000000000000000000000001",
+       "title": "A report",
+       "summary": "Day two",
+       "created_at": 1802576018000
+      },
+      {
+       "version": "v2",
+       "title": "A report",
+       "summary": "Day two",
+       "created_at": 1802576008000
+      },
+      {
+       "version": "v1",
+       "title": "A report",
+       "summary": "Day one",
+       "created_at": 1802576001000
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "version": "v1"
+     },
+     "at": 1802576037000,
+     "result": {
+      "artifact_id": "report-1",
+      "version": "v1",
+      "title": "A report",
+      "summary": "Day one",
+      "created_at": 1802576001000,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "version": "v2"
+     },
+     "at": 1802576038000,
+     "result": {
+      "artifact_id": "report-1",
+      "version": "v2",
+      "title": "A report",
+      "summary": "Day two",
+      "created_at": 1802576008000,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "v2"
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "version": "v4"
+     },
+     "at": 1802576039000,
+     "result": {
+      "artifact_id": "report-1",
+      "version": "v4",
+      "title": "A report, renamed",
+      "summary": "Day four",
+      "created_at": 1802576021000,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "v4"
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "version": "nothing"
+     },
+     "at": 1802576040000,
+     "error": {
+      "kind": "ValueError",
+      "message": "report revision not found"
+     },
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "limit": 2,
+      "offset": 1
+     },
+     "at": 1802576041000,
+     "result": [
+      {
+       "version": "v4",
+       "title": "A report, renamed",
+       "summary": "Day four",
+       "created_at": 1802576021000
+      },
+      {
+       "version": "revision-00000000000000000000000000000001",
+       "title": "A report",
+       "summary": "Day two",
+       "created_at": 1802576018000
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "limit": 0,
+      "offset": -3
+     },
+     "at": 1802576042000,
+     "result": [
+      {
+       "version": "revision-00000000000000000000000000000002",
+       "title": "A fourth",
+       "summary": "Day four",
+       "created_at": 1802576028000
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "report-1",
+      "limit": 500,
+      "offset": 50
+     },
+     "at": 1802576043000,
+     "result": [],
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "nothing"
+     },
+     "at": 1802576044000,
+     "error": {
+      "kind": "ValueError",
+      "message": "read-only report not found"
+     },
+     "ids": 0
+    },
+    {
+     "call": "represent",
+     "args": {
+      "artifact_id": "report-1",
+      "representation": "summary-v1"
+     },
+     "at": 1802576045000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A fourth",
+      "summary": "Day four",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576034000,
+      "completed_at": 1802576034000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "version": "revision-00000000000000000000000000000002",
+      "read_only": true,
+      "connect_origins": [
+       "https://example.org"
+      ],
+      "content_omitted": {
+       "reason": "summary",
+       "bytes": 14,
+       "sha256": "c1:deddc6389158f53783a497386f48bc26d6ff4b1f9fe0bb1c6763f1f28fbcaf56",
+       "version": "revision-00000000000000000000000000000002",
+       "updated_at": 1802576034000
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "report-1"
+     },
+     "at": 1802576046000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A fourth",
+      "summary": "Day four",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576034000,
+      "completed_at": 1802576034000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "revision-00000000000000000000000000000002",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       },
+       "connect_origins": [
+        "https://example.org"
+       ]
+      },
+      "content": "<p>Fourth.</p>",
+      "version": "revision-00000000000000000000000000000002",
+      "read_only": true,
+      "connect_origins": [
+       "https://example.org"
+      ]
+     },
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "session": "vera9",
+      "type": "html_form"
+     },
+     "at": 1802576047000,
+     "result": [
+      {
+       "artifact_id": "report-1",
+       "agent_id": "0901aaaabbbbcccc",
+       "session": "vera9",
+       "type": "html_form",
+       "title": "A fourth",
+       "summary": "Day four",
+       "status": "completed",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1802576001000,
+       "updated_at": 1802576034000,
+       "completed_at": 1802576034000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "revision-00000000000000000000000000000002",
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        },
+        "connect_origins": [
+         "https://example.org"
+        ]
+       },
+       "content": "<p>Fourth.</p>",
+       "version": "revision-00000000000000000000000000000002",
+       "read_only": true,
+       "connect_origins": [
+        "https://example.org"
+       ]
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "",
+       "read_only": true
+      }
+     },
+     "at": 1802576048000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): content, version"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true
+      }
+     },
+     "at": 1802576049000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): version"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v 1"
+      }
+     },
+     "at": 1802576050000,
+     "error": {
+      "kind": "ValueError",
+      "message": "HTML form requires a stable version string"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": 7,
+       "read_only": true,
+       "version": "v1"
+      }
+     },
+     "at": 1802576051000,
+     "error": {
+      "kind": "ValueError",
+      "message": "payload content must be a string"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1",
+       "answer_schema": {
+        "type": "object",
+        "properties": {
+         "a": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     },
+     "at": 1802576052000,
+     "error": {
+      "kind": "ValueError",
+      "message": "a read-only report cannot declare answers; omit answer_schema"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1",
+       "connect_origins": [
+        "https://example.org/x"
+       ]
+      }
+     },
+     "at": 1802576053000,
+     "error": {
+      "kind": "ValueError",
+      "message": "connect_origins requires exact HTTPS origins without paths or credentials"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": "yes",
+       "version": "v1"
+      }
+     },
+     "at": 1802576054000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): answer_schema"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "payload": null
+     },
+     "at": 1802576055000,
+     "error": {
+      "kind": "ValueError",
+      "message": "html_form artifact requires payload field(s): content, version, answer_schema"
+     },
+     "ids": 1
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "nobody",
+      "type": "html_form",
+      "title": "T",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      }
+     },
+     "at": 1802576056000,
+     "error": {
+      "kind": "ValueError",
+      "message": "unknown agent session"
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "status": "sleeping",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      }
+     },
+     "at": 1802576057000,
+     "error": {
+      "kind": "ValueError",
+      "message": "unsupported artifact status"
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "document",
+      "title": "Notes",
+      "artifact_id": "doc-1",
+      "payload": {
+       "content": "x"
+      }
+     },
+     "at": 1802576058000,
+     "result": {
+      "artifact_id": "doc-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "document",
+      "title": "Notes",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576058000,
+      "updated_at": 1802576058000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {
+       "content": "x"
+      },
+      "content": "x"
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "vera9",
+      "type": "html_form",
+      "title": "T",
+      "artifact_id": "doc-1",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>First.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "expected_version": "v1"
+     },
+     "at": 1802576059000,
+     "error": {
+      "kind": "ValueError",
+      "message": "HTML forms are immutable; publish a new artifact/version"
+     },
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "doc-1"
+     },
+     "at": 1802576060000,
+     "error": {
+      "kind": "ValueError",
+      "message": "read-only report not found"
+     },
+     "ids": 0
+    },
+    {
+     "call": "represent",
+     "args": {
+      "artifact_id": "doc-1",
+      "representation": "summary-v1"
+     },
+     "at": 1802576061000,
+     "result": {
+      "artifact_id": "doc-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "document",
+      "title": "Notes",
+      "summary": "",
+      "status": "ready",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576058000,
+      "updated_at": 1802576058000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "content": "x"
+     },
+     "ids": 0
+    },
+    {
+     "call": "create",
+     "args": {
+      "session": "omar9",
+      "type": "html_form",
+      "title": "With <environment_context>cut</environment_context> a title",
+      "summary": "Reaches out",
+      "status": "active",
+      "reference_id": "ref-9",
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "2026.11.15-a",
+       "connect_origins": [
+        "https://API.example.org:443",
+        "https://api.example.org"
+       ]
+      }
+     },
+     "at": 1802576062000,
+     "result": {
+      "artifact_id": "artifact-00000000000000000000000d",
+      "agent_id": "0902aaaabbbbcccc",
+      "session": "omar9",
+      "type": "html_form",
+      "title": "With  a title",
+      "summary": "Reaches out",
+      "status": "active",
+      "reference_id": "ref-9",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576062000,
+      "updated_at": 1802576062000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "payload": {
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "read_only": true,
+       "version": "2026.11.15-a",
+       "connect_origins": [
+        "https://api.example.org"
+       ],
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       }
+      },
+      "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+      "version": "2026.11.15-a",
+      "read_only": true,
+      "connect_origins": [
+       "https://api.example.org"
+      ]
+     },
+     "ids": 1
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "artifact-00000000000000000000000d"
+     },
+     "at": 1802576063000,
+     "result": [
+      {
+       "version": "2026.11.15-a",
+       "title": "With  a title",
+       "summary": "Reaches out",
+       "created_at": 1802576062000
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "represent",
+     "args": {
+      "artifact_id": "artifact-00000000000000000000000d",
+      "representation": "summary-v1"
+     },
+     "at": 1802576064000,
+     "result": {
+      "artifact_id": "artifact-00000000000000000000000d",
+      "agent_id": "0902aaaabbbbcccc",
+      "session": "omar9",
+      "type": "html_form",
+      "title": "With  a title",
+      "summary": "Reaches out",
+      "status": "active",
+      "reference_id": "ref-9",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576062000,
+      "updated_at": 1802576062000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Omar",
+      "pinned": false,
+      "version": "2026.11.15-a",
+      "read_only": true,
+      "connect_origins": [
+       "https://api.example.org"
+      ],
+      "content_omitted": {
+       "reason": "summary",
+       "bytes": 172,
+       "sha256": "c1:0b1bd7417507862a01d72908c10a7c966291db9b984d05e3fa2d522ff623260a",
+       "version": "2026.11.15-a",
+       "updated_at": 1802576062000
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "type": "html_form"
+     },
+     "at": 1802576065000,
+     "result": [
+      {
+       "artifact_id": "artifact-00000000000000000000000d",
+       "agent_id": "0902aaaabbbbcccc",
+       "session": "omar9",
+       "type": "html_form",
+       "title": "With  a title",
+       "summary": "Reaches out",
+       "status": "active",
+       "reference_id": "ref-9",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1802576062000,
+       "updated_at": 1802576062000,
+       "completed_at": null,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Omar",
+       "pinned": false,
+       "payload": {
+        "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+        "read_only": true,
+        "version": "2026.11.15-a",
+        "connect_origins": [
+         "https://api.example.org"
+        ],
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        }
+       },
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "version": "2026.11.15-a",
+       "read_only": true,
+       "connect_origins": [
+        "https://api.example.org"
+       ]
+      },
+      {
+       "artifact_id": "report-1",
+       "agent_id": "0901aaaabbbbcccc",
+       "session": "vera9",
+       "type": "html_form",
+       "title": "A fourth",
+       "summary": "Day four",
+       "status": "completed",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1802576001000,
+       "updated_at": 1802576034000,
+       "completed_at": 1802576034000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "revision-00000000000000000000000000000002",
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        },
+        "connect_origins": [
+         "https://example.org"
+        ]
+       },
+       "content": "<p>Fourth.</p>",
+       "version": "revision-00000000000000000000000000000002",
+       "read_only": true,
+       "connect_origins": [
+        "https://example.org"
+       ]
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "search": "report"
+     },
+     "at": 1802576066000,
+     "result": [],
+     "ids": 0
+    },
+    {
+     "call": "pin",
+     "args": {
+      "artifact_id": "report-1",
+      "pinned": true
+     },
+     "at": 1802576067000,
+     "result": [
+      {
+       "artifact_id": "report-1",
+       "agent_id": "0901aaaabbbbcccc",
+       "session": "vera9",
+       "type": "html_form",
+       "title": "A fourth",
+       "summary": "Day four",
+       "status": "completed",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1802576001000,
+       "updated_at": 1802576034000,
+       "completed_at": 1802576034000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": 1802576067000,
+       "agent_name": "Vera",
+       "pinned": true,
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "revision-00000000000000000000000000000002",
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        },
+        "connect_origins": [
+         "https://example.org"
+        ]
+       },
+       "content": "<p>Fourth.</p>",
+       "version": "revision-00000000000000000000000000000002",
+       "read_only": true,
+       "connect_origins": [
+        "https://example.org"
+       ]
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "archive",
+     "args": {
+      "artifact_id": "report-1",
+      "archived": true,
+      "expected_updated_at": 1802576034000
+     },
+     "at": 1802576068000,
+     "result": [
+      {
+       "artifact_id": "report-1",
+       "agent_id": "0901aaaabbbbcccc",
+       "session": "vera9",
+       "type": "html_form",
+       "title": "A fourth",
+       "summary": "Day four",
+       "status": "completed",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1802576001000,
+       "updated_at": 1802576068000,
+       "completed_at": 1802576034000,
+       "deleted_at": null,
+       "archived_at": 1802576068000,
+       "pinned_at": 1802576067000,
+       "agent_name": "Vera",
+       "pinned": true,
+       "payload": {
+        "content": "<p>Fourth.</p>",
+        "read_only": true,
+        "version": "revision-00000000000000000000000000000002",
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        },
+        "connect_origins": [
+         "https://example.org"
+        ]
+       },
+       "content": "<p>Fourth.</p>",
+       "version": "revision-00000000000000000000000000000002",
+       "read_only": true,
+       "connect_origins": [
+        "https://example.org"
+       ]
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "discard",
+     "args": {
+      "artifact_id": "artifact-00000000000000000000000d",
+      "expected_updated_at": 1802576062000
+     },
+     "at": 1802576069000,
+     "result": [
+      {
+       "artifact_id": "artifact-00000000000000000000000d",
+       "agent_id": "0902aaaabbbbcccc",
+       "session": "omar9",
+       "type": "html_form",
+       "title": "With  a title",
+       "summary": "Reaches out",
+       "status": "active",
+       "reference_id": "ref-9",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1802576062000,
+       "updated_at": 1802576069000,
+       "completed_at": null,
+       "deleted_at": 1802576069000,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Omar",
+       "pinned": false,
+       "payload": {
+        "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+        "read_only": true,
+        "version": "2026.11.15-a",
+        "connect_origins": [
+         "https://api.example.org"
+        ],
+        "answer_schema": {
+         "type": "object",
+         "properties": {},
+         "additionalProperties": false
+        }
+       },
+       "content": "<h1>Synthetic report</h1><p>Second: æøå, and what a filter of text would cut, <environment_context>kept</environment_context>.</p><script>document.title = \"two\"</script>",
+       "version": "2026.11.15-a",
+       "read_only": true,
+       "connect_origins": [
+        "https://api.example.org"
+       ]
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "revisions",
+     "args": {
+      "artifact_id": "artifact-00000000000000000000000d"
+     },
+     "at": 1802576070000,
+     "error": {
+      "kind": "ValueError",
+      "message": "read-only report not found"
+     },
+     "ids": 0
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "report-1"
+     },
+     "at": 1802576071000,
+     "result": {
+      "artifact_id": "report-1",
+      "agent_id": "0901aaaabbbbcccc",
+      "session": "vera9",
+      "type": "html_form",
+      "title": "A fourth",
+      "summary": "Day four",
+      "status": "completed",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1802576001000,
+      "updated_at": 1802576068000,
+      "completed_at": 1802576034000,
+      "deleted_at": null,
+      "archived_at": 1802576068000,
+      "pinned_at": 1802576067000,
+      "agent_name": "Vera",
+      "pinned": true,
+      "payload": {
+       "content": "<p>Fourth.</p>",
+       "read_only": true,
+       "version": "revision-00000000000000000000000000000002",
+       "answer_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+       },
+       "connect_origins": [
+        "https://example.org"
+       ]
+      },
+      "content": "<p>Fourth.</p>",
+      "version": "revision-00000000000000000000000000000002",
+      "read_only": true,
+      "connect_origins": [
+       "https://example.org"
+      ]
+     },
+     "ids": 0
+    }
+   ]
   }
  ]
 }

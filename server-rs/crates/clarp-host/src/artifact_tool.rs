@@ -470,7 +470,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                 }
             }
         },
-        ("list", 1) => Ok(library::of_session(app, &rest[0])),
+        ("list", 1) => Ok(library::of_session(app, &rest[0]).await),
         _ => return ToolAnswer::said(2, USAGE),
     };
     match result {

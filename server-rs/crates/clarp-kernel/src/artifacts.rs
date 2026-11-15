@@ -13,10 +13,12 @@
 //! is answered from the agents' books together, by the functions here that take several.
 //!
 //! A recording, a film and a file are artifacts that name a file their agent published
-//! ([`crate::media`]): one of its own, and as what it is.
+//! ([`crate::media`]): one of its own, and as what it is. A report is a page of HTML
+//! ([`reports`]): the page is kept beside the log and the artifact names it, with what the
+//! report was version by version.
 //!
-//! Not here yet: HTML forms and reports, countdowns, and podcast episodes. Asking for one
-//! says so.
+//! Not here yet: HTML forms that take answers, countdowns, and podcast episodes. Asking for
+//! one says so.
 
 use std::collections::BTreeMap;
 
@@ -52,7 +54,7 @@ const TYPES: [&str; 15] = [
     "workflow_run",
 ];
 /// The kinds this Host cannot make yet.
-const NOT_HERE: [&str; 2] = ["countdown", "html_form"];
+const NOT_HERE: [&str; 1] = ["countdown"];
 const STATUSES: [&str; 7] = [
     "draft",
     "active",
@@ -114,7 +116,7 @@ const INTEGER_FIELDS: [&str; 9] = [
     "completed_steps",
 ];
 /// The fields of a payload that are shown on the artifact itself, in the order they are.
-const PUBLIC_FIELDS: [&str; 49] = [
+const PUBLIC_FIELDS: [&str; 50] = [
     "target_at",
     "url",
     "thumbnail_url",
@@ -164,6 +166,7 @@ const PUBLIC_FIELDS: [&str; 49] = [
     "total_steps",
     "completed_steps",
     "read_only",
+    "connect_origins",
 ];
 
 /// How a call is refused: as a mistake of the caller's, as something the caller may not do,
@@ -242,6 +245,35 @@ pub struct Artifact {
     /// The request to the user, for a `decision` or a `question`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision: Option<Decision>,
+    /// A report's page, by what it is: the page itself is kept beside the log, and the
+    /// payload kept here is without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<reports::Page>,
+    /// What a report was, version by version, without the pages themselves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub revisions: Vec<reports::Revision>,
+}
+
+/// What making or changing an artifact comes to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Made {
+    pub artifact: Artifact,
+    /// A report's page that came with the change: to be kept under [`reports::Page::blob`]
+    /// before the artifact is written.
+    pub page: Option<String>,
+    /// Whether there is anything to write. A report that is published again as it is, or as
+    /// it once was, is answered with the report as it stands.
+    pub changed: bool,
+}
+
+impl Made {
+    fn of(artifact: Artifact) -> Self {
+        Self {
+            artifact,
+            page: None,
+            changed: true,
+        }
+    }
 }
 
 /// What the log keeps of a change to an artifact: the artifact as the change left it.
@@ -268,6 +300,10 @@ pub struct Ctx<'a> {
     pub taken: &'a dyn Fn(&str) -> bool,
     /// The files the artifact's agent published: what a recording, a film or a file names.
     pub published: &'a MediaBook,
+    /// Whether another agent has an artifact with this id that was not thrown away.
+    pub elsewhere: &'a dyn Fn(&str) -> bool,
+    /// The page that is kept under this name, when it is.
+    pub page: &'a dyn Fn(&reports::Page) -> Option<String>,
 }
 
 /// What an artifact is to be made from.
@@ -281,6 +317,8 @@ pub struct New {
     /// `None` and null are an empty payload.
     pub payload: Option<Value>,
     pub artifact_id: String,
+    /// The version a report that is published again follows.
+    pub expected_version: Option<Value>,
 }
 
 /// Which artifacts are listed.
@@ -355,14 +393,24 @@ fn whole(value: &Value) -> Option<i64> {
 /// Checks a payload and makes it what is kept: no hidden blocks, and the fields every kind
 /// shares of the type they must be.
 fn payload(value: Option<&Value>) -> Result<Map<String, Value>, Refused> {
+    payload_as(value, false)
+}
+
+/// The same, for a page of HTML when `page` is set: its `content` is kept as it was
+/// written, since what is a hidden block in a text is markup in a page.
+pub(crate) fn payload_as(value: Option<&Value>, page: bool) -> Result<Map<String, Value>, Refused> {
     let given = match value {
         None | Some(Value::Null) => return Ok(Map::new()),
         Some(Value::Object(_)) => value.map(sanitized),
         Some(_) => return refuse("payload must be an object"),
     };
-    let Some(Value::Object(payload)) = given else {
+    let Some(Value::Object(mut payload)) = given else {
         return Ok(Map::new());
     };
+    let written = value.and_then(|value| value.get("content"));
+    if let Some(written) = written.filter(|written| page && !written.is_null()) {
+        payload.insert("content".to_string(), written.clone());
+    }
     let limit = if payload.contains_key("answer_schema") {
         4 * 1024 * 1024
     } else {
@@ -669,6 +717,7 @@ fn require_payload(
             Ok(())
         }
         "audio" | "video" | "file" => require_published(kind, payload, published),
+        "html_form" => reports::validate(payload),
         _ => Ok(()),
     }
 }
@@ -758,6 +807,8 @@ fn shown_as_it_is(key: &str, value: &Value) -> bool {
             .as_f64()
             .is_some_and(|progress| value.is_number() && (0.0..=1.0).contains(&progress)),
         "all_day" | "read_only" => value.is_boolean(),
+        // What a page may reach is shown when it is a list this Host would keep.
+        "connect_origins" => reports::connect_origins(value).is_ok(),
         "columns" | "recipients" | "artifact_ids" | "asset_ids" => strings(value),
         "rows" => value.as_array().is_some_and(|rows| {
             rows.iter()
@@ -810,6 +861,11 @@ impl Artifact {
             {
                 item[key] = value.clone();
             }
+        }
+        // A report's page is not here: whoever answers with this row puts it back, or says
+        // what was left out ([`reports::with_page`], [`reports::without_page`]).
+        if let Some(page) = &self.page {
+            item[reports::PAGE] = json!(page);
         }
         match self.kind.as_str() {
             "decision" | "question" => {
@@ -865,13 +921,9 @@ impl ArtifactBook {
             .insert(record.artifact.artifact_id.clone(), record.artifact.clone());
     }
 
-    /// Makes an artifact of a plain kind. A request and a plan are made their own way.
-    pub fn create(
-        &self,
-        maker: Maker<'_>,
-        new: &New,
-        ctx: &mut Ctx<'_>,
-    ) -> Result<Artifact, Refused> {
+    /// Makes an artifact of a plain kind. A request and a plan are made their own way, and
+    /// a report that is published under the id it has is revised.
+    pub fn create(&self, maker: Maker<'_>, new: &New, ctx: &mut Ctx<'_>) -> Result<Made, Refused> {
         if matches!(
             new.kind.trim().to_lowercase().as_str(),
             "decision" | "question" | "plan"
@@ -881,7 +933,11 @@ impl ArtifactBook {
                 new.kind
             ));
         }
-        self.make(maker, new, ctx)
+        let (opening, payload) = self.opening(new, ctx)?;
+        if opening.kind == "html_form" {
+            return reports::published(self, maker, new, opening, payload, ctx);
+        }
+        self.placed(maker, new, opening, payload, ctx).map(Made::of)
     }
 
     /// Makes an artifact of any kind: the checks every kind shares, then its own.
@@ -891,6 +947,17 @@ impl ArtifactBook {
         new: &New,
         ctx: &mut Ctx<'_>,
     ) -> Result<Artifact, Refused> {
+        let (opening, payload) = self.opening(new, ctx)?;
+        self.placed(maker, new, opening, payload, ctx)
+    }
+
+    /// What a new artifact is, by what was asked for: its kind, its state, its title, its
+    /// id, and its payload as it is kept. Refused in the order the Python Host refuses in.
+    fn opening(
+        &self,
+        new: &New,
+        ctx: &mut Ctx<'_>,
+    ) -> Result<(Opening, Map<String, Value>), Refused> {
         let kind = new.kind.trim().to_lowercase();
         let status = new.status.trim().to_lowercase();
         let title = strip_hidden_blocks(&new.title).trim().to_string();
@@ -915,8 +982,39 @@ impl ArtifactBook {
                 "{kind} artifacts are not available on this Host yet (the Rust Host)"
             ));
         }
-        let payload = payload(new.payload.as_ref())?;
+        let page = kind == "html_form";
+        let payload = if page {
+            let filled = new.payload.as_ref().map(reports::normalized).transpose()?;
+            payload_as(filled.as_ref(), true)?
+        } else {
+            payload(new.payload.as_ref())?
+        };
         require_payload(&kind, &payload, ctx.published)?;
+        let opening = Opening {
+            kind,
+            status,
+            title,
+            artifact_id,
+        };
+        Ok((opening, payload))
+    }
+
+    /// Puts a new artifact in its place among the agent's own, when its id and what it
+    /// refers to are nobody else's.
+    pub(crate) fn placed(
+        &self,
+        maker: Maker<'_>,
+        new: &New,
+        opening: Opening,
+        payload: Map<String, Value>,
+        ctx: &mut Ctx<'_>,
+    ) -> Result<Artifact, Refused> {
+        let Opening {
+            kind,
+            status,
+            title,
+            artifact_id,
+        } = opening;
         let reference_id = clip(strip_hidden_blocks(&new.reference_id).trim(), 500);
         if (ctx.taken)(&artifact_id) {
             return taken("artifacts.artifact_id");
@@ -945,18 +1043,19 @@ impl ArtifactBook {
             archived_at: None,
             pinned_at: None,
             decision: None,
+            page: None,
+            revisions: Vec::new(),
         })
     }
 
     /// Changes an artifact of a plain kind: its status, its title and summary, its payload
-    /// as a whole or in part.
+    /// as a whole or in part. A report whose payload changes is revised.
     pub fn update(
         &self,
         artifact_id: &str,
         data: &Value,
-        now: i64,
-        published: &MediaBook,
-    ) -> Result<Artifact, Refused> {
+        ctx: &mut Ctx<'_>,
+    ) -> Result<Made, Refused> {
         let Some(current) = self.get(artifact_id) else {
             return refuse("artifact not found");
         };
@@ -966,14 +1065,11 @@ impl ArtifactBook {
                 current.kind
             ));
         }
-        let given = |key: &str| data.get(key).filter(|value| is_true(value));
-        let status = given("status")
-            .map_or_else(|| current.status.clone(), text_of)
-            .to_lowercase();
-        if !STATUSES.contains(&status.as_str()) {
-            return refuse("unsupported artifact status");
-        }
         let (whole, patch) = (data.get("payload"), data.get("payload_patch"));
+        if current.kind == "html_form" && (whole.is_some() || patch.is_some()) {
+            return reports::revised(current, data, false, ctx);
+        }
+        let status = status_asked(current, data)?;
         let new_payload = match (whole, patch) {
             (Some(_), Some(_)) => return refuse("provide payload or payload_patch, not both"),
             (None, Some(patch)) => {
@@ -985,33 +1081,9 @@ impl ArtifactBook {
             (None, None) => current.payload.clone(),
         };
         if whole.is_some() || patch.is_some() {
-            require_payload(&current.kind, &new_payload, published)?;
+            require_payload(&current.kind, &new_payload, ctx.published)?;
         }
-        let title = given("title").map_or_else(|| current.title.clone(), text_of);
-        let title = strip_hidden_blocks(&title).trim().to_string();
-        if title.is_empty() {
-            return refuse("artifact title required");
-        }
-        let now = now.max(current.updated_at + 1);
-        let completed_at = if status == current.status {
-            current.completed_at
-        } else {
-            OVER.contains(&status.as_str()).then_some(now)
-        };
-        let summary = match data.get("summary") {
-            Some(Value::Null) => "None".to_string(),
-            Some(summary) => text_of(summary),
-            None => current.summary.clone(),
-        };
-        Ok(Artifact {
-            title: clip(&title, 300),
-            summary: clip(&strip_hidden_blocks(&summary), 4_000),
-            status,
-            payload: new_payload,
-            updated_at: now,
-            completed_at,
-            ..current.clone()
-        })
+        applied(current, data, status, new_payload, ctx.now_ms).map(Made::of)
     }
 
     /// Hides an artifact from the inbox, or shows it there again. Answers the artifact and
@@ -1141,6 +1213,64 @@ impl ArtifactBook {
             ..current
         })
     }
+}
+
+/// What a new artifact is, by what was asked for.
+pub(crate) struct Opening {
+    pub(crate) kind: String,
+    pub(crate) status: String,
+    pub(crate) title: String,
+    pub(crate) artifact_id: String,
+}
+
+/// The state a change asks for: the one it names, or the one the artifact is in.
+pub(crate) fn status_asked(current: &Artifact, data: &Value) -> Result<String, Refused> {
+    let status = data
+        .get("status")
+        .filter(|value| is_true(value))
+        .map_or_else(|| current.status.clone(), text_of)
+        .to_lowercase();
+    if !STATUSES.contains(&status.as_str()) {
+        return refuse("unsupported artifact status");
+    }
+    Ok(status)
+}
+
+/// An artifact as a change leaves it: in the state, under the title and with the summary
+/// the change names, with this payload.
+pub(crate) fn applied(
+    current: &Artifact,
+    data: &Value,
+    status: String,
+    payload: Map<String, Value>,
+    now: i64,
+) -> Result<Artifact, Refused> {
+    let given = |key: &str| data.get(key).filter(|value| is_true(value));
+    let title = given("title").map_or_else(|| current.title.clone(), text_of);
+    let title = strip_hidden_blocks(&title).trim().to_string();
+    if title.is_empty() {
+        return refuse("artifact title required");
+    }
+    let now = now.max(current.updated_at + 1);
+    let completed_at = if status == current.status {
+        current.completed_at
+    } else {
+        OVER.contains(&status.as_str()).then_some(now)
+    };
+    let summary = match data.get("summary") {
+        Some(Value::Null) => "None".to_string(),
+        Some(summary) => text_of(summary),
+        None => current.summary.clone(),
+    };
+    Ok(Artifact {
+        title: clip(&title, 300),
+        summary: clip(&strip_hidden_blocks(&summary), 4_000),
+        status,
+        payload,
+        updated_at: now,
+        completed_at,
+        ..current.clone()
+    })
 }
 
 /// What making an artifact is refused with when nobody has the session it is asked for.

@@ -12,15 +12,16 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Extension, Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_actor::{Actor, ActorError, Kept, Outputs};
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
+use clarp_kernel::artifacts::reports::{self, Page, Revisions};
 use clarp_kernel::artifacts::{
-    self, Artifact, ArtifactBook, Ctx, Listing, Maker, New, Refused, Shelf, Why,
+    self, Artifact, ArtifactBook, Ctx, Listing, Made, Maker, New, Refused, Shelf, Why,
 };
 use clarp_kernel::conversation::Message;
 use clarp_kernel::goals::GoalBook;
@@ -28,13 +29,15 @@ use clarp_kernel::media::MediaBook;
 use clarp_kernel::push;
 use clarp_kernel::python;
 use clarp_kernel::turn::{Admission, Origin};
+use clarp_ports::blobs::Blobs;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::agent::View;
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::fleet::{AgentRecord, Member};
 use crate::ids;
+use crate::pairing::Scope;
 use crate::pusher::Requested;
 
 /// An agent's books as anyone may read them without asking the agent.
@@ -53,6 +56,8 @@ pub enum Want {
         new: New,
         /// Another agent has an artifact with the id this one is to get.
         taken_elsewhere: bool,
+        /// And has not thrown it away.
+        live_elsewhere: bool,
     },
     Update {
         artifact_id: String,
@@ -158,12 +163,23 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
     Ok(outs)
 }
 
-/// Carries out what is asked of an agent's artifacts. On the agent's own thread.
+/// A page as it is kept, whole. On a thread that may wait for the disk.
+fn kept_page(pages: &dyn Blobs, page: &Page) -> Option<String> {
+    let most = usize::try_from(page.bytes).ok()?;
+    let bytes = pages.read(&page.blob(), 0, most).ok()?;
+    (bytes.len() == most)
+        .then(|| String::from_utf8(bytes).ok())
+        .flatten()
+}
+
+/// Carries out what is asked of an agent's artifacts. On the agent's own thread. `pages` is
+/// where the pages of reports are kept.
 pub fn carry_out(
     actor: &mut Actor,
     record: &AgentRecord,
     want: &Want,
     now: i64,
+    pages: &dyn Blobs,
 ) -> Result<Carried, ActorError> {
     // What ran out is closed before anything is answered about it.
     let mut outs = settle(actor, now)?;
@@ -174,17 +190,25 @@ pub fn carry_out(
     };
     let decided = {
         let (book, published) = (actor.artifacts(), actor.media());
-        let made = |made: Result<Artifact, Refused>| made.map(|artifact| (artifact, true));
+        let page = |page: &Page| kept_page(pages, page);
+        let made =
+            |made: Result<Made, Refused>| made.map(|made| (made.artifact, made.changed, made.page));
+        let changed = |changed: Result<(Artifact, bool), Refused>| {
+            changed.map(|(artifact, changed)| (artifact, changed, None))
+        };
         match want {
             Want::Create {
                 new,
                 taken_elsewhere,
+                live_elsewhere,
             } => {
                 let mut ctx = Ctx {
                     now_ms: now,
                     token_hex: &mut ids::hex,
                     taken: &|id| *taken_elsewhere || book.any(id).is_some(),
                     published,
+                    elsewhere: &|_| *live_elsewhere,
+                    page: &page,
                 };
                 made(book.create(maker, new, &mut ctx))
             }
@@ -194,11 +218,24 @@ pub fn carry_out(
                     token_hex: &mut ids::hex,
                     taken: &|id| book.any(id).is_some(),
                     published,
+                    elsewhere: &|_| false,
+                    page: &page,
                 };
-                made(book.ask(maker, ask, &mut ctx))
+                changed(
+                    book.ask(maker, ask, &mut ctx)
+                        .map(|artifact| (artifact, true)),
+                )
             }
             Want::Update { artifact_id, data } => {
-                made(book.update(artifact_id, data, now, published))
+                let mut ctx = Ctx {
+                    now_ms: now,
+                    token_hex: &mut ids::hex,
+                    taken: &|id| book.any(id).is_some(),
+                    published,
+                    elsewhere: &|_| false,
+                    page: &page,
+                };
+                made(book.update(artifact_id, data, &mut ctx))
             }
             Want::Resolve {
                 decision_id,
@@ -217,32 +254,32 @@ pub fn carry_out(
                     session: on_behalf_session.as_deref(),
                     ..OnBehalf::default()
                 };
-                book.resolve(decision_id, &given, &by, &|_| false, now)
+                changed(book.resolve(decision_id, &given, &by, &|_| false, now))
             }
             Want::Dismiss {
                 decision_id,
                 expected_revision,
-            } => book.dismiss(decision_id, *expected_revision, now),
+            } => changed(book.dismiss(decision_id, *expected_revision, now)),
             Want::Withdraw {
                 decision_id,
                 session,
-            } => book.withdraw(decision_id, session, now),
+            } => changed(book.withdraw(decision_id, session, now)),
             Want::Archive {
                 artifact_id,
                 archived,
                 expected_updated_at,
-            } => book.archive(artifact_id, *archived, *expected_updated_at, now),
+            } => changed(book.archive(artifact_id, *archived, *expected_updated_at, now)),
             Want::Discard {
                 artifact_id,
                 expected_updated_at,
-            } => book.discard(artifact_id, *expected_updated_at, now),
+            } => changed(book.discard(artifact_id, *expected_updated_at, now)),
             Want::Pin {
                 artifact_id,
                 pinned,
-            } => book.pin(artifact_id, *pinned, now),
+            } => changed(book.pin(artifact_id, *pinned, now)),
         }
     };
-    let (artifact, changed) = match decided {
+    let (artifact, changed, page) = match decided {
         Ok(decided) => decided,
         Err(refused) => {
             return Ok(Carried {
@@ -251,6 +288,13 @@ pub fn carry_out(
             });
         }
     };
+    // A report's page is kept before the report is written: what the log says of a report
+    // never names a page that is not there.
+    if let (Some(content), Some(named)) = (&page, &artifact.page) {
+        pages
+            .put(&named.blob(), content.as_bytes())
+            .map_err(|error| ActorError::Io(format!("a report's page was not kept: {error}")))?;
+    }
     if changed {
         outs.push(actor.keep(&kept(std::slice::from_ref(&artifact)), now)?);
     }
@@ -370,6 +414,41 @@ async fn ask_agent(member: &Member, want: Want) -> Result<Done, ApiError> {
     member.agent.artifact(want).await?.map_err(conflict)
 }
 
+/// A report's page as it is kept, read on a thread that may wait for the disk.
+async fn page_of(app: &App, page: &Page) -> Option<String> {
+    let (blobs, page) = (app.blobs.clone(), page.clone());
+    let read = tokio::task::spawn_blocking(move || kept_page(blobs.as_ref(), &page)).await;
+    read.ok().flatten()
+}
+
+/// A row as it is answered: as a representation asks for it, with its report's page put
+/// back, or named where a list leaves it out.
+pub(crate) async fn shown(app: &App, mut row: Value, representation: &str) -> Value {
+    let page = reports::named_page(&mut row);
+    let mut row = represented(row, representation);
+    match page {
+        Some(page) if representation == "summary-v1" => reports::without_page(&mut row, &page),
+        Some(page) => {
+            let content = page_of(app, &page).await;
+            if content.is_none() {
+                eprintln!("clarp-host: the page of a report is not where it is kept");
+            }
+            reports::with_page(&mut row, content.as_deref().unwrap_or(""));
+        }
+        None => {}
+    }
+    row
+}
+
+/// Rows as they are answered, in their order.
+async fn all_shown(app: &App, rows: Vec<Value>, representation: &str) -> Vec<Value> {
+    let mut answered = Vec::with_capacity(rows.len());
+    for row in rows {
+        answered.push(shown(app, row, representation).await);
+    }
+    answered
+}
+
 /// The artifact as a representation asks for it: as it is, without the payload its fields
 /// were taken from, or also without the bodies a list does not need.
 fn represented(mut item: Value, representation: &str) -> Value {
@@ -443,12 +522,11 @@ async fn list_artifacts(
         offset: number("offset", Some(0))?.unwrap_or(0),
         by_creation: text("order") == "created",
     };
-    let fleet = Fleet::of(&app);
-    let rows = artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms());
-    let rows: Vec<Value> = rows
-        .into_iter()
-        .map(|row| represented(row, representation))
-        .collect();
+    let rows = {
+        let fleet = Fleet::of(&app);
+        artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
+    };
+    let rows = all_shown(&app, rows, representation).await;
     Ok(Json(json!({ "artifacts": rows })))
 }
 
@@ -457,39 +535,155 @@ async fn pinned_artifacts(
     Query(query): Params,
 ) -> Result<Json<Value>, ApiError> {
     let representation = representation(&query)?;
-    let fleet = Fleet::of(&app);
-    let rows = artifacts::list_pinned(&fleet.shelves(), 100, app.clock.now_ms());
-    let rows: Vec<Value> = rows
-        .into_iter()
-        .map(|row| represented(row, representation))
-        .collect();
+    let rows = {
+        let fleet = Fleet::of(&app);
+        artifacts::list_pinned(&fleet.shelves(), 100, app.clock.now_ms())
+    };
+    let rows = all_shown(&app, rows, representation).await;
     Ok(Json(json!({ "artifacts": rows })))
 }
 
+/// `GET /artifacts/<id>`, and what is read of a report beside it: `/html`, its page as a
+/// browser is given it, and `/revisions`, what it was.
 async fn get_artifact(
     State(app): State<App>,
-    Path(artifact_id): Path<String>,
+    Path(rest): Path<String>,
     Query(query): Params,
-) -> Result<Json<Value>, ApiError> {
-    let fleet = Fleet::of(&app);
-    let found = artifacts::get(
-        &fleet.shelves(),
-        artifact_id.trim_matches('/'),
-        app.clock.now_ms(),
-    );
-    let Some(row) = found else {
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let rest = rest.trim_matches('/');
+    if let Some(artifact_id) = rest.strip_suffix("/html") {
+        return page_for_a_browser(&app, artifact_id.trim_matches('/'), &principal, &headers).await;
+    }
+    if let Some(artifact_id) = rest.strip_suffix("/revisions") {
+        return revisions(&app, artifact_id.trim_matches('/'), &query).await;
+    }
+    let Some(row) = find(&app, rest) else {
         return Err(refused(StatusCode::NOT_FOUND, "artifact not found"));
     };
     // Only this one representation is known here; any other is the artifact as it is.
     let flat = query
         .get("representation")
         .is_some_and(|given| given == "flat-v1");
-    let row = if flat {
-        represented(row, "flat-v1")
-    } else {
-        row
+    let row = shown(&app, row, if flat { "flat-v1" } else { "" }).await;
+    Ok(Json(json!({ "artifact": row })).into_response())
+}
+
+/// `GET /artifacts/<id>/html`: a report's page as a browser is given it, behind the policy
+/// that keeps it from reaching anything the artifact does not name. The page's own scripts
+/// can read the address it was fetched by, so a token in the address is refused; and a
+/// device that may only read and send does not get pages that run.
+async fn page_for_a_browser(
+    app: &App,
+    artifact_id: &str,
+    principal: &Principal,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    let limited = matches!(
+        principal,
+        Principal::Device {
+            scope: Scope::Limited,
+            ..
+        }
+    );
+    if limited {
+        return Err(refused(
+            StatusCode::FORBIDDEN,
+            "full device access required",
+        ));
+    }
+    let said = |name| headers.get(name).and_then(|value| value.to_str().ok());
+    let in_a_header = said(header::AUTHORIZATION).is_some_and(|value| value.starts_with("Bearer "))
+        || said(header::COOKIE).is_some_and(|cookies| cookies.contains("claude_pwa_token="));
+    if !in_a_header && !app.config.auth_token.is_empty() {
+        return Err(refused(
+            StatusCode::FORBIDDEN,
+            "send the credential in a header or cookie, not the URL",
+        ));
+    }
+    let artifact = {
+        let fleet = Fleet::of(app);
+        let held = fleet.holder(artifact_id, false);
+        held.and_then(|member| {
+            member
+                .agent
+                .view()
+                .books
+                .artifacts
+                .get(artifact_id)
+                .cloned()
+        })
     };
-    Ok(Json(json!({ "artifact": row })))
+    let Some((artifact, page)) = artifact
+        .filter(|artifact| artifact.kind == "html_form")
+        .and_then(|artifact| artifact.page.clone().map(|page| (artifact, page)))
+    else {
+        return Err(refused(StatusCode::NOT_FOUND, "HTML artifact not found"));
+    };
+    let content = page_of(app, &page).await.unwrap_or_default();
+    let (body, policy) = reports::rendered(&artifact.payload, &content);
+    let mut response = (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::REFERRER_POLICY, "no-referrer"),
+        ],
+        body,
+    )
+        .into_response();
+    if let Ok(policy) = HeaderValue::from_str(&policy) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_SECURITY_POLICY, policy);
+    }
+    Ok(response)
+}
+
+/// `GET /artifacts/<id>/revisions`: what a report was, version by version, or one version
+/// of it with its page.
+async fn revisions(
+    app: &App,
+    artifact_id: &str,
+    query: &std::collections::HashMap<String, String>,
+) -> Result<Response, ApiError> {
+    let not_found = |why: String| refused(StatusCode::NOT_FOUND, why);
+    let number = |key: &str, otherwise: i64| match query.get(key) {
+        None => Ok(otherwise),
+        Some(given) => given
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| not_found(format!("invalid literal for int() with base 10: '{given}'"))),
+    };
+    let (limit, offset) = (number("limit", 50)?, number("offset", 0)?);
+    let version = query.get("version").map(String::as_str);
+    let asked = {
+        let fleet = Fleet::of(app);
+        let held = fleet.holder(artifact_id, false);
+        held.map(|member| {
+            let view = member.agent.view();
+            view.books
+                .artifacts
+                .revisions(artifact_id, version, limit, offset)
+        })
+    };
+    let asked = asked.unwrap_or_else(|| {
+        Err(Refused {
+            why: Why::Value,
+            message: "read-only report not found".to_string(),
+        })
+    });
+    match asked.map_err(|why| not_found(why.message))? {
+        Revisions::Listed(listed) => Ok(Json(json!({ "revisions": listed })).into_response()),
+        Revisions::One(mut one) => {
+            // The page of that version, back in its payload.
+            if let Some(page) = one.get_mut("payload").and_then(reports::named_page) {
+                let content = page_of(app, &page).await.unwrap_or_default();
+                one["payload"]["content"] = json!(content);
+            }
+            Ok(Json(json!({ "revision": one })).into_response())
+        }
+    }
 }
 
 async fn create_artifact(
@@ -517,6 +711,7 @@ pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value
         reference_id: said(data, "reference_id", ""),
         payload: data.get("payload").cloned(),
         artifact_id: said(data, "artifact_id", ""),
+        expected_version: data.get("expected_version").cloned(),
     };
     let fleet = Fleet::of(app);
     let session = said(data, "session", "");
@@ -524,16 +719,23 @@ pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value
         return Err(conflict(artifacts::create_of_nobody(&new)));
     };
     let id = new.artifact_id.trim();
-    let taken_elsewhere = !id.is_empty()
-        && fleet.0.iter().any(|(other, view)| {
-            other.record.agent_id != member.record.agent_id
-                && view.books.artifacts.any(id).is_some()
-        });
+    let elsewhere = |has: &dyn Fn(&ArtifactBook) -> bool| {
+        !id.is_empty()
+            && fleet.0.iter().any(|(other, view)| {
+                other.record.agent_id != member.record.agent_id && has(&view.books.artifacts)
+            })
+    };
+    let (taken_elsewhere, live_elsewhere) = (
+        elsewhere(&|book| book.any(id).is_some()),
+        elsewhere(&|book| book.get(id).is_some()),
+    );
     let want = Want::Create {
         new,
         taken_elsewhere,
+        live_elsewhere,
     };
-    Ok(ask_agent(&member, want).await?.artifact)
+    let made = ask_agent(&member, want).await?.artifact;
+    Ok(shown(app, made, "").await)
 }
 
 /// `POST /artifacts/<id>` and what a user does with an artifact: `/archive`, `/discard`,
@@ -614,10 +816,11 @@ pub(crate) async fn change(
         });
     };
     let done = ask_agent(member, want).await?;
+    let artifact = shown(app, done.artifact, "").await;
     Ok(if action == "update" {
-        json!({ "artifact": done.artifact })
+        json!({ "artifact": artifact })
     } else {
-        json!({ "artifact": done.artifact, "changed": done.changed })
+        json!({ "artifact": artifact, "changed": done.changed })
     })
 }
 
@@ -838,15 +1041,17 @@ pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
 }
 
 /// The artifacts of one session, as `GET /artifacts?session=` answers them.
-pub(crate) fn of_session(app: &App, session: &str) -> Value {
+pub(crate) async fn of_session(app: &App, session: &str) -> Value {
     let listing = Listing {
         session: session.trim().to_string(),
         limit: 100,
         ..Listing::default()
     };
-    let fleet = Fleet::of(app);
-    let rows = artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms());
-    json!({ "artifacts": rows })
+    let rows = {
+        let fleet = Fleet::of(app);
+        artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
+    };
+    json!({ "artifacts": all_shown(app, rows, "").await })
 }
 
 /// The routes of the library and the inbox.

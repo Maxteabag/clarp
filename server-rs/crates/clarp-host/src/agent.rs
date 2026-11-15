@@ -25,6 +25,7 @@ use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, T
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
 use clarp_kernel::media::Asset;
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
+use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
@@ -224,6 +225,8 @@ pub struct Setup {
     pub jobs_checked_every: Duration,
     /// The way to the phones that are not listening.
     pub pusher: Pusher,
+    /// Where the pages of the agent's reports are kept.
+    pub blobs: Arc<dyn Blobs>,
 }
 
 /// The way to an agent's thread.
@@ -551,6 +554,8 @@ fn plan_shown(
         // An id of twelve random bytes is nobody else's.
         taken: &|_| false,
         published: actor.media(),
+        elsewhere: &|_| false,
+        page: &|_| None,
     };
     let given = title.unwrap_or(&change.plan.title);
     actor
@@ -854,7 +859,8 @@ impl Worker {
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
-        match library::carry_out(actor, &self.setup.record, want, now) {
+        let pages = self.setup.blobs.as_ref();
+        match library::carry_out(actor, &self.setup.record, want, now, pages) {
             Ok(carried) => {
                 for out in carried.outs {
                     self.after(out);

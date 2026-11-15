@@ -9,12 +9,27 @@
 //! These are the rules of the Python Host's `server/lib/html_forms.py`, held to it by
 //! `tests/fixtures/report-vectors.json` (`server-rs/tools/report-vectors.py`).
 //!
+//! A page can be large (the reports of a week on one Host weighed megabytes) and is the
+//! same from one change of its artifact to the next. So it is not part of what the log keeps
+//! of the artifact, and it is not held in memory: it is kept beside the log, whole, under a
+//! name made of what it is ([`Page`]), and the artifact names it. The rules see a page when
+//! it comes in, which is when they judge it; afterwards they compare pages by their names.
+//! A report that is published again under its id is revised, and carries what it was
+//! version by version ([`Revision`]). These are the rules of
+//! `server/lib/html_report_revisions.py`, held by the report's scenario in
+//! `tests/fixtures/artifact-vectors.json`.
+//!
 //! Not here yet: a form that takes answers. Its answers are held to a JSON Schema the agent
 //! writes, which this Host cannot read yet; asking for one says so.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
-use super::{Refused, refuse};
+use super::{
+    Artifact, ArtifactBook, Ctx, Made, Maker, New, Opening, Refused, applied, payload_as, refuse,
+    require_payload, status_asked,
+};
 
 /// What a form that takes answers is refused with.
 pub const FORMS_NOT_HERE: &str =
@@ -234,4 +249,315 @@ pub fn validate(payload: &Map<String, Value>) -> Result<(), Refused> {
         return refuse(FORMS_NOT_HERE);
     }
     Ok(())
+}
+
+/// The field of a shown artifact that names its page, until whoever answers puts the page
+/// back or says it was left out. It never leaves the Host.
+pub const PAGE: &str = "$page";
+
+/// A page by what it is: a number only this page has, and its length in bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Page {
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+impl Page {
+    pub fn of(content: &str) -> Self {
+        let sha256 = Sha256::digest(content.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        Self {
+            sha256,
+            bytes: content.len() as u64,
+        }
+    }
+
+    /// The name the page is kept under.
+    pub fn blob(&self) -> String {
+        format!("{}.html", self.sha256)
+    }
+}
+
+/// What a report was under one version: everything but the page itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Revision {
+    pub version: String,
+    pub title: String,
+    pub summary: String,
+    pub created_at: i64,
+    pub payload: Map<String, Value>,
+    pub page: Page,
+}
+
+/// Whether an artifact is a report: a page that takes no answers.
+pub fn is_report(artifact: &Artifact) -> bool {
+    artifact.kind == "html_form"
+        && artifact.page.is_some()
+        && artifact.payload.get("read_only") == Some(&Value::Bool(true))
+        && artifact.payload.get("answer_schema") == Some(&read_only_schema())
+}
+
+/// A payload without its page.
+fn light(payload: &Map<String, Value>) -> Map<String, Value> {
+    let mut light = payload.clone();
+    light.remove("content");
+    light
+}
+
+/// The version a payload names.
+fn version_of(payload: &Map<String, Value>) -> String {
+    payload
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+impl Artifact {
+    /// Remembers what the report is now, under its version, when that version is not
+    /// remembered yet.
+    fn remember(&mut self) {
+        let (version, Some(page)) = (version_of(&self.payload), self.page.clone()) else {
+            return;
+        };
+        if self.revisions.iter().all(|known| known.version != version) {
+            self.revisions.push(Revision {
+                version,
+                title: self.title.clone(),
+                summary: self.summary.clone(),
+                created_at: self.updated_at,
+                payload: self.payload.clone(),
+                page,
+            });
+        }
+    }
+}
+
+/// A report is published: made, when its id is new, and revised when it is the id of a
+/// report this agent has.
+pub(crate) fn published(
+    book: &ArtifactBook,
+    maker: Maker<'_>,
+    new: &New,
+    opening: Opening,
+    payload: Map<String, Value>,
+    ctx: &mut Ctx<'_>,
+) -> Result<Made, Refused> {
+    if let Some(current) = book.get(&opening.artifact_id) {
+        let mut data = json!({
+            "payload": payload,
+            "title": opening.title,
+            "summary": new.summary,
+        });
+        if let Some(expected) = new
+            .expected_version
+            .as_ref()
+            .filter(|given| !given.is_null())
+        {
+            data["expected_version"] = expected.clone();
+        }
+        return revised(current, &data, true, ctx);
+    }
+    if (ctx.elsewhere)(&opening.artifact_id) {
+        return refuse("report artifact belongs to another agent");
+    }
+    let content = payload
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let mut artifact = book.placed(maker, new, opening, light(&payload), ctx)?;
+    artifact.page = Some(Page::of(&content));
+    artifact.remember();
+    Ok(Made {
+        artifact,
+        page: Some(content),
+        changed: true,
+    })
+}
+
+/// A report is revised: its page, what it may reach, or what is said beside it changes,
+/// and what it was stays on record under its version.
+pub(crate) fn revised(
+    current: &Artifact,
+    data: &Value,
+    published_again: bool,
+    ctx: &mut Ctx<'_>,
+) -> Result<Made, Refused> {
+    let Some(page_before) = current.page.as_ref().filter(|_| is_report(current)) else {
+        return refuse("HTML forms are immutable; publish a new artifact/version");
+    };
+    let (whole, patch) = (data.get("payload"), data.get("payload_patch"));
+    if whole.is_some() && patch.is_some() {
+        return refuse("provide payload or payload_patch, not both");
+    }
+    let Some(incoming) = whole.or(patch).and_then(Value::as_object) else {
+        return refuse("payload must be an object");
+    };
+    // A part that does not bring a page keeps the one the report has.
+    let value = if patch.is_some() {
+        let mut merged = current.payload.clone();
+        if !incoming.contains_key("content") {
+            let Some(kept) = (ctx.page)(page_before) else {
+                return Err(Refused {
+                    why: super::Why::Integrity,
+                    message: "the report's page is not kept on this Host".to_string(),
+                });
+            };
+            merged.insert("content".to_string(), Value::String(kept));
+        }
+        merged.extend(incoming.clone());
+        merged
+    } else {
+        incoming.clone()
+    };
+    let mut payload = payload_as(Some(&normalized(&Value::Object(value))?), true)?;
+    if payload.get("read_only") != Some(&Value::Bool(true)) {
+        return refuse("a report revision must remain read-only");
+    }
+    let page_of =
+        |payload: &Map<String, Value>| payload.get("content").and_then(Value::as_str).map(Page::of);
+    let as_it_is = |payload: &Map<String, Value>| {
+        light(payload) == current.payload && page_of(payload).as_ref() == Some(page_before)
+    };
+    // A change that names no version is given one.
+    if !incoming.contains_key("version") && !as_it_is(&payload) {
+        let version = format!("revision-{}", (ctx.token_hex)(16));
+        payload.insert("version".to_string(), Value::String(version));
+    }
+    require_payload("html_form", &payload, ctx.published)?;
+    let content = payload
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let (page, kept, version) = (Page::of(&content), light(&payload), version_of(&payload));
+    let before = version_of(&current.payload);
+    let known = current
+        .revisions
+        .iter()
+        .find(|known| known.version == version);
+    if let Some(known) = known {
+        if known.payload != kept || known.page != page {
+            return refuse(
+                "report version already used for different content; choose a new version",
+            );
+        }
+        // An answer that was lost is asked for again: the report as it stands, whatever
+        // has come after.
+        if version != before || (as_it_is(&payload) && published_again) {
+            return Ok(Made {
+                artifact: current.clone(),
+                page: None,
+                changed: false,
+            });
+        }
+    }
+    let follows = data
+        .get("expected_version")
+        .filter(|given| !given.is_null());
+    let another = follows.is_some_and(|follows| follows.as_str() != Some(before.as_str()));
+    if another || (published_again && known.is_none() && follows.is_none()) {
+        return refuse("expected_version must match the current report version");
+    }
+    let status = status_asked(current, data)?;
+    let mut artifact = applied(current, data, status, kept, ctx.now_ms)?;
+    artifact.page = Some(page);
+    artifact.remember();
+    Ok(Made {
+        artifact,
+        page: Some(content),
+        changed: true,
+    })
+}
+
+/// What was asked of a report's revisions.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Revisions {
+    /// The versions, the newest first: each with its title, its summary and when it was.
+    Listed(Vec<Value>),
+    /// One version, with its payload: its page is named ([`PAGE`]) for whoever answers to
+    /// put back.
+    One(Value),
+}
+
+impl ArtifactBook {
+    /// What a report was: its versions, or one of them.
+    pub fn revisions(
+        &self,
+        artifact_id: &str,
+        version: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Revisions, Refused> {
+        let Some(current) = self.get(artifact_id).filter(|current| is_report(current)) else {
+            return refuse("read-only report not found");
+        };
+        if let Some(version) = version {
+            let Some(known) = current
+                .revisions
+                .iter()
+                .find(|known| known.version == version)
+            else {
+                return refuse("report revision not found");
+            };
+            let mut payload = known.payload.clone();
+            payload.insert(PAGE.to_string(), json!(known.page));
+            return Ok(Revisions::One(json!({
+                "artifact_id": current.artifact_id,
+                "version": known.version,
+                "title": known.title,
+                "summary": known.summary,
+                "created_at": known.created_at,
+                "payload": payload,
+            })));
+        }
+        let mut known: Vec<&Revision> = current.revisions.iter().collect();
+        known.sort_by(|a, b| (b.created_at, &b.version).cmp(&(a.created_at, &a.version)));
+        let skip = usize::try_from(offset.max(0)).unwrap_or(usize::MAX);
+        let most = usize::try_from(limit.clamp(1, 100)).unwrap_or(100);
+        let listed = known.into_iter().skip(skip).take(most).map(|known| {
+            json!({
+                "version": known.version,
+                "title": known.title,
+                "summary": known.summary,
+                "created_at": known.created_at,
+            })
+        });
+        Ok(Revisions::Listed(listed.collect()))
+    }
+}
+
+/// The page a shown row or payload names, taken out of it.
+pub fn named_page(shown: &mut Value) -> Option<Page> {
+    let named = shown.as_object_mut()?.remove(PAGE)?;
+    serde_json::from_value(named).ok()
+}
+
+/// Puts a report's page back into a row that shows it: in its payload, when the row has
+/// one, and beside it.
+pub fn with_page(row: &mut Value, content: &str) {
+    if let Some(payload) = row.get_mut("payload").and_then(Value::as_object_mut) {
+        payload.insert("content".to_string(), json!(content));
+    }
+    if row.is_object() {
+        row["content"] = json!(content);
+    }
+}
+
+/// Says in a row that a list shows which page was left out of it: how long it is and what
+/// it is, by which an app knows the page it holds is this one.
+pub fn without_page(row: &mut Value, page: &Page) {
+    let left_out = json!({
+        "reason": "summary",
+        "bytes": page.bytes,
+        "sha256": format!("c1:{}", page.sha256),
+        "version": row.get("version").cloned().unwrap_or(Value::Null),
+        "updated_at": row.get("updated_at").cloned().unwrap_or(Value::Null),
+    });
+    if row.is_object() {
+        row["content_omitted"] = left_out;
+    }
 }

@@ -108,6 +108,7 @@ async fn serve(config: Config) -> Result<(), String> {
         revisions: revisions.clone(),
         tool_env: tool_env(&address.to_string(), &config.auth_token),
         pusher: pusher.clone(),
+        blobs: blobs.clone(),
     };
     let fleet = fleet::start(works, store)?;
     let desks = Arc::new(Mutex::new(Presence::new()));
