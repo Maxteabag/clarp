@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_kernel::devices::Refused;
+use clarp_kernel::presence::LEASE_MS;
 use serde_json::{Map, Value, json};
 
 use crate::edge::{ApiError, App, Principal};
@@ -180,8 +181,56 @@ async fn tokens(
     Ok(Json(json!({ "ok": true, "tokens": rows })))
 }
 
+/// `POST /desktop-presence`: a desktop app says whether it is in front of its user, every
+/// few seconds, with a lease that runs out by itself. While one runs, no phone is paged.
+async fn desktop_presence(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    // A Host that asks nobody for a token cannot know whose desk reports.
+    if app.config.auth_token.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "authenticated desktop required",
+        ));
+    }
+    let reporter = match &principal {
+        Principal::Administrator => "administrator",
+        Principal::Device {
+            device_id,
+            scope: Scope::Full,
+        } => device_id.as_str(),
+        Principal::Device { .. } => return Err(forbidden()),
+    };
+    let data = if body.is_empty() {
+        Map::new()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(Value::Object(fields)) => fields,
+            _ => return Err(ApiError::new(StatusCode::BAD_REQUEST, "object required")),
+        }
+    };
+    let field = |key: &str| data.get(key).cloned().unwrap_or(Value::Null);
+    let accepted = app
+        .desks
+        .lock()
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "presence is not kept"))?
+        .update(
+            reporter,
+            &field("instance_id"),
+            &field("sequence"),
+            &field("active"),
+            &field("sent_at_ms"),
+            app.clock.now_ms(),
+        )
+        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    Ok(Json(json!({ "accepted": accepted, "lease_ms": LEASE_MS })))
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/devices", post(register).delete(unregister))
         .route("/devices/push-tokens", get(tokens))
+        .route("/desktop-presence", post(desktop_presence))
 }

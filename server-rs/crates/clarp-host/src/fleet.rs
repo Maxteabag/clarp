@@ -25,6 +25,7 @@ use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::Launcher;
 use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
+use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::wire;
 
@@ -148,6 +149,8 @@ pub struct Works {
     pub revisions: Arc<Revisions>,
     /// What every turn's tool is told: where the agent's own tools find this Host.
     pub tool_env: Vec<(String, String)>,
+    /// The way to the phones that are not listening.
+    pub pusher: Pusher,
 }
 
 enum Ask {
@@ -415,6 +418,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         hub: works.hub.clone(),
         revisions: works.revisions.clone(),
         jobs_checked_every: std::time::Duration::from_millis(works.config.jobs_checked_every_ms),
+        pusher: works.pusher.clone(),
     })
 }
 

@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, Request, State};
@@ -21,6 +21,7 @@ use clarp_actor::ImportedRow;
 use clarp_actor::conversation::Which;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::jobs::{Job, JobCommand};
+use clarp_kernel::presence::Presence;
 use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::clock::Clock;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
@@ -39,6 +40,7 @@ use crate::config::Config;
 use crate::fleet::{AgentRecord, FleetHandle, Member};
 use crate::hub::{Hub, Published};
 use crate::pairing::{self, Device, Scope};
+use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
 use crate::{ids, joblog, library, plans, push, wire};
@@ -68,6 +70,10 @@ pub struct App {
     pub server_id: String,
     /// The numbers for changes the whole Host counts in one row.
     pub revisions: Arc<Revisions>,
+    /// The way to the phones that are not listening.
+    pub pusher: Pusher,
+    /// The desks that have said their user sits at them: no phone is paged meanwhile.
+    pub desks: Arc<Mutex<Presence>>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -580,16 +586,16 @@ async fn send(
     State(app): State<App>,
     Json(request): Json<SendRequest>,
 ) -> Result<Json<SendResponse>, ApiError> {
+    // What the Python Host refuses a send with, in its order and its words (plain text).
+    if request.text.trim().is_empty() {
+        return Err(ApiError::plain(StatusCode::BAD_REQUEST, "empty text"));
+    }
     let Some(member) = app.member(&request.session) else {
-        // The Python Host's words for a message that names an agent it does not have.
         return Err(ApiError::plain(
             StatusCode::NOT_FOUND,
             "unknown forced agent",
         ));
     };
-    if request.text.trim().is_empty() {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
-    }
     // Who it comes from, as the Python Host reads a send: the origin it names, when that is
     // one a sender may name; otherwise another agent, when it names its sender; otherwise
     // the user. What the Host stamps itself (a janitor, a leader's tick) nobody may claim.
@@ -605,14 +611,19 @@ async fn send(
         .as_deref()
         .map(|origin| origin.trim().to_lowercase())
         .unwrap_or_default();
+    if named == "heartbeat" {
+        // This Host has no heartbeats. The Python Host's words for one where they are off.
+        return Err(ApiError::plain(
+            StatusCode::CONFLICT,
+            "Heartbeats are disabled on this Host",
+        ));
+    }
     let origin = match named.as_str() {
         "user" => Origin::User,
         "agent" => from_agent(),
-        "oracle" | "schedule" | "automation" | "watcher" | "heartbeat" | "dreaming" => {
-            Origin::Trigger {
-                name: named.clone(),
-            }
-        }
+        "oracle" | "schedule" | "automation" | "watcher" | "dreaming" => Origin::Trigger {
+            name: named.clone(),
+        },
         _ if sender.is_some() => from_agent(),
         _ => Origin::User,
     };

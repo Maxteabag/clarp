@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -2294,6 +2294,298 @@ fn a_phone_registers_its_push_token_and_a_revoked_phone_is_sent_nothing() {
     let mine = rows(&host, &again);
     assert_eq!(live(&mine), vec!["b2b2b2b2b2b2"]);
     assert!(mine.iter().all(|row| row["owner"] == again_id.as_str()));
+}
+
+/// What the relay was sent: the path, who it was sent as, and the body.
+type Relayed = (String, String, Value);
+
+/// A stand-in for the relay that carries pushes: it takes what a Host hands it, keeps it to
+/// be looked at, and answers what the test told it to.
+struct StandInRelay {
+    address: String,
+    taken: Arc<Mutex<Vec<Relayed>>>,
+    answer: Arc<Mutex<(u16, Value)>>,
+}
+
+impl StandInRelay {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let taken: Arc<Mutex<Vec<Relayed>>> = Arc::new(Mutex::new(Vec::new()));
+        let delivered = json!({ "results": [{ "status": 200, "reason": "", "apnsId": "apns-1" }] });
+        let answer = Arc::new(Mutex::new((200, delivered)));
+        let (keeps, says) = (taken.clone(), answer.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = String::new();
+                if reader.read_line(&mut first).unwrap_or(0) == 0 {
+                    continue;
+                }
+                let path = first.split_whitespace().nth(1).unwrap_or("").to_string();
+                let (mut length, mut chunked, mut sent_as) = (0usize, false, String::new());
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                        break;
+                    }
+                    let (name, value) = line.split_once(':').unwrap_or((&line, ""));
+                    match name.to_ascii_lowercase().as_str() {
+                        "content-length" => length = value.trim().parse().unwrap_or(0),
+                        "transfer-encoding" => chunked = value.contains("chunked"),
+                        "authorization" => sent_as = value.trim().to_string(),
+                        _ => {}
+                    }
+                }
+                let mut body = Vec::new();
+                if chunked {
+                    loop {
+                        let mut size = String::new();
+                        reader.read_line(&mut size).unwrap();
+                        let size = usize::from_str_radix(size.trim(), 16).unwrap_or(0);
+                        let mut chunk = vec![0u8; size + 2];
+                        reader.read_exact(&mut chunk).unwrap();
+                        if size == 0 {
+                            break;
+                        }
+                        body.extend_from_slice(&chunk[..size]);
+                    }
+                } else {
+                    body = vec![0u8; length];
+                    reader.read_exact(&mut body).unwrap();
+                }
+                let body = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                keeps.lock().unwrap().push((path, sent_as, body));
+                let (status, said) = says.lock().unwrap().clone();
+                let said = said.to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{said}",
+                    said.len()
+                );
+            }
+        });
+        Self {
+            address,
+            taken,
+            answer,
+        }
+    }
+
+    fn taken(&self) -> Vec<Relayed> {
+        self.taken.lock().unwrap().clone()
+    }
+
+    /// From now on the relay answers this.
+    fn answers(&self, status: u16, said: Value) {
+        *self.answer.lock().unwrap() = (status, said);
+    }
+}
+
+#[test]
+fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
+    let relay = StandInRelay::start();
+    let place = Place::new("push");
+    let host = place.start_with(
+        "the-administrators-token",
+        &["--push-relay", &format!("http://{}", relay.address)],
+    );
+    let (phone, _) = pair(&host, "Phone", "full");
+    let token = "a1".repeat(32);
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let register = |host: &Host| {
+        let registered = host.ask_as(
+            &phone,
+            "POST",
+            "/devices",
+            Some(&json!({ "token": token, "session": "echo", "push_grant": grant })),
+        );
+        assert_eq!(registered, (200, json!({ "ok": true })));
+    };
+    let row = |host: &Host| {
+        let (_, answer) = host.ask("GET", "/devices/push-tokens", None);
+        answer["tokens"][0].clone()
+    };
+    register(&host);
+    let session = host.new_agent("Echo");
+    let server_id = host.get("/server-info")["server_id"].clone();
+    // The push of a turn that ended on this, when it is the newest the relay was sent.
+    let pushed = |text: &str| {
+        relay.taken().last().is_some_and(|(_, _, body)| {
+            body["notifications"][0]["payload"]["aps"]["alert"]["body"] == text
+        })
+    };
+    // The turn that ended on this is over, and what the pusher was handed for it is dealt
+    // with: the pusher takes one thing after another, and needs no time worth naming.
+    let answered = |host: &Host, text: &str| {
+        let reply = said("assistant", text);
+        wait_for("the reply", || host.conversation(&session).contains(&reply));
+        wait_for("the turn to be over", || host.state(&session) == "done");
+        std::thread::sleep(Duration::from_millis(300));
+    };
+
+    // A turn ends with something for the user: the phone is pushed to, by its own grant.
+    host.send(&session, "the build is green", "m1");
+    wait_for("the push for the first turn", || {
+        pushed("the build is green")
+    });
+    let taken = relay.taken();
+    assert_eq!(taken.len(), 1);
+    let (path, sent_as, body) = &taken[0];
+    assert_eq!(path, "/v1/push/send");
+    assert_eq!(sent_as, &format!("Bearer {grant}"));
+    let notification = &body["notifications"][0];
+    assert_eq!(
+        (&notification["pushType"], &notification["priority"]),
+        (&json!("alert"), &json!("10"))
+    );
+    assert!(
+        notification.get("deviceToken").is_none(),
+        "a grant names the phone: no token is sent"
+    );
+    let payload = &notification["payload"];
+    assert_eq!(payload["aps"]["alert"]["title"], "Echo");
+    assert_eq!(payload["aps"]["thread-id"], session.as_str());
+    assert_eq!(payload["aps"]["interruption-level"], "active");
+    assert!(
+        payload["aps"].get("sound").is_none(),
+        "an ordinary reply is quiet"
+    );
+    assert_eq!(payload["kind"], "user-notification");
+    assert_eq!(payload["session"], session.as_str());
+    assert_eq!(payload["server_instance_id"], server_id);
+    assert_eq!(payload["needs_response"], false);
+    let notification_id = payload["notification_id"].as_str().unwrap();
+    assert!(notification_id.starts_with("pn-"));
+    assert_eq!(notification["collapseId"], notification_id);
+    wait_for("the row to say when it was last pushed to", || {
+        row(&host)["last_push_at"].is_number()
+    });
+
+    // A user who asked at the desk is told in the app, not paged; and while a desktop app
+    // says its user sits in front of it, nobody is paged. Neither is pushed: the next push
+    // the relay is sent is the one after them.
+    host.post(
+        "/send",
+        json!({ "session": session, "text": "asked at the desk", "client_msg_id": "m2", "client": "desktop" }),
+    );
+    answered(&host, "asked at the desk");
+    let desk = |sequence: u64, active: bool| {
+        host.ask(
+            "POST",
+            "/desktop-presence",
+            Some(&json!({
+                "instance_id": "8f6f0d6a-3a9a-4f37-9d6b-0c2f8f3b7a11", "sequence": sequence,
+                "active": active, "sent_at_ms": now_ms(),
+            })),
+        )
+    };
+    assert_eq!(
+        desk(1, true),
+        (200, json!({ "accepted": true, "lease_ms": 45_000 }))
+    );
+    host.send(&session, "while at the desk", "m3");
+    answered(&host, "while at the desk");
+    assert_eq!(
+        desk(1, false),
+        (200, json!({ "accepted": false, "lease_ms": 45_000 })),
+        "an older report changes nothing"
+    );
+    assert_eq!(desk(2, false).1["accepted"], true);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/desktop-presence",
+            Some(&json!({ "instance_id": "no", "sequence": 3, "active": true, "sent_at_ms": now_ms() })),
+        ),
+        (400, json!({ "error": "instance_id must be a UUID" }))
+    );
+    host.send(&session, "the desk is left", "m4");
+    wait_for("the push after the desk was left", || {
+        pushed("the desk is left")
+    });
+    assert_eq!(relay.taken().len(), 2, "nothing was pushed in between");
+
+    // An agent asks its user something: the phone is told at once, with a sound, and the
+    // answer can be typed from the banner.
+    let (status, asked) = host.ask(
+        "POST",
+        "/decisions",
+        Some(&json!({
+            "session": session, "title": "The code", "question": "Which code did the bank send?",
+            "response_type": "text_input",
+        })),
+    );
+    assert_eq!(status, 201, "{asked}");
+    let decision_id = asked["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for("the push for the request", || {
+        pushed("Which code did the bank send?")
+    });
+    let request = relay.taken().last().unwrap().2["notifications"][0].clone();
+    assert_eq!(request["collapseId"], format!("decision-{decision_id}"));
+    let payload = &request["payload"];
+    assert_eq!(payload["aps"]["sound"], "default");
+    assert_eq!(payload["aps"]["category"], "input-request");
+    assert_eq!(payload["aps"]["alert"]["subtitle"], "The code");
+    assert_eq!(
+        (
+            &payload["reason"],
+            &payload["decision_id"],
+            &payload["response_type"]
+        ),
+        (
+            &json!("decision"),
+            &json!(decision_id),
+            &json!("text_input")
+        )
+    );
+    // While the request is open, a reply that ends a turn makes a sound too.
+    host.send(&session, "still waiting for the code", "m5");
+    wait_for("the push for a reply while a request is open", || {
+        pushed("still waiting for the code")
+    });
+    let payload = relay.taken().last().unwrap().2["notifications"][0]["payload"].clone();
+    assert_eq!(
+        (&payload["needs_response"], &payload["aps"]["sound"]),
+        (&json!(true), &json!("default"))
+    );
+
+    // The push service says the token is gone: nothing is sent to it again.
+    relay.answers(
+        200,
+        json!({ "results": [{ "status": 410, "reason": "Unregistered" }] }),
+    );
+    host.send(&session, "to a phone that is gone", "m6");
+    wait_for("the row to be stopped", || {
+        !row(&host)["disabled_at"].is_null()
+    });
+    let sent_so_far = relay.taken().len();
+    host.send(&session, "to nobody", "m7");
+    answered(&host, "to nobody");
+
+    // The phone registers again and lives again. Then it takes its grant back: this Host
+    // has no other way to it, and stops.
+    register(&host);
+    assert!(row(&host)["disabled_at"].is_null());
+    relay.answers(401, json!({ "error": { "code": "grant_revoked" } }));
+    host.send(&session, "to a phone that took its grant back", "m8");
+    wait_for("the row to be stopped again", || {
+        !row(&host)["disabled_at"].is_null()
+    });
+    assert_eq!(
+        relay.taken().len(),
+        sent_so_far + 1,
+        "one more push was tried, and none for the turn in between"
+    );
 }
 
 #[test]

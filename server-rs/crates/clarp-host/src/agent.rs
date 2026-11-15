@@ -35,6 +35,7 @@ use crate::hub::Hub;
 use crate::ids;
 use crate::launcher::{self, Launcher, Told};
 use crate::library::{self, Books, Done, Want};
+use crate::pusher::{Pusher, TurnDone};
 use crate::revisions::Revisions;
 use crate::tools::ToolAnswer;
 use crate::{process, wire};
@@ -198,6 +199,8 @@ pub struct Setup {
     pub revisions: Arc<Revisions>,
     /// How often an agent that has running jobs looks whether somebody still runs them.
     pub jobs_checked_every: Duration,
+    /// The way to the phones that are not listening.
+    pub pusher: Pusher,
 }
 
 /// The way to an agent's thread.
@@ -1257,6 +1260,17 @@ impl Worker {
             if let Some(told) =
                 wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms)
             {
+                // A phone that is not listening is pushed to, when the rule says so. With a
+                // sound when the agent still waits for an answer from the user.
+                if told["push"] == true {
+                    self.setup.pusher.turn_done(TurnDone {
+                        session: record.session.clone(),
+                        persona: record.persona.clone(),
+                        notification_id: id.clone(),
+                        preview: told["preview"].as_str().unwrap_or("").to_string(),
+                        needs_response: actor.artifacts().has_pending_decision(now),
+                    });
+                }
                 hub.publish(told, now);
             }
         }

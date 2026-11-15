@@ -353,6 +353,9 @@ SCENARIOS = [
         'steps': [
             get('/log?session=nobody'),
             post('/send', {'session': 'nobody', 'text': 'synthetic to nobody', 'client_msg_id': 'lost'}),
+            # A message that says nothing is refused before it is asked whom it is for.
+            post('/send', {'session': 'nobody', 'text': '   ', 'client_msg_id': 'empty'}, 'send nothing to nobody'),
+            post('/send', {'session': AGENT, 'text': '', 'client_msg_id': 'void'}, 'send nothing'),
             post('/stop', {'session': 'nobody'}),
             post('/select', {'session': 'nobody'}),
             get('/turn-queue?session=nobody'),
@@ -417,8 +420,11 @@ SCENARIOS = [
             {'op': 'wait_reply', 'after': 'u-alfa'},
             {'op': 'quiesce'},
             {**LOG, 'name': 'log after the first turn', 'save': {'first': 'latest_revision'}},
-            send('synthetic HEARTBEAT_OK bravo', 'bravo', origin='heartbeat'),
-            {'op': 'wait_reply', 'after': 'u-bravo'},
+            # A Host whose heartbeats are off takes none from outside either.
+            send('synthetic routine bravo', 'bravo', origin='heartbeat'),
+            # A dreaming run that found nothing to do says so with its token.
+            send('synthetic DREAMING_OK charlie', 'charlie', origin='dreaming'),
+            {'op': 'wait_reply', 'after': 'u-charlie'},
             {'op': 'quiesce'},
             send('synthetic routine delta', 'delta', origin='dreaming'),
             {'op': 'wait_reply', 'after': 'u-delta'},
