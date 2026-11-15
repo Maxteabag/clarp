@@ -57,8 +57,10 @@ SCENARIOS = [
         'what': 'a client resends after a lost acknowledgement: one message, one turn',
         'steps': [
             send('synthetic durable charlie', 'charlie'),
-            send('synthetic durable charlie', 'charlie'),
             {'op': 'wait_reply', 'after': 'u-charlie'},
+            {'op': 'quiesce'},
+            # The acknowledgement was lost; the client sends the same message again.
+            {**send('synthetic durable charlie', 'charlie'), 'name': 'send charlie again'},
             {'op': 'quiesce'},
             LOG,
         ],

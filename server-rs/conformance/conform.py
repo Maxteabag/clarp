@@ -54,7 +54,9 @@ import run as harness_run  # noqa: E402
 import contract_plants as plants  # noqa: E402
 import contract_scenarios as scenarios  # noqa: E402
 
-FAKE_CLAUDE = REPO / 'tests' / 'replay' / 'fake_claude.py'
+# The harness's fake Claude, and one thing more: it writes the transcript the real CLI writes,
+# which is where the Python Host reads a Claude agent's conversation from.
+FAKE_CLAUDE = HERE / 'fake_claude.py'
 SCRATCH = Path(os.environ.get('CLARP_CONFORM_SCRATCH', '/var/tmp/cfm'))
 HTTP_OPS = ('get', 'post', 'put', 'delete', 'patch')
 # What a normalized capture holds besides the two channels a client sees. Both sides get the
@@ -62,8 +64,24 @@ HTTP_OPS = ('get', 'post', 'put', 'delete', 'patch')
 NO_STATE = {'schema': [], 'tables': {}, 'files': [], 'cli': [], 'sse_log': []}
 
 
+def claude_shim(path: Path) -> None:
+    """Makes `path` the program that runs this suite's fake Claude."""
+    path.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_CLAUDE))} "$@"\n')
+    path.chmod(0o755)
+
+
+class PythonHost(replay.Host):
+    """The replay harness's own Host, with this suite's fake Claude in place of the harness's."""
+
+    def start(self, config=None):
+        super().start(config)
+        # The harness put its fake first on the Host's PATH as `claude`. No turn has run yet.
+        claude_shim(self.root / 'provider' / 'bin' / 'claude')
+        return self
+
+
 class RustHost(replay.Host):
-    """The Rust Host behind the same fake Claude the Python replay Host runs."""
+    """The Rust Host behind the same fake Claude."""
 
     def start(self, config=None):
         (self.root / replay.OWNED).touch()
@@ -71,8 +89,7 @@ class RustHost(replay.Host):
         for path in (provider / 'bin', self.root / 'workspace', self.root / 'home', self.root / 'tmp'):
             path.mkdir(parents=True)
         shim = provider / 'bin' / 'claude'
-        shim.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_CLAUDE))} "$@"\n')
-        shim.chmod(0o755)
+        claude_shim(shim)
         env = replay.child_env()
         env.update({'HOME': str(self.root / 'home'), 'TMPDIR': str(self.root / 'tmp'),
                     'CLARP_HOST_TOKEN': replay.TOKEN, 'CLARP_CLAUDE_PROGRAM': str(shim),
@@ -195,8 +212,36 @@ def capture(make_host, scenario, root: Path) -> dict:
             'db': {'schema': [], 'pk': {}, 'tables': {}}, 'files': [], 'cli': []}
 
 
+EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
+
+
+def settle(value, sessions):
+    """Rewrites what differs between two runs of the same Host by nature, where the harness's
+    normalizer does not know the field, and leaves out the agents a scenario is not about."""
+    if isinstance(value, list):
+        return [settle(item, sessions) for item in value]
+    if not isinstance(value, dict):
+        return value
+    out = {}
+    for key, item in value.items():
+        if key == 'runtime_instance' and isinstance(item, str) and item:
+            item = '<instance>'  # one per Host process
+        elif key == 'turn_started_at' and isinstance(item, int) and item in EPOCH_MS:
+            item = '<time>'  # a clock reading while a turn runs, 0 when none does
+        elif key == 'agents' and isinstance(item, list):
+            # The reference Host starts with two codex agents (rachel, mike) that the Rust Host
+            # cannot run until it has a Codex adapter. Both sides are cut to the scenario's own.
+            item = [row for row in item if not isinstance(row, dict) or row.get('session') in sessions]
+        elif key == 'roster' and isinstance(item, list):
+            item = [name for name in item if isinstance(name, str) and name.lower() in sessions]
+        out[key] = settle(item, sessions)
+    return out
+
+
 def seen_by_a_client(raw: dict) -> dict:
     """A capture, normalized, and cut down to the channels a client sees."""
+    sessions = (scenarios.AGENT,)
+    raw = {**raw, 'http': [{**exchange, 'body': settle(exchange['body'], sessions)} for exchange in raw['http']]}
     whole = normalize.normalize(raw, str(REPO))
     return {'scenario': whole['scenario'], 'error': whole['error'], 'http': whole['http'], 'sse': whole['sse'],
             'live': whole.get('live', {})}
@@ -251,7 +296,7 @@ def run_errors(seen: dict, label: str) -> list:
 
 
 def python_host(build: Path):
-    return lambda root: replay.Host(build, root)
+    return lambda root: PythonHost(build, root)
 
 
 def rust_host(binary: Path):
