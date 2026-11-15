@@ -161,13 +161,15 @@ pub enum Ask {
     },
     /// From a turn's thread: the live turn's spool may have grown.
     SpoolChanged,
-    /// From a turn's thread: nothing answers at the turn's shim any more.
+    /// From a turn's thread: nothing answers at the shim of this attempt of the turn any more.
     ShimGone {
         turn: TurnId,
+        attempt: u32,
     },
-    /// From a turn's thread: no shim could be started.
+    /// From a turn's thread: no shim could be started for this attempt of the turn.
     LaunchFailed {
         turn: TurnId,
+        attempt: u32,
         reason: String,
     },
     /// From the fleet: the user changed something about the agent. This is the agent as it
@@ -383,6 +385,8 @@ pub(crate) fn never_ran() -> Status {
         label: String::new(),
         resting: None,
         context_tokens: None,
+        completed_at_ms: None,
+        answered_by: None,
     }
 }
 
@@ -618,10 +622,21 @@ impl Worker {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                     Instant::now() + Duration::from_millis(wait)
                 });
-            let due = [self.transcript_due, jobs_due, goals_due, requests_due]
-                .into_iter()
-                .flatten()
-                .min();
+            // And an agent whose turn waits for its next attempt wakes to start it.
+            let retry_due = self.actor.as_ref().and_then(Actor::retry_at).map(|due| {
+                let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
+                Instant::now() + Duration::from_millis(wait)
+            });
+            let due = [
+                self.transcript_due,
+                jobs_due,
+                goals_due,
+                requests_due,
+                retry_due,
+            ]
+            .into_iter()
+            .flatten()
+            .min();
             let ask = match due {
                 None => match rx.recv() {
                     Ok(ask) => ask,
@@ -643,6 +658,9 @@ impl Worker {
                         }
                         if looked.is_ok() && requests_due.is_some_and(|due| due <= now) {
                             looked = self.settle_requests();
+                        }
+                        if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
+                            looked = self.retry_turn();
                         }
                         if let Err(error) = looked {
                             eprintln!(
@@ -956,15 +974,28 @@ impl Worker {
             // Answered above, where what they change is published first.
             Ask::Artifact { .. } | Ask::Goal { .. } | Ask::Amended { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
-            Ask::ShimGone { turn } => (actor.shim_gone(turn, now)?, nobody()),
-            Ask::LaunchFailed { turn, reason } => {
-                (actor.launch_failed(turn, &reason, now)?, nobody())
-            }
+            Ask::ShimGone { turn, attempt } => (actor.shim_gone(turn, attempt, now)?, nobody()),
+            Ask::LaunchFailed {
+                turn,
+                attempt,
+                reason,
+            } => (actor.launch_failed(turn, attempt, &reason, now)?, nobody()),
             Ask::Close => return Ok(()),
         };
         // What follows from a command is done and published before its answer is given.
         self.after(out);
         owed();
+        Ok(())
+    }
+
+    /// Starts the next attempt of a turn whose wait is over.
+    fn retry_turn(&mut self) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let out = actor.retry_due(now)?;
+        self.after(out);
         Ok(())
     }
 
@@ -998,16 +1029,20 @@ impl Worker {
         let spawned = match action {
             Action::Launch(order) => {
                 let launcher = self.setup.launcher.clone();
-                let turn = order.turn;
+                let (turn, attempt) = (order.turn, order.attempt);
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
-                        launcher.launch_and_follow(&order, &|told| tell(&tx, turn, told))
+                        launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told))
                     })
             }
-            Action::Follow { turn, socket } => std::thread::Builder::new()
+            Action::Follow {
+                turn,
+                attempt,
+                socket,
+            } => std::thread::Builder::new()
                 .name(format!("turn-{}", turn.0))
-                .spawn(move || launcher::follow(&socket, &|told| tell(&tx, turn, told))),
+                .spawn(move || launcher::follow(&socket, &|told| tell(&tx, turn, attempt, told))),
             Action::Stop {
                 socket, grace_ms, ..
             } => std::thread::Builder::new()
@@ -1364,7 +1399,7 @@ impl Worker {
 
 /// What a client is shown as an agent's state: which turn runs and what it does, or which
 /// turn ended last. A change in any of it is told.
-fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>, String) {
+fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>, String, u32) {
     let live = status.live.as_ref();
     let tool = match live.map(|live| &live.activity) {
         Some(Activity::Tool { name }) => name.clone(),
@@ -1376,15 +1411,22 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
         tool,
         status.last.as_ref().map(|last| last.id),
         status.label.clone(),
+        // An attempt of the live turn failed and the turn is tried again: the apps are told
+        // that it reconnects. They are not told when the next attempt begins.
+        live.map_or(0, |live| live.failed_attempts),
     )
 }
 
-/// Passes what a turn's thread says on to the agent's thread.
-fn tell(tx: &mpsc::Sender<Ask>, turn: TurnId, told: Told) {
+/// Passes what the thread of one attempt of a turn says on to the agent's thread.
+fn tell(tx: &mpsc::Sender<Ask>, turn: TurnId, attempt: u32, told: Told) {
     let ask = match told {
         Told::SpoolChanged => Ask::SpoolChanged,
-        Told::Gone => Ask::ShimGone { turn },
-        Told::Failed(reason) => Ask::LaunchFailed { turn, reason },
+        Told::Gone => Ask::ShimGone { turn, attempt },
+        Told::Failed(reason) => Ask::LaunchFailed {
+            turn,
+            attempt,
+            reason,
+        },
     };
     let _ = tx.send(ask);
 }

@@ -61,6 +61,8 @@ it covers that exact difference and nothing else.
 | `pinned` in the answer to the discard of a pinned artifact | `true`, beside `pinned_at: null` (defect R15) | `false` | A discard unpins. The answer says what is now true |
 | A reply, to a client that catches up by revision | given again after the next message arrived: the Host wrote it a second time (defect R16) | given once | A row that did not change is not sent again |
 | `live_activity` in an agent's row after its first turn | missing until the next turn, in some runs (defect R17) | there: at rest, since the turn's end | An app's line for an agent says what the agent last did, whichever turn that was |
+| What a tool that died left on stderr, as the state of the failed turn gives it (`detail.error`) | as the tool wrote it, with the end of its last line | the same words without the line's end | The words are what failed, the line's end is how a terminal was told. `detail.provider_message` and the row under the message carry them without it on both Hosts |
+| `phase` of the last thing a turn said before it failed | `final` | none | A turn that failed has no final word: the row below says why it ended |
 
 ## Differences the conformance corpus does not reach
 

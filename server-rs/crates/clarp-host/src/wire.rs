@@ -12,7 +12,8 @@ use clarp_kernel::conversation::{Entry, Notice, ToolStatus, TurnEnd};
 use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::notify;
-use clarp_kernel::turn::{Activity, Origin, Outcome, automation_kind};
+use clarp_kernel::recovery;
+use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Value, json};
@@ -162,6 +163,18 @@ pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Va
     })
 }
 
+/// What a turn that waits a moment for its next attempt shows.
+const RECONNECTING: &str = "Reconnecting… Your message is saved.";
+
+/// The attempt a live turn waits a moment for, and how long it waits: when it waits for one.
+fn reconnecting(live: &LiveStatus) -> Option<(u32, i64)> {
+    let parked = live.parked.as_ref()?;
+    match parked.wait {
+        Wait::Retry { until_ms } => Some((parked.attempts + 1, until_ms - parked.since_ms)),
+        Wait::Account => None,
+    }
+}
+
 /// What the user is told of a turn that failed: its kind, and the Python Host's words for it
 /// (`failures::told`). A turn in a log from before the kind was kept is read now.
 fn failure(reason: &str, kind: &str, model: &str) -> (String, failures::Told) {
@@ -177,8 +190,8 @@ fn failure(reason: &str, kind: &str, model: &str) -> (String, failures::Told) {
 }
 
 /// What an ended turn's state says about how it ended. `backend` and `model` are the agent's.
-fn ending_detail(outcome: &Outcome, backend: &str, model: &str) -> Value {
-    match outcome {
+fn ending_detail(last: &Settled, backend: &str, model: &str) -> Value {
+    match &last.outcome {
         Outcome::Stopped { by } => json!({
             "message": "Turn stopped",
             "source": "user_stop",
@@ -189,8 +202,7 @@ fn ending_detail(outcome: &Outcome, backend: &str, model: &str) -> Value {
         Outcome::Failed { reason, kind } => {
             let (kind, told) = failure(reason, kind, model);
             json!({
-                // A turn is tried once: nothing is tried again yet.
-                "attempts": 1,
+                "attempts": last.attempts.max(1),
                 "dispatch": backend,
                 "error": told.error,
                 "message": told.message,
@@ -227,6 +239,19 @@ pub fn state(
 ) -> Value {
     let kind = state_kind(status);
     let detail = match (&status.live, &status.last) {
+        // Between two attempts: the turn is as busy as before, and reconnects.
+        (Some(live), _) if reconnecting(live).is_some() => {
+            let (next, after_ms) = reconnecting(live).unwrap_or_default();
+            json!({
+                "action": "reconnecting",
+                "after_ms": after_ms,
+                "dispatch": backend,
+                "of": recovery::MAX_ATTEMPTS,
+                "origin": live.origin.name(),
+                "reconnect": next,
+                "summary": RECONNECTING,
+            })
+        }
         (Some(live), _) => json!({
             "backend_session_id": session_name(record, status),
             "dispatch": backend,
@@ -249,7 +274,7 @@ pub fn state(
             }
             detail
         }
-        (None, Some(last)) => ending_detail(&last.outcome, backend, &record.model),
+        (None, Some(last)) => ending_detail(last, backend, &record.model),
         (None, None) => json!({ "session": record.session }),
     };
     json!({
@@ -277,7 +302,7 @@ pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
         "persona": record.persona,
         "kind": "interrupted",
         "ts": state_since(record, status),
-        "detail": ending_detail(&last.outcome, "", ""),
+        "detail": ending_detail(last, "", ""),
     }))
 }
 
@@ -304,6 +329,17 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         Some(Activity::Responding)
     );
     let (action, phase, state, outcome, summary) = match (&kind, status.last.as_ref()) {
+        (AgentStateKind::Thinking, _)
+            if running.is_some_and(|live| reconnecting(live).is_some()) =>
+        {
+            (
+                "reconnecting",
+                "thinking",
+                "thinking",
+                "running",
+                RECONNECTING,
+            )
+        }
         (AgentStateKind::Thinking, _) if responding => (
             "responding",
             "responding",
@@ -1059,10 +1095,7 @@ pub fn summary(
         // answered last. A turn that was cut off may or may not have said its model before
         // it went: what an app shows must not depend on that.
         "model": if record.model.is_empty() {
-            ended
-                .filter(|end| end.status == "completed")
-                .and_then(|end| end.model.clone())
-                .unwrap_or_default()
+            status.answered_by.clone().unwrap_or_default()
         } else {
             record.model.clone()
         },
@@ -1110,7 +1143,9 @@ pub fn summary(
         "latest_state_ts": since,
         "turn_started_at": turn_started_at,
         "last_activity": since / 1_000,
-        "last_turn_end": completed.map_or(0, |last| last.ended_at_ms / 1_000),
+        // When a turn last ran to its end: a turn that failed or was stopped since does not
+        // take that away.
+        "last_turn_end": status.completed_at_ms.map_or(0, |at| at / 1_000),
         "status_text": (!status.label.is_empty()).then_some(&status.label),
         "activity": activity(record, status),
         "live_activity": live_activity,
@@ -1129,7 +1164,7 @@ pub fn summary(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use clarp_kernel::conversation::{Message, Reply, ToolCall};
-    use clarp_kernel::turn::{Origin, Settled, TurnId};
+    use clarp_kernel::turn::{Origin, TurnId};
     use clarp_protocol::events::{Envelope, Event};
     use clarp_protocol::log::LogResponse;
     use clarp_protocol::snapshot::AgentSummary;
@@ -1204,6 +1239,8 @@ mod tests {
                 tool_count: 1,
                 tools: Vec::new(),
                 stopping: false,
+                parked: None,
+                failed_attempts: 0,
             }),
             last: last.map(|outcome| Settled {
                 id: TurnId(1),
@@ -1214,6 +1251,7 @@ mod tests {
                 started_at_ms: Some(1_100),
                 ended_at_ms: 4_000,
                 tool_count: 0,
+                attempts: 1,
             }),
             waiting: vec![TurnId(3)],
             paused: true,
@@ -1223,6 +1261,8 @@ mod tests {
             label: String::new(),
             resting: None,
             context_tokens: None,
+            completed_at_ms: None,
+            answered_by: None,
         }
     }
 
@@ -1482,9 +1522,10 @@ mod tests {
             42,
             None,
         );
-        // The gauge is what a turn last said of the conversation, whichever turn that was.
+        // The gauge and the model are what a turn last said, whichever turn that was.
         let busy = Status {
             context_tokens: Some(5),
+            answered_by: Some("fable".to_string()),
             ..busy
         };
         let row = summary(
@@ -1674,11 +1715,35 @@ mod tests {
 
         let done = summary(
             &record(),
-            &status(None, Some(Outcome::Completed)),
+            &Status {
+                completed_at_ms: Some(4_000),
+                ..status(None, Some(Outcome::Completed))
+            },
             "claude",
             None,
             Some(&ended()),
             false,
+        );
+        // A turn that failed or was stopped since does not take that away.
+        let later = summary(
+            &record(),
+            &Status {
+                completed_at_ms: Some(4_000),
+                answered_by: Some("fable".to_string()),
+                ..halted
+            },
+            "claude",
+            None,
+            None,
+            false,
+        );
+        assert_eq!(
+            (
+                &later["last_turn_end"],
+                &later["model"],
+                &later["latest_state"]
+            ),
+            (&json!(4), &json!("fable"), &json!("interrupted"))
         );
         assert_eq!(
             (&done["last_turn_end"], &done["turn_started_at"]),

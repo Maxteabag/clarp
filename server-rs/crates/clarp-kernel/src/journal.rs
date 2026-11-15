@@ -510,7 +510,7 @@ mod tests {
     use clarp_store_mem::MemEngine;
 
     use super::*;
-    use crate::turn::{Activity, RunOutcome, TurnId};
+    use crate::turn::{Activity, RunOutcome, TurnId, Wait};
 
     fn open(engine: &MemEngine) -> Recorder {
         Recorder::open(
@@ -615,7 +615,45 @@ mod tests {
                     t,
                 )
             }),
+            // A turn whose connection drops: it waits, is tried again, drops again, and
+            // gives up. A crash at any of these leaves it where it was.
+            Box::new(|r, t| {
+                r.accept(b"over a bad line".to_vec(), Origin::User, t)
+                    .map(|a| a.effects)
+            }),
+            Box::new(|r, t| r.handle(Command::TurnStarted { turn: TurnId(5) }, t)),
+            Box::new(|r, t| r.handle(dropped(5, t), t)),
+            Box::new(|r, t| r.handle(Command::TurnRetried { turn: TurnId(5) }, t)),
+            Box::new(|r, t| r.handle(Command::TurnStarted { turn: TurnId(5) }, t)),
+            Box::new(|r, t| r.handle(dropped(5, t), t)),
+            Box::new(|r, t| r.handle(Command::WaitOver { turn: TurnId(5) }, t)),
+            // And one that is stopped while it waits.
+            Box::new(|r, t| {
+                r.accept(b"once more".to_vec(), Origin::User, t)
+                    .map(|a| a.effects)
+            }),
+            Box::new(|r, t| r.handle(dropped(6, t), t)),
+            Box::new(|r, t| {
+                r.handle(
+                    Command::Stop {
+                        by: "peter".to_string(),
+                    },
+                    t,
+                )
+            }),
         ]
+    }
+
+    /// The connection of a turn's tool dropped: the turn waits a second for its next attempt.
+    fn dropped(turn: u64, now_ms: i64) -> Command {
+        Command::TurnParked {
+            turn: TurnId(turn),
+            wait: Wait::Retry {
+                until_ms: now_ms + 1_000,
+            },
+            kind: "connection".to_string(),
+            reason: "read ECONNRESET".to_string(),
+        }
     }
 
     #[test]
@@ -636,8 +674,8 @@ mod tests {
         }
         assert_eq!(
             recorder.agent().settled(),
-            4,
-            "all four messages reached an end"
+            6,
+            "all six messages reached an end"
         );
         assert!(recorder.agent().live().is_none() && recorder.agent().waiting().next().is_none());
     }

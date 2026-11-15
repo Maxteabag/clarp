@@ -40,8 +40,10 @@ use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
+use clarp_kernel::recovery;
 use clarp_kernel::turn::{
-    Activity, Admission, Origin, RunOutcome, Settled, Turn, TurnId, silent_when_failed,
+    Activity, Admission, Origin, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
+    silent_when_failed,
 };
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
@@ -82,17 +84,48 @@ pub struct Profile {
 
 impl Profile {
     pub fn spool_path(&self, turn: TurnId) -> PathBuf {
-        self.dir.join("spool").join(format!("{}.jsonl", turn.0))
+        self.spool_path_of(turn, 1)
     }
 
     /// The message of a turn, where its shim reads it.
     pub fn stdin_path(&self, turn: TurnId) -> PathBuf {
-        self.dir.join("spool").join(format!("{}.stdin", turn.0))
+        self.stdin_path_of(turn, 1)
     }
 
     pub fn socket_path(&self, turn: TurnId) -> PathBuf {
-        self.run_dir
-            .join(format!("{}-{}.sock", self.agent_id, turn.0))
+        self.socket_path_of(turn, 1)
+    }
+
+    /// What one attempt of a turn writes: every attempt is a tool process of its own, with a
+    /// shim, a spool and a socket of its own.
+    pub fn spool_path_of(&self, turn: TurnId, attempt: u32) -> PathBuf {
+        self.dir
+            .join("spool")
+            .join(format!("{}.jsonl", attempt_name(turn, attempt)))
+    }
+
+    pub fn stdin_path_of(&self, turn: TurnId, attempt: u32) -> PathBuf {
+        self.dir
+            .join("spool")
+            .join(format!("{}.stdin", attempt_name(turn, attempt)))
+    }
+
+    pub fn socket_path_of(&self, turn: TurnId, attempt: u32) -> PathBuf {
+        self.run_dir.join(format!(
+            "{}-{}.sock",
+            self.agent_id,
+            attempt_name(turn, attempt)
+        ))
+    }
+}
+
+/// The name an attempt's files go by: the turn's number, and from the second attempt on the
+/// attempt's too. A turn's first attempt keeps the name a turn always had.
+fn attempt_name(turn: TurnId, attempt: u32) -> String {
+    if attempt <= 1 {
+        turn.0.to_string()
+    } else {
+        format!("{}.{attempt}", turn.0)
     }
 }
 
@@ -100,6 +133,8 @@ impl Profile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShimOrder {
     pub turn: TurnId,
+    /// Which attempt of the turn the shim runs, from 1.
+    pub attempt: u32,
     pub spool: PathBuf,
     pub socket: PathBuf,
     pub stdin_file: PathBuf,
@@ -119,7 +154,11 @@ pub enum Action {
     Launch(ShimOrder),
     /// Follow the shim that has this turn: say [`Actor::spool_changed`] whenever it hints that
     /// its spool has grown, and [`Actor::shim_gone`] when nothing answers at its socket any more.
-    Follow { turn: TurnId, socket: PathBuf },
+    Follow {
+        turn: TurnId,
+        attempt: u32,
+        socket: PathBuf,
+    },
     /// Ask the shim that has this turn to end its tool.
     Stop {
         turn: TurnId,
@@ -285,6 +324,10 @@ pub struct LiveStatus {
     pub tools: Vec<LiveTool>,
     /// It was told to stop and has not gone yet.
     pub stopping: bool,
+    /// It waits between two attempts: for what, since when, and on which failure.
+    pub parked: Option<Parked>,
+    /// How many attempts of the turn have failed so far.
+    pub failed_attempts: u32,
 }
 
 /// What an agent is doing, for a snapshot.
@@ -307,6 +350,10 @@ pub struct Status {
     /// How many tokens the tool's conversation held when a turn last said so: the gauge an
     /// app shows. A turn that says nothing of it (a tool that died) leaves it as it was.
     pub context_tokens: Option<u64>,
+    /// When a turn last ran to its end, and the model that answered last. A turn that
+    /// failed or was stopped leaves both as they were.
+    pub completed_at_ms: Option<i64>,
+    pub answered_by: Option<String>,
 }
 
 /// What changed in the agent's books together, to be written together: a goal, and
@@ -348,6 +395,8 @@ struct LiveTurn {
     tools: Vec<LiveTool>,
     /// The spool has said how the tool went. Nothing more will come.
     over: bool,
+    /// Which attempt of the turn this is, from 1: whose spool is read.
+    attempt: u32,
 }
 
 impl LiveTurn {
@@ -376,12 +425,44 @@ pub struct Actor {
     unstored_changes: u64,
     /// The newest revision given to something that is shown and not stored.
     shown_revision: u64,
-    /// How full the tool's conversation was when a turn last said so ([`Status`]).
-    context_tokens: Option<u64>,
+    /// What the turns before left for the agent's row: how full the tool's conversation was
+    /// when a turn last said so, when a turn last ran to its end, and which model answered
+    /// last ([`Status`]).
+    remembered: Remembered,
 }
 
-/// How many turns back the log is asked how full the conversation was, when the agent is
-/// opened. A tool that has said nothing for so many turns in a row says it at its next one.
+/// What an agent's row goes on showing whatever became of the turns after.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Remembered {
+    context_tokens: Option<u64>,
+    completed_at_ms: Option<i64>,
+    answered_by: Option<String>,
+}
+
+impl Remembered {
+    /// Takes what a turn's end says, where it says something.
+    fn take(&mut self, end: &TurnEnd) {
+        if let Some(tokens) = end.tokens_in {
+            self.context_tokens = Some(tokens);
+        }
+        if end.status == "completed" {
+            self.completed_at_ms = Some(end.ended_at_ms);
+            if let Some(model) = &end.model {
+                self.answered_by = Some(model.clone());
+            }
+        }
+    }
+
+    /// Whether an older turn's end could still add something.
+    fn is_whole(&self) -> bool {
+        self.context_tokens.is_some()
+            && self.completed_at_ms.is_some()
+            && self.answered_by.is_some()
+    }
+}
+
+/// How many turns back the log is asked what the agent's row keeps, when the agent is
+/// opened. What no turn has said for so many turns in a row, the next turn says.
 const CONTEXT_LOOKBACK: usize = 20;
 
 /// Hands over every record of one kind that the log has, oldest first. Items of the same
@@ -473,8 +554,10 @@ struct Failure<'a> {
 /// turn nobody was waiting for, and for one that was ended on purpose: the agent's state says
 /// it, the conversation does not.
 ///
-/// The row does not close the turn. A turn's end is told on the last thing the turn itself
-/// put into the conversation, which for a turn that said nothing is the message.
+/// Whether the row closes the turn is the Python Host's rule, as both recordings of run
+/// 43741530173 show it: a turn that put something into the conversation is closed by this
+/// row, below what it said; a turn that said nothing is closed by its message, and this row
+/// stands below the turn's end ([`closed_by_marker`]).
 fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
     if failed.kind == failures::INTERRUPTED || silent_when_failed(failed.origin.name()) {
         return None;
@@ -492,6 +575,22 @@ fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
         text: told.row,
         trace_id: failed.trace_id,
     }))
+}
+
+/// Whether the row that says why a turn failed closes the turn: it does when the turn put
+/// something into the conversation before it failed, and `last_row` is no longer its message.
+fn closed_by_marker(last_row: &str, message_id: &str) -> bool {
+    last_row != message_id
+}
+
+/// The name of one attempt of a turn: the turn's own for its first, and from the second on
+/// the attempt's number with it, so that what two attempts write is never under one name.
+fn attempt_of(name: &str, attempt: u32) -> String {
+    if attempt <= 1 {
+        name.to_string()
+    } else {
+        format!("{name}.{attempt}")
+    }
 }
 
 /// A name for a turn that no other turn has, on this Host or on one the agent may move to: the
@@ -590,17 +689,39 @@ impl Actor {
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
-            context_tokens: None,
+            remembered: Remembered::default(),
         };
-        actor.context_tokens = actor.context_from_log()?;
+        actor.remembered = actor.remembered_in_log()?;
         let mut out = Outputs::default();
         let live = match actor.recorder.agent().live() {
-            Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, true)),
-            Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, false)),
+            Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
+            Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
             _ => None,
         };
-        if let Some((turn, message_seq, starting)) = live {
-            actor.rejoin(turn, message_seq, starting, &mut out, now_ms)?;
+        if let Some((turn, message_seq, attempt, starting)) = live {
+            actor.rejoin(turn, message_seq, attempt, starting, &mut out, now_ms)?;
+        }
+        // A turn that waited for its next attempt still waits: no tool ran for it meanwhile.
+        if let Some(Turn::Parked(parked)) = actor.recorder.agent().live() {
+            let (turn, message_seq, attempt) = (parked.id, parked.message_seq, parked.attempts);
+            let message = actor.message_at(message_seq)?;
+            actor.live = Some(LiveTurn {
+                turn,
+                last_row: message.id.clone(),
+                interpreter: actor
+                    .backend
+                    .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
+                message_id: message.id,
+                trace_id: message.trace_id,
+                origin: message.origin,
+                model: None,
+                tokens: None,
+                offset: 0,
+                drafts: Vec::new(),
+                tools: Vec::new(),
+                over: true,
+                attempt,
+            });
         }
         Ok((actor, out))
     }
@@ -649,9 +770,11 @@ impl Actor {
                 starting: true,
                 activity: Activity::Thinking,
                 started_at_ms: turn.started_at_ms,
-                tool_count: 0,
+                tool_count: turn.tool_count,
                 tools,
                 stopping,
+                parked: None,
+                failed_attempts: turn.attempt.saturating_sub(1),
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
                 turn: turn.id,
@@ -665,6 +788,24 @@ impl Actor {
                 tool_count: turn.tool_count,
                 tools,
                 stopping,
+                parked: None,
+                failed_attempts: turn.attempt.saturating_sub(1),
+            }),
+            // Between two attempts no tool works: the turn is as busy as one that thinks.
+            Some(Turn::Parked(turn)) => Some(LiveStatus {
+                turn: turn.id,
+                message_id,
+                trace_id,
+                origin: turn.origin.clone(),
+                from_queue,
+                starting: false,
+                activity: Activity::Thinking,
+                started_at_ms: turn.started_at_ms,
+                tool_count: turn.tool_count,
+                tools: Vec::new(),
+                stopping,
+                parked: Some(turn.clone()),
+                failed_attempts: turn.attempts,
             }),
             _ => None,
         };
@@ -678,21 +819,33 @@ impl Actor {
             backend_session: agent.backend_session().map(str::to_string),
             label: agent.label().to_string(),
             resting: agent.resting(),
-            context_tokens: self.context_tokens,
+            context_tokens: self.remembered.context_tokens,
+            completed_at_ms: self.remembered.completed_at_ms,
+            answered_by: self.remembered.answered_by.clone(),
         }
     }
 
-    /// What the newest turn that said so says of how full the conversation was.
-    fn context_from_log(&self) -> Result<Option<u64>, ActorError> {
+    /// What the last turns' ends in the log say for the agent's row: of each thing, the
+    /// newest word.
+    fn remembered_in_log(&self) -> Result<Remembered, ActorError> {
+        let mut kept = Remembered::default();
         let Some(last) = self.recorder.agent().last() else {
-            return Ok(None);
+            return Ok(kept);
         };
+        // From the newest end back: an older one only fills what the newer ones left open.
         for turn in (1..=last.id.0).rev().take(CONTEXT_LOOKBACK) {
-            if let Some(tokens) = self.turn_end(turn)?.and_then(|end| end.tokens_in) {
-                return Ok(Some(tokens));
+            if let Some(end) = self.turn_end(turn)? {
+                let mut older = Remembered::default();
+                older.take(&end);
+                kept.context_tokens = kept.context_tokens.or(older.context_tokens);
+                kept.completed_at_ms = kept.completed_at_ms.or(older.completed_at_ms);
+                kept.answered_by = kept.answered_by.or(older.answered_by);
+            }
+            if kept.is_whole() {
+                break;
             }
         }
-        Ok(None)
+        Ok(kept)
     }
 
     /// How the last turn that held the agent ended, with what its tool said of itself.
@@ -1189,13 +1342,25 @@ impl Actor {
         Ok((true, out))
     }
 
-    /// The shim for this turn could not be started.
+    /// Whether the actor follows this attempt of this turn. What is said of another attempt's
+    /// shim is late news: that attempt is over, and its turn may be at its next one.
+    fn follows(&self, turn: TurnId, attempt: u32) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.turn == turn && live.attempt == attempt)
+    }
+
+    /// The shim for this attempt of the turn could not be started.
     pub fn launch_failed(
         &mut self,
         turn: TurnId,
+        attempt: u32,
         reason: &str,
         now_ms: i64,
     ) -> Result<Outputs, ActorError> {
+        if !self.follows(turn, attempt) {
+            return Ok(Outputs::default());
+        }
         let command = Command::StartFailed {
             turn,
             reason: reason.to_string(),
@@ -1203,8 +1368,16 @@ impl Actor {
         self.ended_outside_the_spool(turn, command, now_ms)
     }
 
-    /// Nothing answers at this turn's shim any more.
-    pub fn shim_gone(&mut self, turn: TurnId, now_ms: i64) -> Result<Outputs, ActorError> {
+    /// Nothing answers at the shim of this attempt of the turn any more.
+    pub fn shim_gone(
+        &mut self,
+        turn: TurnId,
+        attempt: u32,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        if !self.follows(turn, attempt) {
+            return Ok(Outputs::default());
+        }
         let command = Command::TurnEnded {
             turn,
             outcome: RunOutcome::Interrupted {
@@ -1228,6 +1401,11 @@ impl Actor {
         }
         self.pump(&mut out, now_ms)?;
         if self.live.as_ref().map(|live| live.turn) != Some(turn) {
+            return Ok(out);
+        }
+        // A turn between two attempts has no shim and no tool: what is said of the attempt
+        // that is over is late news.
+        if !self.recorder.agent().live().is_some_and(Turn::has_process) {
             return Ok(out);
         }
         // What the agent had written and nobody stored is kept: the user saw it.
@@ -1310,11 +1488,21 @@ impl Actor {
             match effect {
                 Effect::StartTurn { turn, message_seq } => {
                     out.changed.status = true;
-                    self.start(turn, message_seq, out)?;
+                    self.start(turn, message_seq, 1, out)?;
+                }
+                Effect::RetryTurn {
+                    turn,
+                    message_seq,
+                    attempt,
+                } => {
+                    out.changed.status = true;
+                    self.start(turn, message_seq, attempt, out)?;
                 }
                 Effect::StopTurn { turn } => out.actions.push(Action::Stop {
                     turn,
-                    socket: self.profile.socket_path(turn),
+                    socket: self
+                        .profile
+                        .socket_path_of(turn, self.attempt_of_live(turn)),
                     grace_ms: self.profile.stop_grace_ms,
                 }),
             }
@@ -1322,14 +1510,27 @@ impl Actor {
         Ok(())
     }
 
-    /// Hands a turn to a shim: the message goes to disk, and the world is asked to launch.
+    /// Which attempt of this turn the actor follows: 1 when it follows none of it.
+    fn attempt_of_live(&self, turn: TurnId) -> u32 {
+        self.live
+            .as_ref()
+            .filter(|live| live.turn == turn)
+            .map_or(1, |live| live.attempt)
+    }
+
+    /// Hands an attempt of a turn to a shim: the message goes to disk, and the world is asked
+    /// to launch. A later attempt is given the same message; the tool is started on the
+    /// session it named in an earlier one, when it named one.
     fn start(
         &mut self,
         turn: TurnId,
         message_seq: Seq,
+        attempt: u32,
         out: &mut Outputs,
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
+        // What the attempts before put into the conversation is still the turn's.
+        let before = self.live.take().filter(|live| live.turn == turn);
         let backend_session = self.recorder.agent().backend_session().map(str::to_string);
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
@@ -1345,27 +1546,35 @@ impl Actor {
             effort: self.profile.effort.clone(),
             identity: self.profile.identity.clone(),
         });
-        let stdin_file = self.profile.stdin_path(turn);
+        let stdin_file = self.profile.stdin_path_of(turn, attempt);
         write_whole(&stdin_file, &launch.stdin)?;
-        let interpreter = self.backend.interpreter(turn.0, turn_name(&message.id));
+        let interpreter = self
+            .backend
+            .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
+        let (last_row, model, tokens) = match before {
+            Some(before) => (before.last_row, before.model, before.tokens),
+            None => (message.id.clone(), None, None),
+        };
         self.live = Some(LiveTurn {
             turn,
-            last_row: message.id.clone(),
+            last_row,
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
-            model: None,
-            tokens: None,
+            model,
+            tokens,
             interpreter,
             offset: 0,
             drafts: Vec::new(),
             tools: Vec::new(),
             over: false,
+            attempt,
         });
         out.actions.push(Action::Launch(ShimOrder {
             turn,
-            spool: self.profile.spool_path(turn),
-            socket: self.profile.socket_path(turn),
+            attempt,
+            spool: self.profile.spool_path_of(turn, attempt),
+            socket: self.profile.socket_path_of(turn, attempt),
             stdin_file,
             cwd: self.profile.cwd.clone(),
             program: launch.program,
@@ -1384,16 +1593,17 @@ impl Actor {
         &mut self,
         turn: TurnId,
         message_seq: Seq,
+        attempt: u32,
         starting: bool,
         out: &mut Outputs,
         now_ms: i64,
     ) -> Result<(), ActorError> {
-        let spool = self.profile.spool_path(turn);
+        let spool = self.profile.spool_path_of(turn, attempt);
         let reader = SpoolReader::new(&spool);
         if !reader.exists() {
             if starting {
-                // The turn was decided and no shim ever took it. Nothing ran: start it now.
-                return self.start(turn, message_seq, out);
+                // The attempt was decided and no shim ever took it. Nothing ran: start it now.
+                return self.start(turn, message_seq, attempt, out);
             }
             let command = Command::TurnEnded {
                 turn,
@@ -1423,7 +1633,9 @@ impl Actor {
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
         let (mut model, mut tokens) = (None, None);
-        let mut interpreter = self.backend.interpreter(turn.0, turn_name(&message.id));
+        let mut interpreter = self
+            .backend
+            .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
         let mut drafts = Vec::new();
         let mut tools = Vec::new();
         let mut signals = Vec::new();
@@ -1487,18 +1699,20 @@ impl Actor {
             drafts,
             tools,
             over: false,
+            attempt,
         });
         out.changed.conversation = true;
         out.actions.push(Action::Follow {
             turn,
-            socket: self.profile.socket_path(turn),
+            attempt,
+            socket: self.profile.socket_path_of(turn, attempt),
         });
         if self.recorder.agent().stopping().is_some() {
             // The stop was decided; whether the shim ever heard it is not known. Telling it
             // twice does no harm.
             out.actions.push(Action::Stop {
                 turn,
-                socket: self.profile.socket_path(turn),
+                socket: self.profile.socket_path_of(turn, attempt),
                 grace_ms: self.profile.stop_grace_ms,
             });
         }
@@ -1509,14 +1723,54 @@ impl Actor {
     /// The live turn is over, in the log: its files have done their work.
     fn forget_live(&mut self) {
         if let Some(live) = self.live.take() {
-            if let Some((tokens_in, _)) = live.tokens {
-                self.context_tokens = Some(tokens_in);
+            // What the turn's end says is kept for the agent's row.
+            if let Ok(Some(end)) = self.turn_end(live.turn.0) {
+                self.remembered.take(&end);
             }
-            let _ = std::fs::remove_file(self.profile.stdin_path(live.turn));
-            if !self.profile.keep_spools {
-                let _ = std::fs::remove_file(self.profile.spool_path(live.turn));
+            for attempt in 1..=live.attempt {
+                let _ = std::fs::remove_file(self.profile.stdin_path_of(live.turn, attempt));
+                if !self.profile.keep_spools {
+                    let _ = std::fs::remove_file(self.profile.spool_path_of(live.turn, attempt));
+                }
             }
         }
+    }
+
+    /// When the turn that waits for its next attempt is to be tried again. `None`: no turn
+    /// waits for that.
+    pub fn retry_at(&self) -> Option<i64> {
+        match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) => match parked.wait {
+                Wait::Retry { until_ms } => Some(until_ms),
+                Wait::Account => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Starts the next attempt of a turn whose wait is over. Nothing happens before then.
+    pub fn retry_due(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        let mut out = Outputs::default();
+        let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
+            return Ok(out);
+        };
+        if self.retry_at().is_none_or(|at| at > now_ms) {
+            return Ok(out);
+        }
+        let turn = parked.id;
+        let mut batch = self.recorder.batch();
+        if batch
+            .command(Command::TurnRetried { turn }, now_ms)
+            .is_err()
+        {
+            return Ok(out);
+        }
+        // The next attempt has a spool of its own, read from its beginning.
+        batch.cursor(turn, 0, now_ms);
+        let effects = batch.commit()?.effects;
+        out.changed.status = true;
+        self.carry_out(effects, &mut out)?;
+        Ok(out)
     }
 
     /// Reads what is new in the live turn's spool and writes what it means to the log.
@@ -1526,7 +1780,7 @@ impl Actor {
                 return Ok(());
             };
             let turn = live.turn;
-            let spool = self.profile.spool_path(turn);
+            let spool = self.profile.spool_path_of(turn, live.attempt);
             let read = SpoolReader::new(&spool)
                 .read_window(live.offset, u64::MAX, WINDOW)
                 .map_err(|error| io_error(&spool, error))?;
@@ -1593,6 +1847,32 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
+                            // An attempt that failed on something that passes is not the
+                            // turn's end: the turn waits, and is tried again.
+                            if let RunOutcome::Failed { reason } = &outcome
+                                && batch.agent().stopping().is_none()
+                            {
+                                let kind = failures::classify_error(reason);
+                                if let recovery::Next::Retry { after_ms } =
+                                    recovery::after_failed_attempt(kind, live.attempt)
+                                {
+                                    let parked = Command::TurnParked {
+                                        turn,
+                                        wait: Wait::Retry {
+                                            until_ms: t + after_ms,
+                                        },
+                                        kind: kind.to_string(),
+                                        reason: reason.clone(),
+                                    };
+                                    if batch.command(parked, t).is_ok() {
+                                        // What the attempt was writing when it failed is
+                                        // not said: the next one says it.
+                                        live.drafts.clear();
+                                        live.tools.clear();
+                                        continue;
+                                    }
+                                }
+                            }
                             // What is said of the end, and whether that row closes the turn.
                             let told = match &outcome {
                                 // It went because it was told to: nothing to explain.
@@ -1606,7 +1886,10 @@ impl Actor {
                                     model: &model,
                                     trace_id: live.trace_id.clone(),
                                 })
-                                .map(|marker| (marker, false)),
+                                .map(|marker| {
+                                    let closes = closed_by_marker(&live.last_row, &live.message_id);
+                                    (marker, closes)
+                                }),
                                 RunOutcome::Interrupted { reason } => {
                                     let name = turn_name(&live.message_id);
                                     Some((
@@ -1669,7 +1952,12 @@ impl Actor {
                     batch.item(written(&piece, t)?);
                 }
             }
-            if live.over && batch.agent().live().map(Turn::id) == Some(turn) {
+            if live.over
+                && batch
+                    .agent()
+                    .live()
+                    .is_some_and(|held| held.id() == turn && held.has_process())
+            {
                 // The process is gone and its backend did not say how the turn went.
                 let reason = "the tool ended and nothing said how";
                 let stopping = batch.agent().stopping().is_some();
@@ -1713,7 +2001,8 @@ impl Actor {
                     out.changed.conversation = true;
                 }
             }
-            if live.over {
+            // The turn is over when its attempt is and it does not wait for another.
+            if live.over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
                 self.forget_live();
             }
             self.carry_out(committed.effects, out)?;

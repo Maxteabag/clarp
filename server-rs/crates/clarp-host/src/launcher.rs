@@ -216,6 +216,7 @@ mod tests {
     fn order() -> ShimOrder {
         ShimOrder {
             turn: TurnId(7),
+            attempt: 1,
             spool: PathBuf::from("/data/agents/a1/spool/7.jsonl"),
             socket: PathBuf::from("/run/a1-7.sock"),
             stdin_file: PathBuf::from("/data/agents/a1/spool/7.stdin"),

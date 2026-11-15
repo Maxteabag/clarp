@@ -192,10 +192,34 @@ pub enum TurnEvent {
         activity: Activity,
         at_ms: i64,
     },
+    /// An attempt ended on a failure that does not end the turn: the turn waits for the next
+    /// attempt. `kind` and `reason` are that failure, as it was read then and in the tool's words.
+    Parked {
+        wait: Wait,
+        kind: String,
+        reason: String,
+        at_ms: i64,
+    },
+    /// The wait is over: the tool process of the next attempt is being started.
+    Retried {
+        at_ms: i64,
+    },
     Settled {
         outcome: Outcome,
         at_ms: i64,
     },
+}
+
+/// What a turn waits for between two attempts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "for", rename_all = "kebab-case")]
+pub enum Wait {
+    /// A moment, and then the same again: the attempt failed in a way that passes (a
+    /// connection that dropped, a tool that stalled). The next begins at `until_ms`.
+    Retry { until_ms: i64 },
+    /// An account that serves the turn: the attempt failed on its account (a limit that was
+    /// reached, a sign-in that ran out, a plan without the model).
+    Account,
 }
 
 /// A turn that was accepted and waits in the agent's mailbox.
@@ -209,14 +233,21 @@ pub struct Queued {
     pub accepted_at_ms: i64,
 }
 
-/// A turn whose tool process is being started.
+/// A turn whose tool process is being started: for the first time, or again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Starting {
     pub id: TurnId,
     pub message_seq: u64,
     pub origin: Origin,
     pub accepted_at_ms: i64,
+    /// When the turn began: its first attempt. A turn is counted from there however often
+    /// it is tried.
     pub started_at_ms: i64,
+    /// Which attempt this is, from 1.
+    pub attempt: u32,
+    /// What the attempts before left: the tool's session, and how many tools ran.
+    pub backend_session: Option<String>,
+    pub tool_count: u32,
 }
 
 /// A turn whose tool process is working.
@@ -227,9 +258,31 @@ pub struct Running {
     pub origin: Origin,
     pub accepted_at_ms: i64,
     pub started_at_ms: i64,
+    pub attempt: u32,
     pub backend_session: Option<String>,
     pub activity: Activity,
     pub tool_count: u32,
+}
+
+/// A turn between two attempts. It holds the agent like a turn that runs, and has no tool
+/// process: the last attempt's is gone, the next one's is not started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parked {
+    pub id: TurnId,
+    pub message_seq: u64,
+    pub origin: Origin,
+    pub accepted_at_ms: i64,
+    pub started_at_ms: i64,
+    /// How many attempts the turn has had.
+    pub attempts: u32,
+    pub backend_session: Option<String>,
+    pub tool_count: u32,
+    pub wait: Wait,
+    /// The failure the last attempt ended on: what the turn ends on too, when the wait
+    /// does not end well.
+    pub kind: String,
+    pub reason: String,
+    pub since_ms: i64,
 }
 
 /// A turn that is over. Nothing moves it again.
@@ -243,6 +296,8 @@ pub struct Settled {
     pub started_at_ms: Option<i64>,
     pub ended_at_ms: i64,
     pub tool_count: u32,
+    /// How many attempts the turn had. None for a turn that was taken back before it started.
+    pub attempts: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,6 +305,7 @@ pub enum Turn {
     Queued(Queued),
     Starting(Starting),
     Running(Running),
+    Parked(Parked),
     Settled(Settled),
 }
 
@@ -309,6 +365,9 @@ impl Queued {
             origin: self.origin,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: at_ms,
+            attempt: 1,
+            backend_session: None,
+            tool_count: 0,
         };
         (next, TurnEvent::Started { at_ms })
     }
@@ -324,6 +383,7 @@ impl Queued {
             started_at_ms: None,
             ended_at_ms: at_ms,
             tool_count: 0,
+            attempts: 0,
         };
         (next, TurnEvent::Settled { outcome, at_ms })
     }
@@ -338,9 +398,10 @@ impl Starting {
             origin: self.origin,
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: self.started_at_ms,
-            backend_session: None,
+            attempt: self.attempt,
+            backend_session: self.backend_session,
             activity: Activity::Thinking,
-            tool_count: 0,
+            tool_count: self.tool_count,
         };
         (
             next,
@@ -370,7 +431,8 @@ impl Starting {
             accepted_at_ms: self.accepted_at_ms,
             started_at_ms: Some(self.started_at_ms),
             ended_at_ms: at_ms,
-            tool_count: 0,
+            tool_count: self.tool_count,
+            attempts: self.attempt,
         }
     }
 }
@@ -446,6 +508,84 @@ impl Running {
             started_at_ms: Some(self.started_at_ms),
             ended_at_ms: at_ms,
             tool_count: self.tool_count,
+            attempts: self.attempt,
+        }
+    }
+
+    /// The attempt's tool process is gone on a failure that does not end the turn.
+    pub fn park(self, wait: Wait, kind: String, reason: String, at_ms: i64) -> (Parked, TurnEvent) {
+        let event = TurnEvent::Parked {
+            wait: wait.clone(),
+            kind: kind.clone(),
+            reason: reason.clone(),
+            at_ms,
+        };
+        let next = Parked {
+            id: self.id,
+            message_seq: self.message_seq,
+            origin: self.origin,
+            accepted_at_ms: self.accepted_at_ms,
+            started_at_ms: self.started_at_ms,
+            attempts: self.attempt,
+            backend_session: self.backend_session,
+            tool_count: self.tool_count,
+            wait,
+            kind,
+            reason,
+            since_ms: at_ms,
+        };
+        (next, event)
+    }
+}
+
+impl Parked {
+    /// The wait is over: the next attempt starts.
+    pub fn retry(self, at_ms: i64) -> (Starting, TurnEvent) {
+        let next = Starting {
+            id: self.id,
+            message_seq: self.message_seq,
+            origin: self.origin,
+            accepted_at_ms: self.accepted_at_ms,
+            started_at_ms: self.started_at_ms,
+            attempt: self.attempts + 1,
+            backend_session: self.backend_session,
+            tool_count: self.tool_count,
+        };
+        (next, TurnEvent::Retried { at_ms })
+    }
+
+    /// The wait did not end well: the turn ends on the failure it waited on.
+    pub fn give_up(self, at_ms: i64) -> (Settled, TurnEvent) {
+        let outcome = Outcome::Failed {
+            reason: self.reason.clone(),
+            kind: self.kind.clone(),
+        };
+        (
+            self.ended(outcome.clone(), at_ms),
+            TurnEvent::Settled { outcome, at_ms },
+        )
+    }
+
+    /// Someone stopped the turn while it waited. There is no tool process to wait for.
+    pub fn stop(self, by: String, at_ms: i64) -> (Settled, TurnEvent) {
+        let outcome = Outcome::Stopped { by };
+        (
+            self.ended(outcome.clone(), at_ms),
+            TurnEvent::Settled { outcome, at_ms },
+        )
+    }
+
+    fn ended(self, outcome: Outcome, at_ms: i64) -> Settled {
+        Settled {
+            id: self.id,
+            message_seq: self.message_seq,
+            origin: self.origin,
+            outcome,
+            accepted_at_ms: self.accepted_at_ms,
+            started_at_ms: Some(self.started_at_ms),
+            ended_at_ms: at_ms,
+            tool_count: self.tool_count,
+            attempts: self.attempts,
         }
     }
 }
@@ -457,6 +597,8 @@ impl TurnEvent {
             Self::Started { .. } => "started",
             Self::Bound { .. } => "bound",
             Self::Moved { .. } => "moved",
+            Self::Parked { .. } => "parked",
+            Self::Retried { .. } => "retried",
             Self::Settled { .. } => "settled",
         }
     }
@@ -468,6 +610,7 @@ impl Turn {
             Self::Queued(t) => t.id,
             Self::Starting(t) => t.id,
             Self::Running(t) => t.id,
+            Self::Parked(t) => t.id,
             Self::Settled(t) => t.id,
         }
     }
@@ -477,12 +620,20 @@ impl Turn {
             Self::Queued(_) => "queued",
             Self::Starting(_) => "starting",
             Self::Running(_) => "running",
+            Self::Parked(_) => "parked",
             Self::Settled(_) => "settled",
         }
     }
 
-    /// Whether the turn holds the agent: an agent runs one turn at a time.
+    /// Whether the turn holds the agent: an agent runs one turn at a time, and a turn that
+    /// waits for its next attempt is still that turn.
     pub fn is_live(&self) -> bool {
+        matches!(self, Self::Starting(_) | Self::Running(_) | Self::Parked(_))
+    }
+
+    /// Whether a tool process works for the turn, or is being started for it. A turn between
+    /// two attempts has none.
+    pub fn has_process(&self) -> bool {
         matches!(self, Self::Starting(_) | Self::Running(_))
     }
 
@@ -553,6 +704,27 @@ impl Turn {
                 }
                 Outcome::Withdrawn { .. } => Err(illegal(&Self::Running(t))),
             },
+            (
+                Self::Running(t),
+                TurnEvent::Parked {
+                    wait,
+                    kind,
+                    reason,
+                    at_ms,
+                },
+            ) => Ok(Self::Parked(
+                t.park(wait.clone(), kind.clone(), reason.clone(), *at_ms).0,
+            )),
+            (Self::Parked(t), TurnEvent::Retried { at_ms }) => {
+                Ok(Self::Starting(t.retry(*at_ms).0))
+            }
+            // A turn that waits has no tool that could complete it.
+            (Self::Parked(t), TurnEvent::Settled { outcome, at_ms }) => match outcome {
+                Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {
+                    Ok(Self::Settled(t.ended(outcome.clone(), *at_ms)))
+                }
+                Outcome::Completed | Outcome::Withdrawn { .. } => Err(illegal(&Self::Parked(t))),
+            },
             (state, _) => Err(illegal(&state)),
         }
     }
@@ -579,6 +751,117 @@ mod tests {
 
     fn accepted() -> (Queued, TurnEvent) {
         Queued::accept(TurnId(7), 41, Origin::User, Admission::Queue, 1_000)
+    }
+
+    #[test]
+    fn a_turn_waits_between_two_attempts_and_is_the_same_turn_after() {
+        let (queued, accepted) = accepted();
+        let (starting, started) = queued.start(1_100);
+        assert_eq!(starting.attempt, 1);
+        let (running, moved) = starting.running(1_200);
+        let (running, bound) = running.bind("sess-1".to_string());
+        let (running, tool) = running.moved(
+            Activity::Tool {
+                name: "Bash".to_string(),
+            },
+            1_250,
+        );
+        // The connection drops: the turn is not over.
+        let (parked, dropped) = running.park(
+            Wait::Retry { until_ms: 2_300 },
+            "connection".to_string(),
+            "read ECONNRESET".to_string(),
+            1_300,
+        );
+        assert_eq!(
+            (parked.attempts, parked.tool_count, parked.since_ms),
+            (1, 1, 1_300)
+        );
+        let waiting = Turn::Parked(parked.clone());
+        assert!(waiting.is_live(), "it holds the agent");
+        assert!(!waiting.has_process(), "and no tool works for it");
+        // The next attempt is the same turn: counted from its first start, on the tool's
+        // session, with the tools that ran.
+        let (again, retried) = parked.clone().retry(2_300);
+        assert_eq!(
+            (again.attempt, again.started_at_ms, again.tool_count),
+            (2, 1_100, 1)
+        );
+        assert_eq!(again.backend_session.as_deref(), Some("sess-1"));
+        let (running, moved_again) = again.running(2_400);
+        assert_eq!(
+            (
+                running.attempt,
+                running.tool_count,
+                running.backend_session.as_deref()
+            ),
+            (2, 1, Some("sess-1"))
+        );
+        let (settled, done) = running.settle(RunOutcome::Completed, 2_900);
+        assert_eq!(
+            (
+                settled.started_at_ms,
+                settled.ended_at_ms,
+                settled.tool_count
+            ),
+            (Some(1_100), 2_900, 1)
+        );
+        let history = [
+            accepted.clone(),
+            started.clone(),
+            moved.clone(),
+            bound.clone(),
+            tool.clone(),
+            dropped.clone(),
+            retried,
+            moved_again,
+            done,
+        ];
+        assert_eq!(
+            Turn::replay(&history).unwrap(),
+            Some(Turn::Settled(settled))
+        );
+
+        // A wait that does not end well ends the turn on the failure it waited on.
+        let (gave_up, failed) = parked.clone().give_up(9_000);
+        assert_eq!(
+            gave_up.outcome,
+            Outcome::Failed {
+                reason: "read ECONNRESET".to_string(),
+                kind: "connection".to_string()
+            }
+        );
+        let waited = [accepted, started, moved, bound, tool, dropped];
+        let mut ended = waited.to_vec();
+        ended.push(failed);
+        assert_eq!(Turn::replay(&ended).unwrap(), Some(Turn::Settled(gave_up)));
+        // And a stop ends it at once: there is no tool to wait for.
+        let (stopped, by_hand) = parked.stop("user".to_string(), 1_500);
+        assert_eq!(
+            stopped.outcome,
+            Outcome::Stopped {
+                by: "user".to_string()
+            }
+        );
+        let mut halted = waited.to_vec();
+        halted.push(by_hand);
+        assert_eq!(Turn::replay(&halted).unwrap(), Some(Turn::Settled(stopped)));
+        // Nothing completes a turn that waits, and nothing moves it but its next attempt.
+        for illegal in [
+            TurnEvent::Settled {
+                outcome: Outcome::Completed,
+                at_ms: 1_400,
+            },
+            TurnEvent::Moved {
+                activity: Activity::Thinking,
+                at_ms: 1_400,
+            },
+            TurnEvent::Started { at_ms: 1_400 },
+        ] {
+            let mut wrong = waited.to_vec();
+            wrong.push(illegal);
+            assert!(Turn::replay(&wrong).is_err());
+        }
     }
 
     #[test]

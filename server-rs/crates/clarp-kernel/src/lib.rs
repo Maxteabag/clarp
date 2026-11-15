@@ -18,6 +18,7 @@ pub mod notify;
 pub mod presence;
 pub mod push;
 pub mod python;
+pub mod recovery;
 pub mod requests;
 pub mod roster;
 pub mod tools;
