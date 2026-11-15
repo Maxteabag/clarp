@@ -291,8 +291,11 @@ shim's follower reports names its attempt. The next attempt is given the same me
 session the tool named before. The wait is in the log: a Host that is killed while a turn waits takes the
 wait up, and a crash at any step of it leaves the agent where it was (`journal.rs`, the crash script). While
 it waits the apps are told that the turn reconnects, as busy as before; when the last attempt fails too, the
-turn ends on that failure and says after how many attempts. Held to the Python Host by the scenario
-`retried-turns`.
+turn ends on that failure and says after how many attempts. A turn that is tried once more and then works
+is held to the Python Host by the scenario `retried-turns`. A turn whose connection drops every time is held
+by this Host's own test: the reference did not end such a turn within the fifteen seconds the harness waits,
+in four recordings of four (runs 43741865162 and 43744222881), and a scenario the reference does not finish
+cannot be in the corpus. That is told to the release owner as something seen, not as a defect that is read.
 
 **A turn whose account is out waits, where someone else changes the login** (15 Nov 2026). Two Hosts on one
 machine run their tools with the same logins. The Python Host's selector puts another account in place when
