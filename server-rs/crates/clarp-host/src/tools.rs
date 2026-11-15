@@ -20,7 +20,7 @@ use crate::agent::Unavailable;
 use crate::edge::App;
 use crate::fleet::Member;
 use crate::goaltool::{self, About};
-use crate::{artifact_tool, ids, process};
+use crate::{admin_tool, artifact_tool, ids, process};
 
 /// What a tool was called with.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -103,6 +103,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         "clarp-agent-bg" => agent_bg(app, call).await,
         "clarp-goal" | "clarp-agent-tasks" => goal(app, call).await,
         "clarp-agent-artifacts" => artifact_tool::run(app, call).await,
+        "clarp-admin" => admin_tool::run(app, call).await,
         other => ToolAnswer::said(
             NOT_HERE,
             format!("{other}: not available on this Host yet (the Rust Host). Nothing was done."),

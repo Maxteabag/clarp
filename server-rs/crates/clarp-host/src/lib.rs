@@ -13,6 +13,7 @@
 #![recursion_limit = "256"]
 
 pub mod admin;
+pub mod admin_tool;
 pub mod agent;
 pub mod artifact_tool;
 pub mod config;

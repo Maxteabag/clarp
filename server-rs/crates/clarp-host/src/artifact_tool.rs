@@ -42,19 +42,24 @@ const ASK_VALUED: [&str; 7] = [
 
 /// A command line as it was read: what stands for itself, and what was said with a name.
 #[derive(Debug, Default, PartialEq)]
-struct Parsed {
-    positional: Vec<String>,
-    options: BTreeMap<String, String>,
-    flags: BTreeSet<String>,
+pub(crate) struct Parsed {
+    pub(crate) positional: Vec<String>,
+    pub(crate) options: BTreeMap<String, String>,
+    pub(crate) flags: BTreeSet<String>,
 }
 
 impl Parsed {
-    fn option(&self, name: &str) -> Option<&str> {
+    pub(crate) fn option(&self, name: &str) -> Option<&str> {
         self.options.get(name).map(String::as_str)
     }
 
     /// An option that has to be one of a few words.
-    fn choice(&self, name: &str, among: &[&str], otherwise: &str) -> Result<String, String> {
+    pub(crate) fn choice(
+        &self,
+        name: &str,
+        among: &[&str],
+        otherwise: &str,
+    ) -> Result<String, String> {
         let given = self.option(name).unwrap_or(otherwise);
         if among.contains(&given) {
             return Ok(given.to_string());
@@ -82,7 +87,7 @@ impl Parsed {
 /// Reads a command line: options with a value, flags, and everything else in its order.
 /// `names` are what the things that stand for themselves are called, the ones that may be
 /// left out in brackets.
-fn parse(
+pub(crate) fn parse(
     args: &[String],
     valued: &[&str],
     flags: &[&str],
