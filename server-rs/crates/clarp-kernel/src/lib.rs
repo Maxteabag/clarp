@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod artifacts;
 pub mod conversation;
+pub mod devices;
 pub mod goals;
 pub mod jobs;
 pub mod journal;
