@@ -630,4 +630,31 @@ SCENARIOS = [
     },
 ]
 
+SCENARIOS.append({
+    'id': 'retried-turns',
+    'what': 'a connection that drops under a turn: the turn is tried again, and what a client is '
+            'shown while it is, when it then works, and when it never does',
+    'steps': [
+        # It drops once. The second process answers.
+        send('[qa-drops:1] synthetic work quebec', 'quebec'),
+        {'op': 'wait_reply', 'after': 'u-quebec'},
+        {'op': 'quiesce'},
+        {**LOG, 'name': 'log after a turn that was tried twice'},
+        {**SNAPSHOT, 'name': 'snapshot after a turn that was tried twice'},
+        # It drops every time: the turn gives up.
+        send(SLOW + '[qa-drops:9] synthetic work romeo', 'romeo'),
+        {'op': 'wait_busy', 'busy': True},
+        {'op': 'wait_busy', 'busy': False},
+        {'op': 'quiesce'},
+        {**LOG, 'name': 'log after a turn that gave up'},
+        {**SNAPSHOT, 'name': 'snapshot after a turn that gave up'},
+        # And the agent works on.
+        send('synthetic greeting sierra', 'sierra'),
+        {'op': 'wait_reply', 'after': 'u-sierra'},
+        {'op': 'quiesce'},
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
