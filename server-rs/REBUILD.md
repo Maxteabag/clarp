@@ -24,6 +24,8 @@ On 15 Nov, on how to build it (dictated):
 > studio is interrupted. [...] If you want to have parallel agents, that's fine. The only thing I'm concerned about
 > is when we start running tests and compiling multiple times at the same time."
 
+And when the work was slowed by gate runs: "Why are you running tests and not working".
+
 (His typing corrected; the words are his.)
 
 **Outcome.** A new Clarp Host, written in Rust, that joins the fleet as one more Host on today's client contract.
@@ -67,6 +69,8 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
    event types are frozen for this program. The Rust Host leaves out of `FEATURES` what it does not have yet.
 4. **Main moves by fast-forward, after the gates:** the repository's gates in `AGENTS.md`, plus a green
    `Server (Rust)` run, started by hand, on the exact commit. No force-push, no rewriting main, no secrets in commits.
+   **Main moves at milestones, not per commit** (Peter, 15 Nov 2026): work on your branch, push it often, and
+   pay for the gates when a stage or a whole piece is done.
 5. **Fail safe.** Unknown, partial or contradictory means stop and report. Never retry a write that may have
    landed; read back first.
 6. **Never `pkill -f` or `pgrep -f`.** Kill only process ids you captured.
@@ -89,6 +93,11 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D10 | Migration moves agents, not modules: the Rust Host is a new Host in the fleet | No shared-database coupling with the Python server, no big-bang switch |
 | D11 | The binary is `clarp-host`. (`clarpd` is taken: it is the desktop installer in dotfiles.) | Avoids a name collision the report missed |
 | D12 | Rust stable, edition 2024; Tokio; Axum; no message broker, no external database, no orchestrator | Plain, widely used, one binary and one directory of data |
+| D14 | A message is admitted **direct** or **queued**. Direct is the user's own send: it ends the live turn, goes ahead of what waits, and runs even while the mailbox is held, without lifting the hold. Queued waits its turn and is held by a Stop until a resume | It is what the Python Host documents (`docs/protocol.md`, section 4); the kernel's first rule ("a user message lifts the hold") was not |
+| D15 | A conversation's revision is `seq * 2^20 + n`: the log position, with room in between for the changes of a reply that is shown while it is written and not stored. A restart that rejoins a turn writes once, so later revisions are above earlier ones | Clients sync by revision; the log gives it for free; a growing reply needs revisions of its own |
+| D16 | A turn starts at most once by construction: the shim creates the turn's spool exclusively; "spawned" is durable before the tool is given the message; the shim prints `ready`; a second shim for the turn leaves with exit 125 | Rule 1 must not depend on the server remembering what it started |
+| D17 | The hub forgets. It keeps five minutes of events for clients that reconnect; after longer, or after a restart, a client is sent `agent-roster` and syncs from the snapshot and the conversations' revisions | An event is a wake-up, not the data; the logs are the durable record. Events that are themselves the data (a clip, a notification) get a durable home in stage 3 |
+| D18 | The conformance suite is `tests/replay` run across implementations: its scenarios, its fake Claude and its differ, with the Rust Host as the second build, comparing the `http` and `sse` channels. It runs in GitHub Actions, contained, never on a machine with a live Host | The harness exists, is proven to catch planted changes, and already isolates a Python Host safely |
 | D13 | **Write big, compile rarely.** The lead keeps a compiled skeleton: every crate, its public traits and message types, no logic. A builder writes a whole crate against it, then compiles: `tools/build check` until clean, then `tools/build test`. No compile after every function, and no one-shot of the whole server | Peter's concern is dead time and parallel builds; the compiler is still the design feedback, so the batch is a crate, not the application |
 
 ## 5. Code rules (this is where "exactly as you want" is spent)
@@ -117,19 +126,41 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 server-rs/
   REBUILD.md            this brief (lead only)
   docs/design.md        the design (from the report of 14 Nov 2026)
-  docs/log.md           the decision log, append-only (lead only)
-  docs/differences.md   intended differences from the Python Host (lead signs)
   crates/
-    clarp-ports/        the traits and their conformance suites (testkit)
+    clarp-ports/        the traits and their conformance suites: log engine, key-value store, compressor, clock
     clarp-codec/        compressors: none, zstd, zstd with a dictionary
-    clarp-store-mem/    in-memory log engine (simulator, tests)
-    clarp-store-sqlite/ SQLite log engine
-    ...                 clarp-protocol, clarp-kernel, clarp-shim, clarp-edge and the contexts follow
+    clarp-store-mem/    in-memory log engine and tables (tests, the simulator)
+    clarp-store-sqlite/ SQLite log engine (`agents/<id>/log.db`) and tables (`fleet.db`)
+    clarp-protocol/     the client contract as types: events, log, snapshot, server-info, requests, responses
+    clarp-kernel/       turn state machine, the agent's pure core, the journal (write first, then change),
+                        the conversation's items
+    clarp-spool/        the spool: what a tool printed, as the shim recorded it
+    clarp-shim/         `clarp-shim` (owns one tool process) and `clarp-hook`
+    clarp-backend/      the backend port; Claude Code (stream-json), a scripted tool
+    clarp-actor/        one agent's actor without its thread: send, stop, the spool pump, rejoin after a restart
+    clarp-host/         `clarp-host`: agent threads, launcher (direct, systemd scope), fleet, hub, HTTP edge
   tools/build           the build queue: check, test, clippy, fmt on the XPS 15, one job at a time
+  tools/repo-gates      the repository's Python gates, on the same machine and queue
 ```
 
 Ownership is by crate. A crate has one owner at a time, named in section 8. Shared files (`Cargo.toml` of the
 workspace, the CI workflow, `clarp-ports`) belong to the lead.
+
+**Where it stands (15 Nov 2026).** The Host runs end to end: a message over HTTP becomes a turn in a shim, the
+conversation, snapshot and events are served, and a Host killed with `kill -9` in the middle of ten running turns
+comes back and finishes all ten (`crates/clarp-host/tests/host.rs`). A real Claude Code turn has been through
+it, with the Host killed while Claude's command ran; the next turn continued Claude's session. That test runs
+only when asked, because it spends a real account:
+
+```
+CLARP_BUILD_ENV="CLARP_TEST_CLAUDE=1" server-rs/tools/build test --test host -- --ignored
+```
+
+It needs a logged-in Claude Code on the machine that runs it. On 15 Nov the XPS 15's was not; the test was run on
+elitebook with the binaries the XPS had built (running a built binary is not compiling).
+
+Not there yet, in the order it is planned: the conformance run against the Python Host (D18); the importer that
+moves one agent with its conversation; how an app is paired with this Host; the Codex adapter; then stage 3.
 
 ## 7. Stages and gates
 
