@@ -601,3 +601,64 @@ def test_a_tail_takes_the_send_rows_and_the_latest_user_row_from_the_rows_it_rea
         assert world.imported() == ("full_carry_inputs_changed", ["send_said_before"])
         reads = world.report["session_reads"]
         assert reads["sends"] == reads["latest_user"] == 2
+
+
+def _reply_traces(world, ordinal, database=None):
+    """The traces on the replies of the turn written at second ``ordinal``."""
+    with sqlite3.connect(database or world.candidate) as stored:
+        return {trace for (trace,) in stored.execute(
+            "SELECT trace_id FROM messages WHERE role='assistant' AND text IN (?, ?)",
+            (f"synthetic step {ordinal}", f"synthetic answer {ordinal}"))}
+
+
+@BACKENDS
+def test_two_messages_with_the_same_words_are_told_apart_by_when_they_were_sent(tmp_path, backend):
+    """The order of the /send rows is what tells them apart. Two messages
+    with the same words wait, no turn runs, and the transcript brings the
+    words once: the turn is the EARLIER message's, by when it was sent (the
+    oldest of the rows with those words). The later one has the lower seq
+    here, as a /send row's seq is no time, so an order by seq alone gives
+    the turn to the wrong message; its replies then carry the other trace.
+    The second time the words come, the later message is left and takes it.
+
+    A tail takes the /send rows from the rows it read
+    (message_import_common._session_parts); the full replay beside it asks
+    SQLite. (Found in review: without this case the lane did not notice a
+    wrong order.)"""
+    words = "the same words, sent twice"
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("earlier", words, at=FAR, trace="the-earlier-message")
+        world.send("later", words, at=FAR + 5_000, trace="the-later-message")
+        with sqlite3.connect(world.candidate) as stored:
+            seqs = dict(stored.execute(
+                "SELECT message_id, seq FROM messages WHERE source_file LIKE 'client:%'"))
+        assert seqs["u-later"] < seqs["u-earlier"]
+        world.grow(_turn(backend, ordinal, request=words))
+        assert world.imported() == ("tail_applied", [])
+        assert _reply_traces(world, ordinal) == {"the-earlier-message"}
+        assert world.report["session_reads"]["sends"] == 0          # taken from the rows
+        world.grow(_turn(backend, ordinal + 1, request=words))
+        assert world.imported() == ("tail_applied", [])
+        assert _reply_traces(world, ordinal) == {"the-earlier-message"}
+        assert _reply_traces(world, ordinal + 1) == {"the-later-message"}
+        assert _reply_traces(world, ordinal + 1, world.reference) == {"the-later-message"}
+
+
+@BACKENDS
+def test_two_messages_with_the_same_words_sent_in_the_same_millisecond(tmp_path, backend):
+    """Then seq decides, as the statement's second key does: the row with
+    the lower seq is the older of the two for the linker. Here that is the
+    one written second, whose id sorts last, so neither the order the rows
+    were read in nor their time alone gives it."""
+    words = "the same words, in the same millisecond"
+    with World(tmp_path, backend, _history(backend)) as world:
+        ordinal = world.started(6)
+        world.send("a-written-first", words, at=FAR, trace="higher-seq")
+        world.send("b-written-second", words, at=FAR, trace="lower-seq")
+        world.grow(_turn(backend, ordinal, request=words))
+        assert world.imported() == ("tail_applied", [])
+        assert _reply_traces(world, ordinal) == {"lower-seq"}
+        world.grow(_turn(backend, ordinal + 1, request=words))
+        assert world.imported() == ("tail_applied", [])
+        assert _reply_traces(world, ordinal + 1) == {"higher-seq"}
