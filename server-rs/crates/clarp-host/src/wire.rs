@@ -840,13 +840,9 @@ pub fn summary(
             "item_id": tools.last().map(|tool| &tool.id),
         })
     };
-    // The Python Host keeps the start of a turn that did not finish, and forgets the start of
-    // one that did.
-    let turn_started_at = match (live, last) {
-        (Some(live), _) => live.started_at_ms,
-        (None, Some(last)) if last.outcome != Outcome::Completed => last.started_at_ms.unwrap_or(0),
-        _ => 0,
-    };
+    // The start of the turn that runs: what an app counts the running turn from. At rest
+    // there is no such turn, however the last one ended.
+    let turn_started_at = live.map_or(0, |live| live.started_at_ms);
     json!({
         "agent_id": record.agent_id,
         "session": record.session,
@@ -1453,8 +1449,8 @@ mod tests {
             (&json!("interrupted"), &json!("Interrupted"))
         );
         assert_eq!(
-            row["turn_started_at"], 1_100,
-            "the start of a turn that did not finish is kept"
+            row["turn_started_at"], 0,
+            "at rest no turn runs, however the last one ended"
         );
         assert_eq!(row["last_turn_end"], 0);
 
