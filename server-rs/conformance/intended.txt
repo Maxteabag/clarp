@@ -15,3 +15,7 @@ dfcb5143ebc3  two-turns: the second reply
 15b27f8ead44  log-pages: the second reply, in the newest page
 9c9b8bbc7447  log-pages: the second reply, in the page a client with nothing gets
 00f5d90896a6  log-pages: the second reply, to a client that catches up
+
+# A notification's preview of what was said aloud does not show an emotion tag the engine
+# acts out (the Python Host shows "[sigh]" there: reference defect R10).
+0d1fdd0f0ff9  voice-markup: the preview of the notification

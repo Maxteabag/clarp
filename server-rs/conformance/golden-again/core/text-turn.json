@@ -27,7 +27,7 @@
     "file": "<id:2>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 3,
+    "latest_revision": 2,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -74,7 +74,15 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>"
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
      }
     ]
    },
@@ -133,7 +141,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 3,
+      "head_revision": 2,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -232,21 +240,6 @@
    },
    "event": null,
    "id": "<eid:transcript-updated#1@45bbad>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:3>",
-    "client_msg_id": "alpha",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -352,12 +345,27 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:5>",
+    "source_message_id": "<row:1>",
     "type": "user-notification",
     "unread": true
    },
    "event": null,
    "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "client_msg_id": "alpha",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   }
  ]
 }
