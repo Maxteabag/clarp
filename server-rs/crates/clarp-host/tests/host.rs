@@ -4019,11 +4019,75 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     };
     let state = |session: &str| lineage(session)["helper_state"].clone();
 
-    // The maker hands it work: it is working already, nothing moves.
+    // The apps were told of the new agent in order: that it is there, then what an agent
+    // that has never run is doing.
+    wait_for("the apps to hear of the new agent", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-activity"
+                && event["session"] == "slice-1"
+                && event["kind"] == "spawned"
+        })
+    });
+    let about: Vec<Value> = heard
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| event["session"] == "slice-1")
+        .take(4)
+        .cloned()
+        .collect();
+    assert_eq!(
+        about
+            .iter()
+            .map(|event| (
+                event["type"].as_str().unwrap(),
+                event["kind"].as_str().unwrap_or("")
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("agent-roster", "created"),
+            ("transcript-updated", ""),
+            ("agent-state", "spawned"),
+            ("agent-activity", "spawned"),
+        ]
+    );
+    assert_eq!(
+        (
+            &about[0]["persona"],
+            &about[0]["backend"],
+            &about[0]["voice_id"]
+        ),
+        (&json!("Slice Helper"), &json!("scripted"), &json!("{}"))
+    );
+    assert_eq!(about[2]["detail"], json!({ "session": "slice-1" }));
+
+    // The maker hands it work: it is working already, nothing moves. A message from
+    // another agent waits its turn like one left for later: it goes through the queue.
     agent_message(helper, &maker, "do the slice", "h1");
     wait_for("the helper's turn", || host.state(helper) == "done");
     assert_eq!(state(helper), "running");
     assert_eq!(roster_told(helper), 0);
+    assert_eq!(row(helper)["queued_turn_revision"], 2);
+    // The helper's answer says whom it answers, and is its own: it names no sender.
+    let rows = host.turns(helper);
+    assert_eq!(
+        (
+            &rows[0]["sender_session"],
+            &rows[0]["reply_to_session"],
+            &rows[1]["sender_session"],
+            &rows[1]["reply_to_session"],
+            &rows[1]["reply_to_name"],
+            &rows[1]["reply_to_agent_id"],
+        ),
+        (
+            &json!("maker"),
+            &json!(""),
+            &json!(""),
+            &json!("maker"),
+            &json!("Maker"),
+            &json!(maker_id),
+        )
+    );
     // What a helper says tells nobody: it reports to the agent that made it.
     host.send(helper, "how is it going?", "h2");
     let told_of = |id: &str| {
