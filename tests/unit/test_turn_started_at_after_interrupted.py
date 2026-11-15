@@ -1,4 +1,4 @@
-"""The running turn's start, for the apps' "working for 4m 12s" timer (issue 354).
+"""When the running work began, for the apps' "working for 4m 12s" timer (issue 354).
 
 ``turn_started_at`` was the first busy state after the last done, idle or
 stopped. A turn that ends as interrupted (a Stop, a usage limit, a runner
@@ -72,18 +72,33 @@ def _snapshot_row(tmp_path, persona="Felix"):
     return next(row for row in snap["agents"] if row["persona"] == persona)
 
 
-def test_a_running_turn_is_counted_from_its_own_row(tmp_path, monkeypatch):
-    """What the clock of the states says is the fallback: the open turn's own
-    start is the turn's start, whatever came before it."""
+def test_more_sent_to_a_working_agent_does_not_restart_its_clock(tmp_path, monkeypatch):
+    """A message to a working agent opens a new turn row and writes no end
+    state: 397 of 2,899 working stretches on one Host in four days, the
+    newest row a median 19 minutes after the work began. The timer says how
+    long the agent has been working, so it stays (review of PR 357)."""
     agent_id = _agent(tmp_path)
     monkeypatch.setattr(backends, "active_handles",
                         lambda backend, aid: [object()] if aid == agent_id else [])
-    # States that would say 'six hours ago': a usage limit recorded as no end at all.
-    _states(agent_id, ("thinking", T), ("waiting", T + 1_000), ("thinking", T + 6 * 3_600_000))
-    db.conn().execute("INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES(?,'user','now',?)",
-                      (agent_id, T + 6 * 3_600_000 - 400))
+    _states(agent_id, ("done", T - 60_000), ("thinking", T), ("tool", T + 5_000),
+            ("thinking", T + 19 * 60_000), ("tool", T + 75 * 60_000))
+    for trace, at in (("first", T - 400), ("more", T + 19 * 60_000), ("and more", T + 75 * 60_000)):
+        db.conn().execute("INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES(?,'user',?,?)",
+                          (agent_id, trace, at))
 
-    assert _snapshot_row(tmp_path)["turn_started_at"] == T + 6 * 3_600_000 - 400
+    assert _both_clocks(agent_id) == (T, T)
+    assert _snapshot_row(tmp_path)["turn_started_at"] == T
+
+
+def test_work_that_has_no_row_yet_is_not_given_the_turn_before(tmp_path, monkeypatch):
+    agent_id = _agent(tmp_path)
+    monkeypatch.setattr(backends, "active_handles",
+                        lambda backend, aid: [object()] if aid == agent_id else [])
+    db.conn().execute("INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES(?,'user','before',?)",
+                      (agent_id, T - 12 * 60_000))
+    _states(agent_id, ("thinking", T - 12 * 60_000), ("done", T - 11 * 60_000), ("thinking", T))
+
+    assert _snapshot_row(tmp_path)["turn_started_at"] == T
 
 
 def test_a_running_turn_with_no_row_of_its_own_is_counted_from_its_states(tmp_path, monkeypatch):
