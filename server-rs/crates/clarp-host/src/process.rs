@@ -85,7 +85,15 @@ mod tests {
         let pid = child.id();
         let token = start_token(pid);
         assert!(is_alive(pid, &token));
-        assert!(command_line(pid).starts_with("sleep"));
+        // A child is its parent's program until it has become its own.
+        let became_itself = (0..400).any(|_| {
+            let is_sleep = command_line(pid).starts_with("sleep");
+            if !is_sleep {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            is_sleep
+        });
+        assert!(became_itself, "{}", command_line(pid));
         child.kill().unwrap();
         // Killed and not yet reaped: a zombie, which is not alive.
         std::thread::sleep(std::time::Duration::from_millis(50));
