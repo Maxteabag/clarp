@@ -372,7 +372,10 @@ command while the Host was down: eighteen turns, all held. At 20:02 the installe
 of `61194d0c` with three turns in their commands, the eighth exercise: held. One soak round of the first
 thirteen did not complete: at 19:31 the Claude account was out, and the turn ended after three seconds with the
 Host's sentence for it under the message; nothing was lost. That build did not wait for an account; the one
-installed since does. Open: the week.
+installed since does. At 20:40 the Host was updated to `87818123` with three turns running (the ninth
+exercise: held), and two minutes later an agent there published an image in a real turn with its own tool,
+through the door for tools: its reply is the Markdown that shows the image, and the id in it fetches the
+image. Open: the week.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the core contract and what

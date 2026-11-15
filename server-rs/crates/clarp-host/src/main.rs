@@ -156,7 +156,7 @@ async fn serve(config: Config) -> Result<(), String> {
     }
     eprintln!("clarp-host listens on {address}");
     eprintln!(
-        "clarp-host {} serves {} (engine {}, codec {}, files in {}, launcher {})",
+        "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",
         clarp_host::VERSION,
         config.data_dir.display(),
         config.engine,

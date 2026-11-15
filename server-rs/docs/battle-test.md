@@ -134,14 +134,25 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 17:55 | the Host updated by the installer, `d9868bea` to `2e935ef7` | 3 | every turn in its command (`sleep 40`) | held: the new build had all three |
 | 17:57 | the service restarted, on the new build | 2 | every turn in its command | held |
 | 20:02 | the Host updated by the installer, `2e935ef7` to `61194d0c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered 1 ms after the restart was done, with all three |
+| 20:40 | the Host updated by the installer, `61194d0c` to `87818123` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 8 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Thirty-eight turns, none interrupted,
+completed, answered with its word, and its command ran exactly once. Forty-one turns, none interrupted,
 lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no
 more.
 
-The update of 20:02 was installed from a release built out of a clean checkout of the commit that had just
-landed, not out of the working tree: what runs is what is on main.
+The updates of 20:02 and 20:40 were installed from a release built out of a clean checkout of the commit that
+had just landed, not out of the working tree: what runs is what is on main.
+
+## An agent publishes a file
+
+On the build of `87818123`, 15 Nov 2026, with the installed tool (`clarp-media-publish`, the repository's own
+program):
+
+| When | Who | How it reached the Host | Result |
+|---|---|---|---|
+| 20:41 | a shell with nothing of a turn in its environment, as a worker an agent left running | the file the installer wrote, the administrator's door (`POST /media`) | a PNG of 3,860 bytes taken as `image/png`, 64 by 32, under a safe name; in the agent's gallery; fetched back byte for byte with the headers that keep a browser from running anything in it; a `Range` answered with the part |
+| 20:42 | the agent `restart-2` in a real Claude Code turn, asked to run the tool and answer with what it printed | what its turn was given: the door for tools (`POST /tools/media`) and the token of the agent's tools | the turn ran the tool, completed, and its reply is the Markdown that shows the image; the id in the reply fetches the image; the same image published twice lies on the disk once, readable by its user alone |
 
 ## The soak so far
 
@@ -152,6 +163,10 @@ Host). The turn ended after three seconds, and the Host said why under the messa
 reached". The message is in the conversation once, with one turn end. That build ended such a turn; the
 build installed at 20:02 runs with `--accounts follow` and lets it wait for the login to change. The next
 time the account runs out during a round, the soak shows whether the turn waits and is taken up.
+
+Rounds 14 to 16 (to 20:43) completed, on the builds of `61194d0c` and `87818123`. At 20:43 the soak was
+started again as the job `rust-host-soak-2`, on the tool as installed with `87818123`: it writes down why a
+turn did not finish and follows a turn that waits to its end. It went on counting where the evidence ended.
 
 ## What a round does not prove
 
