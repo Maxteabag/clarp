@@ -236,8 +236,11 @@ another with `clarp-admin prompt --to SESSION --from ME`; on this Host the same 
 (`peers.rs`, `clarp-host peer add NAME URL`, the Python Host's scheme): that Host's own `POST /send`. This is
 what lets agents move one by one: an agent that lives here still reaches the ones on the Python Host beside
 it, and they reach it once the Python Host has this one as a peer (`clarp-admin peers add`, the release
-owner's to do at an install). Not there: a message for later (`--delay`), and a request that waits for its
-answer (`clarp-admin request` and `reply`).
+owner's to do at an install). A request that comes back is there too (`clarp-admin request` and `reply`,
+`request_tool.rs`, the words held by 97 recorded cases): the agent that is asked is told how to answer, the
+asker's goal waits for the result as a dependency with a deadline and its owner is woken with the answer, and
+an update is a message, at most five to a request. Not there: a message for later (`--delay`), and a request
+to an agent of another Host (the Python Host has none either).
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every

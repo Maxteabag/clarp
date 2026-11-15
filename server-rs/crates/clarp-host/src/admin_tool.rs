@@ -19,6 +19,7 @@ use crate::artifact_tool::parse;
 use crate::edge::{self, App};
 use crate::ids;
 use crate::peers::{self, Failed};
+use crate::request_tool;
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
 
 /// What argparse says of a command line it cannot read, and exits 2 with.
@@ -152,6 +153,8 @@ async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "prompt" => prompt(app, rest).await,
+        Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,
+        Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
         Some((command, _)) => not_here(command),
         None => ToolAnswer::said(2, "usage: clarp-admin COMMAND ..."),
     }
