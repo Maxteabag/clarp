@@ -11,12 +11,15 @@
 //!
 //! Two more commands are an agent's: `clarp-admin sessions` lists the agents it can write
 //! to, and `clarp-admin model` shows or sets which model an agent runs (the skill
-//! `clarp-sessions`).
+//! `clarp-sessions`). And an agent makes another, and says how a helper's work stands, with
+//! `clarp-admin agent create` and `clarp-admin agent helper-state`: these are what the
+//! program `clarp-sub-agent` calls (the skill `clarp-sub-agents`).
 //!
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
 use clarp_backend::SESSION_ENV;
+use clarp_kernel::python;
 use clarp_protocol::requests::SendRequest;
 use serde_json::{Value, json};
 
@@ -254,10 +257,152 @@ async fn model(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// What the Python tool says when the Host refuses an `agent` command, and exits 1 with.
+fn refused_by_host(status: u16, body: &Value) -> ToolAnswer {
+    ToolAnswer::said(
+        1,
+        format!("clarp-admin: HTTP {status}: {}", python::dumps(body)),
+    )
+}
+
+/// `clarp-admin agent create NAME [--parent SESSION] [--role agent|helper] [--cwd DIR]
+/// [--backend B] [--model M] [--effort E] [--session S] [--voice-id V]`: makes an agent;
+/// with `--parent` and `--role helper`, a helper of that agent. This is how an agent makes
+/// another (the skill `clarp-sub-agents`).
+async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let valued = [
+        "--parent",
+        "--role",
+        "--cwd",
+        "--backend",
+        "--model",
+        "--effort",
+        "--session",
+        "--voice-id",
+    ];
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin agent create [-h] [--parent PARENT] [--role {{agent,helper}}] \
+                 [--cwd CWD] [--backend BACKEND] [--model MODEL] [--effort EFFORT] \
+                 [--session SESSION] [--voice-id VOICE_ID] name\n\
+                 clarp-admin agent create: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(args, &valued, &[], &["name"]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let role = match parsed.option("--role") {
+        None => None,
+        Some(role @ ("agent" | "helper")) => Some(role),
+        Some(other) => {
+            return usage(&format!(
+                "argument --role: invalid choice: '{other}' (choose from 'agent', 'helper')"
+            ));
+        }
+    };
+    if role == Some("helper") && parsed.option("--parent").is_none() {
+        return ToolAnswer::said(1, "--role helper needs --parent SESSION");
+    }
+    // A helper is a working identity, not a contact: no voice unless one is asked for.
+    let mut asked = roster::Fields::new();
+    let name = parsed.positional.first().cloned().unwrap_or_default();
+    asked.insert("name".to_string(), json!(name));
+    asked.insert("synthesize_audio".to_string(), json!(false));
+    for key in [
+        "cwd", "backend", "model", "effort", "parent", "role", "session",
+    ] {
+        if let Some(value) = parsed.option(&format!("--{key}")) {
+            asked.insert(key.to_string(), json!(value));
+        }
+    }
+    let voice = parsed.option("--voice-id").unwrap_or("{}");
+    asked.insert("voice_id".to_string(), json!(voice));
+    // A directory is named from where the tool was called.
+    if let Some(cwd) = parsed.option("--cwd").filter(|cwd| !cwd.is_empty()) {
+        let from = std::path::Path::new(&call.cwd);
+        let whole = match cwd.strip_prefix("~/") {
+            Some(rest) => home().join(rest),
+            None if cwd == "~" => home(),
+            None => from.join(cwd),
+        };
+        let whole = whole.canonicalize().unwrap_or(whole);
+        asked.insert("cwd".to_string(), json!(whole.display().to_string()));
+    }
+    match edge::make_agent(app, &asked).await {
+        Ok(made) => shown(&made),
+        Err((status, why)) => refused_by_host(status.as_u16(), &why),
+    }
+}
+
+fn home() -> std::path::PathBuf {
+    std::env::var_os("HOME").map_or_else(|| std::path::PathBuf::from("/"), std::path::PathBuf::from)
+}
+
+/// `clarp-admin agent helper-state SESSION [done|failed|running] [--from SESSION]`: shows
+/// who made an agent and how its work stands, or marks a helper. `--from` names the agent
+/// that marks it, which has to be the one that made it.
+async fn agent_helper_state(app: &App, args: &[String]) -> ToolAnswer {
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] \
+                 session [{{done,failed,running}}]\n\
+                 clarp-admin agent helper-state: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(args, &["--from"], &[], &["session", "[state]"]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let session = parsed.positional.first().cloned().unwrap_or_default();
+    let answered = match parsed.positional.get(1).map(String::as_str) {
+        None => roster::lineage(app, &session),
+        Some(state @ ("done" | "failed" | "running")) => {
+            let mut asked = roster::Fields::new();
+            asked.insert("session".to_string(), json!(session));
+            asked.insert("state".to_string(), json!(state));
+            if let Some(by) = parsed.option("--from").filter(|by| !by.is_empty()) {
+                asked.insert("by".to_string(), json!(by));
+            }
+            roster::mark_helper(app, &asked).await
+        }
+        Some(other) => {
+            return usage(&format!(
+                "argument state: invalid choice: '{other}' (choose from 'done', 'failed', 'running')"
+            ));
+        }
+    };
+    match answered {
+        Ok(answer) => shown(&answer),
+        Err(refused) => {
+            let (status, body) = refused.answered();
+            ToolAnswer::said(1, format!("clarp-admin: HTTP {status}: {body}"))
+        }
+    }
+}
+
+/// `clarp-admin agent ...`: what an agent does about other agents.
+async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    match args.split_first() {
+        Some((command, rest)) if command == "create" => agent_create(app, call, rest).await,
+        Some((command, rest)) if command == "helper-state" => agent_helper_state(app, rest).await,
+        // A helper that starts from its maker's conversation is not built yet.
+        Some((command, _)) => not_here(&format!("agent {command}")),
+        None => ToolAnswer::said(2, "usage: clarp-admin agent {create,fork,helper-state} ..."),
+    }
+}
+
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "prompt" => prompt(app, rest).await,
+        Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),
         Some((command, rest)) if command == "model" => model(app, call, rest).await,
         Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,

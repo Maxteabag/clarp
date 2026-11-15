@@ -255,6 +255,20 @@ agent reads the roster and tunes itself with `clarp-admin sessions` and `clarp-a
 `roster-edits`. Not there: the list of models a tool offers (any name is taken, and the tool says at its next
 turn whether it has it), an agent's voice, portrait and MCP servers.
 
+**Agents make agents** (15 Nov 2026). An agent is made with the agent that makes it and a role (`POST /agents`
+with `parent` and `role`, answered as the Python Host answers). A helper's work has a state
+(`clarp-kernel/src/helpers.rs`, 72 recorded moves): it is working; it has reported when it writes to its maker
+or answers its request, or sat idle for half an hour; it has more work when its maker writes back; its maker or
+the user marks it done, failed or working again (`/agent-helper-state`); it is abandoned when its maker is
+removed or put away, and nothing is ever removed with its maker; a helper that has been done for a day is put
+away. The lineage is the fleet's, like every fact about who an agent is. A maker's row counts what it made
+(`child_count`, `running_children`, `background_jobs.sub_agents`), shows it as at work while a helper or a
+process of its own is, and says in a line what they are doing; a job that only mirrors a helper is not counted
+twice. A helper's replies page nobody: it reports to its maker. An agent makes one with `clarp-admin agent
+create` and follows it with `clarp-admin agent helper-state`: the two commands the program `clarp-sub-agent`
+is built on. Held to the Python Host by the scenario `helpers`. Not there: a helper that starts from its
+maker's conversation (`agent fork`), and the program `clarp-sub-agent` itself on this Host's path.
+
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the 15 of the core contract and leaves every
 other feature out of `capabilities.features`. The owner declined an install on 15 Nov: a Host an agent cannot

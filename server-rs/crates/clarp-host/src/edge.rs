@@ -4,7 +4,7 @@
 //! the answer in the types of `clarp-protocol`. It holds no state of its own and decides
 //! nothing about an agent.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,7 @@ use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_actor::conversation::Which;
 use clarp_kernel::conversation::{Message, Sender};
+use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::turn::{Admission, Origin};
@@ -372,8 +373,77 @@ fn identity(app: &App) -> ServerInfo {
     }
 }
 
+/// The agents an agent made, as its row counts them.
+#[derive(Default)]
+struct Family {
+    children: usize,
+    /// The sessions of the helpers among them.
+    helper_sessions: Vec<String>,
+    /// The helpers that are working, each as its maker's line describes it.
+    working: Vec<helpers::Working>,
+}
+
+/// What every agent's row says of the agents it made: counted once for a whole list, over
+/// every agent of the fleet, whichever agents the list shows.
+pub(crate) struct Families(HashMap<String, Family>);
+
+impl Families {
+    pub(crate) fn of(directory: &Directory) -> Self {
+        let mut families: HashMap<String, Family> = HashMap::new();
+        for member in &directory.members {
+            let record = &member.record;
+            let Some(parent) = &record.parent_agent_id else {
+                continue;
+            };
+            let family = families.entry(parent.clone()).or_default();
+            family.children += 1;
+            if record.is_helper() {
+                family.helper_sessions.push(record.session.clone());
+            }
+            if record.helper_state.as_deref() == Some("running") {
+                let view = member.agent.view();
+                let state = wire::state_name(&wire::state_kind(&view.status));
+                // What it says it is doing, or what its state says.
+                let said = view.status.label.trim();
+                let text = if said.is_empty() {
+                    let doing = wire::activity(record, &view.status);
+                    doing["summary"].as_str().unwrap_or("").trim().to_string()
+                } else {
+                    said.to_string()
+                };
+                family.working.push(helpers::Working {
+                    session: record.session.clone(),
+                    text,
+                    bucket: helpers::bucket(&state),
+                });
+            }
+        }
+        Self(families)
+    }
+
+    /// The agents put away that an agent in the list names as the one that made it. A
+    /// client that reads the list without them cannot tell such a maker from one that was
+    /// removed: this tells them apart.
+    fn archived_parents(directory: &Directory) -> Vec<String> {
+        let put_away: HashSet<&str> = directory
+            .members
+            .iter()
+            .filter(|member| member.record.archived_at_ms.is_some())
+            .map(|member| member.record.agent_id.as_str())
+            .collect();
+        let named: BTreeSet<String> = directory
+            .members
+            .iter()
+            .filter(|member| member.record.archived_at_ms.is_none())
+            .filter_map(|member| member.record.parent_agent_id.clone())
+            .filter(|parent| put_away.contains(parent.as_str()))
+            .collect();
+        named.into_iter().collect()
+    }
+}
+
 /// An agent's row in the snapshot: who it is and what it is doing.
-pub(crate) fn agent_row(directory: &Directory, member: &Member) -> Value {
+pub(crate) fn agent_row(directory: &Directory, families: &Families, member: &Member) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
     let mut row = wire::summary(
@@ -384,13 +454,38 @@ pub(crate) fn agent_row(directory: &Directory, member: &Member) -> Value {
         view.ended.as_ref(),
         focused,
     );
-    // What runs for the agent besides its turn.
-    let running = view
+    // Two things keep an agent busy after its turn: helpers it made that are working, and
+    // background processes it left running. A job that only mirrors one of its helpers is
+    // not a process of its own.
+    let none = Family::default();
+    let family = families.0.get(&member.record.agent_id).unwrap_or(&none);
+    let helper_sessions: Vec<&str> = family.helper_sessions.iter().map(String::as_str).collect();
+    let processes: Vec<helpers::Process> = view
         .jobs
         .iter()
         .filter(|job| job.status.is_active())
-        .count();
-    row["background_jobs"]["count"] = json!(running);
+        .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none())
+        .map(|job| helpers::Process {
+            title: job.title.clone(),
+            progress: job.progress_text.clone(),
+            active_at_ms: job.progress_at_ms.unwrap_or(job.started_at_ms),
+        })
+        .collect();
+    row["child_count"] = json!(family.children);
+    row["running_children"] = json!(family.working.len());
+    row["background_jobs"] =
+        json!({ "count": processes.len(), "sub_agents": family.working.len() });
+    if !processes.is_empty() || !family.working.is_empty() {
+        // The apps draw it as working, not as idle; and its line says what goes on, when
+        // the agent did not say so itself.
+        let at_work = ["thinking", "tool", "compacting", "background"];
+        if !at_work.contains(&row["latest_state"].as_str().unwrap_or("")) {
+            row["latest_state"] = json!("background");
+        }
+        if row["status_text"].is_null() {
+            row["status_text"] = json!(helpers::work_summary(&family.working, &processes));
+        }
+    }
     row
 }
 
@@ -405,11 +500,12 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let directory = app.fleet.directory();
     let without_archived = query.include_archived.as_deref() == Some("0");
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
+    let families = Families::of(&directory);
     let agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
-        .map(|member| agent_row(&directory, member))
+        .map(|member| agent_row(&directory, &families, member))
         .collect();
     // Every agent's name, whichever agents were asked for.
     let roster: Vec<&str> = directory
@@ -430,29 +526,110 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     if without_archived {
         let archived = directory.members.iter().filter(|member| put_away(member));
         body["archived_count"] = json!(archived.count());
-        // The agents put away that an agent in the list names as the one that made it.
-        // No agent makes another on this Host yet.
-        body["archived_parents"] = json!([]);
+        body["archived_parents"] = json!(Families::archived_parents(&directory));
     }
     Json(body)
 }
 
-async fn create_agent(
-    State(app): State<App>,
-    Json(request): Json<CreateAgentRequest>,
-) -> Result<Response, ApiError> {
-    match app.fleet.create(request).await? {
-        Ok(record) => Ok(Json(json!({
-            "ok": true,
-            "session": record.session,
-            "persona": record.persona,
-            "agent_id": record.agent_id,
-            "backend": record.backend,
-            "cwd": record.cwd,
-        }))
-        .into_response()),
-        Err(NotMade::Refused(why)) => Err(ApiError::new(StatusCode::BAD_REQUEST, why)),
-        Err(NotMade::Occupied { owner, session }) => Ok(roster::occupied(&owner, &session)),
+/// What the answer to making an agent says of it: the fields of its row that the Python
+/// Host answers with.
+const MADE_FIELDS: [&str; 21] = [
+    "agent_id",
+    "session",
+    "persona",
+    "backend",
+    "cwd",
+    "model",
+    "effort",
+    "voice_id",
+    "avatar_symbol",
+    "muted",
+    "heartbeat_enabled",
+    "dreaming_enabled",
+    "parent_agent_id",
+    "role",
+    "helper_state",
+    "alive",
+    "latest_state",
+    "last_activity",
+    "mcp_servers",
+    "avatar_url",
+    "avatar_generation_status",
+];
+
+/// Makes an agent from what a request said: `POST /agents`, and `clarp-admin agent create`.
+/// Answers what the Python Host answers: the new agent's session, its name and its row, or
+/// why it was not made.
+pub(crate) async fn make_agent(
+    app: &App,
+    asked: &serde_json::Map<String, Value>,
+) -> Result<Value, (StatusCode, Value)> {
+    let refused = |status: StatusCode, code: &str, message: &str| {
+        (status, json!({ "error": code, "message": message }))
+    };
+    let bad = |why: &str| refused(StatusCode::BAD_REQUEST, why, why);
+    // A field that is a text, or says nothing.
+    let text = |key: &str, what: &str| match asked.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(said)) => Ok(Some(said.clone())),
+        Some(_) => Err(bad(&format!("{what} must be a string or null"))),
+    };
+    let plain = |key: &str| asked.get(key).and_then(Value::as_str).map(str::to_string);
+    let request = CreateAgentRequest {
+        name: plain("name").unwrap_or_default(),
+        backend: plain("backend"),
+        cwd: plain("cwd"),
+        model: text("model", "model")?,
+        effort: text("effort", "effort")?,
+        voice_id: plain("voice_id"),
+        parent: plain("parent"),
+        role: plain("role"),
+        session: plain("session"),
+    };
+    let unavailable =
+        |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
+    let record = match app.fleet.create(request).await.map_err(unavailable)? {
+        Ok(record) => record,
+        Err(NotMade::Refused(why)) => {
+            return Err((StatusCode::BAD_REQUEST, json!({ "error": why })));
+        }
+        Err(NotMade::Occupied { owner, session }) => {
+            return Err((StatusCode::CONFLICT, roster::occupied(&owner, &session)));
+        }
+        Err(NotMade::Told(told)) => {
+            let status = StatusCode::from_u16(told.status).unwrap_or(StatusCode::BAD_REQUEST);
+            return Err(refused(status, told.code, &told.message));
+        }
+    };
+    let directory = app.fleet.directory();
+    let row = directory
+        .named(&record.agent_id)
+        .map(|member| agent_row(&directory, &Families::of(&directory), member))
+        .unwrap_or_default();
+    let agent: serde_json::Map<String, Value> = MADE_FIELDS
+        .iter()
+        .map(|field| ((*field).to_string(), row[*field].clone()))
+        .collect();
+    Ok(json!({
+        "ok": true,
+        "session": record.session,
+        "name": record.persona,
+        "agent": agent,
+    }))
+}
+
+async fn create_agent(State(app): State<App>, body: axum::body::Bytes) -> Response {
+    let asked = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice(&body).unwrap_or(Value::Null)
+    };
+    let Some(asked) = asked.as_object() else {
+        return ApiError::new(StatusCode::BAD_REQUEST, "bad json").into_response();
+    };
+    match make_agent(&app, asked).await {
+        Ok(made) => Json(made).into_response(),
+        Err((status, why)) => (status, Json(why)).into_response(),
     }
 }
 
@@ -500,9 +677,17 @@ async fn import_agent(
         // The conversation keeps its name: it is the tool's session, which goes on.
         conversation_id: backend_session.clone().unwrap_or_default(),
         created_at_ms: app.clock.now_ms(),
-        // An agent that was muted or put away stays so where it goes.
+        // An agent that was muted or put away stays so where it goes, and keeps its voice.
         muted: request.agent["muted"] == true,
         archived_at_ms: request.agent["archived_at"].as_i64(),
+        voice_id: field("voice_id"),
+        // A helper stays a helper, as its work stood. The agent that made it is named by
+        // its id, whether or not it is on this Host.
+        role: Some(field("role"))
+            .filter(|role| role == "helper")
+            .unwrap_or_default(),
+        parent_agent_id: Some(field("parent_agent_id")).filter(|parent| !parent.is_empty()),
+        helper_state: Some(field("helper_state")).filter(|state| !state.is_empty()),
         ..AgentRecord::default()
     };
     let rows: Vec<ImportedRow> = request
@@ -717,7 +902,18 @@ pub(crate) async fn send_message(
         sender,
         client: request.client.as_deref().and_then(client_name),
     };
+    let writer = match &message.origin {
+        Origin::Agent { agent_id } if !agent_id.is_empty() => Some(agent_id.clone()),
+        _ => None,
+    };
     let sent = member.agent.send(message, admission).await?;
+    if let Some(writer) = writer {
+        // A helper that writes to the agent that made it has reported, and one that is
+        // written to by it has more work.
+        app.fleet
+            .noted(writer, member.record.agent_id.clone())
+            .await?;
+    }
     if origin_is_user {
         // Writing to an agent makes it the open one, without a word about it.
         let _ = app.fleet.open(member.record.session.clone()).await;

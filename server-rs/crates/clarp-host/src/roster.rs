@@ -82,11 +82,10 @@ fn occupied_body(owner: &str, session: &str, advice: &str) -> Value {
     })
 }
 
-/// The answer to making an agent under a name another agent has.
-pub(crate) fn occupied(owner: &str, session: &str) -> Response {
+/// What is said to making an agent under a name another agent has.
+pub(crate) fn occupied(owner: &str, session: &str) -> Value {
     let advice = " Open or release that chat before starting another.";
-    let body = occupied_body(owner, session, advice);
-    (StatusCode::CONFLICT, Json(body)).into_response()
+    occupied_body(owner, session, advice)
 }
 
 /// A request's body as the object it has to be. No body is an empty object.
@@ -265,6 +264,7 @@ async fn archived(
             .collect(),
     );
     let page = rules::page(&order, limit, position.as_ref());
+    let families = edge::Families::of(&directory);
     let agents: Vec<Value> = order[page.start..page.end]
         .iter()
         .filter_map(|(_, agent_id)| {
@@ -272,7 +272,7 @@ async fn archived(
                 .members
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
-            Some(edge::agent_row(&directory, member))
+            Some(edge::agent_row(&directory, &families, member))
         })
         .collect();
     Ok(Json(json!({
@@ -282,8 +282,71 @@ async fn archived(
     })))
 }
 
+/// How a helper's work stands: `{session, state, by?}` marks it done, failed or working
+/// again. `by` names the agent that marks it, which has to be the one that made it;
+/// without it the mark is the user's. Answers the state the helper then has.
+pub(crate) async fn mark_helper(app: &App, asked: &Fields) -> Result<Value, Refusal> {
+    let (session, state) = (text(asked, "session"), text(asked, "state"));
+    if session.is_empty() || state.is_empty() {
+        return Err(bad("session and state required"));
+    }
+    let marked = app
+        .fleet
+        .mark(session.clone(), state, text(asked, "by"))
+        .await
+        .map_err(|unavailable| Refusal::Plain(unavailable.into()))?;
+    match marked {
+        Ok(state) => Ok(json!({ "ok": true, "session": session, "helper_state": state })),
+        Err(told) => Err(Refusal::Told(
+            StatusCode::from_u16(told.status).unwrap_or(StatusCode::CONFLICT),
+            json!({ "error": told.code, "message": told.message }),
+        )),
+    }
+}
+
+async fn helper_state_post(State(app): State<App>, body: Bytes) -> Answered {
+    Ok(Json(mark_helper(&app, &object(&body)?).await?))
+}
+
+/// Who made an agent and how its work stands, without the whole list.
+pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
+    let session = session.trim();
+    if session.is_empty() {
+        return Err(bad("session required"));
+    }
+    let directory = app.fleet.directory();
+    let Some(member) = directory.named(session) else {
+        return Err(Refusal::Plain(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "agent_not_found",
+        )));
+    };
+    let record = &member.record;
+    Ok(json!({
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "role": record.role(),
+        "parent_agent_id": record.parent_agent_id,
+        "helper_state": record.helper_state,
+        "helper_completed_at": record.helper_completed_at_ms,
+        "archived_at": record.archived_at_ms,
+    }))
+}
+
+async fn helper_state_get(
+    State(app): State<App>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Answered {
+    let session = query.get("session").map_or("", String::as_str);
+    Ok(Json(lineage(&app, session)?))
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route(
+            "/agent-helper-state",
+            get(helper_state_get).post(helper_state_post),
+        )
         .route("/agent-mute", post(mute))
         .route("/agent-rename", post(rename))
         .route("/agent-archive", post(archive))

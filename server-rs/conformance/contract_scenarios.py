@@ -30,6 +30,11 @@ SNAPSHOT = get('/agents/snapshot')
 QUEUE = get(f'/turn-queue?session={AGENT}')
 # The fake waits up to 3 s on this marker: a turn that is still running when the next step comes.
 SLOW = '[qa-slow] '
+# A helper the scenarios' agent makes, as the agents' own tool asks for one (`clarp-admin agent
+# create`): a working identity, without a voice and without an announcement.
+HELPER = 'helper-one'
+MAKE_HELPER = {'name': 'Helper One', 'backend': 'claude', 'cwd': '{workspace}', 'synthesize_audio': False,
+               'voice_id': '{}'}
 
 SCENARIOS = [
     {
@@ -516,6 +521,66 @@ SCENARIOS = [
             post('/agent-llm', {'session': AGENT, 'model': ''}, 'the tool chooses its model'),
             post('/agent-llm', {'session': AGENT}, 'tune nothing'),
             LOG,
+            SNAPSHOT,
+        ],
+    },
+    {
+        'id': 'helpers',
+        'what': "an agent makes a helper: who made it, how its work stands and moves, what its maker's "
+                'row says of it, and what is refused',
+        # The helper's row is compared too.
+        'sessions': (AGENT, HELPER),
+        'steps': [
+            post('/agents', {**MAKE_HELPER, 'role': 'boss'}, 'make an agent in a role there is not'),
+            post('/agents', {**MAKE_HELPER, 'role': 'helper'}, 'make a helper nobody made'),
+            post('/agents', {**MAKE_HELPER, 'role': 'helper', 'parent': 'nobody-there'},
+                 'make a helper of an agent that is not there'),
+            post('/agents', {**MAKE_HELPER, 'role': 'helper', 'parent': AGENT, 'session': HELPER}, 'make a helper'),
+            get(f'/agent-helper-state?session={HELPER}', 'who made the helper and how its work stands'),
+            get(f'/agent-helper-state?session={AGENT}', 'the same of its maker'),
+            get('/agent-helper-state?session=nobody-there', 'the same of an agent that is not there'),
+            get('/agent-helper-state', 'the same of nobody'),
+            {**SNAPSHOT, 'name': 'snapshot with a helper at work'},
+            # The maker hands it work: it is working already, nothing moves.
+            send('synthetic helper alfa', 'halfa', session=HELPER, origin='agent', sender=AGENT),
+            {'op': 'wait_reply', 'after': 'u-halfa', 'session': HELPER},
+            {'op': 'quiesce', 'session': HELPER},
+            # The helper writes to its maker: it has reported.
+            send('synthetic helper bravo', 'hbravo', origin='agent', sender=HELPER),
+            {'op': 'wait_reply', 'after': 'u-hbravo'},
+            {'op': 'quiesce'},
+            get(f'/agent-helper-state?session={HELPER}', 'the helper after it reported'),
+            {**SNAPSHOT, 'name': 'snapshot with a helper that reported'},
+            # The maker writes back: more work.
+            send('synthetic helper charlie', 'hcharlie', session=HELPER, origin='agent', sender=AGENT),
+            {'op': 'wait_reply', 'after': 'u-hcharlie', 'session': HELPER},
+            {'op': 'quiesce', 'session': HELPER},
+            get(f'/agent-helper-state?session={HELPER}', 'the helper with more work'),
+            # Marked by hand: by the agent that made it, or by the user.
+            post('/agent-helper-state', {'session': HELPER}, 'mark without a state'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'abandoned'},
+                 'mark with a state nobody may set'),
+            post('/agent-helper-state', {'session': 'nobody-there', 'state': 'done'},
+                 'mark an agent that is not there'),
+            post('/agent-helper-state', {'session': AGENT, 'state': 'done'}, 'mark an agent that is no helper'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'done', 'by': 'rachel'},
+                 'mark as an agent that did not make it'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'failed', 'by': AGENT},
+                 'the maker marks it failed'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'failed'}, 'mark it failed again'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'running'}, 'the user opens it again'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'done'}, 'the user marks it done'),
+            post('/agent-helper-state', {'session': HELPER, 'state': 'failed'}, 'mark what is done failed'),
+            get(f'/agent-helper-state?session={HELPER}', 'the helper when it is done'),
+            {**SNAPSHOT, 'name': 'snapshot with a helper that is done'},
+            # The maker is put away: a helper that is not finished loses it.
+            post('/agent-helper-state', {'session': HELPER, 'state': 'running'}, 'the user opens it once more'),
+            post('/agent-archive', {'session': AGENT, 'archived': True}, 'put the maker away'),
+            get(f'/agent-helper-state?session={HELPER}', 'the helper whose maker is put away'),
+            get('/agents/snapshot?include_archived=0', 'snapshot without the maker'),
+            post('/agent-archive', {'session': AGENT, 'archived': False}, 'take the maker out again'),
+            LOG,
+            get(f'/log?session={HELPER}', "the helper's conversation"),
             SNAPSHOT,
         ],
     },

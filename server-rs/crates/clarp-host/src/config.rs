@@ -30,6 +30,13 @@ pub struct Config {
     pub keep_spools: bool,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
+    /// How often the fleet looks after the helpers nobody speaks of any more.
+    pub helpers_checked_every_ms: u64,
+    /// How long a helper that is working may sit idle before it counts as having reported.
+    /// Nothing turns the rule off.
+    pub helper_idle_after_ms: i64,
+    /// How long a helper that is done stays in the list before it is put away.
+    pub helper_archive_grace_ms: i64,
     /// What an installer stamped this installation with: the content of `DEPLOYED_VERSION` in
     /// the data directory. Empty for a Host that was not installed by one.
     pub deployed_version: String,
@@ -43,7 +50,8 @@ pub struct Config {
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
 [--engine sqlite|memory] [--codec zstd|none] [--launcher direct|systemd] [--shim PATH] \
-[--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL]
+[--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
+[--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N]
 The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
 the push relay, when it has one, from CLARP_PUSH_CREDENTIAL.";
 
@@ -72,6 +80,9 @@ impl Config {
         let mut default_cwd = home();
         let mut keep_spools = false;
         let mut jobs_checked_every_ms = 30_000;
+        let mut helpers_checked_every_ms = 60_000;
+        let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
+        let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
         let mut push_relay = String::new();
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
@@ -101,6 +112,21 @@ impl Config {
                         .parse()
                         .map_err(|_| "--jobs-checked-every-ms needs a number".to_string())?;
                 }
+                "--helpers-checked-every-ms" => {
+                    helpers_checked_every_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--helpers-checked-every-ms needs a number".to_string())?;
+                }
+                "--helper-idle-after-ms" => {
+                    helper_idle_after_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--helper-idle-after-ms needs a number".to_string())?;
+                }
+                "--helper-archive-grace-ms" => {
+                    helper_archive_grace_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--helper-archive-grace-ms needs a number".to_string())?;
+                }
                 other => return Err(format!("unknown argument {other}")),
             }
         }
@@ -129,6 +155,9 @@ impl Config {
             default_cwd,
             keep_spools,
             jobs_checked_every_ms,
+            helpers_checked_every_ms,
+            helper_idle_after_ms,
+            helper_archive_grace_ms,
             deployed_version: std::fs::read_to_string(data_dir.join("DEPLOYED_VERSION"))
                 .map(|version| version.trim().to_string())
                 .unwrap_or_default(),
