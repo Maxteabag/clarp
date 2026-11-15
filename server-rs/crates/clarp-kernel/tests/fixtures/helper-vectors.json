@@ -1,0 +1,638 @@
+{
+ "about": "Written by server-rs/tools/helper-vectors.py from server/lib/policies/helper_state.py. Do not edit by hand.",
+ "moves": [
+  {
+   "state": null,
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "marked_done",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "marked_running",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "failed",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "parent_gone",
+   "to": null
+  },
+  {
+   "state": null,
+   "event": "went_idle",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "marked_done",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "marked_running",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "failed",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "parent_gone",
+   "to": null
+  },
+  {
+   "state": "",
+   "event": "went_idle",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "marked_done",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "marked_running",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "failed",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "parent_gone",
+   "to": null
+  },
+  {
+   "state": "bogus",
+   "event": "went_idle",
+   "to": null
+  },
+  {
+   "state": "running",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "running",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "running",
+   "event": "reported",
+   "to": {
+    "state": "reported",
+    "completed": false
+   }
+  },
+  {
+   "state": "running",
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": "running",
+   "event": "marked_done",
+   "to": {
+    "state": "done",
+    "completed": true
+   }
+  },
+  {
+   "state": "running",
+   "event": "marked_running",
+   "to": null
+  },
+  {
+   "state": "running",
+   "event": "failed",
+   "to": {
+    "state": "failed",
+    "completed": true
+   }
+  },
+  {
+   "state": "running",
+   "event": "parent_gone",
+   "to": {
+    "state": "abandoned",
+    "completed": true
+   }
+  },
+  {
+   "state": "running",
+   "event": "went_idle",
+   "to": {
+    "state": "reported",
+    "completed": false
+   }
+  },
+  {
+   "state": "reported",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "reported",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "reported",
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": "reported",
+   "event": "parent_prompted",
+   "to": {
+    "state": "running",
+    "completed": false
+   }
+  },
+  {
+   "state": "reported",
+   "event": "marked_done",
+   "to": {
+    "state": "done",
+    "completed": true
+   }
+  },
+  {
+   "state": "reported",
+   "event": "marked_running",
+   "to": {
+    "state": "running",
+    "completed": false
+   }
+  },
+  {
+   "state": "reported",
+   "event": "failed",
+   "to": {
+    "state": "failed",
+    "completed": true
+   }
+  },
+  {
+   "state": "reported",
+   "event": "parent_gone",
+   "to": {
+    "state": "abandoned",
+    "completed": true
+   }
+  },
+  {
+   "state": "reported",
+   "event": "went_idle",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "marked_done",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "marked_running",
+   "to": {
+    "state": "running",
+    "completed": false
+   }
+  },
+  {
+   "state": "done",
+   "event": "failed",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "parent_gone",
+   "to": null
+  },
+  {
+   "state": "done",
+   "event": "went_idle",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "marked_done",
+   "to": {
+    "state": "done",
+    "completed": true
+   }
+  },
+  {
+   "state": "failed",
+   "event": "marked_running",
+   "to": {
+    "state": "running",
+    "completed": false
+   }
+  },
+  {
+   "state": "failed",
+   "event": "failed",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "parent_gone",
+   "to": null
+  },
+  {
+   "state": "failed",
+   "event": "went_idle",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "bogus",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "reported",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "parent_prompted",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "marked_done",
+   "to": {
+    "state": "done",
+    "completed": true
+   }
+  },
+  {
+   "state": "abandoned",
+   "event": "marked_running",
+   "to": {
+    "state": "running",
+    "completed": false
+   }
+  },
+  {
+   "state": "abandoned",
+   "event": "failed",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "parent_gone",
+   "to": null
+  },
+  {
+   "state": "abandoned",
+   "event": "went_idle",
+   "to": null
+  }
+ ],
+ "markable": {
+  "done": "marked_done",
+  "running": "marked_running",
+  "failed": "failed"
+ },
+ "finished": [
+  "abandoned",
+  "done",
+  "failed"
+ ],
+ "default_archive_grace_ms": 86400000,
+ "roles": [
+  {
+   "given": null,
+   "role": "agent",
+   "initial_state": null
+  },
+  {
+   "given": "",
+   "role": "agent",
+   "initial_state": null
+  },
+  {
+   "given": "agent",
+   "role": "agent",
+   "initial_state": null
+  },
+  {
+   "given": "helper",
+   "role": "helper",
+   "initial_state": "running"
+  },
+  {
+   "given": "janitor",
+   "role": null,
+   "initial_state": null
+  },
+  {
+   "given": " Helper ",
+   "role": "helper",
+   "initial_state": "running"
+  },
+  {
+   "given": "AGENT",
+   "role": "agent",
+   "initial_state": null
+  },
+  {
+   "given": "boss",
+   "role": null,
+   "initial_state": null
+  },
+  {
+   "given": 0,
+   "role": "agent",
+   "initial_state": null
+  },
+  {
+   "given": false,
+   "role": "agent",
+   "initial_state": null
+  }
+ ],
+ "parents": [
+  {
+   "child": "",
+   "parent": "p",
+   "ancestors": [],
+   "refusal": ""
+  },
+  {
+   "child": "c",
+   "parent": "",
+   "ancestors": [
+    "c"
+   ],
+   "refusal": ""
+  },
+  {
+   "child": "c",
+   "parent": "c",
+   "ancestors": [],
+   "refusal": "self_parent"
+  },
+  {
+   "child": "c",
+   "parent": "p",
+   "ancestors": [],
+   "refusal": ""
+  },
+  {
+   "child": "c",
+   "parent": "p",
+   "ancestors": [
+    "g",
+    "c"
+   ],
+   "refusal": "parent_cycle"
+  },
+  {
+   "child": "c",
+   "parent": "p",
+   "ancestors": [
+    "g"
+   ],
+   "refusal": ""
+  },
+  {
+   "child": "",
+   "parent": "p",
+   "ancestors": [
+    "p"
+   ],
+   "refusal": ""
+  },
+  {
+   "child": "",
+   "parent": "",
+   "ancestors": [],
+   "refusal": ""
+  }
+ ],
+ "rows": [
+  {
+   "agent_id": "done-long-ago",
+   "role": "helper",
+   "helper_state": "done",
+   "archived_at": null,
+   "helper_completed_at": 1794827200000
+  },
+  {
+   "agent_id": "done-just-now",
+   "role": "helper",
+   "helper_state": "done",
+   "archived_at": null,
+   "helper_completed_at": 1794999999000
+  },
+  {
+   "agent_id": "done-at-the-edge",
+   "role": "helper",
+   "helper_state": "done",
+   "archived_at": null,
+   "helper_completed_at": 1794913600000
+  },
+  {
+   "agent_id": "done-without-a-time",
+   "role": "helper",
+   "helper_state": "done",
+   "archived_at": null,
+   "helper_completed_at": null
+  },
+  {
+   "agent_id": "put-away-already",
+   "role": "helper",
+   "helper_state": "done",
+   "archived_at": 1794999999995,
+   "helper_completed_at": 1794827200000
+  },
+  {
+   "agent_id": "failed-long-ago",
+   "role": "helper",
+   "helper_state": "failed",
+   "archived_at": null,
+   "helper_completed_at": 1794827200000
+  },
+  {
+   "agent_id": "reported-long-ago",
+   "role": "helper",
+   "helper_state": "reported",
+   "archived_at": null,
+   "helper_completed_at": null
+  },
+  {
+   "agent_id": "no-helper",
+   "role": "agent",
+   "helper_state": "done",
+   "archived_at": null,
+   "helper_completed_at": 1794827200000
+  }
+ ],
+ "due": [
+  {
+   "grace_ms": null,
+   "now_ms": 1795000000000,
+   "due": [
+    "done-long-ago",
+    "done-at-the-edge",
+    "done-without-a-time"
+   ]
+  },
+  {
+   "grace_ms": 0,
+   "now_ms": 1795000000000,
+   "due": [
+    "done-long-ago",
+    "done-just-now",
+    "done-at-the-edge",
+    "done-without-a-time"
+   ]
+  },
+  {
+   "grace_ms": 500,
+   "now_ms": 1795000000000,
+   "due": [
+    "done-long-ago",
+    "done-just-now",
+    "done-at-the-edge",
+    "done-without-a-time"
+   ]
+  },
+  {
+   "grace_ms": 259200000,
+   "now_ms": 1795000000000,
+   "due": [
+    "done-without-a-time"
+   ]
+  },
+  {
+   "grace_ms": -5,
+   "now_ms": 1795000000000,
+   "due": [
+    "done-long-ago",
+    "done-just-now",
+    "done-at-the-edge",
+    "done-without-a-time"
+   ]
+  }
+ ]
+}

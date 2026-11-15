@@ -10,6 +10,7 @@ pub mod artifacts;
 pub mod conversation;
 pub mod devices;
 pub mod goals;
+pub mod helpers;
 pub mod jobs;
 pub mod journal;
 pub mod notify;
