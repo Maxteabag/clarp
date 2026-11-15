@@ -18,6 +18,7 @@ word a full import puts in the journal (``transcriptFullDigest code=...``):
 from __future__ import annotations
 
 import hashlib
+import io
 import sqlite3
 
 import pytest
@@ -195,6 +196,100 @@ def test_bytes_rewritten_while_the_file_was_parsed_are_caught_by_the_second_read
         assert again["digest_reads"] == ([] if switch else ["all"])      # the file stands still now
         seen[switch] = (_decision(first), _retentions(first), _decision(again))
     assert seen[True] == seen[False]
+
+
+# ---- the file changes while the reader is in the middle of it -------------------------
+# The cases above change the file when the parser has read its last byte.
+# These change it between two of the reader's reads (from the review of #336).
+
+RECORDS = 5 * io.DEFAULT_BUFFER_SIZE // 1024         # a record is 1,024 bytes: several reads
+
+
+def _mid_read(how, keep_times=False):
+    return {"during_read": {"how": how, "after": 2 * io.DEFAULT_BUFFER_SIZE,
+                            "keep_times": keep_times}}
+
+
+@pytest.mark.parametrize("keep_times", [False, True], ids=["times moved", "mtime put back"])
+@pytest.mark.parametrize("where", ["behind", "ahead"])
+@BACKENDS
+def test_a_byte_rewritten_while_the_reader_is_in_the_middle_of_the_file(
+        tmp_path, backend, where, keep_times):
+    """Behind the reader: the parser was handed the old byte and the file
+    has the new one. The second read is made (the change time moved, with
+    the mtime put back too) and says the parsed bytes are not the file's:
+    nothing is published, and the next import is full and reads once.
+    Ahead of the reader: the parser is handed the new byte. The second read
+    is made all the same and agrees, so the frontier is published, with the
+    file's digest. The switch changes nothing but the next full import's
+    one read."""
+    seen = {}
+    for switch in (True, False):
+        home = tmp_path / ("on" if switch else "off")
+        home.mkdir()
+        reference, candidate, transcript = _world(home, backend, records=RECORDS)
+        size = transcript.stat().st_size
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            first = actual.tick(0, faults={**_settings(switch), **_mid_read(where, keep_times)})
+        assert 0 < first["read_changed_at"] < size == transcript.stat().st_size
+        assert first["digest_reads"] == ["all"]
+        assert first["second_read"] == ["touched" if switch else "switch_off"]
+        with sqlite3.connect(candidate) as connection:
+            [(frontiers,)] = connection.execute("SELECT count(*) FROM transcript_import_frontiers")
+        if where == "behind":
+            assert "parsed_prefix_changed" in _retentions(first) and frontiers == 0
+        else:
+            assert "parsed_prefix_changed" not in _retentions(first) and frontiers == 1
+            assert _stored_digest(candidate) == _digest_of(transcript)
+        _append(transcript, backend, RECORDS)
+        with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+            with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+                full.tick(1)
+                again = actual.tick(1, faults=_settings(switch))
+        assert _texts(candidate) == _texts(reference)
+        changed = f"Synthetic step {0 if where == 'behind' else RECORDS - 1}"
+        assert any(text == changed for _id, text in _texts(candidate))
+        assert _stored_digest(candidate) == _digest_of(transcript)
+        if where == "behind":
+            assert again["apply_mode"] == "full"
+            assert again["digest_reads"] == ([] if switch else ["all"])
+        else:
+            # A tail; the lane was opened anew, and a process's first tail
+            # reads every imported byte.
+            assert (_decision(again), again["digest_reads"]) == ("tail_applied", ["all"])
+        seen[switch] = (_decision(first), _retentions(first), _decision(again))
+    assert seen[True] == seen[False]
+
+
+@BACKENDS
+def test_a_file_that_grows_while_the_reader_is_in_the_middle_of_it(tmp_path, backend):
+    """What a working agent does to its transcript. The parser is handed the
+    bytes up to the size the import began with, however far the file has
+    grown since; the file is read again (``grew``), the frontier is for
+    those bytes, and the record that was added is the next import's tail."""
+    seen = {}
+    for switch in (True, False):
+        home = tmp_path / ("on" if switch else "off")
+        home.mkdir()
+        reference, candidate, transcript = _world(home, backend, records=RECORDS)
+        size = transcript.stat().st_size
+        with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+            with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+                full.tick(0)
+                first = actual.tick(0, faults={**_settings(switch), **_mid_read("grow")})
+                assert 0 < first["read_changed_at"] < size < transcript.stat().st_size
+                assert first["digest_reads"] == ["all"]
+                assert first["second_read"] == ["grew" if switch else "switch_off"]
+                assert _stored_digest(candidate) == _digest_of(transcript, size)
+                harness.assert_product_equal(reference, candidate)
+                full.tick(1)
+                after = actual.tick(1, faults=_settings(switch))
+                harness.assert_product_equal(reference, candidate)
+                assert _stored_digest(candidate) == _digest_of(transcript)
+                seen[switch] = (_decision(first), _retentions(first), _decision(after),
+                                after["digest_reads"])
+    assert seen[True] == seen[False]
+    assert seen[True][2:] == ("tail_applied", ["added"])
 
 
 @SWITCH
