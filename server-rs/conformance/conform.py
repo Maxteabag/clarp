@@ -351,6 +351,17 @@ NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
 # capture, not as its number. A queue's revision is another thing: both Hosts count the same
 # changes, and it is compared as the number it is.
 HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
+# Readings of the clock the harness's normalizer has no name for: when something an agent made
+# was pinned, put away or thrown away, and when what it asked was answered. Whether there is
+# one is compared; which moment it was is not.
+CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at'})
+# The ids a Host gives to what agents make and ask. Under their own keys the harness's
+# normalizer names them by the order they appear in (`artifact-<id:1>`). They are also in the
+# paths a client calls (`/decisions/<id>/resolve`) and in what an agent is told and says back
+# (`Decision ID: ...`), and there the normalizer leaves them: hex in free text is content to it.
+ISSUED = re.compile(r'^(?:artifact|decision)-[0-9a-f]{12,64}$')
+# An id a preview cut short: `Decision ID: decision-7be0a016ae…`.
+CUT_ID = re.compile(r'((?:artifact|decision)-[0-9a-f]{4,})…$')
 
 
 def settle(value, sessions):
@@ -366,6 +377,8 @@ def settle(value, sessions):
             item = '<instance>'  # one per Host process
         elif key == 'turn_started_at' and isinstance(item, int) and item in EPOCH_MS:
             item = '<time>'  # a reading no TurnClock has told: there is none in a capture of this suite
+        elif key in CLOCK_KEYS and isinstance(item, int) and not isinstance(item, bool) and item in EPOCH_MS:
+            item = '<time>'
         elif key == 'agents' and isinstance(item, list):
             # The reference Host starts with two codex agents (rachel, mike) that the Rust Host
             # cannot run until it has a Codex adapter. Both sides are cut to the scenario's own.
@@ -476,11 +489,56 @@ def core(raw: dict) -> dict:
     return {**raw, 'http': http, 'sse': sse}
 
 
+def issued(raw, named, found: dict) -> dict:
+    """The ids a Host gave out in its answers, each with the name the normalizer gave it: read
+    off the same place in an answer as it came and as it was normalized."""
+    if isinstance(raw, dict) and isinstance(named, dict):
+        for key, item in raw.items():
+            if key in named:
+                issued(item, named[key], found)
+    elif isinstance(raw, list) and isinstance(named, list) and len(raw) == len(named):
+        for item, other in zip(raw, named):
+            issued(item, other, found)
+    elif isinstance(raw, str) and isinstance(named, str) and raw != named and ISSUED.match(raw):
+        found.setdefault(raw, named)
+    return found
+
+
+def by_name(value, names: dict):
+    """Every id a Host gave out, under its name wherever it is written: in a path, in a text,
+    cut short at the end of a preview. Only ids the Host gave out under an id's own key in an
+    answer of this capture: any other hex in a text stays what it is, content."""
+    if isinstance(value, list):
+        return [by_name(item, names) for item in value]
+    if isinstance(value, dict):
+        return {key: by_name(item, names) for key, item in value.items()}
+    if not isinstance(value, str):
+        return value
+    for raw, name in names.items():
+        if raw in value:
+            value = value.replace(raw, name)
+    cut = CUT_ID.search(value)
+    if cut:
+        start = cut.group(1)
+        for raw, name in names.items():
+            if raw.startswith(start) and raw != start:
+                value = f'{value[:cut.start(1)]}{name}[:{len(start)}]…'
+                break
+    return value
+
+
 def seen_by_a_client(raw: dict) -> dict:
     """A capture, normalized, and cut down to the channels a client sees."""
     sessions = (scenarios.AGENT,)
     raw = {**raw, 'http': [{**exchange, 'body': settle(exchange['body'], sessions)} for exchange in raw['http']]}
     whole = normalize.normalize(raw, str(REPO))
+    # The normalizer keeps the answers in the order they were given, one for one.
+    names: dict = {}
+    for exchange, named in zip(raw['http'], whole['http']):
+        issued(exchange['body'], named['body'], names)
+    if names:
+        whole = {**whole, 'http': by_name(whole['http'], names), 'sse': by_name(whole['sse'], names),
+                 'live': by_name(whole.get('live', {}), names)}
     return {'scenario': whole['scenario'], 'error': whole['error'], 'http': whole['http'], 'sse': whole['sse'],
             'live': whole.get('live', {})}
 
