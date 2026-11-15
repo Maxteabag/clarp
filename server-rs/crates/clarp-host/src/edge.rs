@@ -419,11 +419,23 @@ async fn import_agent(
         .adopt(record)
         .await?
         .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
-    let imported = member
+    let outcome = member
         .agent
         .import(request.from, backend_session, rows)
-        .await?
-        .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
+        .await;
+    let imported = match outcome {
+        Ok(Ok(imported)) => imported,
+        failed => {
+            // Nothing of the conversation was written. An agent without its past is not what
+            // was asked for: it does not stay.
+            let _ = app.fleet.remove(member.record.session.clone()).await;
+            return Err(match failed {
+                Ok(Err(why)) => ApiError::new(StatusCode::CONFLICT, why),
+                Err(unavailable) => unavailable.into(),
+                Ok(Ok(_)) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the move failed"),
+            });
+        }
+    };
     Ok(Json(json!({
         "ok": true,
         "session": member.record.session,
