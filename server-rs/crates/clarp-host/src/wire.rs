@@ -748,12 +748,17 @@ pub fn summary(
     let live_activity = if live.is_none() && last.is_none() {
         Value::Null
     } else {
-        let state = match (live, completed) {
-            (Some(_), _) => state_name(&kind),
-            (None, Some(_)) => "idle".to_string(),
-            (None, None) => "interrupted".to_string(),
+        // What the agent is doing, and the words the apps show for it. Writing its answer is
+        // a state of its own here, though the agent's row calls it thinking. A tool's own
+        // line (what it runs or reads) comes with the tool's details, which are not told yet.
+        let (state, headline) = match (live.map(|live| &live.activity), completed) {
+            (Some(Activity::Thinking), _) => ("thinking".to_string(), Some("Thinking")),
+            (Some(Activity::Responding), _) => ("responding".to_string(), Some("Responding")),
+            (Some(Activity::Compacting), _) => ("compacting".to_string(), Some("Compacting")),
+            (Some(Activity::Tool { .. } | Activity::Waiting), _) => (state_name(&kind), None),
+            (None, Some(_)) => ("idle".to_string(), None),
+            (None, None) => ("interrupted".to_string(), Some("Interrupted")),
         };
-        let headline = (live.is_none() && completed.is_none()).then_some("Interrupted");
         json!({
             "state": state,
             "headline": headline,
@@ -1223,6 +1228,33 @@ mod tests {
         assert_eq!(row["activity"]["tool"], "Bash");
         assert_eq!(row["turn_started_at"], 5_000);
         assert_eq!(row["live_activity"]["turn_id"], "trace-2");
+        // What it is doing, in the apps' words, for as long as it does it.
+        let doing = |activity: Activity| {
+            let mut status = busy.clone();
+            status.live.as_mut().unwrap().activity = activity;
+            let row = summary(&record(), &status, "claude", Some(&newest), None, true);
+            (
+                row["live_activity"]["state"].clone(),
+                row["live_activity"]["headline"].clone(),
+                row["latest_state"].clone(),
+            )
+        };
+        assert_eq!(
+            doing(Activity::Thinking),
+            (json!("thinking"), json!("Thinking"), json!("thinking"))
+        );
+        assert_eq!(
+            doing(Activity::Responding),
+            (json!("responding"), json!("Responding"), json!("thinking"))
+        );
+        assert_eq!(
+            doing(Activity::Compacting),
+            (
+                json!("compacting"),
+                json!("Compacting"),
+                json!("compacting")
+            )
+        );
         assert_eq!(
             (&row["model"], &row["context_tokens"]),
             (&json!("fable"), &json!(5))
