@@ -54,9 +54,13 @@ of the kind it names.
 
 The reference is recorded twice in every run. Where the two recordings differ, the Python
 Host itself answers in more than one way: the report says so in its first part, the defect
-goes into `../docs/reference-defects.md`, and both answers are kept. In such a scenario the
-Rust Host conforms when it gives one of them; the report names the recording it was held to.
-It never conforms by matching neither.
+goes into `../docs/reference-defects.md`, and both answers are kept. At such a place the Rust
+Host conforms when it gives one of the two answers; the report lists those places. A place
+where it differs from both recordings is a difference, as everywhere else. Two races in one
+scenario give four combinations and the two recordings hold two of them, which is why this is
+decided place by place and not scenario by scenario (run 43703416886: in `turn-timer` the
+Python Host showed the agent's model in one recording and none in the other, and wrote two
+rows in either order).
 
 ## What is compared as what a client may rely on
 
