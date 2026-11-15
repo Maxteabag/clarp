@@ -27,6 +27,10 @@ OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'failure-
 SAID = [
     '', '   ', 'something else entirely', 'ok',
     'Claude usage limit reached', "You've hit your session limit · resets 3pm", 'You are out of usage',
+    # What Claude Code said on 15 Nov 2026, as its own answer to the turn (`error: rate_limit`).
+    "You've hit your 5-hour limit · resets 12:50pm (Europe/Oslo)", "You've hit your 5-hour limit · resets 10pm (Europe/Oslo)",
+    "You're out of usage credits. Switch to another model to continue.",
+    "You've hit your weekly limit · resets Nov 18, 9am (Europe/Oslo)",
     'usage limit reached. Your limit will reset at 3pm (Europe/Oslo)', 'Usage cap exceeded', 'usage quota',
     'You have hit your weekly limit, it resets Monday', 'hit your limit',
     'Subscription quota exhausted. Your usage window resets at 14:00', 'quota exhausted',

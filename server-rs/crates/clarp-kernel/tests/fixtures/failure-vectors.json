@@ -286,6 +286,102 @@
    "account_wait": false,
    "explained": "",
    "kind": "usage_limit",
+   "provider_message": "You've hit your 5-hour limit · resets 12:50pm (Europe/Oslo)",
+   "resets": true,
+   "text": "You've hit your 5-hour limit · resets 12:50pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR 5-HOUR LIMIT · RESETS 12:50PM (EUROPE/OSLO)",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR 5-HOUR LIMIT · RESETS 12:50PM (EUROPE/OSLO)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your 5-hour limit · resets 12:50pm (Europe/Oslo)",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your 5-hour limit · resets 12:50pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your 5-hour limit · resets 10pm (Europe/Oslo)",
+   "resets": true,
+   "text": "You've hit your 5-hour limit · resets 10pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR 5-HOUR LIMIT · RESETS 10PM (EUROPE/OSLO)",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR 5-HOUR LIMIT · RESETS 10PM (EUROPE/OSLO)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your 5-hour limit · resets 10pm (Europe/Oslo)",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your 5-hour limit · resets 10pm (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You're out of usage credits. Switch to another model to continue.",
+   "resets": true,
+   "text": "You're out of usage credits. Switch to another model to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'RE OUT OF USAGE CREDITS. SWITCH TO ANOTHER MODEL TO CONTINUE.",
+   "resets": true,
+   "text": "YOU'RE OUT OF USAGE CREDITS. SWITCH TO ANOTHER MODEL TO CONTINUE."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You're out of usage credits. Switch to another model to continue.",
+   "resets": true,
+   "text": "claude exited rc=1: You're out of usage credits. Switch to another model to continue."
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "You've hit your weekly limit · resets Nov 18, 9am (Europe/Oslo)",
+   "resets": true,
+   "text": "You've hit your weekly limit · resets Nov 18, 9am (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "YOU'VE HIT YOUR WEEKLY LIMIT · RESETS NOV 18, 9AM (EUROPE/OSLO)",
+   "resets": true,
+   "text": "YOU'VE HIT YOUR WEEKLY LIMIT · RESETS NOV 18, 9AM (EUROPE/OSLO)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
+   "provider_message": "claude exited rc=1: You've hit your weekly limit · resets Nov 18, 9am (Europe/Oslo)",
+   "resets": true,
+   "text": "claude exited rc=1: You've hit your weekly limit · resets Nov 18, 9am (Europe/Oslo)"
+  },
+  {
+   "account_wait": false,
+   "explained": "",
+   "kind": "usage_limit",
    "provider_message": "usage limit reached. Your limit will reset at 3pm (Europe/Oslo)",
    "resets": true,
    "text": "usage limit reached. Your limit will reset at 3pm (Europe/Oslo)"
