@@ -2106,6 +2106,77 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
 }
 
 #[test]
+fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
+    let place = Place::new("focus");
+    let host = place.start();
+    let (first, second) = (host.new_agent("First"), host.new_agent("Second"));
+    let focus = || host.get("/agents/snapshot")["focus"].clone();
+    let id_of = |session: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .unwrap()["agent_id"]
+            .clone()
+    };
+    let (first_id, second_id) = (id_of(&first), id_of(&second));
+    // Sends to the second agent and waits for its answer; gives back the message's row.
+    let send = |more: Value, id: &str| -> Value {
+        let mut body =
+            json!({ "session": second, "text": format!("word {id}"), "client_msg_id": id });
+        for (key, value) in more.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let sent = host.post("/send", body);
+        assert_eq!(sent["ok"], true, "{sent}");
+        let mine = format!("u-{id}");
+        let mut row = Value::Null;
+        wait_for("the answer", || {
+            let rows = host.turns(&second);
+            let Some(at) = rows.iter().position(|row| row["id"] == mine) else {
+                return false;
+            };
+            row = rows[at].clone();
+            rows[at + 1..].iter().any(|row| row["role"] == "assistant")
+                && host.state(&second) == "done"
+        });
+        row
+    };
+    let open_first = || {
+        let (status, _) = host.ask("POST", "/select", Some(&json!({ "session": first })));
+        assert_eq!(status, 200);
+        assert_eq!(focus(), first_id);
+    };
+
+    // The user has the first agent open. A message that names its sender is that agent's,
+    // also when it says it is the user's or the Oracle's: the focus stays.
+    open_first();
+    for (claimed, id) in [("user", "claimed-user"), ("oracle", "claimed-oracle")] {
+        let row = send(json!({ "origin": claimed, "sender": first }), id);
+        assert_eq!(
+            (&row["origin"], &row["sender_session"]),
+            (&json!("agent"), &json!(first)),
+            "{claimed}"
+        );
+        assert_eq!(focus(), first_id, "{claimed}");
+    }
+    // What runs by itself does not move it either.
+    let row = send(json!({ "origin": "schedule" }), "by-itself");
+    assert_eq!(row["origin"], "schedule");
+    assert_eq!(focus(), first_id);
+    // The Oracle acts on what the user said: a person. The agent it writes to is the open one.
+    let row = send(json!({ "origin": "oracle" }), "oracle");
+    assert_eq!(row["origin"], "oracle");
+    assert_eq!(focus(), second_id);
+    // And so does the user.
+    open_first();
+    let row = send(json!({}), "user");
+    assert_eq!(row["origin"], "user");
+    assert_eq!(focus(), second_id);
+}
+
+#[test]
 fn an_agent_writes_to_another_agent_with_its_own_tool() {
     let place = Place::new("message");
     let host = place.start();
