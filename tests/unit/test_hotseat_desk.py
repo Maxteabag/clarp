@@ -958,8 +958,11 @@ def test_the_switchers_codex_read_refreshes_only_codex_rows(monkeypatch):
     assert body["observed_at"] == T0_MS, "only the read that carries the whole account list moves the desk's time"
 
 
-def test_the_switchers_read_neither_invents_nor_removes_accounts_and_needs_a_stored_desk(monkeypatch):
-    monkeypatch.setattr(desk, "now_ms", lambda: T0_MS)
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("newer_inventory_during_refresh", [False, True])
+def test_roster_changes_rebuild_from_canonical_snapshot_without_inventing_capabilities(monkeypatch, empty, newer_inventory_during_refresh):
+    clock = {"now": T0_MS}
+    monkeypatch.setattr(desk, "now_ms", lambda: clock["now"])
     d = desk.HotseatDesk()
     _, switcher_list, _ = _lists([_claude_row("main", five_hour=0.6, weekly=0.3, fable=0.5, active=True),
                                   _claude_row("brand-new", five_hour=0.0, weekly=0.0, fable=0.0)])
@@ -978,6 +981,42 @@ def test_the_switchers_read_neither_invents_nor_removes_accounts_and_needs_a_sto
     assert body["accounts"][1]["windows"][0]["remaining_ratio"] == 0.7
     assert [item["id"] for item in body["stopped_work"]] == ["koko"], (
         "a read without the Clarp extension says nothing about stopped work")
+
+    assert body["stale"] is True, "a current quota timestamp cannot make an obsolete roster fresh"
+
+    # Only the full TUI read supplies membership and capabilities. Use the
+    # real full-read builder with fake CLI I/O; admission and persistence run.
+    replacement = [] if empty else [
+        _claude_row("main", five_hour=0.6, weekly=0.3, fable=0.5, active=True),
+        _claude_row("brand-new", five_hour=0.0, weekly=0.0, fable=0.0)]
+    canonical_tui, canonical_list, _ = _lists(replacement)
+    began, release = threading.Event(), threading.Event()
+    calls = []
+    original_read = desk._read_live
+    def read(command, runner, observed_at):
+        calls.append(command)
+        began.set()
+        assert release.wait(timeout=5), "scheduled callback blocked on a full read"
+        return original_read(command, _fake_runner_factory(canonical_tui, canonical_list, {"items": []}), observed_at)
+    monkeypatch.setattr(desk, "_read_live", read)
+    clock["now"] += desk.MIN_REFRESH_INTERVAL_MS + 1
+    _, incoming, _ = _lists(replacement)
+    assert d.absorb_switcher_read("claude", incoming, started_at=clock["now"])
+    try:
+        assert began.wait(timeout=2), "changed inventory never requested a canonical roster refresh"
+        newest = incoming
+        if newer_inventory_during_refresh:
+            _, newest, _ = _lists([_claude_row("arrived-later", five_hour=0.0, weekly=0.0, fable=0.0)])
+        assert d.absorb_switcher_read("claude", newest, started_at=clock["now"])
+        assert len(calls) == 1, "concurrent scheduled reads must share the existing full-read admission"
+    finally:
+        release.set()
+    d.refresh(command="hotseat")  # Joins the admitted read, or sees its cooldown.
+    after = d.payload(command="hotseat", runner=_no_cli)
+    assert [a["alias"] for a in after["accounts"]] == ([] if empty else ["main", "brand-new"])
+    assert all(a["can_switch"] for a in after["accounts"]), "use TUI capabilities, never guesses from list metadata"
+    assert after["stale"] is newer_inventory_during_refresh, "an older full read cannot erase a newer roster change"
+    assert len(calls) == 1
 
 
 def test_a_read_that_began_before_a_switch_does_not_undo_the_account_in_use(monkeypatch):
