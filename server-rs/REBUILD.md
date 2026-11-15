@@ -287,7 +287,10 @@ install the host to battletest." The Rust Host runs on elitebook beside the Pyth
 `docs/battle-test.md` says: its own directories, its own unit, the loopback only, no push relay while no phone
 is paired. One agent lives there, on a small model, and `tools/soak` writes to it every quarter of an hour and
 audits every message. The first build installed was `d9868bea`. The week of section 2's third proof counts from
-here, and every update of the Host during it is part of the proof: a restart with a turn running.
+here. The first of that proof's three parts is there: on 15 Nov at 17:33 the Host's service was restarted while
+ten real turns ran, each in a command of 45 seconds (`tools/soak restart`); it answered again after 102 ms with
+all ten, and all ten ended completed, each message once, each command run once. Open: the kill tests at every
+step of a turn on the real Host, and the week.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the core contract and what

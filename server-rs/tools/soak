@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The battle test of an installed Rust Host: real messages, around the clock, each one audited.
 
-    server-rs/tools/soak run    [--host ADDR:PORT] [--session S] [--every SECONDS] [--evidence FILE]
-                                [--rounds N] [--turn-timeout SECONDS]
-    server-rs/tools/soak report [--evidence FILE]
+    server-rs/tools/soak run     [--host ADDR:PORT] [--session S] [--every SECONDS] [--evidence FILE]
+                                 [--rounds N] [--turn-timeout SECONDS]
+    server-rs/tools/soak restart [--host ADDR:PORT] [--agents N] [--seconds S] [--by COMMAND] [--evidence FILE]
+    server-rs/tools/soak report  [--evidence FILE]
 
 `run` writes to an agent of the Host every `--every` seconds (default 900) and waits for the
 turn to end. Every message asks for one exact word back (`ack <n>`), so that an answer can be
@@ -18,6 +19,11 @@ what it was, with the Host's own word for it: it is not a lost message. Every ro
 line of JSON in the evidence file, so the test can be read, and resumed, at any time. Each
 line also says which build the Host runs and since when its service has been up, so that a
 restart or an update of the Host between or during turns is on record.
+
+`restart` starts the Host's service again while turns run, as an update does: every agent of
+the exercise is in a command that takes a while when the service is restarted, and afterwards
+every message must be there once, ended once, completed and answered, its command run once.
+With `--by "server-rs/tools/install-host --start"` the restart is the installer's: an update.
 
 The token is read from CLARP_HOST_TOKEN, or from the file the installer wrote
 (~/.config/clarp-host/env). Nothing but this Host is spoken to.
@@ -89,6 +95,12 @@ def up_since() -> str:
         return ""
 
 
+def version_of(host: Host) -> str:
+    """The build the Host says it runs, or nothing when it does not answer."""
+    status, info = host.ask("GET", "/server-info", timeout=5)
+    return str(info.get("version", "")) if status == 200 and isinstance(info, dict) else ""
+
+
 def rows_of(host: Host, session: str, limit: int = 200):
     status, body = host.ask("GET", f"/log?session={urllib.parse.quote(session)}&limit={limit}")
     return (body.get("turns") or []) if status == 200 and isinstance(body, dict) else None
@@ -137,8 +149,7 @@ def audit(rows: list, message_id: str, word: str) -> dict:
 def one_round(host: Host, session: str, run: str, n: int, turn_timeout: float) -> dict:
     client_id, word = f"soak-{run}-{n}", f"ack {n}"
     line = {"at": int(time.time() * 1000), "run": run, "n": n, "message_id": f"u-{client_id}", "up_since": up_since()}
-    status, info = host.ask("GET", "/server-info")
-    line["host_version"] = info.get("version", "") if isinstance(info, dict) else ""
+    line["host_version"] = version_of(host)
     began = time.monotonic()
     status, sent = host.ask("POST", "/send", {
         "session": session, "client_msg_id": client_id, "synthesize_audio": False,
@@ -229,6 +240,166 @@ def run(args) -> int:
     return 0
 
 
+def snapshot(host: Host) -> dict:
+    """The Host's agents by session, or nothing when it does not answer."""
+    status, body = host.ask("GET", "/agents/snapshot")
+    if status != 200 or not isinstance(body, dict):
+        return {}
+    return {row.get("session"): row for row in body.get("agents") or []}
+
+
+def restart(args) -> int:
+    """The Host is started again while turns run: the second rule, on the installed Host.
+
+    Every agent of the exercise is given a command that takes a while and leaves a mark in a
+    file, and a word to answer with afterwards. When all of them are in their turns the Host's
+    service is restarted. Then each message must be there once, with one turn end, completed,
+    answered with its word, and its command must have run exactly once.
+    """
+    if not args.unit.startswith("clarp-host"):
+        print(f"restart: {args.unit} is not the Rust Host's unit; nothing was done", file=sys.stderr)
+        return 2
+    host = Host(args.host, token())
+    evidence = pathlib.Path(args.evidence)
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    exercise = time.strftime("%m%d%H%M%S")
+    cwd = pathlib.Path(args.cwd).expanduser()
+    cwd.mkdir(parents=True, exist_ok=True)
+    marks = cwd / "restart-marks.txt"
+    sessions = [f"restart-{i}" for i in range(1, args.agents + 1)]
+
+    def write(line: dict) -> None:
+        with evidence.open("a") as out:
+            out.write(json.dumps({"at": int(time.time() * 1000), "exercise": exercise, **line}, sort_keys=True) + "\n")
+
+    def gave_up(why: str, detail: str = "") -> int:
+        write({"kind": "restart_summary", "outcome": why, "detail": detail[:300], "agents": len(sessions)})
+        print(f"restart: {why} {detail}".rstrip(), flush=True)
+        return 3
+
+    # The agents of the exercise: made once, kept for the next one.
+    there = snapshot(host)
+    if not there and host.ask("GET", "/server-info")[0] != 200:
+        return gave_up("host_unreachable")
+    for i, session in enumerate(sessions, 1):
+        if session in there:
+            continue
+        status, made = host.ask("POST", "/agents", {"name": f"Restart {i}", "session": session, "backend": "claude",
+                                                    "model": args.model, "cwd": str(cwd)})
+        if status != 200:
+            return gave_up("agent_not_made", f"{session}: {status} {made}")
+        host.ask("POST", "/agent-mute", {"session": session, "muted": True})
+
+    # Every one is given its command and its word.
+    asked = {}
+    for i, session in enumerate(sessions, 1):
+        mark, word = f"mark-{exercise}-{i}", f"held {i}"
+        text = (f"Restart check {i}. Use your shell tool to run exactly this one command, and wait until it has "
+                f"finished:\n\necho {mark} >> {marks}; sleep {args.seconds}\n\n"
+                f"Then reply with exactly these two words and nothing else: {word}")
+        client_id = f"restart-{exercise}-{i}"
+        status, sent = host.ask("POST", "/send", {"session": session, "client_msg_id": client_id,
+                                                  "synthesize_audio": False, "text": text})
+        if status != 200:
+            return gave_up("not_accepted", f"{session}: {status} {sent}")
+        asked[session] = {"message_id": f"u-{client_id}", "mark": mark, "word": word, "sent": time.monotonic()}
+        # One after the other: ten tools starting in the same breath is a load of its own.
+        time.sleep(args.stagger)
+
+    def marked() -> dict:
+        try:
+            lines = marks.read_text().split()
+        except OSError:
+            lines = []
+        return {session: lines.count(given["mark"]) for session, given in asked.items()}
+
+    # All of them in their turns, and their commands begun.
+    deadline, running = time.monotonic() + args.start_timeout, []
+    while time.monotonic() < deadline:
+        rows, begun = snapshot(host), marked()
+        running = [session for session in sessions if (rows.get(session) or {}).get("busy") and begun[session] >= 1]
+        if len(running) == len(sessions):
+            break
+        time.sleep(1)
+    if len(running) != len(sessions):
+        return gave_up("not_all_running", f"{len(running)} of {len(sessions)} were in their command in time")
+    time.sleep(args.settle)
+    rows = snapshot(host)
+    running = [session for session in sessions if (rows.get(session) or {}).get("busy")]
+    version_before = version_of(host)
+    since_before = up_since()
+
+    # The restart: of the service alone, or by the command that was given (an update: the
+    # installer puts the new build in place and restarts the service itself).
+    began = time.monotonic()
+    how = ["sh", "-c", args.by] if args.by else ["systemctl", "--user", "restart", args.unit]
+    done = subprocess.run(how, capture_output=True, text=True, timeout=300)
+    if done.returncode != 0:
+        return gave_up("restart_failed", (done.stderr or done.stdout).strip())
+    answers_again, restarted_at = None, time.monotonic()
+    while time.monotonic() < restarted_at + 60:
+        status, info = host.ask("GET", "/server-info", timeout=3)
+        if status == 200:
+            answers_again = round((time.monotonic() - restarted_at) * 1000)
+            break
+        time.sleep(0.1)
+    since_after = up_since()
+    if answers_again is None:
+        return gave_up("host_did_not_come_back")
+    rows = snapshot(host)
+    taken_up = [session for session in sessions if (rows.get(session) or {}).get("busy")]
+    print(f"restart: the Host was started again with {len(running)} of {len(sessions)} turns running; "
+          f"it answered {answers_again} ms after the restart was done and has {len(taken_up)} of them", flush=True)
+
+    # Every turn to its end.
+    found, ended = {}, {}
+    deadline = time.monotonic() + args.seconds * 3 + args.turn_timeout
+    while time.monotonic() < deadline and len(ended) < len(sessions):
+        for session in sessions:
+            if session in ended:
+                continue
+            listed = rows_of(host, session)
+            if listed is None:
+                continue
+            found[session] = audit(listed, asked[session]["message_id"], asked[session]["word"])
+            if found[session]["turn_ends"] >= 1:
+                ended[session] = round(time.monotonic() - asked[session]["sent"], 1)
+        time.sleep(2)
+    ran, outcomes = marked(), {}
+    for session in sessions:
+        seen = found.get(session)
+        if seen is None:
+            outcome = "host_unreachable"
+        elif seen["message_rows"] == 0:
+            outcome = "lost"
+        elif seen["message_rows"] > 1 or seen["turn_ends"] > 1 or ran[session] > 1:
+            outcome = "doubled"
+        elif seen["turn_ends"] == 0:
+            outcome = "no_end_in_time"
+        elif seen["status"] != "completed":
+            outcome = f"turn_{seen['status'] or 'ended'}"
+        elif not seen["said_the_word"]:
+            outcome = "wrong_answer"
+        else:
+            outcome = "ok"
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        write({"kind": "restart", "agent": session, "message_id": asked[session]["message_id"], "outcome": outcome,
+               "running_at_restart": session in running, "taken_up_after": session in taken_up,
+               "command_ran": ran[session], "seconds": ended.get(session), **(seen or {})})
+    version_after = version_of(host)
+    restarted = bool(since_before and since_after and since_before != since_after)
+    held = restarted and outcomes == {"ok": len(sessions)} and len(running) == len(sessions)
+    write({"kind": "restart_summary", "outcome": "held" if held else "not_held", "agents": len(sessions),
+           "running_at_restart": len(running), "taken_up_after": len(taken_up), "outcomes": outcomes,
+           "restarted": restarted, "answered_again_ms": answers_again, "by": args.by or f"systemctl restart {args.unit}",
+           "restart_took_ms": round((restarted_at - began) * 1000), "up_since": since_before,
+           "up_since_after": since_after, "host_version": version_before, "host_version_after": version_after,
+           "command_seconds": args.seconds})
+    print(f"restart: {'held' if held else 'NOT HELD'}: " + ", ".join(f"{name}: {count}" for name, count in sorted(outcomes.items()))
+          + f"; builds {version_before} -> {version_after}", flush=True)
+    return 0 if held else 2
+
+
 def report(args) -> int:
     evidence = pathlib.Path(args.evidence)
     if not evidence.exists():
@@ -267,24 +438,43 @@ def report(args) -> int:
     if audits:
         doubled = sum(len(a.get("doubled", [])) + len(a.get("ended_twice", [])) for a in audits)
         print(f"whole-conversation audits: {len(audits)}, the last over {audits[-1].get('messages')} messages; doubled or ended twice: {doubled}")
-    bad = by.get("lost", 0) + by.get("doubled", 0) + by.get("wrong_answer", 0)
+    exercises = [line for line in lines if line.get("kind") == "restart_summary"]
+    for line in exercises:
+        outcomes = ", ".join(f"{name}: {count}" for name, count in sorted((line.get("outcomes") or {}).items()))
+        print(f"restart with turns running, {time.strftime('%d %b %H:%M', time.localtime(line['at'] / 1000))}: "
+              f"{line.get('outcome')}; {line.get('running_at_restart', 0)} of {line.get('agents', 0)} running at the restart"
+              + (f"; {outcomes}" if outcomes else "")
+              + (f"; builds {line.get('host_version')} -> {line.get('host_version_after')}" if line.get("host_version") else ""))
+    not_held = sum(1 for line in exercises if line.get("outcome") == "not_held")
+    bad = by.get("lost", 0) + by.get("doubled", 0) + by.get("wrong_answer", 0) + not_held
     return 2 if bad else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="soak", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("run", "report"):
+    for name in ("run", "restart", "report"):
         command = sub.add_parser(name)
         command.add_argument("--evidence", default=str(EVIDENCE))
-        if name == "run":
+        if name != "report":
             command.add_argument("--host", default="127.0.0.1:7690")
+            command.add_argument("--turn-timeout", type=float, default=900)
+        if name == "run":
             command.add_argument("--session", default="soak")
             command.add_argument("--every", type=float, default=900)
             command.add_argument("--rounds", type=int, default=0, help="stop after so many rounds (default: never)")
-            command.add_argument("--turn-timeout", type=float, default=900)
+        if name == "restart":
+            command.add_argument("--agents", type=int, default=10, help="how many turns run at the restart")
+            command.add_argument("--seconds", type=int, default=45, help="how long each agent's command takes")
+            command.add_argument("--settle", type=float, default=2, help="how long after the last command began")
+            command.add_argument("--stagger", type=float, default=1, help="seconds between two agents' messages")
+            command.add_argument("--by", default="", help="the command that restarts the Host (default: systemctl)")
+            command.add_argument("--start-timeout", type=float, default=180)
+            command.add_argument("--model", default="haiku")
+            command.add_argument("--cwd", default="~/clarp-host-soak")
+            command.add_argument("--unit", default="clarp-host.service")
     args = parser.parse_args()
-    return run(args) if args.command == "run" else report(args)
+    return {"run": run, "restart": restart, "report": report}[args.command](args)
 
 
 if __name__ == "__main__":
