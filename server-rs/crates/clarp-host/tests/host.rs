@@ -2085,6 +2085,111 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
     );
 }
 
+#[test]
+fn an_agent_writes_to_another_agent_with_its_own_tool() {
+    let place = Place::new("message");
+    let host = place.start();
+    let (asker, worker) = (host.new_agent("Asker"), host.new_agent("Worker"));
+    let dir = place.root.clone();
+    let events = host.listen();
+    let focus_before = host.get("/agents/snapshot")["focus"].clone();
+    let admin = |args: &[&str]| {
+        let mut all = vec!["clarp-admin"];
+        all.extend_from_slice(args);
+        tool(&host, &dir, None, &all)
+    };
+    let over = |text: &str| {
+        let reply = said("assistant", text);
+        wait_for("the answer", || host.conversation(&worker).contains(&reply));
+        wait_for("the turn to be over", || host.state(&worker) == "done");
+    };
+
+    // One agent hands another something, as the skill tells it to.
+    let (code, out, err) = admin(&[
+        "prompt",
+        "--to",
+        &worker,
+        "--from",
+        &asker,
+        "--text",
+        "please look at the build",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let sent: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&sent["ok"], &sent["session"], &sent["queued"]),
+        (&json!(true), &json!(worker), &json!(false))
+    );
+    over("please look at the build");
+    let rows = host.turns(&worker);
+    assert_eq!(
+        (
+            &rows[0]["origin"],
+            &rows[0]["sender_session"],
+            &rows[0]["sender_name"]
+        ),
+        (&json!("agent"), &json!(asker), &json!("Asker"))
+    );
+    assert_eq!(rows[1]["origin"], "agent");
+    // What agents say to each other tells the user nothing, and the agent the user has
+    // open stays the one it was.
+    assert!(
+        !events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "user-notification")
+    );
+    assert_eq!(host.get("/agents/snapshot")["focus"], focus_before);
+
+    // Something that runs by itself writes without a sender.
+    let (code, _, err) = admin(&[
+        "prompt",
+        "--to",
+        &worker,
+        "--origin",
+        "watcher",
+        "--text",
+        "the queue is long",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    over("the queue is long");
+    let rows = host.turns(&worker);
+    assert_eq!(
+        (&rows[2]["origin"], &rows[2]["text"], &rows[2]["automated"]),
+        (
+            &json!("watcher"),
+            &json!("Automated watcher event"),
+            &json!(true)
+        )
+    );
+
+    // What the tool refuses, it refuses as the Python tool does.
+    let nobody = admin(&["prompt", "--to", "nobody", "--text", "anyone there"]);
+    assert_eq!(
+        (nobody.0, nobody.2.as_str()),
+        (
+            4,
+            "clarp-admin prompt: the Host refused it (HTTP 404): unknown forced agent\n"
+        )
+    );
+    assert_eq!(admin(&["prompt", "--to", &worker]).0, 2);
+    let both = admin(&[
+        "prompt", "--to", &worker, "--from", &asker, "--origin", "watcher", "--text", "x",
+    ]);
+    assert_eq!(
+        (both.0, both.2.as_str()),
+        (1, "--origin cannot be combined with --from\n")
+    );
+    // What is not on this Host says so, and does nothing.
+    assert_eq!(
+        admin(&["prompt", "--to", &worker, "--text", "x", "--server", "work"]).0,
+        69
+    );
+    assert_eq!(admin(&["update"]).0, 69);
+    assert_eq!(host.turns(&worker).len(), 4, "nothing else was sent");
+}
+
 /// Pairs a device with this Host. Answers the device's token and its id.
 fn pair(host: &Host, name: &str, scope: &str) -> (String, String) {
     let issued = host.post(

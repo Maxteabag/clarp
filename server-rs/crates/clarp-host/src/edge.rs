@@ -615,6 +615,15 @@ async fn send(
     State(app): State<App>,
     Json(request): Json<SendRequest>,
 ) -> Result<Json<SendResponse>, ApiError> {
+    send_message(&app, request).await.map(Json)
+}
+
+/// Takes a message for an agent: what `POST /send` does, and what an agent's own tool does
+/// when it writes to another agent.
+pub(crate) async fn send_message(
+    app: &App,
+    request: SendRequest,
+) -> Result<SendResponse, ApiError> {
     // What the Python Host refuses a send with, in its order and its words (plain text).
     if request.text.trim().is_empty() {
         return Err(ApiError::plain(StatusCode::BAD_REQUEST, "empty text"));
@@ -628,7 +637,7 @@ async fn send(
     // Who it comes from, as the Python Host reads a send: the origin it names, when that is
     // one a sender may name; otherwise another agent, when it names its sender; otherwise
     // the user. What the Host stamps itself (a janitor, a leader's tick) nobody may claim.
-    let sender = sender(&app, request.sender.as_ref());
+    let sender = sender(app, request.sender.as_ref());
     let from_agent = || Origin::Agent {
         agent_id: sender
             .as_ref()
@@ -682,7 +691,7 @@ async fn send(
         // Writing to an agent makes it the open one, without a word about it.
         let _ = app.fleet.open(member.record.session.clone()).await;
     }
-    Ok(Json(SendResponse {
+    Ok(SendResponse {
         ok: true,
         session: member.record.session.clone(),
         dispatch: member.record.backend.clone(),
@@ -697,7 +706,7 @@ async fn send(
         }),
         queue_revision: Some(if sent.queued { sent.queue.revision } else { 0 }),
         ..SendResponse::default()
-    }))
+    })
 }
 
 async fn stop(
