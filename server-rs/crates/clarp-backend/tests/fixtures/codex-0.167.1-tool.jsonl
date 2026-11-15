@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/usr/bin/bash -lc 'echo hello-from-codex'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/usr/bin/bash -lc 'echo hello-from-codex'","aggregated_output":"hello-from-codex\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":87566,"cached_input_tokens":55040,"cache_write_input_tokens":0,"output_tokens":36,"reasoning_output_tokens":0}}

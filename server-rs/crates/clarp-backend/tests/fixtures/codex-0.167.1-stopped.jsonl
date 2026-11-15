@@ -1,0 +1,3 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/usr/bin/bash -lc 'sleep 40'","aggregated_output":"","exit_code":null,"status":"in_progress"}}

@@ -1,0 +1,193 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "capabilities": {
+     "features": "<features>",
+     "version": 1
+    },
+    "clarp_version": "<version>",
+    "client": {
+     "build": "",
+     "contract": 0,
+     "platform": "",
+     "reason": "",
+     "status": "unknown"
+    },
+    "contract": {
+     "features": "<features>",
+     "host": 99,
+     "min_ios": 1
+    },
+    "default_cwd": "<ROOT>/home",
+    "deployment_mode": "native",
+    "image_version": "",
+    "local_connection": {
+     "enabled": false
+    },
+    "min_app_version": "1.0",
+    "name": "<name>",
+    "server_id": "<id:1>",
+    "version": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/server-info",
+   "status": 200,
+   "step": "get /server-info"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "started",
+       "agent_id": "<id:2>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "spawned",
+       "persona": "Claire",
+       "phase": "spawned",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Started",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:2>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": null,
+      "context_window": 1000000,
+      "conversation_id": "",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": false,
+      "goal": null,
+      "head_revision": 0,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "",
+      "last_message": "",
+      "last_message_id": "",
+      "last_turn_end": 0,
+      "latest_state": "spawned",
+      "latest_state_ts": "<time>",
+      "live_activity": null,
+      "mcp_servers": [],
+      "model": "",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": null,
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "get /agents/snapshot"
+  },
+  {
+   "body": {
+    "conversation_id": "",
+    "cwd": "<ROOT>/workspace",
+    "file": null,
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 0,
+    "latest_ts": "",
+    "missing": true,
+    "replace_required": false,
+    "turns": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "who-is-there",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  }
+ ]
+}

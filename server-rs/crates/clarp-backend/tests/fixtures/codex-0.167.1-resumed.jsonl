@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"hello\n\nIt printed that because the command was `echo hello-from-codex`."}}
+{"type":"turn.completed","usage":{"input_tokens":131412,"cached_input_tokens":98688,"cache_write_input_tokens":0,"output_tokens":57,"reasoning_output_tokens":0}}

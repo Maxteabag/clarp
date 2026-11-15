@@ -16,6 +16,7 @@ use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::Record;
 
 pub mod claude;
+pub mod codex;
 pub mod scripted;
 
 /// The environment variable that tells a tool, its hooks and its skills which agent they work for.
@@ -117,13 +118,26 @@ pub trait Backend: Send + Sync {
 
 /// The environment variable that names Claude Code's program, when it is not `claude` on the path.
 pub const CLAUDE_PROGRAM_ENV: &str = "CLARP_CLAUDE_PROGRAM";
+/// The same for Codex.
+pub const CODEX_PROGRAM_ENV: &str = "CLARP_CODEX_PROGRAM";
+
+/// The program an environment variable names, when it names one.
+fn named(variable: &str) -> Option<String> {
+    std::env::var(variable)
+        .ok()
+        .filter(|program| !program.trim().is_empty())
+}
 
 /// The backend with this name, as built in.
 pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
     match id {
-        "claude" => Some(Arc::new(match std::env::var(CLAUDE_PROGRAM_ENV) {
-            Ok(program) if !program.trim().is_empty() => claude::Claude::with_program(program),
-            _ => claude::Claude::new(),
+        "claude" => Some(Arc::new(match named(CLAUDE_PROGRAM_ENV) {
+            Some(program) => claude::Claude::with_program(program),
+            None => claude::Claude::new(),
+        })),
+        "codex" => Some(Arc::new(match named(CODEX_PROGRAM_ENV) {
+            Some(program) => codex::Codex::with_program(program),
+            None => codex::Codex::new(),
         })),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
@@ -180,6 +194,12 @@ mod tests {
     #[test]
     fn the_built_in_backends_are_found_by_name() {
         assert_eq!(by_id("claude").unwrap().id(), "claude");
+        assert_eq!(by_id("codex").unwrap().id(), "codex");
+        assert_eq!(
+            (context_window("claude"), context_window("codex")),
+            (Some(1_000_000), None),
+            "Codex compacts on its own: there is no gauge to show"
+        );
         assert_eq!(by_id("scripted").unwrap().id(), "scripted");
         assert!(by_id("nobody").is_none());
     }

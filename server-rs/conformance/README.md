@@ -16,7 +16,7 @@ they are; what is new is a corpus that only does what a client can do, and a sec
 | `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would |
 | `contract_plants.py` | Deliberate changes to a copy of the Python server that the suite must see. A reviewer adds their own |
 | `conform.py` | The driver: `record`, `plants`, `compare`, `cross` |
-| `golden/` | What the Python Host answered, normalized, one file per scenario. Written by the workflow, committed by hand |
+| `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand |
 | `intended.txt` | Ids of differences that are meant to be there (the reasoning is in `../docs/differences.md`) |
 
 ## Running it
@@ -49,10 +49,26 @@ Python Host. Every difference is exactly one of:
 3. **A defect of the reference.** Write it into `../docs/reference-defects.md` and report it
    to whoever owns the Python Host's releases.
 
-The suite counts only while its proof holds: the reference run twice gives no difference, and
-every planted change is caught by a difference of the kind it names.
+The suite counts only while its proof holds: every planted change is caught by a difference
+of the kind it names.
+
+The reference is recorded twice in every run. Where the two recordings differ, the Python
+Host itself answers in more than one way: the report says so in its first part, the defect
+goes into `../docs/reference-defects.md`, and both answers are kept. In such a scenario the
+Rust Host conforms when it gives one of them; the report names the recording it was held to.
+It never conforms by matching neither.
+
+## What is compared as what a client may rely on
+
+Some things are each Host's own choice, and comparing their values would only compare the
+choices. They are compared as what a client can rely on (`core` in `conform.py`, the table in
+`../docs/differences.md`): a conversation's revisions as their order, the ids of the rows an
+agent wrote as the order they are first read in, a Host's version as "a version". A queue's
+revision is compared as the number it is. Fields and events of features the Rust Host does not
+have yet are left out of both sides.
 
 ## When the Python Host changes
 
-`golden/` is the Python Host at the commit the workflow ran on. After a change to the contract
-(a bump of `HOST_CONTRACT`), run the workflow again and commit the new `golden/`.
+`golden/` and `golden-again/` are the Python Host at the commit the workflow ran on. After a
+change to the contract (a bump of `HOST_CONTRACT`), or to the corpus or the view in
+`conform.py`, run the workflow again and commit what it recorded.

@@ -1,0 +1,713 @@
+//! Codex, run for one turn as `codex exec --json`.
+//!
+//! One process per turn: the message goes in on standard input, and Codex prints one JSON
+//! object per line until the turn is over and then exits. A turn that continues a conversation
+//! is `codex exec resume <thread>`. Codex names its thread itself, in its first line; the Host
+//! cannot choose the name, so it learns it there and resumes it from then on.
+//!
+//! The stream, as codex-cli 0.167.1 prints it (the fixtures in `tests/fixtures` are recordings):
+//!
+//! ```text
+//! {"type":"thread.started","thread_id":"…"}
+//! {"type":"turn.started"}
+//! {"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"…","status":"in_progress",…}}
+//! {"type":"item.completed","item":{"id":"item_0","type":"command_execution","aggregated_output":"…","exit_code":0,"status":"completed"}}
+//! {"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"…"}}
+//! {"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,…}}
+//! ```
+//!
+//! An item's id counts from `item_0` in every turn, so the ids of what a turn puts into the
+//! conversation are built from the turn's own name. A turn that fails says so with `turn.failed`
+//! (and an `error` line) and exits with 1. An item of type `error` is not a failure: it is
+//! Codex remarking on its own configuration, and it is left out.
+
+use std::collections::BTreeMap;
+
+use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
+use clarp_kernel::turn::{Activity, RunOutcome};
+use clarp_spool::{Entry, Record, ShimEvent};
+use serde_json::{Value, json};
+
+use crate::{
+    Backend, ErrorTail, Interpreter, Launch, LiveReply, SESSION_ENV, Signal, TurnSpec, shorten,
+};
+
+/// How much of what a tool gave back is kept with the call.
+const MAX_TOOL_OUTPUT: usize = 4_000;
+
+pub struct Codex {
+    program: String,
+}
+
+impl Codex {
+    pub fn new() -> Self {
+        Self::with_program("codex")
+    }
+
+    /// Codex under another name or path.
+    pub fn with_program(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+        }
+    }
+}
+
+impl Default for Codex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A value for `-c key=value`, which Codex reads as TOML: a JSON string is a TOML string.
+fn setting(key: &str, value: &str) -> String {
+    format!("{key}={}", Value::String(value.to_string()))
+}
+
+impl Backend for Codex {
+    fn id(&self) -> &'static str {
+        "codex"
+    }
+
+    fn launch(&self, spec: &TurnSpec) -> Launch {
+        let mut args: Vec<String> = [
+            "exec",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        if let Some(model) = given(&spec.model) {
+            args.push("--model".to_string());
+            args.push(model);
+        }
+        if let Some(effort) = given(&spec.effort) {
+            args.push("-c".to_string());
+            args.push(setting("model_reasoning_effort", &effort));
+        }
+        // Who the agent is, as a developer message on top of Codex's own instructions.
+        if let Some(identity) = given(&spec.identity) {
+            args.push("-c".to_string());
+            args.push(setting("developer_instructions", &identity));
+        }
+        // A thread it has: continue it. Codex names a new one itself.
+        if let Some(thread) = given(&spec.backend_session) {
+            args.push("resume".to_string());
+            args.push(thread);
+        }
+        // The message is read from standard input: it never has to fit a command line.
+        args.push("-".to_string());
+        Launch {
+            program: self.program.clone(),
+            args,
+            env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
+            stdin: spec.prompt.clone().into_bytes(),
+        }
+    }
+
+    fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
+        Box::new(CodexInterpreter::new(turn, name))
+    }
+}
+
+fn text_of(value: &Value) -> &str {
+    value.as_str().unwrap_or("")
+}
+
+/// What a tool call is called in the conversation, and what it was asked, by the kind of item.
+fn call_of(item: &Value) -> (String, Value) {
+    let kind = text_of(&item["type"]);
+    match kind {
+        "command_execution" | "local_shell_call" => {
+            ("shell".to_string(), json!({ "command": item["command"] }))
+        }
+        "file_change" | "patch_apply" => (
+            "apply_patch".to_string(),
+            json!({ "changes": item["changes"] }),
+        ),
+        "mcp_tool_call" => {
+            let name = match (text_of(&item["server"]), text_of(&item["tool"])) {
+                ("", "") => kind.to_string(),
+                ("", tool) => tool.to_string(),
+                (server, tool) => format!("{server}.{tool}"),
+            };
+            (name, item["arguments"].clone())
+        }
+        "web_search" | "web_search_call" => {
+            ("web_search".to_string(), json!({ "query": item["query"] }))
+        }
+        other => {
+            let name = match text_of(&item["name"]) {
+                "" => other,
+                name => name,
+            };
+            (name.to_string(), item["arguments"].clone())
+        }
+    }
+}
+
+/// What a finished tool call gave back.
+fn result_of(item: &Value) -> String {
+    for field in ["aggregated_output", "output"] {
+        if let Some(text) = item[field].as_str().filter(|text| !text.is_empty()) {
+            return text.to_string();
+        }
+    }
+    if let Some(message) = item["error"]["message"].as_str() {
+        return message.to_string();
+    }
+    match &item["result"] {
+        Value::Null => String::new(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Whether a finished tool call went wrong: it says so, or its command did not exit with 0.
+fn went_wrong(item: &Value) -> bool {
+    matches!(text_of(&item["status"]), "failed" | "declined" | "error")
+        || item["exit_code"].as_i64().is_some_and(|code| code != 0)
+}
+
+pub struct CodexInterpreter {
+    turn: u64,
+    /// The turn's own name: what the ids of its pieces are built from.
+    name: String,
+    /// The tool calls of this turn, by Codex's item id.
+    tools: BTreeMap<String, ToolCall>,
+    activity: Option<Activity>,
+    /// Codex said the turn is complete.
+    completed: bool,
+    /// What Codex said went wrong.
+    failure: Option<String>,
+    stderr: ErrorTail,
+    ended: bool,
+}
+
+impl CodexInterpreter {
+    pub fn new(turn: u64, name: &str) -> Self {
+        Self {
+            turn,
+            name: name.to_string(),
+            tools: BTreeMap::new(),
+            activity: None,
+            completed: false,
+            failure: None,
+            stderr: ErrorTail::default(),
+            ended: false,
+        }
+    }
+
+    fn moved(&mut self, activity: Activity, out: &mut Vec<Signal>) {
+        if self.activity.as_ref() != Some(&activity) {
+            self.activity = Some(activity.clone());
+            out.push(Signal::Moved(activity));
+        }
+    }
+
+    fn on_line(&mut self, line: &str, t: i64, out: &mut Vec<Signal>) {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            return; // not one of its events: a line some tool of its printed
+        };
+        match text_of(&event["type"]) {
+            "thread.started" => {
+                let thread = text_of(&event["thread_id"]).trim();
+                if !thread.is_empty() {
+                    out.push(Signal::Bound {
+                        backend_session: thread.to_string(),
+                    });
+                }
+            }
+            "turn.started" => self.moved(Activity::Thinking, out),
+            step @ ("item.started" | "item.updated" | "item.completed") => {
+                self.on_item(step, &event["item"], t, out);
+            }
+            "turn.completed" => {
+                self.completed = true;
+                let count = |field: &str| event["usage"][field].as_u64();
+                if let (Some(tokens_in), Some(tokens_out)) =
+                    (count("input_tokens"), count("output_tokens"))
+                {
+                    out.push(Signal::Usage {
+                        tokens_in,
+                        tokens_out,
+                    });
+                }
+            }
+            "turn.failed" | "thread.error" | "error" => {
+                let said = match &event["error"] {
+                    Value::String(message) => message.as_str(),
+                    error => match text_of(&error["message"]) {
+                        "" => text_of(&event["message"]),
+                        message => message,
+                    },
+                };
+                if self.failure.is_none() && !said.trim().is_empty() {
+                    self.failure = Some(shorten(said.trim(), 600));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn on_item(&mut self, step: &str, item: &Value, t: i64, out: &mut Vec<Signal>) {
+        let id = text_of(&item["id"]);
+        let done = step == "item.completed";
+        match text_of(&item["type"]) {
+            "agent_message" => {
+                let text = match text_of(&item["text"]) {
+                    "" => text_of(&item["message"]),
+                    text => text,
+                };
+                if text.trim().is_empty() {
+                    return;
+                }
+                let reply = format!("r-{}-{id}", self.name);
+                if done {
+                    out.push(Signal::Reply(Reply {
+                        id: reply,
+                        turn: self.turn,
+                        text: text.to_string(),
+                        trace_id: None,
+                    }));
+                    self.moved(Activity::Thinking, out);
+                } else {
+                    self.moved(Activity::Responding, out);
+                    out.push(Signal::Live(LiveReply {
+                        id: reply,
+                        text: text.to_string(),
+                    }));
+                }
+            }
+            "reasoning" => self.moved(Activity::Thinking, out),
+            "context_compaction" => {
+                let now = if done {
+                    Activity::Thinking
+                } else {
+                    Activity::Compacting
+                };
+                self.moved(now, out);
+            }
+            // Codex on its own configuration, and its plan: nothing the conversation holds.
+            "error" | "todo_list" | "" => {}
+            _ if id.is_empty() => {}
+            _ if done => {
+                let (name, input) = call_of(item);
+                let call = self
+                    .tools
+                    .entry(id.to_string())
+                    .or_insert_with(|| ToolCall {
+                        id: format!("c-{}-{id}", self.name),
+                        turn: self.turn,
+                        name,
+                        input,
+                        status: ToolStatus::Running,
+                        output: None,
+                        started_at_ms: t,
+                        ended_at_ms: None,
+                    });
+                if call.status != ToolStatus::Running {
+                    return; // told twice
+                }
+                call.status = if went_wrong(item) {
+                    ToolStatus::Error
+                } else {
+                    ToolStatus::Ok
+                };
+                call.output = Some(shorten(&result_of(item), MAX_TOOL_OUTPUT));
+                call.ended_at_ms = Some(t);
+                out.push(Signal::Tool(call.clone()));
+                self.moved(Activity::Thinking, out);
+            }
+            _ => {
+                if self.tools.contains_key(id) {
+                    return; // an update of a call that is known: nothing new to store
+                }
+                let (name, input) = call_of(item);
+                let call = ToolCall {
+                    id: format!("c-{}-{id}", self.name),
+                    turn: self.turn,
+                    name: name.clone(),
+                    input,
+                    status: ToolStatus::Running,
+                    output: None,
+                    started_at_ms: t,
+                    ended_at_ms: None,
+                };
+                self.tools.insert(id.to_string(), call.clone());
+                out.push(Signal::Tool(call));
+                self.moved(Activity::Tool { name }, out);
+            }
+        }
+    }
+
+    fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, t: i64, out: &mut Vec<Signal>) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        // A tool that was still running when the process went did not finish.
+        for call in self.tools.values_mut() {
+            if call.status == ToolStatus::Running {
+                call.status = ToolStatus::Error;
+                call.output = Some("The turn ended before this tool finished.".to_string());
+                call.ended_at_ms = Some(t);
+                out.push(Signal::Tool(call.clone()));
+            }
+        }
+        let outcome = if let Some(signal) = signal {
+            RunOutcome::Interrupted {
+                reason: format!("codex was ended by signal {signal}"),
+            }
+        } else if let Some(reason) = self.failure.take() {
+            RunOutcome::Failed { reason }
+        } else if code != Some(0) {
+            RunOutcome::Failed {
+                reason: self
+                    .stderr
+                    .text()
+                    .unwrap_or_else(|| format!("codex exited with code {}", code.unwrap_or(-1))),
+            }
+        } else if !self.completed {
+            RunOutcome::Failed {
+                reason: self
+                    .stderr
+                    .text()
+                    .unwrap_or_else(|| "codex ended without completing its turn".to_string()),
+            }
+        } else {
+            RunOutcome::Completed
+        };
+        out.push(Signal::Ended(outcome));
+    }
+}
+
+impl Interpreter for CodexInterpreter {
+    fn on_record(&mut self, record: &Record, out: &mut Vec<Signal>) {
+        match &record.entry {
+            Entry::Out(line) => self.on_line(line, record.t, out),
+            Entry::Err(line) => self.stderr.push(line),
+            Entry::Shim(ShimEvent::Exited { code, signal }) => {
+                self.on_exit(*code, *signal, record.t, out);
+            }
+            Entry::Shim(_) | Entry::Hook { .. } => {}
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn spec() -> TurnSpec {
+        TurnSpec {
+            agent_id: "a1".to_string(),
+            session: "rachel".to_string(),
+            turn: 3,
+            cwd: PathBuf::from("/work"),
+            prompt: "What is in here?".to_string(),
+            backend_session: None,
+            new_session: Some("conv-1".to_string()),
+            model: None,
+            effort: None,
+            identity: None,
+        }
+    }
+
+    #[test]
+    fn a_turn_is_started_with_the_message_on_standard_input() {
+        let codex = Codex::new();
+        let fresh = codex.launch(&spec());
+        assert_eq!(fresh.program, "codex");
+        assert_eq!(
+            fresh.args,
+            vec![
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-"
+            ],
+            "a new thread: Codex names it, the Host cannot"
+        );
+        assert_eq!(fresh.stdin, b"What is in here?");
+        assert_eq!(
+            fresh.env,
+            vec![(SESSION_ENV.to_string(), "rachel".to_string())]
+        );
+
+        let told = codex.launch(&TurnSpec {
+            backend_session: Some("thread-9".to_string()),
+            model: Some("gpt-9".to_string()),
+            effort: Some("low".to_string()),
+            identity: Some("You are \"Rachel\".\nBe brief.".to_string()),
+            ..spec()
+        });
+        assert_eq!(
+            told.args,
+            vec![
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--model",
+                "gpt-9",
+                "-c",
+                r#"model_reasoning_effort="low""#,
+                "-c",
+                r#"developer_instructions="You are \"Rachel\".\nBe brief.""#,
+                "resume",
+                "thread-9",
+                "-"
+            ],
+            "the settings come before the thread to resume, the message last"
+        );
+        assert_eq!(
+            Codex::with_program("/opt/codex").launch(&spec()).program,
+            "/opt/codex"
+        );
+    }
+
+    fn read(lines: &[&str], exit: (Option<i32>, Option<i32>)) -> Vec<Signal> {
+        let mut interpreter = CodexInterpreter::new(3, "m1");
+        let mut out = Vec::new();
+        let mut t = 100;
+        for line in lines {
+            t += 1;
+            interpreter.on_record(
+                &Record {
+                    t,
+                    entry: Entry::Out((*line).to_string()),
+                },
+                &mut out,
+            );
+        }
+        interpreter.on_record(
+            &Record {
+                t: t + 1,
+                entry: Entry::Shim(ShimEvent::Exited {
+                    code: exit.0,
+                    signal: exit.1,
+                }),
+            },
+            &mut out,
+        );
+        out
+    }
+
+    #[test]
+    fn a_reply_that_grows_is_shown_and_then_stored_under_the_same_id() {
+        let signals = read(
+            &[
+                r#"{"type":"thread.started","thread_id":"t-1"}"#,
+                r#"{"type":"turn.started"}"#,
+                r#"{"type":"item.started","item":{"id":"item_0","type":"reasoning","text":"hm"}}"#,
+                r#"{"type":"item.updated","item":{"id":"item_1","type":"agent_message","text":"One"}}"#,
+                r#"{"type":"item.updated","item":{"id":"item_1","type":"agent_message","text":"One file."}}"#,
+                r#"{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"One file."}}"#,
+                r#"{"type":"turn.completed","usage":{"input_tokens":12,"output_tokens":3}}"#,
+            ],
+            (Some(0), None),
+        );
+        assert_eq!(
+            signals,
+            vec![
+                Signal::Bound {
+                    backend_session: "t-1".to_string()
+                },
+                Signal::Moved(Activity::Thinking),
+                Signal::Moved(Activity::Responding),
+                Signal::Live(LiveReply {
+                    id: "r-m1-item_1".to_string(),
+                    text: "One".to_string()
+                }),
+                Signal::Live(LiveReply {
+                    id: "r-m1-item_1".to_string(),
+                    text: "One file.".to_string()
+                }),
+                Signal::Reply(Reply {
+                    id: "r-m1-item_1".to_string(),
+                    turn: 3,
+                    text: "One file.".to_string(),
+                    trace_id: None
+                }),
+                Signal::Moved(Activity::Thinking),
+                Signal::Usage {
+                    tokens_in: 12,
+                    tokens_out: 3
+                },
+                Signal::Ended(RunOutcome::Completed),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_kinds_of_tool_calls_are_named_and_a_failed_one_is_an_error() {
+        let signals = read(
+            &[
+                r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"false","status":"in_progress"}}"#,
+                r#"{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"false","aggregated_output":"","exit_code":1,"status":"failed"}}"#,
+                r#"{"type":"item.completed","item":{"id":"item_1","type":"file_change","changes":[{"path":"a.txt","kind":"add"}],"status":"completed"}}"#,
+                r#"{"type":"item.started","item":{"id":"item_2","type":"mcp_tool_call","server":"docs","tool":"search","arguments":{"q":"x"},"status":"in_progress"}}"#,
+                r#"{"type":"item.completed","item":{"id":"item_2","type":"mcp_tool_call","server":"docs","tool":"search","arguments":{"q":"x"},"result":{"hits":2},"status":"completed"}}"#,
+                r#"{"type":"item.completed","item":{"id":"item_3","type":"web_search","query":"clarp"}}"#,
+                r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
+            ],
+            (Some(0), None),
+        );
+        let calls: Vec<(&str, &str, ToolStatus, Option<&str>)> = signals
+            .iter()
+            .filter_map(|signal| match signal {
+                Signal::Tool(call) => Some((
+                    call.id.as_str(),
+                    call.name.as_str(),
+                    call.status,
+                    call.output.as_deref(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            vec![
+                ("c-m1-item_0", "shell", ToolStatus::Running, None),
+                ("c-m1-item_0", "shell", ToolStatus::Error, Some("")),
+                ("c-m1-item_1", "apply_patch", ToolStatus::Ok, Some("")),
+                ("c-m1-item_2", "docs.search", ToolStatus::Running, None),
+                (
+                    "c-m1-item_2",
+                    "docs.search",
+                    ToolStatus::Ok,
+                    Some(r#"{"hits":2}"#)
+                ),
+                ("c-m1-item_3", "web_search", ToolStatus::Ok, Some("")),
+            ]
+        );
+        let moves: Vec<&Activity> = signals
+            .iter()
+            .filter_map(|signal| match signal {
+                Signal::Moved(activity) => Some(activity),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            moves,
+            vec![
+                &Activity::Tool {
+                    name: "shell".to_string()
+                },
+                &Activity::Thinking,
+                &Activity::Tool {
+                    name: "docs.search".to_string()
+                },
+                &Activity::Thinking,
+            ],
+            "a call that is only told when it is over was never the agent's activity"
+        );
+    }
+
+    #[test]
+    fn the_ways_a_turn_fails_are_told_apart() {
+        let outcome = |lines: &[&str], exit, stderr: &[&str]| {
+            let mut interpreter = CodexInterpreter::new(1, "m1");
+            let mut out = Vec::new();
+            for line in stderr {
+                interpreter.on_record(
+                    &Record {
+                        t: 1,
+                        entry: Entry::Err((*line).to_string()),
+                    },
+                    &mut out,
+                );
+            }
+            for line in lines {
+                interpreter.on_record(
+                    &Record {
+                        t: 2,
+                        entry: Entry::Out((*line).to_string()),
+                    },
+                    &mut out,
+                );
+            }
+            let (code, signal) = exit;
+            let gone = Entry::Shim(ShimEvent::Exited { code, signal });
+            interpreter.on_record(&Record { t: 3, entry: gone }, &mut out);
+            out.pop().unwrap()
+        };
+        let failed = |reason: &str| {
+            Signal::Ended(RunOutcome::Failed {
+                reason: reason.to_string(),
+            })
+        };
+        assert_eq!(
+            outcome(
+                &[
+                    r#"{"type":"error","message":"The model is not supported."}"#,
+                    r#"{"type":"turn.failed","error":{"message":"The model is not supported."}}"#
+                ],
+                (Some(1), None),
+                &[]
+            ),
+            failed("The model is not supported."),
+            "what Codex said went wrong"
+        );
+        assert_eq!(
+            outcome(
+                &[],
+                (Some(1), None),
+                &["Error: no rollout found for thread id t-9"]
+            ),
+            failed("Error: no rollout found for thread id t-9"),
+            "it said nothing on its output: what it wrote to its error stream"
+        );
+        assert_eq!(
+            outcome(&[], (Some(2), None), &[]),
+            failed("codex exited with code 2")
+        );
+        assert_eq!(
+            outcome(&[r#"{"type":"turn.started"}"#], (Some(0), None), &[]),
+            failed("codex ended without completing its turn"),
+            "an exit with 0 is not enough"
+        );
+        assert_eq!(
+            outcome(&[r#"{"type":"turn.started"}"#], (None, Some(15)), &[]),
+            Signal::Ended(RunOutcome::Interrupted {
+                reason: "codex was ended by signal 15".to_string()
+            })
+        );
+        // An item of type error is Codex remarking on its configuration, not a failed turn.
+        assert_eq!(
+            outcome(
+                &[
+                    r#"{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata not found."}}"#,
+                    r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#
+                ],
+                (Some(0), None),
+                &[]
+            ),
+            Signal::Ended(RunOutcome::Completed)
+        );
+    }
+
+    #[test]
+    fn the_same_lines_mean_the_same_however_often_they_are_read() {
+        let lines = [
+            r#"{"type":"thread.started","thread_id":"t-1"}"#,
+            r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}"#,
+            r#"{"type":"item.updated","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"ls","aggregated_output":"a\n","exit_code":0,"status":"completed"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"ls","aggregated_output":"a\n","exit_code":0,"status":"completed"}}"#,
+            "not json at all",
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ];
+        let once = read(&lines, (Some(0), None));
+        assert_eq!(once, read(&lines, (Some(0), None)));
+        let tools = once
+            .iter()
+            .filter(|signal| matches!(signal, Signal::Tool(_)))
+            .count();
+        assert_eq!(tools, 2, "started and ended, each once");
+    }
+}
