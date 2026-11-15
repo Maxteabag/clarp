@@ -2198,6 +2198,31 @@ def test_hotseat_decide_never_oscillates_or_strands_running_models():
     assert d_ranked["action"] == "switch" and d_ranked["target"] == "c"
 
 
+@pytest.mark.parametrize("remaining,rung", [(15, 10), (3, 0)])
+@pytest.mark.parametrize("models", [("claude-fable-5-2",), ("claude-fable-5-2", "claude-opus-5-5")])
+@pytest.mark.parametrize("candidate_error", [None, "needs sign-in"])
+def test_general_recovery_prefers_complete_model_coverage_below_a_higher_partial_rung(remaining, rung, models, candidate_error):
+    # A healthy general window cannot compensate for zero requested Fable.
+    # Real incident: ai7 had no 5h room; ai8 had 100% general but Fable 0%;
+    # ai2/ai5 could serve Fable and Opus with 15% general room remaining.
+    payload = claude_payload(spent=(True, "rejected"), partial=(False, 0), complete=(False, 1 - remaining / 100))
+    rows = {a["alias"]: a for a in payload["accounts"]}
+    rows["partial"]["usage"]["scoped"] = [{"model": "Fable", "used": 1, "exhausted": True}]
+    rows["complete"]["usage"]["scoped"] = [{"model": "Fable", "used": 0.5, "exhausted": False}]
+    rows["complete"]["error"] = candidate_error
+    decision = hotseat.decide(hotseat.parse_claude(payload), 25, required_models=models)
+    if candidate_error:
+        # Failed authentication does not earn full-coverage preference. Opus
+        # can still use the partial account, as before this correction.
+        if len(models) > 1:
+            assert decision["target"] == "partial"
+        else:
+            assert decision["action"] == "exhausted"
+    else:
+        assert decision["target"] == "complete"
+        assert decision["rung"] == rung
+
+
 def test_hotseat_demand_includes_unpaused_queued_and_recently_limited_agents_and_enforces_reversal_cooldown(switcher, monkeypatch):
     from lib import turn_queue
 

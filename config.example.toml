@@ -289,6 +289,10 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # audit_unchanged_by_digest = true  # an unchanged file whose audit is due (after a Host
 #                                   # start) has its bytes read once and compared with the
 #                                   # stored digest. false: it is imported in full.
+# full_digest_while_parsing = false # true: a full import takes the file's digest from the
+#                                   # bytes its parser read, when the file did not change
+#                                   # while it was parsed. false: it reads the file a
+#                                   # second time for the digest. Off by default.
 # What a tail import may find changed among the database rows its frontier was
 # published with (lib/message_carry.py gives each rule's reason). false: such a
 # change is a full import, as before the rule existed.
@@ -299,6 +303,10 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # carry_live_rows = false           # true: a live row (the row a reply streams into) may be
 #                                   # new, rewritten or gone, unless a reply before the
 #                                   # tail's boundary carries its trace. Off by default.
+# carry_settled_turns = false       # true (with carry_later_turns): a turn that was running when
+#                                   # the frontier was published may have settled, and the
+#                                   # transcript rows from the boundary on may carry its stamps.
+#                                   # Off by default.
 # tail_yield_after_first_write = false   # true: a tail import gives the writer away only once
 #                                   # it has written something. false: its batch budget runs
 #                                   # from BEGIN IMMEDIATE, so on a long conversation it
