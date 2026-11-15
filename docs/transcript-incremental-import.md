@@ -463,6 +463,20 @@ it go stale and are replaced by the first import after the next upgrade
 
 ## When the import must be full
 
+A conversation with no checkpoint is imported in full every time. A full
+import writes one when it finds a boundary: the latest record that opens a
+user turn whose tail, parsed alone, is the full parse's tail. It tries the
+six newest candidates. For Claude a candidate was every user record that is
+not a tool result, and the harness injects such records into a running turn
+(a task notification for each background job that ends, an account
+recovery, a system reminder); the parser drops them, so a tail that starts
+at one opens no turn. Six of them after a prompt left no candidate that
+could work, and the conversation had no checkpoint for as long as the turn
+ran (`no_safe_boundary_tail_differs`, then `full_no_frontier
+reason=bootstrap_refused` at every import). With
+`boundary_skips_dropped_records = true` a candidate is a record that, parsed
+alone, is a user turn. Off by default.
+
 `decide` returns a reason for a full import when there is no checkpoint, the
 parser version or backend differs, the inode or device changed (rotation or a
 rewrite renamed into place), the file is shorter than the checkpoint's
