@@ -36,10 +36,13 @@ use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
     Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
 };
+use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
-use clarp_kernel::turn::{Activity, Admission, Origin, RunOutcome, Settled, Turn, TurnId};
+use clarp_kernel::turn::{
+    Activity, Admission, Origin, RunOutcome, Settled, Turn, TurnId, silent_when_failed,
+};
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
@@ -439,7 +442,47 @@ fn ending_notice(turn: TurnId, name: &str, code: &str, reason: &str) -> Entry {
         turn: Some(turn.0),
         code: code.to_string(),
         text: reason.to_string(),
+        trace_id: None,
     })
+}
+
+/// What a turn that failed leaves in the conversation.
+struct Failure<'a> {
+    turn: TurnId,
+    /// The message the turn answered: the row goes under it, and is named after it.
+    message_id: &'a str,
+    origin: &'a Origin,
+    /// What kind of failure it was (`failures`), and the tool's words for it.
+    kind: &'a str,
+    reason: &'a str,
+    model: &'a str,
+    trace_id: Option<String>,
+}
+
+/// The row that says, under the message that caused it, why its turn failed: the sentence for
+/// that kind of failure, and below it the provider's own words (`failures::told`). `None` for a
+/// turn nobody was waiting for, and for one that was ended on purpose: the agent's state says
+/// it, the conversation does not.
+///
+/// The row does not close the turn. A turn's end is told on the last thing the turn itself
+/// put into the conversation, which for a turn that said nothing is the message.
+fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
+    if failed.kind == failures::INTERRUPTED || silent_when_failed(failed.origin.name()) {
+        return None;
+    }
+    let told = failures::told(
+        failed.kind,
+        failed.reason,
+        failed.model,
+        failures::Known::default(),
+    );
+    Some(Entry::Notice(Notice {
+        id: format!("marker-{}", failed.message_id),
+        turn: Some(failed.turn.0),
+        code: Notice::TURN_FAILED.to_string(),
+        text: told.row,
+        trace_id: failed.trace_id,
+    }))
 }
 
 /// A name for a turn that no other turn has, on this Host or on one the agent may move to: the
@@ -1165,11 +1208,13 @@ impl Actor {
         // What the agent had written and nobody stored is kept: the user saw it.
         let unfinished = self.drafts().to_vec();
         let facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
-        let name = self
+        let (message_id, origin) = self
             .live
             .as_ref()
-            .map(|live| turn_name(&live.message_id).to_string())
+            .map(|live| (live.message_id.clone(), live.origin.clone()))
             .unwrap_or_default();
+        let name = turn_name(&message_id).to_string();
+        let model = self.profile.model.clone().unwrap_or_default();
         let mut closes = self
             .live
             .as_ref()
@@ -1187,21 +1232,31 @@ impl Actor {
             closes = piece.id().to_string();
             batch.item(written(&piece, now_ms)?);
         }
+        // What is said of the end, and whether that row closes the turn.
         let told = match &command {
             _ if batch.agent().stopping().is_some() => None,
-            Command::StartFailed { reason, .. } => {
-                Some(ending_notice(turn, &name, "turn-failed", reason))
-            }
+            Command::StartFailed { reason, .. } => failure_marker(Failure {
+                turn,
+                message_id: &message_id,
+                origin: &origin,
+                kind: failures::NOT_STARTED,
+                reason,
+                model: &model,
+                trace_id: facts.trace_id.clone(),
+            })
+            .map(|marker| (marker, false)),
             Command::TurnEnded {
                 outcome: RunOutcome::Interrupted { reason },
                 ..
-            } => Some(ending_notice(turn, &name, "turn-interrupted", reason)),
+            } => Some((ending_notice(turn, &name, "turn-interrupted", reason), true)),
             _ => None,
         };
         if batch.command(command, now_ms).is_ok() {
-            if let Some(notice) = told {
-                closes = notice.id().to_string();
-                batch.item(written(&notice, now_ms)?);
+            if let Some((notice, closing_row)) = &told {
+                if *closing_row {
+                    closes = notice.id().to_string();
+                }
+                batch.item(written(notice, now_ms)?);
             }
             if let Some(end) = closing(&batch, turn, &closes, facts) {
                 batch.item(written(&end, now_ms)?);
@@ -1452,6 +1507,7 @@ impl Actor {
             }
             out.damaged_lines += read.damaged.len();
 
+            let model = self.profile.model.clone().unwrap_or_default();
             let mut batch = self.recorder.batch();
             let mut signals = Vec::new();
             let mut shown: Vec<String> = Vec::new();
@@ -1469,15 +1525,19 @@ impl Actor {
                         let failed = batch
                             .command(Command::StartFailed { turn, reason }, t)
                             .is_ok();
-                        if failed && !stopping {
-                            let notice = ending_notice(
+                        if failed
+                            && !stopping
+                            && let Some(marker) = failure_marker(Failure {
                                 turn,
-                                turn_name(&live.message_id),
-                                "turn-failed",
-                                error,
-                            );
-                            live.last_row = notice.id().to_string();
-                            batch.item(written(&notice, t)?);
+                                message_id: &live.message_id,
+                                origin: &live.origin,
+                                kind: failures::NOT_STARTED,
+                                reason: error,
+                                model: &model,
+                                trace_id: live.trace_id.clone(),
+                            })
+                        {
+                            batch.item(written(&marker, t)?);
                         }
                         if failed
                             && let Some(end) = closing(&batch, turn, &live.last_row, live.facts())
@@ -1505,24 +1565,36 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
+                            // What is said of the end, and whether that row closes the turn.
                             let told = match &outcome {
                                 // It went because it was told to: nothing to explain.
                                 _ if batch.agent().stopping().is_some() => None,
-                                RunOutcome::Failed { reason } => {
-                                    let name = turn_name(&live.message_id);
-                                    Some(ending_notice(turn, name, "turn-failed", reason))
-                                }
+                                RunOutcome::Failed { reason } => failure_marker(Failure {
+                                    turn,
+                                    message_id: &live.message_id,
+                                    origin: &live.origin,
+                                    kind: failures::classify_error(reason),
+                                    reason,
+                                    model: &model,
+                                    trace_id: live.trace_id.clone(),
+                                })
+                                .map(|marker| (marker, false)),
                                 RunOutcome::Interrupted { reason } => {
                                     let name = turn_name(&live.message_id);
-                                    Some(ending_notice(turn, name, "turn-interrupted", reason))
+                                    Some((
+                                        ending_notice(turn, name, "turn-interrupted", reason),
+                                        true,
+                                    ))
                                 }
                                 RunOutcome::Completed | RunOutcome::Stopped { .. } => None,
                             };
                             let ended = batch
                                 .command(Command::TurnEnded { turn, outcome }, t)
                                 .is_ok();
-                            if let (true, Some(notice)) = (ended, told) {
-                                live.last_row = notice.id().to_string();
+                            if let (true, Some((notice, closing_row))) = (ended, told) {
+                                if closing_row {
+                                    live.last_row = notice.id().to_string();
+                                }
                                 batch.item(written(&notice, t)?);
                             }
                             if ended

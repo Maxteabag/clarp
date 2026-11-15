@@ -602,6 +602,13 @@ SCENARIOS = [
             {'op': 'quiesce'},
             {**LOG, 'name': 'log after the tool died'},
             {**SNAPSHOT, 'name': 'snapshot after the tool died'},
+            # A turn that had begun to answer when its account was out: where its end is told.
+            send(SLOW + '[qa-says-first] [qa-usage-limit] synthetic work november', 'november'),
+            {'op': 'wait_busy', 'busy': True},
+            {'op': 'wait_busy', 'busy': False},
+            {'op': 'quiesce'},
+            {**LOG, 'name': 'log after a turn that had begun to answer'},
+            {**SNAPSHOT, 'name': 'snapshot after a turn that had begun to answer'},
             # And the agent works on.
             send('synthetic greeting mike', 'mike'),
             {'op': 'wait_reply', 'after': 'u-mike'},

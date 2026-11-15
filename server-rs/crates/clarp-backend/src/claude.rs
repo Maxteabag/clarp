@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use clarp_kernel::conversation::{Notice, Reply, ToolCall, ToolStatus};
+use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
@@ -319,14 +319,10 @@ impl ClaudeInterpreter {
             }
             "rate_limit_event" => {
                 let status = text_of(&event["rate_limit_info"]["status"]);
-                if matches!(status, "rejected" | "blocked") && !self.usage_limit {
+                // The account is out. The turn ends on it, and its end says so: nothing
+                // is put into the conversation at this moment.
+                if matches!(status, "rejected" | "blocked") {
                     self.usage_limit = true;
-                    out.push(Signal::Notice(Notice {
-                        id: format!("n-{}-usage-limit", self.name),
-                        turn: Some(self.turn),
-                        code: "usage-limit".to_string(),
-                        text: USAGE_LIMIT.to_string(),
-                    }));
                 }
             }
             _ => {}
@@ -811,13 +807,11 @@ mod tests {
             ],
             (Some(1), None),
         );
-        assert_eq!(
-            limit
+        assert!(
+            !limit
                 .iter()
-                .filter(|signal| matches!(signal, Signal::Notice(notice) if notice.code == "usage-limit"))
-                .count(),
-            1,
-            "the limit is told once"
+                .any(|signal| matches!(signal, Signal::Notice(_) | Signal::Reply(_))),
+            "the limit is told by the turn's end, not by a row of its own"
         );
         assert_eq!(
             limit.last(),

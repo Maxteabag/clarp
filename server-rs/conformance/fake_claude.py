@@ -16,7 +16,9 @@ an assistant message and a result. Markers in the prompt:
   says the limit rejected the request, its own sentence as the answer (an assistant message of
   the model ``<synthetic>``, marked as an API error in the transcript), a result that is an
   error, and exit code 1;
-- ``[qa-crash]``: the tool dies: a line on stderr, no result, exit code 1.
+- ``[qa-crash]``: the tool dies: a line on stderr, no result, exit code 1;
+- ``[qa-says-first]``: the agent says one thing before whatever else the prompt asks for: a
+  turn that had begun to answer when it failed.
 
 Every process appends its lifecycle to ``$CLARP_QA_PROVIDER_ROOT/claude-procs.jsonl``.
 """
@@ -123,6 +125,12 @@ def main() -> int:
     asked = record(path, session, 'user', None, {'role': 'user', 'content': text})
     if '[qa-slow]' in text:
         stopped.wait(3)
+    if '[qa-says-first]' in text:
+        first = {'id': 'msg_first_' + PROC, 'role': 'assistant', 'model': 'replay-fake',
+                 'content': [{'type': 'text', 'text': 'Claude replay first words: ' + text}],
+                 'usage': {'input_tokens': 5, 'output_tokens': 3}}
+        asked = record(path, session, 'assistant', asked, {**first, 'type': 'message'})
+        emit({'type': 'assistant', 'session_id': session, 'message': first})
     if '[qa-usage-limit]' in text:
         return out_of_usage(path, session, asked)
     if '[qa-crash]' in text:

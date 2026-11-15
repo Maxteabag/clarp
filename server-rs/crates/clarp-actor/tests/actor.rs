@@ -502,9 +502,7 @@ fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
     assert!(out.actions.is_empty());
     assert_eq!(
         actor.status().last.unwrap().outcome,
-        Outcome::Failed {
-            reason: "clarp-shim: no such file".to_string()
-        }
+        Outcome::not_started("clarp-shim: no such file".to_string())
     );
     // A shim that started and could not start the tool says so in the spool.
     let now = world.tick();
@@ -526,9 +524,7 @@ fn a_shim_that_cannot_be_started_fails_the_turn_with_the_reason() {
     world.hint(&mut actor);
     assert_eq!(
         actor.status().last.unwrap().outcome,
-        Outcome::Failed {
-            reason: "claude: not found".to_string()
-        }
+        Outcome::not_started("claude: not found".to_string())
     );
     assert_eq!(actor.status().live, None);
 }

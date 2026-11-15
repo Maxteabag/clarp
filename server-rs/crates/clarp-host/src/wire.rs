@@ -8,7 +8,8 @@
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
-use clarp_kernel::conversation::{Entry, ToolStatus, TurnEnd};
+use clarp_kernel::conversation::{Entry, Notice, ToolStatus, TurnEnd};
+use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::notify;
 use clarp_kernel::turn::{Activity, Origin, Outcome, automation_kind};
@@ -161,8 +162,22 @@ pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Va
     })
 }
 
-/// What an ended turn's state says about how it ended.
-fn ending_detail(outcome: &Outcome) -> Value {
+/// What the user is told of a turn that failed: its kind, and the Python Host's words for it
+/// (`failures::told`). A turn in a log from before the kind was kept is read now.
+fn failure(reason: &str, kind: &str, model: &str) -> (String, failures::Told) {
+    let kind = if kind.is_empty() {
+        failures::classify_error(reason)
+    } else {
+        kind
+    };
+    (
+        kind.to_string(),
+        failures::told(kind, reason, model, failures::Known::default()),
+    )
+}
+
+/// What an ended turn's state says about how it ended. `backend` and `model` are the agent's.
+fn ending_detail(outcome: &Outcome, backend: &str, model: &str) -> Value {
     match outcome {
         Outcome::Stopped { by } => json!({
             "message": "Turn stopped",
@@ -171,7 +186,20 @@ fn ending_detail(outcome: &Outcome) -> Value {
             "stop_actor_verified": false,
             "stop_reason": "",
         }),
-        Outcome::Failed { reason } | Outcome::Interrupted { reason } => json!({
+        Outcome::Failed { reason, kind } => {
+            let (kind, told) = failure(reason, kind, model);
+            json!({
+                // A turn is tried once: nothing is tried again yet.
+                "attempts": 1,
+                "dispatch": backend,
+                "error": told.error,
+                "message": told.message,
+                "provider_message": told.provider_message,
+                "reason": kind,
+                "summary": told.summary,
+            })
+        }
+        Outcome::Interrupted { reason } => json!({
             "message": reason,
             "source": "turn_failed",
         }),
@@ -221,7 +249,7 @@ pub fn state(
             }
             detail
         }
-        (None, Some(last)) => ending_detail(&last.outcome),
+        (None, Some(last)) => ending_detail(&last.outcome, backend, &record.model),
         (None, None) => json!({ "session": record.session }),
     };
     json!({
@@ -249,7 +277,7 @@ pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
         "persona": record.persona,
         "kind": "interrupted",
         "ts": state_since(record, status),
-        "detail": ending_detail(&last.outcome),
+        "detail": ending_detail(&last.outcome, "", ""),
     }))
 }
 
@@ -329,6 +357,19 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         Some(Activity::Tool { name }) => name.as_str(),
         _ => "",
     };
+    // A turn that failed says why, and that the message is kept.
+    let failed = match status.last.as_ref().map(|last| &last.outcome) {
+        Some(Outcome::Failed {
+            reason,
+            kind: failure_kind,
+        }) if kind == AgentStateKind::Interrupted => {
+            Some(failure(reason, failure_kind, &record.model).1)
+        }
+        _ => None,
+    };
+    let summary = failed
+        .as_ref()
+        .map_or(summary, |told| told.summary.as_str());
     let mut activity = json!({
         "type": "agent-activity",
         "agent_id": record.agent_id,
@@ -800,6 +841,13 @@ pub fn row(version: &Versioned) -> Value {
                 "ended_at_ms": call.ended_at_ms,
             }]);
         }
+        // Why a turn failed, under the message that caused it: the Host's own word, not the
+        // agent's and not the user's.
+        Entry::Notice(notice) if notice.code == Notice::TURN_FAILED => {
+            row["origin"] = json!("system");
+            row["text"] = json!(notice.text);
+            row["trace_id"] = json!(notice.trace_id.clone().unwrap_or_default());
+        }
         Entry::Notice(notice) => {
             row["kind"] = json!("notice");
             row["text"] = json!(notice.text);
@@ -963,7 +1011,14 @@ pub fn summary(
             (Some(Activity::Compacting), ..) => ("compacting", Some("Compacting".to_string())),
             (Some(Activity::Waiting), ..) => ("waiting", None),
             (None, _, Some(_)) => ("idle", None),
-            (None, _, None) => ("interrupted", Some("Interrupted".to_string())),
+            (None, _, None) => match last.map(|last| &last.outcome) {
+                // A turn that failed: the sentence for its kind of failure.
+                Some(Outcome::Failed { reason, kind }) => (
+                    "interrupted",
+                    Some(failure(reason, kind, &record.model).1.message),
+                ),
+                _ => ("interrupted", Some("Interrupted".to_string())),
+            },
         };
         // The tool that started last stands for all that run.
         let tool = tools.last().map(|tool| {
