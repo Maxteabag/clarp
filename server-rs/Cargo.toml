@@ -17,6 +17,7 @@ publish = false
 [workspace.dependencies]
 clarp-ports = { path = "crates/clarp-ports" }
 clarp-codec = { path = "crates/clarp-codec" }
+clarp-store-mem = { path = "crates/clarp-store-mem" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
