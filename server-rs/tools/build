@@ -47,14 +47,21 @@ case "$cmd" in
 esac
 
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
-rsync -a --delete --exclude target/ --exclude conformance/out/ --exclude dist/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
+# What goes up is what differs in content, and it arrives with the time of its arrival, not with
+# the time it has here. cargo decides what to compile by comparing a source's time with the time
+# of its last build: a file copied with an older time than that build (another checkout of the
+# same name, a file put back as it was) would be passed over, and the build would be of code that
+# is no longer there. Seen on 15 Nov 2026: a release was refused for a module the build did not
+# know, after the landing checkout and the working tree had taken turns in one copy.
+up=(rsync -rlpD --checksum)
+"${up[@]}" --delete --exclude target/ --exclude conformance/out/ --exclude dist/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
 # The contract's schemas and fixtures sit beside server-rs in the repository; tests read them.
-rsync -a --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$remote/contract/"
+"${up[@]}" --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$remote/contract/"
 # So does the program an agent starts helpers with; a test runs it against the Rust Host.
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/scripts"
-rsync -a --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$remote/skills/clarp-sub-agents/"
+"${up[@]}" --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$remote/skills/clarp-sub-agents/"
 # And the program an agent publishes a file with; a test publishes with it.
-rsync -a -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$remote/scripts/"
+"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$remote/scripts/"
 if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
     # The conformance driver is the replay harness run against the Rust Host: it needs the
     # harness, and the server's source for the words its report may print.
