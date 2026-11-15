@@ -40,6 +40,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
@@ -169,6 +170,16 @@ def turns(host, session):
     return (body or {}).get('turns') or [] if isinstance(body, dict) else []
 
 
+def dig(value, dotted: str, name: str):
+    """A value out of an answer, by a path such as `artifact.decision.decision_id` or `items.0.id`."""
+    for part in dotted.split('.'):
+        value = value[int(part)] if isinstance(value, list) and part.isdigit() and int(part) < len(value) \
+            else (value or {}).get(part) if isinstance(value, dict) else None
+    if value is None:
+        raise replay.StepFailed(f'no {name} in the answer before')
+    return value
+
+
 class TurnClock:
     """What `turn_started_at` is told as: which turn's start it is, and after which send.
 
@@ -212,8 +223,17 @@ def run_step(host, events, step, http, variables, clock=None):
     op = step['op']
     session = step.get('session', scenarios.AGENT)
     if op in HTTP_OPS:
-        path = replay.fill(step['path'], variables)
+        last = http[-1]['body'] if http else None
+        path_values = dict(variables)
+        # {name} in the path, and fields of the body, taken from the answer before: an id the
+        # Host made, the time an artifact last changed.
+        for name, dotted in (step.get('from_last') or {}).items():
+            path_values[name] = urllib.parse.quote(str(dig(last, dotted, name)), safe='')
+        path = replay.fill(step['path'], path_values)
         body = replay.fill(step.get('body'), variables)
+        if step.get('body_from_last'):
+            body = {**(body or {}), **{name: dig(last, dotted, name)
+                                       for name, dotted in step['body_from_last'].items()}}
         # Recorded under the step's own name, or its path as written: never a value a Host made up.
         named = {**step, 'name': step.get('name') or f"{op} {step['path']}", 'path': path}
         asked_at = int(time.time() * 1000)
