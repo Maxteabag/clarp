@@ -36,6 +36,25 @@ pub fn hex(count: usize) -> String {
         .collect()
 }
 
+/// `count` random bytes in the URL-safe alphabet of base64, without padding: a secret that can
+/// travel in a link.
+pub fn secret(count: usize) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let bytes = random(count);
+    let mut out = String::with_capacity(count.div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let group = chunk
+            .iter()
+            .fold(0u32, |group, byte| (group << 8) | u32::from(*byte))
+            << (8 * (3 - chunk.len()));
+        for position in 0..=chunk.len() {
+            let index = (group >> (18 - 6 * position)) & 63;
+            out.push(char::from(ALPHABET[index as usize]));
+        }
+    }
+    out
+}
+
 /// A random identifier in the usual 8-4-4-4-12 form.
 pub fn uuid() -> String {
     let h = hex(16);
@@ -80,6 +99,20 @@ mod tests {
         let id = uuid();
         assert_eq!(id.len(), 36);
         assert_eq!(id.matches('-').count(), 4);
+    }
+
+    #[test]
+    fn a_secret_is_url_safe_and_as_long_as_its_bytes_need() {
+        for (bytes, chars) in [(1, 2), (2, 3), (3, 4), (32, 43), (36, 48)] {
+            let secret = secret(bytes);
+            assert_eq!(secret.len(), chars, "{bytes} bytes");
+            assert!(
+                secret
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            );
+        }
+        assert_ne!(secret(32), secret(32));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //! Nothing in this crate decides what an agent does. A thread here asks its actor, does what the
 //! actor answers, and tells the hub what changed.
 
+pub mod admin;
 pub mod agent;
 pub mod config;
 pub mod edge;
@@ -16,6 +17,7 @@ pub mod fleet;
 pub mod hub;
 pub mod ids;
 pub mod launcher;
+pub mod pairing;
 pub mod wire;
 
 /// The version this Host reports.
