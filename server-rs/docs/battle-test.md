@@ -121,7 +121,7 @@ On 15 Nov 2026, on the build of `d9868bea`, with real Claude Code turns:
 | 17:33 | the service restarted | 10 | every turn in its command (`sleep 45`) | held: the Host answered again after 102 ms with all ten |
 | 17:35 | the Host killed (`SIGKILL`) | 5 | every turn in its command | held: back after 2.1 s with all five |
 | 17:36 | the Host killed | 5 | the messages just accepted, the turns starting | held |
-| 17:37 | the Host killed | 8 | one turn just ended, two whose command ended and whose answer came while the Host was down, five in their commands | held |
+| 17:37 | the Host killed | 8 | one turn just ended, two whose command ended while the Host was down (one had answered too before it was back), five in their commands | held |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
 completed, answered with its word, and its command ran exactly once. Thirty turns, none interrupted, lost or
