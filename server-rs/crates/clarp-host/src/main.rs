@@ -131,6 +131,7 @@ async fn serve(config: Config) -> Result<(), String> {
         pusher,
         desks,
         blobs,
+        activity: Arc::default(),
     };
     // Where someone else puts another account in place when one is out, turns that wait for
     // an account are tried as soon as the tool's login has changed.

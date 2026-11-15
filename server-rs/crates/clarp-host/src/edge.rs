@@ -19,6 +19,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_actor::conversation::Which;
+use clarp_kernel::activity::Leases;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
@@ -45,7 +46,7 @@ use crate::pairing::{self, Device, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
-use crate::{ids, joblog, library, media, peers, plans, push, roster, wire};
+use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -119,6 +120,8 @@ pub struct App {
     pub desks: Arc<Mutex<Presence>>,
     /// The bytes of the files agents publish.
     pub blobs: Arc<dyn Blobs>,
+    /// What the apps have reported of themselves: whether one is in front, and touched.
+    pub activity: Arc<Mutex<Leases>>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -210,6 +213,7 @@ pub fn router(app: App) -> Router {
             get(background_job).delete(cancel_background_job),
         )
         .route("/tools/run", post(run_tool))
+        .merge(apps::routes())
         .merge(library::routes())
         .merge(media::routes())
         .merge(plans::routes())
@@ -270,7 +274,7 @@ pub enum Principal {
 const EXCHANGE: &str = "/pairing/exchange";
 
 /// What a device with limited scope may send. Whatever it may read, it may read.
-const LIMITED_POSTS: &[&str] = &["/send", "/select"];
+const LIMITED_POSTS: &[&str] = &["/send", "/select", "/focus"];
 
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {

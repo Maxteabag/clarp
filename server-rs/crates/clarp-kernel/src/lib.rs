@@ -5,6 +5,7 @@
 //! the state machines and the events. It does no I/O: the actor that drives it and the log it
 //! writes to are given to it through `clarp-ports`.
 
+pub mod activity;
 pub mod agent;
 pub mod artifacts;
 pub mod conversation;
