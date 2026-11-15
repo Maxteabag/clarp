@@ -262,19 +262,53 @@ pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
 pub fn activity(record: &AgentRecord, status: &Status) -> Value {
     let kind = state_kind(status);
     let running = status.live.as_ref();
+    // The tool that runs, summed up: the one that started last, or what its name alone says.
+    let followed = running.and_then(|live| live.tools.last());
+    let by_name = match (followed, running.map(|live| &live.activity)) {
+        (None, Some(Activity::Tool { name })) => {
+            Some(clarp_kernel::tools::summarize(name, &Value::Null))
+        }
+        _ => None,
+    };
+    let tool_words = match (followed, &by_name) {
+        (Some(tool), _) => Some((tool.action.as_str(), tool.summary.as_str())),
+        (None, Some(summed)) => Some((summed.action.as_str(), summed.summary.as_str())),
+        (None, None) => None,
+    };
+    let responding = matches!(
+        running.map(|live| &live.activity),
+        Some(Activity::Responding)
+    );
     let (action, phase, state, outcome, summary) = match (&kind, status.last.as_ref()) {
+        (AgentStateKind::Thinking, _) if responding => (
+            "responding",
+            "responding",
+            "responding",
+            "running",
+            "Responding",
+        ),
         (AgentStateKind::Thinking, _) => {
             ("thinking", "thinking", "thinking", "running", "Thinking")
         }
-        (AgentStateKind::Tool, _) => ("tool", "tool", "tool", "running", "Using a tool"),
+        (AgentStateKind::Tool, _) => {
+            let (action, summary) = tool_words.unwrap_or(("tool", "Using a tool"));
+            (action, "tool", "tool", "running", summary)
+        }
         (AgentStateKind::Compacting, _) => (
             "compacting",
             "compacting",
             "compacting",
             "running",
-            "Compacting",
+            "Compacting context",
         ),
-        (AgentStateKind::Waiting, _) => ("waiting", "waiting", "waiting", "running", "Waiting"),
+        // It waits for a person: an approval, an answer.
+        (AgentStateKind::Waiting, _) => (
+            "needs attention",
+            "waiting",
+            "waiting",
+            "error",
+            "Needs attention",
+        ),
         (AgentStateKind::Done, _) => ("done", "done", "idle", "ok", "Done"),
         (AgentStateKind::Interrupted, Some(last)) => match &last.outcome {
             Outcome::Stopped { .. } => (
@@ -310,12 +344,12 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         "state": state,
         "status": outcome,
         "summary": summary,
-        "tool": tool,
-        "file_path": "",
-        "call_id": null,
-        "started_at_ms": null,
+        "tool": followed.map_or(tool, |tool| tool.name.as_str()),
+        "file_path": followed.map_or("", |tool| tool.file_path.as_str()),
+        "call_id": followed.map(|tool| &tool.id),
+        "started_at_ms": followed.map(|tool| tool.started_at_ms),
         "turn_started_ms": running.map(|live| live.started_at_ms),
-        "ts": state_since(record, status),
+        "ts": followed.map_or_else(|| state_since(record, status), |tool| tool.started_at_ms),
     });
     if let Some(Outcome::Stopped { by }) = status.last.as_ref().map(|last| &last.outcome)
         && running.is_none()
@@ -1291,6 +1325,9 @@ mod tests {
                 name: "Read".to_string(),
                 category: "read",
                 label: "src/main.rs".to_string(),
+                action: "reading file".to_string(),
+                summary: "src/main.rs".to_string(),
+                file_path: "/work/src/main.rs".to_string(),
                 started_at_ms: 6_000,
             },
             LiveTool {
@@ -1298,6 +1335,9 @@ mod tests {
                 name: "Bash".to_string(),
                 category: "exec",
                 label: "npm test".to_string(),
+                action: "running command".to_string(),
+                summary: "Run the tests".to_string(),
+                file_path: String::new(),
                 started_at_ms: 7_000,
             },
         ];
@@ -1321,6 +1361,24 @@ mod tests {
                 "name": "Bash", "call_id": "c-2", "label": "npm test", "category": "exec",
                 "item_id": "c-2", "started_at_ms": 7_000,
             })
+        );
+        // The event of the tool state sums the same call up in its own, older words.
+        let event = &with_tools["activity"];
+        assert_eq!(
+            (&event["action"], &event["summary"], &event["tool"]),
+            (
+                &json!("running command"),
+                &json!("Run the tests"),
+                &json!("Bash")
+            )
+        );
+        assert_eq!(
+            (&event["call_id"], &event["started_at_ms"], &event["ts"]),
+            (&json!("c-2"), &json!(7_000), &json!(7_000))
+        );
+        assert_eq!(
+            (&row["activity"]["action"], &row["activity"]["summary"]),
+            (&json!("running command"), &json!("Running shell command"))
         );
         assert_eq!(
             (&row["model"], &row["context_tokens"]),

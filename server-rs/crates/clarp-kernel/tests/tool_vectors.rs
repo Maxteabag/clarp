@@ -6,7 +6,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use clarp_kernel::tools::{describe, headline};
+use clarp_kernel::tools::{describe, headline, summarize};
 use serde_json::Value;
 
 #[test]
@@ -32,6 +32,25 @@ fn a_tool_call_is_named_as_the_python_host_names_it() {
         if ours != theirs {
             wrong.push(format!(
                 "{name:?} with {}:\n    here {ours:?}\n    the Python Host's {theirs:?}",
+                vector["input"]
+            ));
+        }
+        // The older summary, which the event of a tool state carries.
+        let summed = summarize(name, &vector["input"]);
+        let ours = (
+            summed.action.as_str(),
+            summed.summary.as_str(),
+            summed.file_path.as_str(),
+        );
+        let theirs = &vector["activity"];
+        let theirs = (
+            theirs["action"].as_str().unwrap(),
+            theirs["summary"].as_str().unwrap(),
+            theirs["file_path"].as_str().unwrap(),
+        );
+        if ours != theirs {
+            wrong.push(format!(
+                "{name:?} with {}, summed up:\n    here {ours:?}\n    the Python Host's {theirs:?}",
                 vector["input"]
             ));
         }

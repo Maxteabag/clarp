@@ -233,6 +233,10 @@ pub struct LiveTool {
     /// What kind of thing it does, and what it does it to: see [`clarp_kernel::tools`].
     pub category: &'static str,
     pub label: String,
+    /// The same call as the event of a tool state sums it up.
+    pub action: String,
+    pub summary: String,
+    pub file_path: String,
     pub started_at_ms: i64,
 }
 
@@ -241,11 +245,15 @@ fn follow_tool(running: &mut Vec<LiveTool>, call: &ToolCall) {
     running.retain(|tool| tool.id != call.id);
     if call.status == ToolStatus::Running {
         let described = clarp_kernel::tools::describe(&call.name, &call.input);
+        let summed = clarp_kernel::tools::summarize(&call.name, &call.input);
         running.push(LiveTool {
             id: call.id.clone(),
             name: call.name.clone(),
             category: described.category,
             label: described.label,
+            action: summed.action,
+            summary: summed.summary,
+            file_path: summed.file_path,
             started_at_ms: call.started_at_ms,
         });
     }

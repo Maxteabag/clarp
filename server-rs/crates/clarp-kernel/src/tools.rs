@@ -423,6 +423,137 @@ pub fn describe(name: &str, input: &Value) -> Described {
     }
 }
 
+/// A tool call as the event of a tool state sums it up: what is being done, to what, and
+/// the file when it is about one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub action: String,
+    pub summary: String,
+    pub file_path: String,
+}
+
+/// A value of what a tool was given, as a short text. Nothing is no text.
+fn short(value: Option<&Value>, limit: usize) -> String {
+    match value {
+        None | Some(Value::Null) => String::new(),
+        Some(value) => truncate(&text(value), limit),
+    }
+}
+
+/// Sums a tool call up for the event of a tool state. This is the older of the two ways the
+/// Python Host words a tool call (`activity.summarize_tool_activity`); the apps that show an
+/// agent's activity line read it.
+pub fn summarize(name: &str, input: &Value) -> Summary {
+    let name = if name.is_empty() { "tool" } else { name };
+    let file_path = first(input, &["file_path", "filePath", "path"])
+        .map(text)
+        .unwrap_or_default();
+    let short_path = path_tail(&file_path);
+    let or = |said: String, otherwise: &str| {
+        if said.is_empty() {
+            otherwise.to_string()
+        } else {
+            said
+        }
+    };
+    let about_file = |action: &str, otherwise: &str| Summary {
+        action: action.to_string(),
+        summary: or(short_path.clone(), otherwise),
+        file_path: file_path.clone(),
+    };
+    let about = |action: &str, summary: String| Summary {
+        action: action.to_string(),
+        summary,
+        file_path: String::new(),
+    };
+    let listed = |field: &str| {
+        input
+            .get(field)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
+    // Where a search looks: the end of the path it was given, or here.
+    let scope = || {
+        let path = input.get("path").filter(|path| !path.is_null()).map(text);
+        or(path_tail(&path.unwrap_or_default()), ".")
+    };
+    match name {
+        "Bash" | "bash" => {
+            let described = short(input.get("description"), 120);
+            let command = short(input.get("command"), 170);
+            about(
+                "running command",
+                or(or(described, &command), "Running shell command"),
+            )
+        }
+        "Read" | "read_file" => about_file("reading file", "Reading file"),
+        "Write" | "write_file" => about_file("writing file", "Writing file"),
+        "Edit" | "edit_file" => about_file("editing file", "Editing file"),
+        "MultiEdit" => {
+            let edits = listed("edits");
+            let summary = if short_path.is_empty() {
+                format!("{edits} edits")
+            } else {
+                format!("{short_path} · {edits} edits")
+            };
+            Summary {
+                action: "editing file".to_string(),
+                summary,
+                file_path,
+            }
+        }
+        "Glob" | "glob_search" => {
+            let pattern = short(first(input, &["pattern", "glob"]), 100);
+            Summary {
+                action: "finding files".to_string(),
+                summary: format!("{} in {}", or(pattern, "files"), scope()),
+                file_path,
+            }
+        }
+        "Grep" | "grep_search" => {
+            let pattern = short(input.get("pattern"), 100);
+            Summary {
+                action: "searching code".to_string(),
+                summary: format!("{} in {}", or(pattern, "code"), scope()),
+                file_path,
+            }
+        }
+        "TodoWrite" => {
+            let todos = input.get("todos").and_then(Value::as_array);
+            let current = todos.into_iter().flatten().find(|item| {
+                item.is_object()
+                    && item.get("status").and_then(Value::as_str) == Some("in_progress")
+            });
+            let current = short(current.and_then(|item| item.get("content")), 120);
+            about(
+                "updating plan",
+                or(current, &format!("{} items", listed("todos"))),
+            )
+        }
+        "WebSearch" | "web_search" => about(
+            "searching web",
+            or(short(input.get("query"), 130), "the web"),
+        ),
+        "WebFetch" | "web_fetch" => about(
+            "reading web page",
+            or(short(input.get("url"), 130), "web page"),
+        ),
+        _ => {
+            // The first plain value it was given, in the order given.
+            let mut values = input
+                .as_object()
+                .into_iter()
+                .flat_map(|fields| fields.values());
+            let plain = values.find(|value| !value.is_object() && !value.is_array());
+            Summary {
+                action: name.to_string(),
+                summary: or(short(plain, 100), &format!("Using {name}")),
+                file_path,
+            }
+        }
+    }
+}
+
 /// The line an app shows of an agent that runs this tool.
 pub fn headline(name: &str, category: &str, label: &str) -> String {
     let verb = match category {
