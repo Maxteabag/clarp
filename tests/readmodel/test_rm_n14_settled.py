@@ -35,8 +35,12 @@ from tests.readmodel.test_rm_n14_carry import (  # noqa: F401 - frontier_state i
     World, _history, _turn, frontier_state)
 
 ON = {"carry_settled_turns": True}
+# Off is said, not left to the default: the lane also runs with the Hosts'
+# switches (RM_N14_CONFIGURATION=hosts), where this rule is on.
+OFF = {"carry_settled_turns": False}
 WITH_LIVE = {"carry_settled_turns": True, "carry_live_rows": True}
-ON_OFF = pytest.mark.parametrize("rules", [ON, None], ids=["rule on", "rule off"])
+WITHOUT_LIVE = {"carry_settled_turns": True, "carry_live_rows": False}
+ON_OFF = pytest.mark.parametrize("rules", [ON, OFF], ids=["rule on", "rule off"])
 BACKENDS = pytest.mark.parametrize("backend", harness.BACKENDS)
 # More records of a turn without a new prompt: the lane's Codex records of
 # that kind name a turn that began before the boundary, which is a full
@@ -140,14 +144,14 @@ def test_a_turn_that_settled_since_the_frontier_does_not_cost_a_full_import(
         answer, source = _last_row(world, "a-turn")
         assert source == str(world.transcript) and _summaries(world) == {"a-turn": [answer]}
         _begin(world, "the-next", T + 1)
-        assert world.imported() == (("tail_applied", []) if rules else
+        assert world.imported() == (("tail_applied", []) if rules is ON else
                                     ("full_carry_inputs_changed", ["row_transcript"]))
         assert _summaries(world) == {"a-turn": [answer]}
         _settle(world, "the-next", (T + 1) * 1000 + 500)
         _begin(world, "a-third", T + 2)
         # Without the rule the import before this one was full and moved the
         # boundary up: the turn that settled now began among the old turns.
-        assert world.imported() == (("tail_applied", []) if rules else (
+        assert world.imported() == (("tail_applied", []) if rules is ON else (
             "full_carry_inputs_changed", ["row_transcript", "turn_before_boundary"]))
         assert set(_summaries(world)) == {"a-turn", "the-next"}
 
@@ -167,7 +171,7 @@ def test_a_turn_that_settles_before_its_last_rows_are_imported(tmp_path, backend
         _settle(world, "a-turn", T * 1000 + 500)
         before, _source = _last_row(world, "a-turn")
         world.grow(harness.append_bytes(backend, T + 60, long_turn=True))       # no new prompt
-        assert world.imported() == (("tail_applied", []) if rules else
+        assert world.imported() == (("tail_applied", []) if rules is ON else
                                     ("full_carry_inputs_changed", ["row_transcript"]))
         after, _source = _last_row(world, "a-turn")
         assert after != before and _summaries(world) == {"a-turn": [after]}
@@ -206,7 +210,7 @@ def test_an_interrupted_turn_whose_rows_are_from_the_boundary_on(tmp_path, backe
         _settle(world, "a-turn", T * 1000 + 500, outcome="interrupted", stamp=stamped)
         _begin(world, "the-next", T + 1)
         decision, words = world.imported()
-        if rules:
+        if rules is ON:
             assert (decision, words) == ("tail_applied", [])
         else:
             assert decision == "full_carry_inputs_changed"
@@ -442,7 +446,8 @@ def test_a_turn_with_no_reply_stamps_its_message_and_that_is_a_full_import(tmp_p
         assert world.imported() == ("tail_applied", [])
 
 
-@pytest.mark.parametrize("rules", [WITH_LIVE, ON], ids=["with carry_live_rows", "without it"])
+@pytest.mark.parametrize("rules", [WITH_LIVE, WITHOUT_LIVE],
+                         ids=["with carry_live_rows", "without it"])
 @BACKENDS
 def test_a_summary_that_lands_on_the_live_row_of_the_last_message(tmp_path, backend, rules):
     """As on a Host: the last message is still a live row when the turn

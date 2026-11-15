@@ -647,7 +647,7 @@ def test_rewrite_outside_the_samples_and_then_idle_is_found_when_the_audit_is_du
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
-@pytest.mark.parametrize("yield_at", [1, 3, 6])
+@pytest.mark.parametrize("yield_at", [1, 2, 3, 6])
 def test_interleaved_prefix_client_during_yield_cannot_certify_old_carry(tmp_path, backend, yield_at):
     reference, candidate = _clones(tmp_path, backend)
     transcript = tmp_path / "synthetic.jsonl"
@@ -661,13 +661,21 @@ def test_interleaved_prefix_client_during_yield_cannot_certify_old_carry(tmp_pat
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 20))
             faults = {"client_on_yield": True, "single_row_batches": True, "yield_at": yield_at}
-            # Align the foreign commit by canonical row sequence in both
-            # lanes, not by different numbers of unchanged prefix rows.
-            reference_faults = dict(faults, yield_before_seq=boundary_seq + yield_at - 1)
-            a, b = full.tick(1, faults=reference_faults), actual.tick(1, faults=faults)
+            if yield_at > 2:
+                # The third and the sixth yield exist only for a tail that
+                # gives the writer away before each row from its boundary on.
+                faults["settings"] = {"tail_yield_after_first_write": False}
+            early = harness.tail_yields_before_it_writes(faults)
+            b = actual.tick(1, faults=faults)
+            # The foreign commit is placed by what the tail did: the
+            # reference, which replays from the first row, gets it before the
+            # same row, not at the same count of yields.
+            a = full.tick(1, faults=dict(faults, yield_before_seq=b["yield_seq"]))
             assert "failure_code" not in a and "failure_code" not in b
             harness.assert_product_equal(reference, candidate)
-            assert b["yield_intervention"] == yield_at and b["yield_windows"] == 6
+            assert b["yield_intervention"] == yield_at and a["yield_seq"] == b["yield_seq"]
+            assert b["yield_windows"] == (6 if early else 2)
+            assert b["yield_seq"] == (boundary_seq + yield_at - 1 if early else boundary_seq + 3 + yield_at)
             assert {"event": "transcriptTailRetention", "code": "checkpoint_foreign_commit_yield", "count": 1} in b["tail_events"]
             with transcript.open("ab") as output:
                 output.write(harness.append_bytes(backend, 21))
@@ -746,12 +754,18 @@ def test_yield_fence_rejects_only_dirty_or_unverifiable_windows(tmp_path, backen
                 output.write(harness.append_bytes(backend, 20))
             faults = {"single_row_batches": True}
             expected = None
+            # The tail's last yield and its last fence read (two a yield):
+            # the sixth and the twelfth for a tail that yields before each
+            # row, the second and the fourth for one that yields once it has
+            # written.
+            last = 6 if harness.tail_yields_before_it_writes() else 2
             if fault == "connection":
                 faults["connection_on_yield"] = True
-                faults["yield_at"] = 6
+                faults["yield_at"] = last
                 expected = "checkpoint_connection_changed_yield"
             elif fault.startswith("read_"):
-                faults["fence_read_at"] = {"read_release": 1, "read_reacquire": 2, "read_last": 12}[fault]
+                faults["fence_read_at"] = {"read_release": 1, "read_reacquire": 2,
+                                           "read_last": 2 * last}[fault]
                 expected = "checkpoint_data_version_read_failure"
             full.tick(1, faults={"single_row_batches": True})
             report = actual.tick(1, faults=faults)
@@ -826,8 +840,12 @@ def test_dirty_window_and_partial_fanout_failure_keep_recovery_full(tmp_path, ba
                 output.write(harness.append_bytes(backend, 20).replace(
                     b"synthetic answer 20", b"<team>synthetic interrupted fanout</team>"))
             common = {"single_row_batches": True, "client_on_yield": True, "team": True}
-            a = full.tick(1, faults=dict(common, yield_before_seq=boundary_seq))
             b = actual.tick(1, faults=common)
+            # The foreign commit in the tail's first yield, and before the
+            # same row in the reference's replay.
+            a = full.tick(1, faults=dict(common, yield_before_seq=b["yield_seq"]))
+            assert b["yield_seq"] == (boundary_seq if harness.tail_yields_before_it_writes()
+                                      else boundary_seq + 4)
             assert a["failure_code"] == b["failure_code"] == "OperationalError"
             harness.assert_product_equal(reference, candidate)
             # A full replay after a removed row, in both lanes: one row a

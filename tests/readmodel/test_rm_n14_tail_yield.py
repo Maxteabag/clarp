@@ -31,7 +31,9 @@ BACKENDS = pytest.mark.parametrize("backend", harness.BACKENDS)
 
 
 def _settings(switch):
-    return {"tail_yield_after_first_write": True} if switch else None
+    # Off is said, not left to the default: the lane also runs with the
+    # Hosts' switches (RM_N14_CONFIGURATION=hosts), where this one is on.
+    return {"tail_yield_after_first_write": switch}
 
 
 @SWITCH

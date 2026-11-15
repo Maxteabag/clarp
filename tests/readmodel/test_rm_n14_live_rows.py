@@ -28,6 +28,11 @@ from tests.readmodel.test_rm_n14_carry import (  # noqa: F401 - frontier_state i
     FAR, OTHER_SESSION, World, _history, _turn, frontier_state)
 
 ON = {"carry_live_rows": True}
+# Off is said, not left to the default: the lane also runs with the Hosts'
+# switches (RM_N14_CONFIGURATION=hosts), where this rule is on.
+OFF = {"carry_live_rows": False}
+# The rule as it was built, before a turn's end could be a tail.
+ENDS_ARE_FULL = {"carry_live_rows": True, "carry_settled_turns": False}
 BACKENDS = pytest.mark.parametrize("backend", harness.BACKENDS)
 
 
@@ -49,7 +54,7 @@ def test_a_reply_that_streams_does_not_cost_a_full_import(tmp_path, backend, rul
     there carries the running turn's trace. Off, each step is the full
     import it was."""
     wanted = ("tail_applied", []) if rule_on else ("full_carry_inputs_changed", ["row_live"])
-    with World(tmp_path, backend, _history(backend), settings=ON if rule_on else None) as world:
+    with World(tmp_path, backend, _history(backend), settings=ON if rule_on else OFF) as world:
         ordinal = world.started(6)
         world.turn_row("running", at=FAR)
         world.live("reply", "so far", at=FAR + 100, trace="running")
@@ -340,20 +345,18 @@ def test_a_delta_that_lands_while_the_tail_yields_refuses_its_publication(tmp_pa
         world.live("reply", "so far", at=FAR + 100, trace="running")
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("tail_applied", [])
-        with sqlite3.connect(world.candidate) as stored:
-            boundary = stored.execute(
-                "SELECT boundary_seq FROM transcript_import_checkpoints").fetchone()[0]
         world.grow(_turn(backend, ordinal + 1))
         delta = {"live_on_yield": "live-reply", "yield_at": yield_at}
         aligned = world.faults
         world.faults = {**aligned, **delta}
         try:
-            # The reference replays from the first turn: the same delta, before
-            # the same row of the transcript.
-            world.full.tick(world.tick, faults={**world.faults,
-                                                "yield_before_seq": boundary + yield_at - 1})
             report = world.actual.tick(world.tick, faults=(
                 {**world.faults, "evict": True} if world.state == "evicted" else world.faults))
+            assert report["yield_intervention"] == yield_at
+            # The reference replays from the first turn: the same delta, before
+            # the same row of the transcript, wherever the tail's yield fell.
+            world.full.tick(world.tick, faults={**world.faults,
+                                                "yield_before_seq": report["yield_seq"]})
             world.tick += 1
         finally:
             world.faults = aligned
@@ -389,8 +392,10 @@ def test_the_end_of_the_streamed_turn_is_still_a_full_import(tmp_path, backend, 
     published with the running turn's live row, the turn's trace is on an
     old row, and its turn row settling is what the rule for later turns
     refuses (turn_of_old_row), with the live row as it was or rewritten in
-    the same moment. A streamed turn costs one full import, not one a delta."""
-    with World(tmp_path, backend, _history(backend), settings=ON) as world:
+    the same moment. A streamed turn costs one full import, not one a delta.
+    (``carry_settled_turns`` is what later made that end a tail; it is off
+    here, see test_rm_n14_settled.py for it.)"""
+    with World(tmp_path, backend, _history(backend), settings=ENDS_ARE_FULL) as world:
         ordinal = world.started(6)
         world.turn_row("running", at=FAR)
         world.live("reply", "so far", at=FAR + 100, trace="running")
