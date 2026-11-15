@@ -152,6 +152,9 @@ pub struct Agent {
     queue_revision: u64,
     /// The turns that had to wait: each counts once when it joins and once when it leaves.
     waited: BTreeSet<TurnId>,
+    /// The waiting turns a hold does not hold: they came after it was placed. The next stop
+    /// holds them with the rest.
+    unheld: BTreeSet<TurnId>,
     /// The last turn that held the agent and ended.
     last: Option<Settled>,
     /// The tool's own session, as the tool last named it: where the next turn continues.
@@ -169,6 +172,7 @@ impl Default for Agent {
             settled: 0,
             queue_revision: 0,
             waited: BTreeSet::new(),
+            unheld: BTreeSet::new(),
             last: None,
             backend_session: None,
         }
@@ -227,6 +231,30 @@ impl Agent {
         self.live.as_ref().map(Turn::id)
     }
 
+    /// The waiting turn that runs when the agent is free: the first one no hold holds.
+    fn next_to_run(&self) -> Option<&Queued> {
+        self.mailbox.iter().find(|queued| {
+            !self.paused
+                || queued.admission == Admission::Direct
+                || self.unheld.contains(&queued.id)
+        })
+    }
+
+    /// Whether a message admitted this way now would start at once, without waiting.
+    pub fn starts_at_once(&self, admission: Admission) -> bool {
+        self.live.is_none() && !(self.paused && admission == Admission::Background)
+    }
+
+    /// Whether a hold holds this waiting turn.
+    pub fn holds(&self, turn: TurnId) -> bool {
+        self.paused
+            && self.mailbox.iter().any(|queued| {
+                queued.id == turn
+                    && queued.admission != Admission::Direct
+                    && !self.unheld.contains(&turn)
+            })
+    }
+
     /// Says what a command does, without doing it.
     pub fn decide(&self, command: Command, now_ms: i64) -> Result<Decision, Refusal> {
         // Work on a copy and move it only through `apply`, so that what is decided here is, by
@@ -280,7 +308,8 @@ impl Agent {
                     });
                     work.decision.effects.push(Effect::StopTurn { turn });
                 }
-                if !work.agent.paused {
+                // A stop holds everything that waits, also what an earlier hold let through.
+                if !work.agent.paused || !work.agent.unheld.is_empty() {
                     work.record(AgentEvent::Paused { by, at_ms: now_ms });
                 }
             }
@@ -383,10 +412,12 @@ impl Agent {
         match event {
             AgentEvent::Paused { .. } => {
                 self.paused = true;
+                self.unheld.clear();
                 self.queue_revision += 1;
             }
             AgentEvent::Resumed { .. } => {
                 self.paused = false;
+                self.unheld.clear();
                 self.queue_revision += 1;
             }
             AgentEvent::StopRequested { turn, by, .. } => {
@@ -417,9 +448,15 @@ impl Agent {
                 });
             }
             if let Turn::Queued(queued) = Turn::begin(change)? {
-                // Does it have to wait: behind a turn, behind others, or because of a hold?
-                let held = self.paused && queued.admission != Admission::Direct;
-                if self.live.is_some() || !self.mailbox.is_empty() || held {
+                // A hold holds what waited when it was placed, and background work that comes
+                // later. What someone says after the stop is not held by it.
+                let held = self.paused && queued.admission == Admission::Background;
+                if self.paused && matches!(queued.admission, Admission::Queue | Admission::Later) {
+                    self.unheld.insert(turn);
+                }
+                // Does it have to wait: behind a turn, or because of a hold? A free agent has
+                // nothing waiting that could run, so nothing else can be in its way.
+                if self.live.is_some() || held {
                     self.waited.insert(turn);
                     self.queue_revision += 1;
                 }
@@ -462,9 +499,10 @@ impl Agent {
                 event: "turn",
             });
         };
-        // A waiting turn starts only when nothing is live, and only from the front.
+        // A waiting turn starts only when nothing is live, and only when it is the next to run.
         let starting = matches!(change, TurnEvent::Started { .. });
-        if starting && (self.live.is_some() || index != 0) {
+        let next = self.next_to_run().map(|queued| queued.id);
+        if starting && (self.live.is_some() || next != Some(turn)) {
             return Err(IllegalTransition {
                 turn,
                 state: "waiting behind another",
@@ -477,6 +515,7 @@ impl Agent {
         if self.waited.remove(&turn) {
             self.queue_revision += 1;
         }
+        self.unheld.remove(&turn);
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(_) => self.settled += 1,
             next => self.live = Some(next),
@@ -532,18 +571,14 @@ impl Work {
         }
     }
 
-    /// Starts the first waiting turn when the agent is free. A held mailbox lets only a direct
-    /// message through.
+    /// Starts the next waiting turn when the agent is free: the first one no hold holds.
     fn start_next(&mut self, now_ms: i64) {
         if self.agent.live.is_some() {
             return;
         }
-        let Some(next) = self.agent.mailbox.front() else {
+        let Some(next) = self.agent.next_to_run() else {
             return;
         };
-        if self.agent.paused && next.admission != Admission::Direct {
-            return;
-        }
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
@@ -609,6 +644,18 @@ mod tests {
                 message_seq,
                 origin: Origin::User,
                 admission: Admission::Queue,
+            })
+            .unwrap()
+        }
+
+        /// Work nobody sits waiting for.
+        fn background(&mut self, message_seq: u64) -> Vec<Effect> {
+            self.send(Command::Accept {
+                message_seq,
+                origin: Origin::Trigger {
+                    name: "schedule".to_string(),
+                },
+                admission: Admission::Background,
             })
             .unwrap()
         }
@@ -711,9 +758,10 @@ mod tests {
             matches!(a.history.last(), Some(AgentEvent::Turn { change: TurnEvent::Settled { outcome: Outcome::Stopped { by }, .. }, .. }) if by == "peter")
         );
         assert_eq!((a.live(), a.waiting()), (None, vec![2, 3]));
-        // Another message that waits its turn is held with the rest.
-        assert_eq!(a.user(13), vec![]);
+        // Background work that comes now is held with the rest.
+        assert_eq!(a.background(13), vec![]);
         assert!(a.agent.is_paused());
+        assert!(a.agent.holds(TurnId(2)) && a.agent.holds(TurnId(4)));
         // A resume lets them run, the oldest first.
         assert_eq!(
             a.send(Command::Resume {
@@ -745,6 +793,65 @@ mod tests {
             a.started,
             vec![TurnId(1), TurnId(2), TurnId(3), TurnId(4)],
             "nothing was left behind by the stop"
+        );
+    }
+
+    #[test]
+    fn what_is_said_after_a_stop_runs_and_what_was_held_stays_held() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(Command::Stop {
+            by: "peter".to_string(),
+        })
+        .unwrap();
+        assert_eq!(a.finish(1), vec![], "held");
+        let revision = a.agent.queue_revision();
+        // The agent is free and someone speaks: that is its next turn, hold or no hold.
+        assert_eq!(
+            a.user(12),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }]
+        );
+        assert!(a.agent.is_paused(), "the hold stays as it was");
+        assert_eq!(
+            a.agent.queue_revision(),
+            revision,
+            "a message that starts at once never waited"
+        );
+        // While that turn runs, another message comes: it waits behind the turn, not the hold.
+        assert_eq!(a.user(13), vec![]);
+        assert!(a.agent.holds(TurnId(2)) && !a.agent.holds(TurnId(4)));
+        assert_eq!(
+            a.finish(3),
+            vec![Effect::StartTurn {
+                turn: TurnId(4),
+                message_seq: 13
+            }],
+            "it runs past what the hold holds"
+        );
+        // A second stop holds everything that waits, also what the first one let through.
+        a.user(14);
+        assert!(!a.agent.holds(TurnId(5)));
+        a.send(Command::Stop {
+            by: "peter".to_string(),
+        })
+        .unwrap();
+        assert!(a.agent.holds(TurnId(5)));
+        assert_eq!(a.finish(4), vec![], "held with the rest");
+        assert_eq!(a.waiting(), vec![2, 5]);
+        assert_eq!(
+            a.send(Command::Resume {
+                by: "peter".to_string()
+            })
+            .unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }],
+            "a resume runs them oldest first"
         );
     }
 
@@ -903,32 +1010,16 @@ mod tests {
     }
 
     #[test]
-    fn a_message_from_another_agent_does_not_lift_a_stop_but_a_resume_does() {
+    fn background_work_does_not_get_past_a_stop_but_a_resume_lets_it_run() {
         let mut a = Driven::new();
         a.send(Command::Stop {
             by: "peter".to_string(),
         })
         .unwrap();
-        let from_agent = Command::Accept {
-            message_seq: 20,
-            origin: Origin::Agent {
-                agent_id: "arnold".to_string(),
-            },
-            admission: Admission::Queue,
-        };
-        assert_eq!(a.send(from_agent).unwrap(), vec![], "accepted, and held");
-        assert_eq!(
-            a.send(Command::Accept {
-                message_seq: 21,
-                origin: Origin::Trigger {
-                    name: "heartbeat".to_string()
-                },
-                admission: Admission::Queue,
-            })
-            .unwrap(),
-            vec![]
-        );
+        assert_eq!(a.background(20), vec![], "accepted, and held");
+        assert_eq!(a.background(21), vec![]);
         assert_eq!(a.waiting(), vec![1, 2]);
+        assert_eq!(a.agent.queue_revision(), 3, "held, and two joined");
         assert_eq!(
             a.send(Command::Resume {
                 by: "peter".to_string()
@@ -1056,10 +1147,11 @@ mod tests {
                         } else {
                             Origin::User
                         };
-                        let admission = if next(4) == 0 {
-                            Admission::Direct
-                        } else {
-                            Admission::Queue
+                        let admission = match next(6) {
+                            0 => Admission::Direct,
+                            1 => Admission::Background,
+                            2 => Admission::Later,
+                            _ => Admission::Queue,
                         };
                         Command::Accept {
                             message_seq: 100 + step,

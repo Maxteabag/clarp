@@ -206,6 +206,17 @@ fn rows(log: &dyn AgentLog, items: &[Item], place: Place) -> Result<Vec<Versione
     Ok(found)
 }
 
+/// The row with this id as it is now, with its turn's end if it closed one.
+pub(crate) fn one(log: &dyn AgentLog, id: &str) -> Result<Option<Versioned>, ActorError> {
+    let Some(stored) = log.find(id)? else {
+        return Ok(None);
+    };
+    if !kind::ROWS.has(stored.kind) {
+        return Ok(None); // a message that still waits outside the conversation
+    }
+    Ok(rows(log, &[stored], Place::First)?.into_iter().next())
+}
+
 /// The newest `limit` things, in the order a chat shows them, with the replies being written.
 pub(crate) fn tail(
     log: &dyn AgentLog,

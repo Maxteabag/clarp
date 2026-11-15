@@ -18,12 +18,21 @@ conformance run compares them (`NOT_YET` in `conformance/conform.py`).
 Everything else in the Python Host's `capabilities.features` is absent too; the conformance
 corpus does not reach it yet. The list grows as the corpus does.
 
+Parts of the contract that no feature stands for, which the Rust Host sends empty for now
+(`NOT_BUILT` in `conformance/conform.py`):
+
+| Part | What is empty | Planned |
+|---|---|---|
+| Portraits and the persona catalogue | `avatar_url` and `model_avatar_url` of an agent; `personas` in the snapshot | Stage 3. An agent that moves keeps its portrait from then on |
+
 ## Compared as what a client may rely on
 
 | What | The Python Host | The Rust Host | Why it is compared this way |
 |---|---|---|---|
 | Revisions | a counter that grows with every write of a row | the log position times 2^20, with room for a reply that grows | The contract promises an order, not numbers. The run compares each revision as its place among the revisions of its capture |
-| The Host's version in `server-version` | the newest change time of its static files | its own version | Each Host's own. The run compares that there is one |
+| The Host's version in `server-version`, and `clarp_version` in `GET /server-info` | the newest change time of its static files; the version of the Python package | its own version | Each Host's own. The run compares that there is one |
+| The id of a row the agent wrote | `live-` and a hash of the agent, the session, the trace and the tool's message id | `r-` and the tool's message id, or the id of the message it answers and a number | An id is the Host's own choice. The run compares that the same row has the same id wherever it is named. The prefix is different on purpose: in the apps `live-` marks a row that has no fixed place in the history yet (the iOS app does not page back from one, `HistoryCursorPolicy`). A row of the Rust Host is stored under one id from its first word and has a place from then on |
+| A queue's revision | counted per change of the queue | the same changes, counted the same | Compared as the number it is |
 
 ## Differences that are registered one by one
 
@@ -32,3 +41,12 @@ it covers that exact difference and nothing else.
 
 | What | The Python Host | The Rust Host | Why |
 |---|---|---|---|
+| A plain send that has to wait | changes the queue and announces nothing (defect R5) | announces it with `queue-updated`, like a send with `queue_if_busy` | Every device shows the same queue, not only the one that sent |
+| `phase` of the reply that closes a later turn | `null` when the turn before had settled, `final` otherwise (defect R6) | `final` | A reply that closes a completed turn is the agent's final word in it, whenever it is read |
+
+## Differences the conformance corpus does not reach
+
+| What | The Python Host | The Rust Host | Why |
+|---|---|---|---|
+| A plain send to a busy agent from something that is not a person | ends the running turn ("legacy other origins preempt", defect R7) | waits its turn | No automation ends a turn a person may be waiting for |
+| The model an agent's row shows after a turn that was stopped | the model of the last answer in the tool's transcript | the model of the last completed turn | The same thing, read from what the Host has. A turn that was cut off may not have said its model yet |

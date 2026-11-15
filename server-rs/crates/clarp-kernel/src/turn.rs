@@ -30,17 +30,31 @@ pub enum Origin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Admission {
-    /// It waits its turn behind what already waits, and is held while the agent is paused.
+    /// Said to the agent: it is in the conversation from now on, and the agent comes to it when
+    /// it is free. A hold that was placed before it came does not hold it: someone said this
+    /// after the stop, and means it.
     #[default]
     Queue,
     /// The user wants it now: it ends the live turn, goes ahead of what waits its turn, and runs
     /// even while the agent is paused, without lifting the pause.
     Direct,
+    /// Left for later by someone: it waits its turn like a message that was said, but stays
+    /// out of the conversation until its turn starts. Until then it is in the queue, where it
+    /// can be taken back.
+    Later,
+    /// Work nobody sits waiting for: it waits in the queue like `Later`, and a hold holds it
+    /// like everything that waited when the hold was placed.
+    Background,
 }
 
 impl Admission {
     fn is_queue(&self) -> bool {
         *self == Self::Queue
+    }
+
+    /// Whether a message admitted this way stays out of the conversation while it waits.
+    pub fn waits_outside(self) -> bool {
+        matches!(self, Self::Later | Self::Background)
     }
 }
 

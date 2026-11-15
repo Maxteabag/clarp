@@ -28,6 +28,9 @@ pub struct Config {
     /// Where a new agent works when nobody says.
     pub default_cwd: PathBuf,
     pub keep_spools: bool,
+    /// What an installer stamped this installation with: the content of `DEPLOYED_VERSION` in
+    /// the data directory. Empty for a Host that was not installed by one.
+    pub deployed_version: String,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
@@ -87,7 +90,6 @@ impl Config {
                 .unwrap_or_else(|| PathBuf::from("clarp-shim"))
         });
         Ok(Self {
-            data_dir,
             run_dir,
             listen: listen
                 .parse()
@@ -100,6 +102,10 @@ impl Config {
             name,
             default_cwd,
             keep_spools,
+            deployed_version: std::fs::read_to_string(data_dir.join("DEPLOYED_VERSION"))
+                .map(|version| version.trim().to_string())
+                .unwrap_or_default(),
+            data_dir,
         })
     }
 }

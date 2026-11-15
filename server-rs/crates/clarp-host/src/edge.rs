@@ -268,8 +268,9 @@ fn identity(app: &App) -> ServerInfo {
         server_id: app.server_id.clone(),
         name: app.config.name.clone(),
         deployment_mode: "native".to_string(),
-        version: VERSION.to_string(),
-        image_version: None,
+        // What an installer stamped this installation with; a Host run from a build has none.
+        version: app.config.deployed_version.clone(),
+        image_version: Some(std::env::var("CLARP_IMAGE_VERSION").unwrap_or_default()),
         default_cwd: app.config.default_cwd.display().to_string(),
         clarp_version: VERSION.to_string(),
         min_app_version: "1.0".to_string(),
@@ -452,7 +453,9 @@ async fn log(
         return Ok(Json(wire::no_conversation(&home)));
     };
     let limit = query.limit.unwrap_or(100).clamp(1, 5_000);
-    let (page, replace) = if let Some(revision) = query.after_revision {
+    // "After revision 0" is how a client that has nothing yet asks: it gets the newest page.
+    let after = query.after_revision.filter(|revision| *revision > 0);
+    let (page, replace) = if let Some(revision) = after {
         let page = member.agent.after(revision, limit).await?;
         // A client that holds a revision this conversation never reached holds another
         // conversation: it must drop what it has.
@@ -532,10 +535,16 @@ async fn send(
         None => Origin::User,
     };
     let origin_is_user = origin == Origin::User;
-    // A message to an agent that is busy waits its turn. That is what the Python Host does
-    // today, whoever sent it and whatever `queue_if_busy` says, and so does this one. (The
-    // kernel can also take a message that replaces the running turn; nothing asks for it yet.)
-    let admission = Admission::Queue;
+    // A message to an agent that is busy waits its turn, as on the Python Host. What differs
+    // is where it waits. A plain message is said: it is in the conversation at once. One sent
+    // with `queue_if_busy` was left for later: it is in the queue until its turn starts, and
+    // when it does not come from a person, a Stop holds it. (The kernel can also take a message
+    // that replaces the running turn; nothing asks for it yet.)
+    let admission = match (request.queue_if_busy.unwrap_or(false), origin_is_user) {
+        (false, _) => Admission::Queue,
+        (true, true) => Admission::Later,
+        (true, false) => Admission::Background,
+    };
     let trace_id = request.trace_id.clone().unwrap_or_else(|| ids::hex(8));
     let client_msg_id = request.client_msg_id.clone().unwrap_or_else(ids::uuid);
     let message = Message {
@@ -557,8 +566,14 @@ async fn send(
         dispatch: member.record.backend.clone(),
         trace_id,
         queued: Some(sent.queued),
-        queue_depth: Some(sent.queue.waiting as u64),
-        queue_revision: Some(sent.queue.revision),
+        // Where the queue stands with this message in it. A message that did not have to
+        // wait says nothing about the queue: the Python Host answers zeros, and so does this.
+        queue_depth: Some(if sent.queued {
+            sent.queue.waiting as u64
+        } else {
+            0
+        }),
+        queue_revision: Some(if sent.queued { sent.queue.revision } else { 0 }),
         ..SendResponse::default()
     }))
 }

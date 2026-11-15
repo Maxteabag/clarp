@@ -543,11 +543,24 @@ impl Worker {
         }
         // What the agent is doing changed: its state, and the line that describes it.
         if before.as_ref().map(told_state) != Some(told_state(&status)) {
-            if status.live.is_none()
-                && turn_ended
-                && let Some(at_once) = wire::stopped(&record, &status)
-            {
-                hub.publish(at_once, now);
+            if turn_ended {
+                // The agent as it stood when the turn had ended and the next had not begun.
+                let rested = Status {
+                    live: None,
+                    ..status.clone()
+                };
+                if let Some(at_once) = wire::stopped(&record, &rested) {
+                    hub.publish(at_once, now);
+                }
+                if status.live.is_some() {
+                    // The next turn began in the same breath. How the last one ended is told
+                    // first: a client that waits for an agent to be done hears that it was.
+                    hub.publish(
+                        wire::state(&record, &rested, backend, self.ended.as_ref()),
+                        now,
+                    );
+                    hub.publish(wire::activity(&record, &rested), now);
+                }
             }
             hub.publish(
                 wire::state(&record, &status, backend, self.ended.as_ref()),
@@ -560,10 +573,14 @@ impl Worker {
             .last
             .as_ref()
             .filter(|last| turn_ended && last.outcome == Outcome::Completed);
-        if let (Some(ended), Some(reply)) = (answered, &self.newest)
-            && matches!(reply.entry, Entry::Reply(_))
-            && reply.turn_number == Some(ended.id.0)
-        {
+        // The answer is the row that closed the turn. It need not be the newest row: a message
+        // that was left for later enters the conversation in the same breath.
+        let answer = answered.and_then(|ended| {
+            let end = self.ended.as_ref().filter(|end| end.turn == ended.id.0)?;
+            let closed = actor.row(&end.closes).ok()??;
+            matches!(closed.entry, Entry::Reply(_)).then_some((ended, closed))
+        });
+        if let Some((ended, reply)) = &answer {
             let asked = was_live
                 .filter(|was| was.turn == ended.id)
                 .map(|was| was.message_id.clone())

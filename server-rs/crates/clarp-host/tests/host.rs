@@ -364,6 +364,27 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
         (&json!("m2"), &json!("later")),
         "what waits is named as the client named it"
     );
+    assert!(
+        !host.conversation(&session).contains(&said("user", "later")),
+        "what was left for later is in the queue, not yet in the conversation"
+    );
+
+    // The user says something new. It runs although the queue is held, and the hold stays.
+    let now = host.send(&session, "this instead", "m3");
+    assert_eq!(
+        (&now["queued"], &now["queue_depth"], &now["queue_revision"]),
+        (&json!(false), &json!(0), &json!(0))
+    );
+    wait_for("the new message to be answered", || {
+        host.conversation(&session)
+            .contains(&said("assistant", "this instead"))
+    });
+    let held = host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(
+        (&held["paused"], held["items"].as_array().unwrap().len()),
+        (&json!(true), 1),
+        "what was held is still held"
+    );
 
     let resumed = host.post("/turn-queue/resume", json!({ "session": session }));
     assert_eq!(
@@ -375,6 +396,11 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
         host.conversation(&session)
             .contains(&said("assistant", "later"))
     });
+    // It entered the conversation when its turn started: after what was said in between.
+    let conversation = host.conversation(&session);
+    let place = |row: (String, String)| conversation.iter().position(|known| *known == row);
+    assert!(place(said("user", "this instead")) < place(said("user", "later")));
+    wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
 #[test]
