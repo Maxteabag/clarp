@@ -147,8 +147,11 @@ workspace, the CI workflow, `clarp-ports`) belong to the lead.
 |---|---|---|
 | Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions, sign-offs |
 
-Builders and reviewers are added here when Peter has decided models and accounts. Reviewers use a different model
-family from the authors and never edit sources.
+**Stage 1 is built by the lead alone** (Peter's decision of 15 Nov 2026, from three options: "Maximus alone
+through stage 1"). Builders and reviewers are staffed for stage 2, on the models and accounts Peter decides then.
+The one exception to "alone" is the proof that the conformance suite can fail: its plants must also come from a
+reviewer who did not write the suite, so that review is requested from Peter when stage 1 reaches its gate.
+Reviewers use a different model family from the authors and never edit sources.
 
 ## 9. How to work
 
