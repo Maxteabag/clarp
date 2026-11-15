@@ -32,10 +32,10 @@ use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect};
-use clarp_kernel::conversation::{Entry, Message, Reply};
+use clarp_kernel::conversation::{Entry, Message, Notice, Reply};
 use clarp_kernel::journal::{Incoming, JournalError, Recorder, kind};
 use clarp_kernel::turn::{Activity, Admission, RunOutcome, Settled, Turn, TurnId};
-use clarp_ports::log::{AgentLog, Kinds, LogError, Seq};
+use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
 pub mod conversation;
@@ -242,6 +242,24 @@ fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), ActorError> {
         .and_then(|()| file.sync_all())
         .map_err(|error| io_error(&partial, error))?;
     std::fs::rename(&partial, path).map_err(|error| io_error(path, error))
+}
+
+/// What the Host says in a conversation when a turn did not finish, so that whoever reads it
+/// knows why there is no answer. A turn that was stopped on purpose needs no telling.
+fn ending_notice(turn: TurnId, code: &str, reason: &str) -> Entry {
+    Entry::Notice(Notice {
+        id: format!("n-{}-{code}", turn.0),
+        turn: Some(turn.0),
+        code: code.to_string(),
+        text: reason.to_string(),
+    })
+}
+
+/// The log item for a piece of a conversation.
+fn written(piece: &Entry, ts_ms: i64) -> Result<NewItem, ActorError> {
+    piece.to_item(ts_ms).map_err(|error| {
+        ActorError::Corrupt(format!("a piece of a turn could not be written: {error}"))
+    })
 }
 
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, live: LiveReply, ts_ms: i64) {
@@ -537,7 +555,20 @@ impl Actor {
             })?;
             batch.item(item);
         }
-        let _ = batch.command(command, now_ms);
+        let told = match &command {
+            _ if batch.agent().stopping().is_some() => None,
+            Command::StartFailed { reason, .. } => Some(ending_notice(turn, "turn-failed", reason)),
+            Command::TurnEnded {
+                outcome: RunOutcome::Interrupted { reason },
+                ..
+            } => Some(ending_notice(turn, "turn-interrupted", reason)),
+            _ => None,
+        };
+        if batch.command(command, now_ms).is_ok()
+            && let Some(notice) = told
+        {
+            batch.item(written(&notice, now_ms)?);
+        }
         let effects = batch.commit()?.effects;
         self.unstored_changes = 0;
         self.forget_live();
@@ -758,7 +789,13 @@ impl Actor {
                     }
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();
-                        let _ = batch.command(Command::StartFailed { turn, reason }, t);
+                        let stopping = batch.agent().stopping().is_some();
+                        let failed = batch
+                            .command(Command::StartFailed { turn, reason }, t)
+                            .is_ok();
+                        if failed && !stopping {
+                            batch.item(written(&ending_notice(turn, "turn-failed", error), t)?);
+                        }
                         live.over = true;
                     }
                     Line::Shim(ShimEvent::Exited { .. }) => live.over = true,
@@ -780,7 +817,23 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
-                            let _ = batch.command(Command::TurnEnded { turn, outcome }, t);
+                            let told = match &outcome {
+                                // It went because it was told to: nothing to explain.
+                                _ if batch.agent().stopping().is_some() => None,
+                                RunOutcome::Failed { reason } => {
+                                    Some(ending_notice(turn, "turn-failed", reason))
+                                }
+                                RunOutcome::Interrupted { reason } => {
+                                    Some(ending_notice(turn, "turn-interrupted", reason))
+                                }
+                                RunOutcome::Completed | RunOutcome::Stopped { .. } => None,
+                            };
+                            let ended = batch
+                                .command(Command::TurnEnded { turn, outcome }, t)
+                                .is_ok();
+                            if let (true, Some(notice)) = (ended, told) {
+                                batch.item(written(&notice, t)?);
+                            }
                             continue;
                         }
                         Signal::Live(reply) => {
@@ -798,20 +851,25 @@ impl Actor {
                         Signal::Tool(call) => Entry::Tool(call),
                         Signal::Notice(notice) => Entry::Notice(notice),
                     };
-                    let item = piece.to_item(t).map_err(|error| {
-                        ActorError::Corrupt(format!(
-                            "a piece of a turn could not be written: {error}"
-                        ))
-                    })?;
-                    batch.item(item);
+                    batch.item(written(&piece, t)?);
                 }
             }
             if live.over && batch.agent().live().map(Turn::id) == Some(turn) {
                 // The process is gone and its backend did not say how the turn went.
+                let reason = "the tool ended and nothing said how";
+                let stopping = batch.agent().stopping().is_some();
                 let outcome = RunOutcome::Interrupted {
-                    reason: "the tool ended and nothing said how".to_string(),
+                    reason: reason.to_string(),
                 };
-                let _ = batch.command(Command::TurnEnded { turn, outcome }, now_ms);
+                let ended = batch
+                    .command(Command::TurnEnded { turn, outcome }, now_ms)
+                    .is_ok();
+                if ended && !stopping {
+                    batch.item(written(
+                        &ending_notice(turn, "turn-interrupted", reason),
+                        now_ms,
+                    )?);
+                }
             }
             let wrote = !batch.is_empty();
             if wrote {

@@ -94,10 +94,16 @@ pub trait Backend: Send + Sync {
     fn interpreter(&self, turn: u64) -> Box<dyn Interpreter>;
 }
 
+/// The environment variable that names Claude Code's program, when it is not `claude` on the path.
+pub const CLAUDE_PROGRAM_ENV: &str = "CLARP_CLAUDE_PROGRAM";
+
 /// The backend with this name, as built in.
 pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
     match id {
-        "claude" => Some(Arc::new(claude::Claude::new())),
+        "claude" => Some(Arc::new(match std::env::var(CLAUDE_PROGRAM_ENV) {
+            Ok(program) if !program.trim().is_empty() => claude::Claude::with_program(program),
+            _ => claude::Claude::new(),
+        })),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
     }

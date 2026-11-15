@@ -61,6 +61,9 @@ impl Backend for Claude {
             "--include-partial-messages",
             // Without this the stream is not a stream: the lines come when the turn is over.
             "--verbose",
+            // Only the MCP servers the Host names, and so far it names none: a slow or broken
+            // server in the user's own configuration must not hold up every turn's start.
+            "--strict-mcp-config",
         ]
         .iter()
         .map(|arg| (*arg).to_string())
@@ -139,6 +142,8 @@ pub struct ClaudeInterpreter {
     /// The tool calls whose start was reported as an activity.
     announced: HashSet<String>,
     usage_limit: bool,
+    /// What Claude Code itself said went wrong, in the place where the agent would have spoken.
+    api_error: Option<String>,
     result: Option<ResultFacts>,
     stderr: ErrorTail,
     ended: bool,
@@ -174,6 +179,7 @@ impl ClaudeInterpreter {
             tools: BTreeMap::new(),
             announced: HashSet::new(),
             usage_limit: false,
+            api_error: None,
             result: None,
             stderr: ErrorTail::default(),
             ended: false,
@@ -266,7 +272,7 @@ impl ClaudeInterpreter {
         match text_of(&event["type"]) {
             "system" => self.on_system(&event, out),
             "stream_event" => self.on_stream(&event["event"], out),
-            "assistant" => self.on_assistant(&event["message"], t, out),
+            "assistant" => self.on_assistant(&event, t, out),
             "user" => self.on_user(&event["message"], t, out),
             "result" => {
                 // One process can answer more than one thing: a session resumed with background
@@ -374,11 +380,22 @@ impl ClaudeInterpreter {
     }
 
     /// A whole message, or a whole block of one: where the tool calls are complete.
-    fn on_assistant(&mut self, message: &Value, t: i64, out: &mut Vec<Signal>) {
+    fn on_assistant(&mut self, event: &Value, t: i64, out: &mut Vec<Signal>) {
+        let message = &event["message"];
         let id = text_of(&message["id"]).to_string();
         let Some(content) = message["content"].as_array() else {
             return;
         };
+        // When the provider cannot be reached or refuses, Claude Code writes the error where a
+        // message of the agent would be. The agent did not say it: it is why the turn failed.
+        let marked = |value: &Value| value["isApiErrorMessage"].as_bool() == Some(true);
+        if marked(event) || marked(message) || text_of(&message["model"]) == "<synthetic>" {
+            let said = content_text(&Value::Array(content.clone()));
+            if !said.trim().is_empty() {
+                self.api_error = Some(said);
+            }
+            return;
+        }
         for block in content {
             match text_of(&block["type"]) {
                 "tool_use" | "server_tool_use" => {
@@ -468,9 +485,20 @@ impl ClaudeInterpreter {
                 out.push(Signal::Tool(call.clone()));
             }
         }
-        let failed = |reason: String| RunOutcome::Failed { reason };
+        // What Claude Code said went wrong comes first; what else is known comes after it.
+        let api_error = self.api_error.take();
+        let failed = |detail: String| RunOutcome::Failed {
+            reason: match &api_error {
+                Some(said) if !detail.contains(said.as_str()) => {
+                    shorten(&format!("{said}\n{detail}"), 900)
+                }
+                _ => detail,
+            },
+        };
         let outcome = if self.usage_limit {
-            failed(USAGE_LIMIT.to_string())
+            RunOutcome::Failed {
+                reason: USAGE_LIMIT.to_string(),
+            }
         } else if let Some(signal) = signal {
             RunOutcome::Interrupted {
                 reason: format!("claude was ended by signal {signal}"),
@@ -769,6 +797,48 @@ mod tests {
             refused.last(),
             Some(&Signal::Ended(RunOutcome::Failed {
                 reason: "API Error: overloaded".to_string()
+            }))
+        );
+    }
+
+    #[test]
+    fn what_claude_code_says_went_wrong_is_the_reason_and_not_a_reply() {
+        // As recorded on 15 Nov 2026 from a Claude Code whose login had expired.
+        let signals = read(
+            &[
+                INIT,
+                r#"{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed","message":{"id":"e1","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Failed to authenticate: OAuth session expired"}]}}"#,
+                r#"{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate: OAuth session expired"}"#,
+                "ERR [claude-code:unrecognized_model]",
+            ],
+            (Some(1), None),
+        );
+        assert!(
+            !signals
+                .iter()
+                .any(|signal| matches!(signal, Signal::Reply(_) | Signal::Live(_))),
+            "the agent said nothing"
+        );
+        assert_eq!(
+            signals.last(),
+            Some(&Signal::Ended(RunOutcome::Failed {
+                reason: "Failed to authenticate: OAuth session expired\n[claude-code:unrecognized_model]"
+                    .to_string()
+            }))
+        );
+        // When the result says the same as the error, it is said once.
+        let once = read(
+            &[
+                INIT,
+                r#"{"type":"assistant","message":{"id":"e1","isApiErrorMessage":true,"content":[{"type":"text","text":"Credit balance is too low"}]}}"#,
+                r#"{"type":"result","subtype":"success","is_error":true,"result":"Credit balance is too low"}"#,
+            ],
+            (Some(0), None),
+        );
+        assert_eq!(
+            once.last(),
+            Some(&Signal::Ended(RunOutcome::Failed {
+                reason: "Credit balance is too low".to_string()
             }))
         );
     }
