@@ -61,6 +61,7 @@ it covers that exact difference and nothing else.
 | The focus after the Host sent an agent something by itself (an answer that is delivered, a goal that is taken up again), or after another agent wrote to it | moves to that agent (defect R14) | stays where the user put it | Focus is the agent the user has open, and where a message without a name goes. Only the user moves it |
 | `pinned` in the answer to the discard of a pinned artifact | `true`, beside `pinned_at: null` (defect R15) | `false` | A discard unpins. The answer says what is now true |
 | A reply, to a client that catches up by revision | given again after the next message arrived: the Host wrote it a second time (defect R16) | given once | A row that did not change is not sent again |
+| `live_activity` in an agent's row after its first turn | missing until the next turn, in some runs (defect R17) | there: at rest, since the turn's end | An app's line for an agent says what the agent last did, whichever turn that was |
 
 ## Differences the conformance corpus does not reach
 
