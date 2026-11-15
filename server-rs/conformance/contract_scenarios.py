@@ -584,6 +584,32 @@ SCENARIOS = [
             SNAPSHOT,
         ],
     },
+    {
+        'id': 'failed-turns',
+        'what': 'a turn the tool could not finish, once because the account is out and once because '
+                'the tool died: what a client is shown, and that the next turn runs',
+        'steps': [
+            # The fake waits before it fails, so that the turn is seen running first.
+            send(SLOW + '[qa-usage-limit] synthetic work kilo', 'kilo'),
+            {'op': 'wait_busy', 'busy': True},
+            {'op': 'wait_busy', 'busy': False},
+            {'op': 'quiesce'},
+            {**LOG, 'name': 'log after the account was out'},
+            {**SNAPSHOT, 'name': 'snapshot after the account was out'},
+            send(SLOW + '[qa-crash] synthetic work lima', 'lima'),
+            {'op': 'wait_busy', 'busy': True},
+            {'op': 'wait_busy', 'busy': False},
+            {'op': 'quiesce'},
+            {**LOG, 'name': 'log after the tool died'},
+            {**SNAPSHOT, 'name': 'snapshot after the tool died'},
+            # And the agent works on.
+            send('synthetic greeting mike', 'mike'),
+            {'op': 'wait_reply', 'after': 'u-mike'},
+            {'op': 'quiesce'},
+            LOG,
+            SNAPSHOT,
+        ],
+    },
 ]
 
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
