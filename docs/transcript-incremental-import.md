@@ -113,6 +113,8 @@ size:
 - a digest of the latest user row and one of the Oracle rows.
 - a digest of each live row of the session by itself (there are few), for
   `carry_live_rows`;
+- for `carry_live_rows_by_words` nothing in the record: the words of the
+  replies before the boundary are in the checkpoint's store carry;
 - for `carry_settled_turns`: the highest `settled_at` among the turn rows,
   the boundary the record was published with, and one digest of the
   transcript rows from that boundary on without the columns a turn's
@@ -322,6 +324,37 @@ A fifth is off unless switched on, and needs `carry_later_turns`:
   import only); a stamp on a row before the boundary, on the turn's `/send`
   row (a turn that never replied) or on a live row without
   `carry_live_rows`; and any other change to a turn row.
+
+A sixth is off unless switched on, and needs `carry_live_rows`:
+
+- `carry_live_rows_by_words`: a changed live row whose turn has replies
+  before the boundary. `carry_live_rows` refuses it for the trace alone
+  (`live_row_of_old_reply`). What a full import does with such a row is
+  narrower: it removes a leftover live row, or lets a reply take it over,
+  only when a reply of the row's own trace in its batch has words related
+  to the row's (`message_text._related`: one text begins with the other,
+  markup stripped, neither empty). A tail's batch is the replies from the
+  boundary on, so the two differ only when a reply before the boundary has
+  the trace and related words. With the switch on only that is refused.
+
+  It matters when a running turn spans the boundary. A context compaction
+  leaves a user record inside the turn; the next full import puts the
+  boundary there, and from then on every word the turn streamed was a full
+  import of the whole conversation (one conversation, 39 times in 47
+  minutes on 15 November; issue 352). The same when the last reply of a
+  turn, written within two seconds before the next turn began, is given
+  that turn's trace and lies before the boundary at its prompt.
+
+  The rows do not hold the words a full import compares: a reply is stored
+  as the automation left it (an acknowledgement replaced by a notice), and
+  the import compares what the transcript said. So the full import keeps
+  them in the store carry it captures at the boundary (`reply_words`): for
+  the three newest turns before the boundary, each reply's words as its
+  batch names them, and as stored when the two differ, up to 64 KB in all.
+  A live row of a turn the carry did not keep (an older turn, one with more
+  words than fit, a carry captured while the switch was off) is refused as
+  before. A conversation with a turn the stream owns keeps the full import,
+  as under `carry_live_rows`.
 
 What stays a full import on purpose: any other change to a row of this
 session (a finalized row, a turn's rows re-stamped when it settles unless

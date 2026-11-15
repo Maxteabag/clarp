@@ -605,6 +605,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            checkpoint_status: dict | None = None,
                            recertify_checkpoint: Callable[[], bool] | None = None,
                            carry_session_rows: bool = False,
+                           reply_words: bool = False,
                            ) -> list[dict[str, Any]]:
     """Full materialization; only opted native checkpoints may recertify.
 
@@ -643,7 +644,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 database, binding, agent_id=agent_id, backend_session_id=backend_session_id,
                 source_file=source_file, turns=turns, capture_at=capture_at, on_stored=on_stored,
                 prepare=recertify_checkpoint, phases=phases, visible_replies=visible_replies,
-                session_rows=carry_session_rows):
+                session_rows=carry_session_rows, reply_words=reply_words):
             if checkpoint_status is not None:
                 checkpoint_status.pop("refused", None)
 
@@ -655,7 +656,8 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=captured, out_seqs=out_seqs,
-            visible_replies=visible_replies, prelude=prelude.for_pass())
+            visible_replies=visible_replies, prelude=prelude.for_pass(),
+            reply_words=reply_words)
         if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
         if database.in_transaction:
@@ -679,7 +681,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=captured, out_seqs=out_seqs,
-            visible_replies=visible_replies, prelude=prepared)
+            visible_replies=visible_replies, prelude=prepared, reply_words=reply_words)
         if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
         writer.finish()
@@ -722,7 +724,8 @@ def _checkpoint_db_binding(database):
 
 def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_id,
                                source_file, turns, capture_at, on_stored,
-                               prepare, phases, visible_replies, session_rows=False):
+                               prepare, phases, visible_replies, session_rows=False,
+                               reply_words=False):
     """Fresh read-only carry, then exact five-input check in a new writer.
 
     Previous products are already committed. Never run a second row-writing
@@ -742,7 +745,8 @@ def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_i
             probe, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             capture_at=capture_at, captured=fresh,
-            visible_replies=visible_replies, prelude=prelude.for_pass())
+            visible_replies=visible_replies, prelude=prelude.for_pass(),
+            reply_words=reply_words)
         expected = prelude.raw_carry_inputs()
         if not fresh or _checkpoint_db_binding(database) != binding:
             return False
@@ -1123,6 +1127,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                                 out_seqs: list[int] | None = None,
                                 visible_replies: list[str] | None = None,
                                 prelude: _ImportPrelude | None = None,
+                                reply_words: bool = False,
                                 ) -> list[dict[str, Any]]:
     """Import ``turns`` as transcript rows ``start_seq`` onward.
 
@@ -1182,9 +1187,16 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         user_turn_seen = True
         initial_provenance_used = bool(carry.get("initial_provenance_used", True))
 
+    # With ``reply_words`` (a full import that chooses a boundary asks for
+    # it): every reply so far with its words, as this batch names them, for
+    # the carry (lib.message_carry.LIVE_WORDS).
+    said: list[tuple[str, str]] | None = [] if reply_words else None
+
     def capture() -> None:
         """The carried state as the loop stands now (lib.transcript_incremental)."""
         captured.clear()
+        if said is not None:
+            captured["reply_words"] = message_carry.reply_words(said)
         captured.update(json.loads(json.dumps({
             "consumed_client_ids": provenance.consumed,
             "current_origin": current_origin,
@@ -1254,6 +1266,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 batch_finals.append(
                     ((authority["trace_id"] or "") if authority is not None else reply_trace,
                      visible_reply))
+            if said is not None:
+                said.append(((authority["trace_id"] or "") if authority is not None
+                             else reply_trace, visible_reply))
             if authority is not None:
                 # Stream-json terminal authority owns this provider turn.
                 # Its canonical final row (or empty/error tombstone) remains
@@ -1330,6 +1345,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 and not heartbeat.is_neutral_heartbeat_status(text)
             ):
                 heartbeat_accounting = "activity"
+            if said is not None and text != str(turn.get("text") or ""):
+                # Stored under other words than the transcript's: a reply
+                # that takes a live row over is matched by these.
+                said.append((reply_trace, _strip_voice_markup(text)))
         else:
             heartbeat_accounting = ""
         # A user turn already owned by a durable client row → don't import a
