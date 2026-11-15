@@ -32,6 +32,7 @@ use crate::python;
 
 pub mod answers;
 pub mod decisions;
+pub mod forms;
 pub mod moved;
 pub mod reports;
 
@@ -254,6 +255,9 @@ pub struct Artifact {
     /// What a report was, version by version, without the pages themselves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub revisions: Vec<reports::Revision>,
+    /// The answers users gave to a form.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submissions: Vec<forms::Submission>,
 }
 
 /// What making or changing an artifact comes to.
@@ -719,7 +723,7 @@ fn require_payload(
             Ok(())
         }
         "audio" | "video" | "file" => require_published(kind, payload, published),
-        "html_form" => reports::validate(payload),
+        "html_form" => reports::contract(payload),
         _ => Ok(()),
     }
 }
@@ -937,7 +941,12 @@ impl ArtifactBook {
         }
         let (opening, payload) = self.opening(new, ctx)?;
         if opening.kind == "html_form" {
-            return reports::published(self, maker, new, opening, payload, ctx);
+            // A report is published, and published again when it changes. A form is made
+            // once.
+            if payload.get("read_only") == Some(&Value::Bool(true)) {
+                return reports::published(self, maker, new, opening, payload, ctx);
+            }
+            return forms::made(self, maker, new, opening, payload, ctx);
         }
         self.placed(maker, new, opening, payload, ctx).map(Made::of)
     }
@@ -1047,6 +1056,7 @@ impl ArtifactBook {
             decision: None,
             page: None,
             revisions: Vec::new(),
+            submissions: Vec::new(),
         })
     }
 

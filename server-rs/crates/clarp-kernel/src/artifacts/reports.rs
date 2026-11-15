@@ -31,10 +31,6 @@ use super::{
     refuse, require_payload, status_asked,
 };
 
-/// What a form that takes answers is refused with.
-pub const FORMS_NOT_HERE: &str =
-    "HTML forms that take answers are not available on this Host yet (the Rust Host)";
-
 /// The answer schema of a report: an object with nothing in it.
 pub fn read_only_schema() -> Value {
     json!({ "type": "object", "properties": {}, "additionalProperties": false })
@@ -211,16 +207,6 @@ fn inline(value: &Value, depth: usize) -> Result<(), Refused> {
         Value::Array(items) => items.iter().try_for_each(|item| inline(item, depth + 1)),
         _ => Ok(()),
     }
-}
-
-/// Whether a normalized payload is a report this Host shows: a page, a version that names
-/// it, origins that are exact, and no answers.
-pub fn validate(payload: &Map<String, Value>) -> Result<(), Refused> {
-    if !judged(payload)? {
-        // Where the Python Host asks whether the schema is a JSON Schema.
-        return refuse(FORMS_NOT_HERE);
-    }
-    Ok(())
 }
 
 /// Whether a normalized payload is a form or a report, as the Python Host judges one: a

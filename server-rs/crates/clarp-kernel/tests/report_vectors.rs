@@ -9,8 +9,7 @@
 
 use clarp_kernel::artifacts::Refused;
 use clarp_kernel::artifacts::reports::{
-    FORMS_NOT_HERE, connect_origins, content_security_policy, normalized, read_only_schema,
-    rendered, validate,
+    connect_origins, content_security_policy, contract, normalized, read_only_schema, rendered,
 };
 use serde_json::{Value, json};
 
@@ -82,7 +81,7 @@ fn a_page_is_served_as_the_python_host_serves_it() {
 }
 
 #[test]
-fn a_payload_is_a_report_or_is_refused_in_the_python_hosts_words() {
+fn a_payload_is_a_report_or_a_form_or_is_refused_in_the_python_hosts_words() {
     let vectors = vectors();
     let payloads = vectors["payloads"].as_array().unwrap();
     assert!(payloads.len() >= 45);
@@ -100,21 +99,15 @@ fn a_payload_is_a_report_or_is_refused_in_the_python_hosts_words() {
         let Ok(filled) = filled else {
             continue;
         };
-        let here = validate(filled.as_object().unwrap()).map_err(|refused| refused.message);
+        let here = contract(filled.as_object().unwrap()).map_err(|refused| refused.message);
         let takes_answers = filled.get("read_only") != Some(&json!(true));
-        // A form that takes answers is not here yet: where the Python Host goes on to ask
-        // whether its schema is one, and says yes or no, this Host says so.
-        let there = match theirs(&vector["contract"]) {
-            Ok(_) if takes_answers => Err(FORMS_NOT_HERE.to_string()),
-            Err(why) if takes_answers && why == "invalid answer schema" => {
-                Err(FORMS_NOT_HERE.to_string())
-            }
-            Ok(_) => Ok(()),
-            Err(why) => Err(why),
-        };
+        // A report and a form alike: what the Python Host says of each is said here. (The
+        // schemas of these forms are all of words this Host reads; `form_vectors.rs` has
+        // the ones that are not.)
+        let there = theirs(&vector["contract"]).map(|_| ());
         match &here {
+            Ok(()) if takes_answers => forms += 1,
             Ok(()) => reports += 1,
-            Err(why) if why == FORMS_NOT_HERE => forms += 1,
             Err(_) => {}
         }
         if here != there {
