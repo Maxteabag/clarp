@@ -401,8 +401,9 @@ Host's sentence for it under the message; nothing was lost. That build did not w
 installed since does. At 20:40 the Host was updated to `87818123` with three turns running (the ninth
 exercise: held), and two minutes later an agent there published an image in a real turn with its own tool,
 through the door for tools: its reply is the Markdown that shows the image, and the id in it fetches the
-image. At 21:03 the Host was updated to `fedf357e` with three turns running (the tenth exercise: held).
-Open: the week.
+image. At 21:03 the Host was updated to `fedf357e` with three turns running (the tenth exercise: held), and at
+21:23 to `d0788034` (the eleventh: held); a minute later an agent there handed over an HTML report in a real
+turn with its own tool, and the page is served behind its policy. Open: the week.
 
 Not there yet: the first kept move (stage 2's gate), and the rest of stage 3, which is what makes an agent
 livable on this Host. The iOS app names about 150 endpoints; the Rust Host answers the core contract and what

@@ -93,4 +93,5 @@ it covers that exact difference and nothing else.
 | A summary of a report (`representation=summary-v1`) in a list so large that the Host's budget for hashing runs out | `content_omitted` without its digest, marked `hash_pending` | always with its digest and length | This Host keeps a page under its digest: it has nothing to compute |
 | A report whose revision is published again as it is, or as it once was | answered with the report as it stands, and announced as changed (`artifact-updated`) | answered the same, and nothing is announced | Nothing changed |
 | A report's revision that names no version | `revision-` and the 32 hex digits of a random UUID | `revision-` and 32 random hex digits | Random on both |
+| A goal's updater (`updater` in a plan: whether a janitor keeps the goal's bookkeeping, which, when it last ran, its last receipt) | as the janitor left it | off, with nothing in it | Janitors are not on this Host. A goal that moves here is the same goal in everything else (rehearsed on 15 Nov with 18 real plans) |
 

@@ -3361,7 +3361,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         paper["asset_id"].as_str().unwrap().to_string(),
     );
     let naming = format!(
-        "see {} and the paper at {} and /media/asset_gone_long_ago",
+        "see {} and the paper at {} and /media/asset_gone_long_ago, kept under /media/disk",
         image["markdown"].as_str().unwrap(),
         paper["url"].as_str().unwrap()
     );

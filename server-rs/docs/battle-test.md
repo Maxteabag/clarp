@@ -136,14 +136,15 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 20:02 | the Host updated by the installer, `2e935ef7` to `61194d0c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered 1 ms after the restart was done, with all three |
 | 20:40 | the Host updated by the installer, `61194d0c` to `87818123` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 8 ms, with all three |
 | 21:03 | the Host updated by the installer, `87818123` to `fedf357e` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 16 ms, with all three |
+| 21:23 | the Host updated by the installer, `fedf357e` to `d0788034` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 35 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Forty-four turns, none interrupted,
+completed, answered with its word, and its command ran exactly once. Forty-seven turns, none interrupted,
 lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of the command and no
 more.
 
-The updates of 20:02, 20:40 and 21:03 were installed from a release built out of a clean checkout of the
-commit that had just landed, not out of the working tree: what runs is what is on main.
+The updates of 20:02, 20:40, 21:03 and 21:23 were installed from a release built out of a clean checkout of
+the commit that had just landed, not out of the working tree: what runs is what is on main.
 
 ## An agent publishes a file
 
@@ -155,6 +156,15 @@ program):
 | 20:41 | a shell with nothing of a turn in its environment, as a worker an agent left running | the file the installer wrote, the administrator's door (`POST /media`) | a PNG of 3,860 bytes taken as `image/png`, 64 by 32, under a safe name; in the agent's gallery; fetched back byte for byte with the headers that keep a browser from running anything in it; a `Range` answered with the part |
 | 20:42 | the agent `restart-2` in a real Claude Code turn, asked to run the tool and answer with what it printed | what its turn was given: the door for tools (`POST /tools/media`) and the token of the agent's tools | the turn ran the tool, completed, and its reply is the Markdown that shows the image; the id in the reply fetches the image; the same image published twice lies on the disk once, readable by its user alone |
 | 21:04 | the artifact tool, by hand, on the build of `fedf357e` | the installed config file | a `file` artifact that names the image `restart-2` published was made for `restart-2`; the same for another agent was refused: the file is not found for that session |
+
+## An agent hands over a report
+
+On the build of `d0788034`, at 21:24 on 15 Nov 2026: the agent `restart-3`, in a real Claude Code turn, was
+asked to write a small page of HTML and hand it over with `clarp-agent-artifacts create-report`. It did, and
+answered `done`. The report is in its library as it was written (kind `html_form`, read-only, version `1`);
+`GET /artifacts/<id>/html` serves the page behind its policy (a sandbox that allows scripts and no connection
+anywhere); a summary of the library names the page by its length and digest instead of carrying it; its
+revisions list its one version; and the page lies in the store of files, once.
 
 ## The soak so far
 

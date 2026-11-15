@@ -135,7 +135,8 @@ fn exchange(
 
 /// The ids of the published files a conversation names: in the Markdown that shows an
 /// image (`clarp-media://asset/<id>`) and in the address a file is fetched by
-/// (`/media/<id>`). In the order they are first named, each once.
+/// (`/media/<id>`). In the order they are first named, each once. A path of the machine
+/// that merely has `/media/` in it names no file: an id begins with `asset_`.
 fn named_files(rows: &[Value]) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     for text in rows.iter().filter_map(|row| row["text"].as_str()) {
@@ -144,7 +145,7 @@ fn named_files(rows: &[Value]) -> Vec<String> {
                 let plain =
                     |sign: &char| sign.is_ascii_alphanumeric() || *sign == '_' || *sign == '-';
                 let id: String = after.chars().take_while(plain).collect();
-                if !id.is_empty() && !found.contains(&id) {
+                if id.starts_with("asset_") && id.len() > 6 && !found.contains(&id) {
                     found.push(id);
                 }
             }
@@ -635,6 +636,17 @@ mod tests {
             .map(str::to_string)
             .collect::<Vec<_>>()
             .into_iter()
+    }
+
+    #[test]
+    fn a_conversation_names_the_files_it_shows_and_a_path_of_the_machine_names_none() {
+        let rows = [
+            json!({ "text": "see ![a chart](clarp-media://asset/asset_AbC_123) and /media/asset_dEf-456." }),
+            json!({ "text": "it is under /media/peter/disk and ~/dotfiles/media/notes, not published" }),
+            json!({ "text": "again clarp-media://asset/asset_AbC_123, and /media/asset_" }),
+            json!({ "kind": "tool" }),
+        ];
+        assert_eq!(named_files(&rows), ["asset_AbC_123", "asset_dEf-456"]);
     }
 
     #[test]
