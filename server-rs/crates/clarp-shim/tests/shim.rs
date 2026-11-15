@@ -185,6 +185,35 @@ fn a_hook_reports_through_the_shim_in_order_with_the_output() {
 }
 
 #[test]
+fn every_hook_is_recorded_after_what_the_tool_printed_before_it() {
+    // Output and a hook's report reach the shim on two ways. A hundred times in one turn
+    // the tool prints and then calls a hook: each report is recorded after the line before
+    // it and before the line after it.
+    let hook = env!("CARGO_BIN_EXE_clarp-hook");
+    let script = format!(
+        "i=0; while [ $i -lt 100 ]; do echo \"out $i\"; \
+         echo \"{{\\\"n\\\":$i}}\" | {hook} Step; i=$((i+1)); done; echo end"
+    );
+    let mut running = start("hooks", &script);
+    running.shim.wait().unwrap();
+    let all = records(&running.spool);
+    let order: Vec<String> = all
+        .iter()
+        .filter_map(|r| match &r.entry {
+            Entry::Out(line) => Some(line.clone()),
+            Entry::Hook { name, data } => Some(format!("{name} {}", data["n"])),
+            _ => None,
+        })
+        .collect();
+    let mut expected: Vec<String> = (0..100)
+        .flat_map(|i| [format!("out {i}"), format!("Step {i}")])
+        .collect();
+    expected.push("end".to_string());
+    assert_eq!(order, expected);
+    std::fs::remove_dir_all(&running.dir).unwrap();
+}
+
+#[test]
 fn a_program_that_cannot_start_is_recorded_and_the_shim_says_so() {
     let dir = std::env::temp_dir().join(format!("clarp-shim-nostart-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
