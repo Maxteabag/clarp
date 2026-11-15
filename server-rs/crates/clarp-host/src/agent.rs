@@ -151,6 +151,11 @@ pub enum Ask {
         want: Box<Want>,
         answer: Answer<Result<Done, Refused>>,
     },
+    /// Holds the agent's mailbox without ending or pausing anything: what would start by
+    /// itself waits for a resume. For an agent that has just arrived from another Host.
+    Hold {
+        answer: Answer<()>,
+    },
     /// The plans the agent had on the Host it comes from, each as that Host showed it, with
     /// the documents of its goal. Answers how many there are now, or why one cannot be taken.
     TakePlans {
@@ -366,6 +371,11 @@ impl AgentHandle {
     pub async fn artifact(&self, want: Want) -> Result<Result<Done, Refused>, Unavailable> {
         let want = Box::new(want);
         self.ask(|answer| Ask::Artifact { want, answer }).await
+    }
+
+    /// Holds the agent's mailbox: nothing starts by itself until it is resumed.
+    pub async fn hold(&self) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Hold { answer }).await
     }
 
     /// Gives the agent the plans it had where it comes from. The inner error is a plan
@@ -1024,6 +1034,10 @@ impl Worker {
                 });
                 answered(stopped, answer)?
             }
+            // The mailbox alone: the agent's goals stay as they are, and wait with it.
+            Ask::Hold { answer } => {
+                answered(actor.stop("move", now).map(|(_, out)| ((), out)), answer)?
+            }
             Ask::Resume { by, answer } => {
                 let resumed = actor.resume(&by, now);
                 let queue = actor.queue_state();
@@ -1608,6 +1622,7 @@ fn refuse_for(
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Publish { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakePlans { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),

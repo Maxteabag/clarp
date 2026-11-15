@@ -3444,6 +3444,12 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let library = new_host.get(&format!("/artifacts?session={session}"));
     assert_eq!(library["artifacts"][0]["type"], "plan");
     assert_eq!(library["artifacts"][0]["plan"]["plan_id"], plan_id.as_str());
+    // It arrived held: until its owner resumes it here, nothing starts by itself, because
+    // until then it is on the first Host too. Its goals are as they were, not paused.
+    assert!(told.contains("Here it is held until then"), "{told}");
+    let queue = new_host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(queue["paused"], true, "{queue}");
+    assert_eq!(plan_here["status"], "active");
     // And the agent goes on with it here: the next step follows the revision it had.
     let revision = plan_before["revision"].as_i64().unwrap().to_string();
     let stepped = goal(
@@ -3549,6 +3555,13 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         new_host.conversation(&session)[5],
         said("assistant", "and now?")
     );
+    // What its user said ran, and it is still held; a resume lets it go.
+    let queue = new_host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(queue["paused"], true, "{queue}");
+    let resumed = new_host.post("/turn-queue/resume", json!({ "session": session }));
+    assert_eq!(resumed["paused"], false, "{resumed}");
+    let queue = new_host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(queue["paused"], false, "{queue}");
     // The first Host was read, not changed; and an agent arrives once.
     assert_eq!(old_host.conversation(&session), before);
     let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))

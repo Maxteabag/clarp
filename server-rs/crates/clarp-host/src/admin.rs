@@ -364,7 +364,10 @@ pub fn import(
     };
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {followed}.\n\
-         It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns."
+         It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns.\n\
+         Here it is held until then: it answers what you say to it, and what would start by itself \
+         (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \
+         or POST /turn-queue/resume."
     ))
 }
 
