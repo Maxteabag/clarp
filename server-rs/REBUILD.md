@@ -207,6 +207,24 @@ the seven days before:
 | Artifacts, media, decision cards | 172 artifacts, 203 media assets, 16 decisions | 5 |
 | Speech out and in | 45 clips, 709 voice events | 6 |
 
+How much that is, by the size of what the Python Host has for it (lines of Python without tests, files sorted
+by name, 15 Nov 2026; the whole is 147,900 and the Rust Host stood at 19,200 lines):
+
+| Area | Lines of Python | Share |
+|---|---|---|
+| Core: turns, queue, messages, transcript, events, snapshot, agents (what the Rust Host has) | 31,000 | 21% |
+| Goals, task plans, background jobs, sub-agents | 7,800 | 5% |
+| Artifacts, media, decisions, forms, attention | 5,100 | 4% |
+| Push, notifications, devices, pairing | 4,700 | 3% |
+| Speech and calls (speech out and in, voice catalogue, Oracle, rings, group calls) | 33,800 | 23% |
+| Janitors, heartbeat, dreaming, leaders, teams | 17,400 | 12% |
+| Accounts, usage, limits, the other backends | 13,000 | 9% |
+| Everything else (settings, install, update, admin, fleet map) | 35,000 | 24% |
+
+What a worker agent needs to live on the Rust Host is the second to fourth row: about 17,600 lines of Python,
+a little over half of what the core was. Speech out and in is a part of the fifth row; calls and the Oracle
+are stage 4.
+
 Speech was planned first and is last: on this Host it carries the least. What is built of it stays: the crate
 `clarp-speech` holds the voice markup (what of a reply is spoken, what is shown), ported from
 `server/lib/voice_markup.py` and held to it by vectors written from the Python module. Its design, for when its
