@@ -582,6 +582,24 @@ impl ArtifactBook {
             .collect()
     }
 
+    /// The earliest moment a pending request runs out, for whoever sets the alarm.
+    pub fn next_expiry(&self) -> Option<i64> {
+        self.artifacts()
+            .filter_map(|artifact| artifact.decision.as_ref())
+            .filter(|decision| decision.status == "pending")
+            .filter_map(|decision| decision.expires_at)
+            .min()
+    }
+
+    /// The requests whose end still waits to be told to the agent, by their ids.
+    pub fn undelivered(&self) -> Vec<String> {
+        self.artifacts()
+            .filter_map(|artifact| artifact.decision.as_ref())
+            .filter(|decision| decision.delivery_pending())
+            .map(|decision| decision.decision_id.clone())
+            .collect()
+    }
+
     /// The user answers a request: accepts or rejects an approval, chooses an option or
     /// writes an answer. Answers the artifact and whether that changed anything: the same
     /// answer given again changes nothing.

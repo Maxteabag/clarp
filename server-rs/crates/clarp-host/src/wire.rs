@@ -442,6 +442,21 @@ pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
     })
 }
 
+/// An artifact changed: an app that shows it asks for it again.
+pub fn artifact_updated(record: &AgentRecord, artifact_id: &str) -> Value {
+    json!({
+        "type": "artifact-updated",
+        "session": record.session,
+        "agent_id": record.agent_id,
+        "artifact_id": artifact_id,
+    })
+}
+
+/// How many requests wait for the user changed, or may have.
+pub fn attention_updated(count: usize) -> Value {
+    json!({ "type": "attention-updated", "attention_count": count })
+}
+
 /// A background job changed: the job as it now stands, under the number of the change.
 pub fn job_updated(record: &AgentRecord, changed: &Job, now_ms: i64) -> Value {
     json!({

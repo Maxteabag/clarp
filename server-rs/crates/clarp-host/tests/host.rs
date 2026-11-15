@@ -948,6 +948,344 @@ fn an_agent_keeps_a_goal_with_its_own_tool_and_still_has_it_after_the_host_is_ki
     assert_eq!(goal(&host, &dir, &["show", &session]), json!({}));
 }
 
+#[test]
+fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_library() {
+    let place = Place::new("library");
+    let host = place.start();
+    let session = host.new_agent("Asker");
+    let dir = place.root.clone();
+    let events = host.listen();
+    let told = |host: &Host, begins: &str| {
+        let all = host.conversation(&session);
+        all.iter()
+            .any(|(role, text)| role == "user" && text.starts_with(begins))
+    };
+    let error = |answer: &(u16, Value)| (answer.0, answer.1["error"].as_str().unwrap().to_string());
+
+    // What an agent made: a document, with what its kind shows on the artifact itself.
+    let document = json!({
+        "session": session, "type": "document", "title": "Notes", "summary": "What was found",
+        "payload": { "content": "# Notes" },
+    });
+    let (status, made) = host.ask("POST", "/artifacts", Some(&document));
+    assert_eq!(status, 201);
+    let document = made["artifact"].clone();
+    let document_id = document["artifact_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (
+            &document["content"],
+            &document["agent_name"],
+            &document["status"]
+        ),
+        (&json!("# Notes"), &json!("Asker"), &json!("ready"))
+    );
+    // What is refused is refused in the Python Host's words, as a conflict.
+    let plan = json!({ "session": session, "type": "plan", "title": "A plan" });
+    let refused = host.ask("POST", "/artifacts", Some(&plan));
+    assert_eq!(error(&refused), (409, "reserved artifact type".to_string()));
+    let nobody = json!({ "session": "nobody", "type": "document", "title": "x", "payload": { "content": "x" } });
+    let refused = host.ask("POST", "/artifacts", Some(&nobody));
+    assert_eq!(error(&refused), (409, "unknown agent session".to_string()));
+    let empty = json!({ "session": session, "type": "document", "title": "x" });
+    let refused = host.ask("POST", "/artifacts", Some(&empty));
+    assert_eq!(
+        error(&refused),
+        (
+            409,
+            "document artifact requires payload field(s): content".to_string()
+        )
+    );
+    let refused = host.ask("GET", "/artifacts/no-such", None);
+    assert_eq!(error(&refused), (404, "artifact not found".to_string()));
+
+    // A plan the agent makes with its goal tool is in the library, as an artifact that
+    // follows the plan. A list leaves the plan's history out and says what it left out.
+    let commitment = json!({
+        "outcome": "The thing is shipped", "criteria": ["It runs"], "limits": "No publication",
+    })
+    .to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &[
+            "create",
+            &session,
+            "ship",
+            "Ship the thing",
+            "[]",
+            &commitment,
+        ],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
+    let library = |host: &Host, how: &str| {
+        host.get(&format!("/artifacts?session={session}{how}"))["artifacts"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let listed = library(&host, "&representation=summary-v1");
+    assert_eq!(listed.len(), 2);
+    let shown = listed.iter().find(|row| row["type"] == "plan").unwrap();
+    assert_eq!(shown["reference_id"], plan_id.as_str());
+    assert_eq!(
+        (&shown["status"], &shown["title"]),
+        (&json!("active"), &json!("Ship the thing"))
+    );
+    assert!(shown.get("payload").is_none(), "a summary has no payload");
+    let left_out = &shown["plan"]["goal"]["history_omitted"];
+    assert_eq!(
+        (&left_out["count"], &left_out["reason"]),
+        (&json!(1), &json!("summary"))
+    );
+    assert!(shown["plan"]["goal"].get("history").is_none());
+    let whole = library(&host, "&type=plan");
+    assert_eq!(
+        whole[0]["plan"]["goal"]["history"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    goal(
+        &host,
+        &dir,
+        &["pause", &plan_id, "0", r#"{"reason": "Later"}"#],
+    );
+    goal(
+        &host,
+        &dir,
+        &["cancel", &plan_id, "1", r#"{"reason": "Not needed"}"#],
+    );
+    let shown = library(&host, "&type=plan")[0].clone();
+    assert_eq!(
+        (&shown["status"], &shown["plan"]["status"]),
+        (&json!("cancelled"), &json!("cancelled"))
+    );
+
+    // The agent asks for an approval. It is in the user's inbox.
+    let ask = json!({
+        "session": session, "title": "Deploy?", "question": "Deploy version 1.2?",
+        "context": "Only the web service.", "reference_id": "deploy-1.2",
+    });
+    let (status, asked) = host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(status, 201);
+    let request = asked["artifact"]["decision"].clone();
+    let request_id = request["decision_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (&request["status"], &request["revision"]),
+        (&json!("pending"), &json!(1))
+    );
+    let inbox = host.get("/attention");
+    assert_eq!(
+        (&inbox["count"], &inbox["decision_format"]),
+        (&json!(1), &json!(2))
+    );
+    assert_eq!(inbox["items"][0]["decision_id"], request_id.as_str());
+    assert_eq!(inbox["items"][0]["kind"], "decision");
+
+    // The user answers. The agent is told, once, and the request leaves the inbox.
+    let resolve = format!("/decisions/{request_id}/resolve");
+    let stale = host.ask(
+        "POST",
+        &resolve,
+        Some(&json!({ "choice": "accepted", "expected_revision": 2 })),
+    );
+    assert_eq!(
+        error(&stale),
+        (409, "decision revision changed".to_string())
+    );
+    let neither = host.ask("POST", &resolve, Some(&json!({ "expected_revision": 1 })));
+    assert_eq!(
+        error(&neither),
+        (
+            400,
+            "exactly one of choice or answer is required".to_string()
+        )
+    );
+    let accept = json!({ "choice": "accepted", "expected_revision": 1 });
+    let (status, resolved) = host.ask("POST", &resolve, Some(&accept));
+    assert_eq!(status, 200);
+    assert_eq!(
+        (&resolved["changed"], &resolved["delivery_pending"]),
+        (&json!(true), &json!(false))
+    );
+    assert_eq!(resolved["artifact"]["decision"]["status"], "accepted");
+    wait_for("the agent to be told the answer", || {
+        told(&host, "[Clarp decision resolved]")
+    });
+    let answer = host
+        .conversation(&session)
+        .into_iter()
+        .find(|(_, text)| text.contains("approved this exact action"))
+        .unwrap()
+        .1;
+    assert!(
+        answer.contains("The user approved this exact action: Deploy version 1.2? Approved scope/context: Only the web service."),
+        "{answer}"
+    );
+    assert!(
+        answer.contains(&format!("Decision ID: {request_id}\n")),
+        "{answer}"
+    );
+    assert_eq!(host.get("/attention")["count"], 0);
+    let (status, again) = host.ask("POST", &resolve, Some(&accept));
+    assert_eq!((status, &again["changed"]), (200, &json!(false)));
+    let other = host.ask(
+        "POST",
+        &resolve,
+        Some(&json!({ "choice": "rejected", "expected_revision": 2 })),
+    );
+    assert_eq!(
+        error(&other),
+        (
+            409,
+            "decision already resolved with a different choice or answer".to_string()
+        )
+    );
+    wait_for("the apps to be told", || {
+        let seen = events.lock().unwrap();
+        let of = |kind: &str| seen.iter().filter(|event| event["type"] == kind).count();
+        let counts: Vec<&Value> = seen
+            .iter()
+            .filter(|event| event["type"] == "attention-updated")
+            .map(|event| &event["attention_count"])
+            .collect();
+        of("artifact-updated") >= 5
+            && counts.contains(&&json!(1))
+            && counts.last() == Some(&&json!(0))
+    });
+    wait_for("the agent to rest", || host.state(&session) == "done");
+
+    // A question nobody answers runs out, and the agent is told that it did.
+    let question = json!({
+        "session": session, "title": "Which?", "question": "Which way?",
+        "response_type": "single_choice",
+        "options": [{ "id": "a", "label": "The first" }, { "id": "b", "label": "The second" }],
+        "expires_at": now_ms() + 500,
+    });
+    let (status, asked) = host.ask("POST", "/decisions", Some(&question));
+    assert_eq!(status, 201);
+    let question_id = asked["artifact"]["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(host.get("/attention?decision_format=2")["count"], 1);
+    assert_eq!(
+        host.get("/attention")["count"],
+        0,
+        "a question is not shown as an approval"
+    );
+    wait_for("the question to run out", || {
+        host.get(&format!("/artifacts/{question_id}"))["artifact"]["decision"]["status"]
+            == "expired"
+    });
+    wait_for("the agent to be told it ran out", || {
+        host.conversation(&session)
+            .iter()
+            .any(|(_, text)| text.contains("The request expired without an answer or approval."))
+    });
+
+    // The same thing is not asked twice: the reference is taken for this agent and kind.
+    let twice = host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(
+        error(&twice),
+        (
+            409,
+            "UNIQUE constraint failed: artifacts.agent_id, artifacts.type, artifacts.reference_id"
+                .to_string()
+        )
+    );
+    // A request the agent takes back is not told to it.
+    let mut ask = ask;
+    ask["reference_id"] = json!("deploy-1.3");
+    let (_, asked) = host.ask("POST", "/decisions", Some(&ask));
+    let taken_back = asked["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let withdraw = format!("/decisions/{taken_back}/withdraw");
+    let not_mine = host.ask(
+        "POST",
+        &withdraw,
+        Some(&json!({ "session": "someone-else" })),
+    );
+    assert_eq!(
+        error(&not_mine),
+        (
+            403,
+            "only the asking agent may withdraw this request".to_string()
+        )
+    );
+    let (status, withdrawn) = host.ask("POST", &withdraw, Some(&json!({ "session": session })));
+    assert_eq!((status, &withdrawn["changed"]), (200, &json!(true)));
+    assert_eq!(
+        withdrawn["artifact"]["decision"]["resolved_choice"],
+        "withdrawn"
+    );
+
+    // What the user does with an artifact: archive it, pin it, discard it.
+    let at = document["updated_at"].as_i64().unwrap();
+    let archive = format!("/artifacts/{document_id}/archive");
+    let (status, archived) = host.ask(
+        "POST",
+        &archive,
+        Some(&json!({ "archived": true, "expected_updated_at": at })),
+    );
+    assert_eq!((status, &archived["changed"]), (200, &json!(true)));
+    assert!(archived["artifact"]["archived_at"].is_i64());
+    let (status, pinned) = host.ask(
+        "POST",
+        &format!("/artifacts/{document_id}/pin"),
+        Some(&json!({ "pinned": true })),
+    );
+    assert_eq!((status, &pinned["artifact"]["pinned"]), (200, &json!(true)));
+    assert_eq!(
+        host.get("/pinned-artifacts")["artifacts"][0]["artifact_id"],
+        document_id.as_str()
+    );
+    let (status, updated) = host.ask(
+        "POST",
+        &format!("/artifacts/{document_id}"),
+        Some(&json!({ "payload_patch": { "content": "# Notes, again" } })),
+    );
+    assert_eq!(
+        (status, &updated["artifact"]["content"]),
+        (200, &json!("# Notes, again"))
+    );
+
+    // The Host is killed. What was made, asked and answered is there when it is back, and
+    // nothing is told a second time.
+    let before = host.get(&format!("/artifacts?session={session}&order=created"));
+    let told_before = host.conversation(&session).len();
+    host.kill();
+    let host = place.start();
+    let mut after = host.get(&format!("/artifacts?session={session}&order=created"));
+    for row in after["artifacts"].as_array_mut().unwrap() {
+        if !row["plan"].is_null() {
+            row["plan"]["server_now"] = json!(0);
+        }
+    }
+    let mut before = before;
+    for row in before["artifacts"].as_array_mut().unwrap() {
+        if !row["plan"].is_null() {
+            row["plan"]["server_now"] = json!(0);
+        }
+    }
+    assert_eq!(after, before);
+    assert_eq!(before["artifacts"].as_array().unwrap().len(), 5);
+    assert_eq!(host.conversation(&session).len(), told_before);
+    let at = updated["artifact"]["updated_at"].as_i64().unwrap();
+    let discard = format!("/artifacts/{document_id}/discard");
+    let (status, discarded) = host.ask(
+        "POST",
+        &discard,
+        Some(&json!({ "expected_updated_at": at })),
+    );
+    assert_eq!((status, &discarded["changed"]), (200, &json!(true)));
+    let gone = host.ask("GET", &format!("/artifacts/{document_id}"), None);
+    assert_eq!(error(&gone), (404, "artifact not found".to_string()));
+}
+
 fn now_ms() -> i64 {
     let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
     i64::try_from(since.unwrap().as_millis()).unwrap()

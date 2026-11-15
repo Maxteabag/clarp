@@ -5,7 +5,7 @@
 //! a moment misses nothing; a client that was away for longer, or across a restart of the Host,
 //! is told to look at everything again, and the conversations themselves tell it what is new.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
@@ -33,6 +33,8 @@ struct Recent {
 pub struct Hub {
     recent: Mutex<Recent>,
     live: broadcast::Sender<Arc<Published>>,
+    /// How many requests of each agent wait for the user: what the apps' badge counts.
+    waiting: Mutex<BTreeMap<String, usize>>,
 }
 
 impl Hub {
@@ -47,7 +49,20 @@ impl Hub {
                 events: VecDeque::new(),
             }),
             live,
+            waiting: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// An agent says how many of its requests wait for the user. Answers how many wait in
+    /// all: the count the apps are told.
+    pub fn waiting_for_user(&self, agent_id: &str, count: usize) -> usize {
+        let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+        if count == 0 {
+            waiting.remove(agent_id);
+        } else {
+            waiting.insert(agent_id.to_string(), count);
+        }
+        waiting.values().sum()
     }
 
     /// Numbers an event, keeps it for those who reconnect and sends it to those who listen.
