@@ -257,7 +257,8 @@ fn main() -> ExitCode {
         args.next();
         let source = std::env::var("CLARP_SOURCE_TOKEN").unwrap_or_default();
         let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
-        return match clarp_host::admin::import(args, &source, &token) {
+        let files = std::env::var("CLARP_FILES_TOKEN").unwrap_or_default();
+        return match clarp_host::admin::import(args, &source, &token, &files) {
             Ok(shown) => {
                 println!("{shown}");
                 ExitCode::SUCCESS
