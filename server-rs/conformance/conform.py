@@ -12,6 +12,9 @@
       what was written down.
   conform.py cross   --build CHECKOUT --rust BINARY --out DIR
       All three, for the workflow. The written-down answers go to DIR/golden.
+  conform.py rust    --rust BINARY --out DIR
+      Runs the corpus against the Rust Host and writes down what it answered, compared
+      with nothing: for a scenario that is new and has no reference yet.
 
 record, plants and cross start Python test Hosts: they run only where the
 replay harness may run (tests/replay/README.md), which is the contained
@@ -166,7 +169,46 @@ def turns(host, session):
     return (body or {}).get('turns') or [] if isinstance(body, dict) else []
 
 
-def run_step(host, events, step, http, variables):
+class TurnClock:
+    """What `turn_started_at` is told as: which turn's start it is, and after which send.
+
+    An app counts a running turn from this field (issue 354). What has to agree between two
+    Hosts is not the number, which is a reading of a clock, but what it is a reading of: one
+    and the same moment for as long as a turn runs, whatever else is sent meanwhile, and another
+    moment for the next turn. So a reading is written down as the turn it belongs to (the
+    readings of a capture, numbered as they are first seen) and by the last message this client
+    had sent when the turn began: a turn begins after the send that started it and before every
+    later one. Host and client read the same clock, so no allowance is made."""
+
+    def __init__(self):
+        self.sent: list[int] = []     # when each message the Host took was sent, in ms
+        self.turns: dict[int, int] = {}  # a start -> the number of the turn it was first read as
+
+    def read(self, exchange: dict, asked_at: int) -> None:
+        """Takes an exchange that was just recorded and was asked for at `asked_at`."""
+        if (exchange['method'], exchange['path'], exchange['status']) == ('POST', '/send', 200):
+            self.sent.append(asked_at)
+        exchange['body'] = self.told(exchange['body'])
+
+    def told(self, value):
+        if isinstance(value, list):
+            return [self.told(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        out = {}
+        for key, item in value.items():
+            if key == 'turn_started_at' and isinstance(item, int) and not isinstance(item, bool) and item in EPOCH_MS:
+                turn = self.turns.setdefault(item, len(self.turns) + 1)
+                sends = sum(1 for at in self.sent if at <= item)
+                item = (f'<turn {turn}, begun after send {sends}>' if sends
+                        else f'<turn {turn}, begun before anything was sent>')
+            else:
+                item = self.told(item)
+            out[key] = item
+        return out
+
+
+def run_step(host, events, step, http, variables, clock=None):
     op = step['op']
     session = step.get('session', scenarios.AGENT)
     if op in HTTP_OPS:
@@ -174,7 +216,10 @@ def run_step(host, events, step, http, variables):
         body = replay.fill(step.get('body'), variables)
         # Recorded under the step's own name, or its path as written: never a value a Host made up.
         named = {**step, 'name': step.get('name') or f"{op} {step['path']}", 'path': path}
+        asked_at = int(time.time() * 1000)
         replay._record(named, host.request(op.upper(), path, body, None, step.get('headers')), http, variables)
+        if clock is not None:
+            clock.read(http[-1], asked_at)
     elif op == 'wait_reply':
         # The agent has answered the message with this id.
         def replied():
@@ -185,6 +230,20 @@ def run_step(host, events, step, http, variables):
         replay._poll('a reply', replied)
     elif op == 'wait_busy':
         replay._poll('busy state', lambda: agent(host, session).get('busy') is step['busy'])
+    elif op == 'wait_running':
+        # The turn of this message runs: the message is in the conversation, the agent is busy,
+        # and what the snapshot says the turn began at is the same in two readings.
+        replay._poll('the message in the conversation',
+                     lambda: any(turn.get('id') == step['message'] for turn in turns(host, session)))
+        last = {'began': None}
+
+        def running():
+            row = agent(host, session)
+            began = row.get('turn_started_at')
+            steady = row.get('busy') is True and bool(began) and began == last['began']
+            last['began'] = began
+            return steady
+        replay._poll('the turn running', running)
     elif op == 'quiesce':
         # Nothing runs, nothing waits (unless it is held on purpose), and the stream is quiet.
         def idle():
@@ -214,13 +273,14 @@ def capture(make_host, scenario, root: Path) -> dict:
     replay.fresh_root(root)
     host = make_host(root)
     events, frames, http, error, variables = None, [], [], None, {}
+    clock = TurnClock()
     try:
         host.start()
         events = Events(host)
         replay._poll('the stream connected', lambda: events.frames)
         for index, step in enumerate(scenario['steps']):
             try:
-                run_step(host, events, step, http, variables)
+                run_step(host, events, step, http, variables, clock)
             except replay.StepFailed as exc:
                 raise replay.StepFailed(f'step {index} ({step["op"]}): {exc}') from exc
         replay._poll('the stream quiet', lambda: time.monotonic() - events.last_at >= replay.QUIET_S)
@@ -285,7 +345,7 @@ def settle(value, sessions):
         if key == 'runtime_instance' and isinstance(item, str) and item:
             item = '<instance>'  # one per Host process
         elif key == 'turn_started_at' and isinstance(item, int) and item in EPOCH_MS:
-            item = '<time>'  # a clock reading while a turn runs, 0 when none does
+            item = '<time>'  # a reading no TurnClock has told: there is none in a capture of this suite
         elif key == 'agents' and isinstance(item, list):
             # The reference Host starts with two codex agents (rachel, mike) that the Rust Host
             # cannot run until it has a Codex adapter. Both sides are cut to the scenario's own.
@@ -610,7 +670,7 @@ def choose(names):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('mode', choices=('record', 'plants', 'compare', 'cross'))
+    parser.add_argument('mode', choices=('record', 'plants', 'compare', 'cross', 'rust'))
     parser.add_argument('--build', type=Path, help='a checkout of the repository: the Python Host under ./server')
     parser.add_argument('--rust', type=Path, help='the clarp-host binary (clarp-shim beside it)')
     parser.add_argument('--golden', type=Path, default=HERE / 'golden')
@@ -622,8 +682,8 @@ def main(argv=None) -> int:
     parser.add_argument('--keep', action='store_true', help='keep the scratch directory')
     args = parser.parse_args(argv)
     chosen = choose(args.scenarios)
-    for needed, modes in (('build', ('record', 'plants', 'cross')), ('rust', ('compare', 'cross')),
-                          ('out', ('cross',))):
+    for needed, modes in (('build', ('record', 'plants', 'cross')), ('rust', ('compare', 'cross', 'rust')),
+                          ('out', ('cross', 'rust'))):
         if args.mode in modes and getattr(args, needed) is None:
             parser.error(f'{args.mode} needs --{needed}')
     build = args.build.resolve() if args.build else None
@@ -647,6 +707,13 @@ def main(argv=None) -> int:
             if args.out:
                 write_golden(args.out / 'rust', rust_seen)
                 (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
+        elif args.mode == 'rust':
+            rust_seen = corpus(rust_host(rust), chosen, run.label('rust'), args.jobs)
+            errors = run_errors(rust_seen, 'rust')
+            write_golden(args.out / 'rust', rust_seen)
+            lines = [f'{len(rust_seen)} scenario(s) run against the Rust Host and compared with nothing; '
+                     f'what it answered is in {args.out / "rust"}', *errors]
+            ok = not errors
         else:
             args.out.mkdir(parents=True, exist_ok=True)
             recordings, lines, ok = record(build, chosen, run, args.jobs)

@@ -148,6 +148,43 @@ SCENARIOS = [
         ],
     },
     {
+        'id': 'turn-timer',
+        'what': 'what a list of agents counts a running turn from (issue 354): the agent is busy, and the '
+                "turn's start stays what it is while more is sent and is another for the next turn",
+        'steps': [
+            {**SNAPSHOT, 'name': 'snapshot at rest'},
+            send(SLOW + 'synthetic timed november', 'november'),
+            {'op': 'wait_running', 'message': 'u-november'},
+            {**SNAPSHOT, 'name': 'snapshot while the first turn runs'},
+            send(SLOW + 'synthetic timed oscar', 'oscar', queue_if_busy=True),
+            {**SNAPSHOT, 'name': 'snapshot after more was sent'},
+            {'op': 'wait_reply', 'after': 'u-november'},
+            {'op': 'wait_running', 'message': 'u-oscar'},
+            {**SNAPSHOT, 'name': 'snapshot while the second turn runs'},
+            {'op': 'wait_reply', 'after': 'u-oscar'},
+            {'op': 'quiesce'},
+            {**SNAPSHOT, 'name': 'snapshot at rest again'},
+        ],
+    },
+    {
+        'id': 'turn-timer-after-stop',
+        'what': 'a turn that runs after one that was stopped is counted from its own start (issue 354)',
+        'steps': [
+            send(SLOW + 'synthetic timed papa', 'papa'),
+            {'op': 'wait_running', 'message': 'u-papa'},
+            post('/stop', {'session': AGENT}),
+            {'op': 'wait_busy', 'busy': False},
+            {'op': 'quiesce', 'held': True},
+            {**SNAPSHOT, 'name': 'snapshot after the stop'},
+            send(SLOW + 'synthetic timed quebec', 'quebec'),
+            {'op': 'wait_running', 'message': 'u-quebec'},
+            {**SNAPSHOT, 'name': 'snapshot while the next turn runs'},
+            {'op': 'wait_reply', 'after': 'u-quebec'},
+            {'op': 'quiesce', 'held': True},
+            {**SNAPSHOT, 'name': 'snapshot at rest'},
+        ],
+    },
+    {
         'id': 'send-while-busy',
         'what': 'a plain send while a turn runs takes its place',
         'steps': [

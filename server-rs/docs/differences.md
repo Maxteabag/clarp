@@ -33,6 +33,7 @@ Parts of the contract that no feature stands for, which the Rust Host sends empt
 | The Host's version in `server-version`, and `clarp_version` in `GET /server-info` | the newest change time of its static files; the version of the Python package | its own version | Each Host's own. The run compares that there is one |
 | The id of a row the agent wrote | `live-` and a hash of the agent, the session, the trace and the tool's message id | `r-` and the tool's message id, or the id of the message it answers and a number | An id is the Host's own choice. The run compares that the same row has the same id wherever it is named. The prefix is different on purpose: in the apps `live-` marks a row that has no fixed place in the history yet (the iOS app does not page back from one, `HistoryCursorPolicy`). A row of the Rust Host is stored under one id from its first word and has a place from then on |
 | A queue's revision | counted per change of the queue | the same changes, counted the same | Compared as the number it is |
+| The start of the turn that runs, `turn_started_at` in the snapshot | the first busy state the agent entered after its last turn that completed | the moment the turn that runs was taken up; at rest 0, or the start of the last turn when that turn did not complete | A reading of a clock, which an app counts the running turn from (issue 354). The run compares which turn it is the start of, and which message the client had last sent when it began |
 
 ## Differences that are registered one by one
 
@@ -44,6 +45,7 @@ it covers that exact difference and nothing else.
 | A plain send that has to wait | changes the queue and announces nothing (defect R5) | announces it with `queue-updated`, like a send with `queue_if_busy` | Every device shows the same queue, not only the one that sent |
 | The preview of a notification for a spoken reply | shows an emotion tag the engine acts out, `[sigh]` (defect R10) | does not | A notification shows the reply as every other place shows it |
 | `phase` of the reply that closes a later turn | `null` when the turn before had settled, `final` otherwise (defect R6) | `final` | A reply that closes a completed turn is the agent's final word in it, whenever it is read |
+| `turn_started_at` while a turn runs after one that did not complete (it was stopped, or failed) | the start of the earlier turn (defect R11) | the start of the turn that runs | The apps count the running turn from it (issue 354): a turn is counted from its own start |
 
 ## Differences the conformance corpus does not reach
 
