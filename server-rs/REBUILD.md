@@ -1016,6 +1016,11 @@ connection relay under the name the phone is paired with. Each of these is true 
    another Clarp Host" and exit 69; it never goes on to the Python Host. For that, every turn of this Host
    carries both variables (measured on 16 Nov 2026 in a Codex turn: plain, `bash -lc` and `sh -lc`), and
    its `tools/` holds a tool under every name the Python Host has (the installer writes one for each).
+   A wrapper marks its hand-over (`CLARP_WRAPPER_HANDOVER=1`) and refuses a call that already has the
+   mark, so that two wrappers never hand a call to each other without end (the release owner's addition
+   of 17 Nov 2026, after the first review of the wrappers). This Host's tools are no wrappers and take
+   the mark off before they run: what a tool starts, a helper or a worker that outlives the turn, may
+   call a tool again, and that is a call of its own.
    What an agent's turn does under `sh -lc` or zsh: **before** the Python Host's wrappers hand over, the
    profile's order stands, the Python Host's tool is found, sets that Host's environment and acts on
    that Host, under the agent's own session name (`docs/battle-test.md`, "Where the fence between the two
