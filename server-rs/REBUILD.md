@@ -584,6 +584,21 @@ plain words (the setting answers off, and turning it on is refused in words); a 
 of tasks and the turn's diff as items of their own; and the pushes that keep the phone's "agents working"
 activity current.
 
+**An agent has a face, and an app is told who an agent can be** (16 Nov 2026). An agent's row says where its
+picture is fetched (`avatar_url`): the one this Host ships for its name, else the one for its kind of tool; and,
+for a name that has one, the picture drawn for the family of model it runs on (`model_avatar_url`). The rules
+are the Python Host's (`clarp-kernel` `portraits.rs`, held by 338 faces, 1,140 faces on models and 33
+addresses recorded from its own functions). A picture's address carries its content: `GET /static/avatars/...`
+hands it to anybody, as the Python Host does, to be kept for a year under that address and checked each time
+without it. The pictures are files beside the Host (`--static`); the installer copies the repository's own.
+The snapshot lists the personas this Host has built in (`personas`: a name, its voices of three engines, how
+it speaks, the kind of tool it belongs to) and offers their names before the agents' (`roster`). They are the
+Python Host's lists, carried as data, with the owner's file adding to them by that Host's rules
+(`personas.rs`, held by what the Python Host lists under three made-up owner's files, each asked in a room of
+its own). Their order is this Host's own, the roster's. On the owner's Host that is 84 of his 93. Not there: a
+persona the owner makes himself (nine of the 93), a picture an agent chose itself (eleven of his 180 agents),
+the janitors' pictures, and the making of pictures.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
