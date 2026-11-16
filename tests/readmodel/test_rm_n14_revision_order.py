@@ -170,3 +170,36 @@ def test_in_the_lane_the_wall_clock_ends_no_batch(tmp_path, backend):
             output.write(harness.append_bytes(backend, 2))
         clocked = actual.tick(1, faults={"slow_writer": 0.03, "write_budget_seconds": 0.025})
         assert clocked["yields"] >= 1
+
+
+def _store(tmp_path, name, *, head):
+    """One conversation with messages up to revision 5 and this head (None: no head row)."""
+    path = tmp_path / name
+    with sqlite3.connect(path) as store:
+        store.execute("CREATE TABLE messages (agent_id, backend_session_id, revision)")
+        store.execute("CREATE TABLE conversation_heads (agent_id, backend_session_id, revision)")
+        store.executemany("INSERT INTO messages VALUES ('a', 's', ?)", [(3,), (5,), (4,)])
+        if head is not None:
+            store.execute("INSERT INTO conversation_heads VALUES ('a', 's', ?)", (head,))
+    return path
+
+
+@pytest.mark.parametrize("head,covered", [(5, True), (9, True), (4, False), (None, False)],
+                         ids=["at its messages", "above them", "below them", "no head"])
+def test_a_head_below_its_messages_is_refused_by_the_lane(tmp_path, head, covered):
+    """The agent list reads what changed from the heads alone (issue 371); the
+    lane asks of every store it compares that no import left a head behind."""
+    store = _store(tmp_path, "store.sqlite", head=head)
+    if covered:
+        harness.assert_heads_cover_messages(store)
+    else:
+        with pytest.raises(AssertionError, match="head_below_its_messages"):
+            harness.assert_heads_cover_messages(store)
+
+
+def test_the_comparison_asks_about_the_heads_of_both_stores(tmp_path):
+    good = _store(tmp_path, "good.sqlite", head=5)
+    behind = _store(tmp_path, "behind.sqlite", head=4)
+    for reference, candidate in ((good, behind), (behind, good)):
+        with pytest.raises(AssertionError, match="head_below_its_messages"):
+            harness.assert_product_equal(reference, candidate)

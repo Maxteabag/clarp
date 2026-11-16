@@ -22,11 +22,40 @@ from lib import log as log_module
 from test_snapshot_n2 import seed, watch
 
 
-def _foreign(sql, params=()):
+# Every writer of a message raises its conversation's head to the revision it
+# gives the row, in the row's own transaction, and the cache keys are read
+# from the heads (issue 371). A write made here in raw SQL does the same.
+_HEADS = """INSERT INTO conversation_heads (agent_id, backend_session_id, revision)
+            SELECT agent_id, backend_session_id, MAX(revision) FROM messages
+             WHERE backend_session_id IS NOT NULL GROUP BY agent_id, backend_session_id
+            ON CONFLICT(agent_id, backend_session_id) DO UPDATE
+               SET revision = MAX(conversation_heads.revision, excluded.revision)"""
+# A delete leaves no row to carry a revision: its writer raises the head.
+# It takes the next number of the message clock: above every row and head.
+_HEAD_AFTER_DELETE = """INSERT INTO conversation_heads (agent_id, backend_session_id, revision)
+            VALUES (?, ?, 1 + (SELECT MAX(revision) FROM (
+                SELECT MAX(revision) AS revision FROM messages
+                UNION ALL SELECT MAX(revision) FROM conversation_heads
+                UNION ALL SELECT 0)))
+            ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET revision = excluded.revision"""
+
+
+def _as_a_writer(connection, *, deleted_from=None):
+    """The other half of a write to ``messages``, on the writer's connection
+    and inside its transaction. ``deleted_from``: the agent whose rows went
+    (these fixtures name an agent's one conversation by the agent's id)."""
+    connection.execute(_HEADS)
+    if deleted_from is not None:
+        connection.execute(_HEAD_AFTER_DELETE, (deleted_from, deleted_from))
+
+
+def _foreign(sql, params=(), *, deleted_from=None):
     """One committed write from another connection, as a hook or the runtime makes."""
     foreign = sqlite3.connect(str(db.DB_PATH))
     try:
         foreign.execute(sql, params)
+        if "messages" in sql:
+            _as_a_writer(foreign, deleted_from=deleted_from)
         foreign.commit()
     finally:
         foreign.close()
@@ -71,6 +100,7 @@ def test_transaction_projection_never_populates_caches(warm):
     c.execute('BEGIN')
     try:
         c.execute("UPDATE messages SET text='uncommitted',revision=2,updated_at=2000 WHERE agent_id=?", (aid,))
+        _as_a_writer(c)
         assert previews.dashboard_messages()[aid]['head']['preview'] == 'You: uncommitted'
         assert c.in_transaction
         assert previews._REVISION_CACHE.peek('all') == old_map
@@ -108,12 +138,15 @@ def test_a_write_to_the_agent_during_the_fill_keeps_its_preview_out_of_the_cache
 @pytest.mark.parametrize('change', ['in-place rewrite', 'newest row deleted', 'first message', 'agent deleted'])
 def test_every_kind_of_change_to_the_agent_moves_its_key(monkeypatch, change):
     aid, other = seed(2)
-    if change == 'first message':
+    if change == 'first message':                          # an agent nothing was ever written for
         db.conn().execute("DELETE FROM messages WHERE agent_id=?", (aid,))
+        db.conn().execute("DELETE FROM conversation_heads WHERE agent_id=?", (aid,))
     action = {
-        # Same revision, new text: only updated_at tells.
-        'in-place rewrite': lambda: _foreign("UPDATE messages SET text='rewritten',updated_at=2000 WHERE agent_id=?", (aid,)),
-        'newest row deleted': lambda: _foreign("DELETE FROM messages WHERE agent_id=?", (aid,)),
+        # New text in the same row, as a transcript import rewrites one: the
+        # row is given the next revision and its head raised to it.
+        'in-place rewrite': lambda: _foreign(
+            "UPDATE messages SET text='rewritten',revision=revision+1,updated_at=2000 WHERE agent_id=?", (aid,)),
+        'newest row deleted': lambda: _foreign("DELETE FROM messages WHERE agent_id=?", (aid,), deleted_from=aid),
         'first message': lambda: _foreign("""INSERT INTO messages
             (message_id,agent_id,backend_session_id,seq,role,text,revision,updated_at)
             VALUES ('first',?,?,1,'user','first',1,1000)""", (aid, aid)),
@@ -241,7 +274,9 @@ def test_a_quiet_database_does_exactly_what_it_did(monkeypatch):
     try:
         cold = previews.dashboard_messages()
         assert (len(maps), sorted(calls)) == (1, sorted(ids))
-        assert len(statements) == 2 + 3 * len(ids)
+        # The heads and the roster, three a preview, and once for a database
+        # the conversations whose messages outrank their head (the floor).
+        assert len(statements) == 2 + 1 + 3 * len(ids)
         assert previews._REVISION_CACHE.peek('all') is not None
         assert all(_stored(agent_id) == _fresh(agent_id) for agent_id in ids)
 
@@ -334,6 +369,7 @@ def test_concurrent_batches_under_writes_never_store_a_wrong_preview():
                 agent_id = ids[n % len(ids)]
                 connection.execute("UPDATE messages SET text=?,revision=revision+1,updated_at=updated_at+1 WHERE agent_id=?",
                                    (f'text {n}', agent_id))
+                _as_a_writer(connection)
                 connection.commit()
                 turn.wait(0.002)                           # let the builders run into the next write
         except Exception as exc:  # noqa: BLE001 - reported by the assertion below
@@ -422,6 +458,7 @@ def test_borrowed_read_cursor_is_not_certified_by_a_newer_global_stamp():
     foreign = sqlite3.connect(str(db.DB_PATH))
     try:
         foreign.execute("UPDATE messages SET text='new committed',revision=2,updated_at=2000 WHERE agent_id=?", (aid,))
+        _as_a_writer(foreign)
         foreign.commit()
         # The caller legitimately sees its earlier read snapshot here.
         assert previews.dashboard_messages()[aid]['head']['preview'] == 'You: synthetic'
@@ -453,6 +490,7 @@ def test_owned_transaction_roster_changes_never_touch_cache_apis(monkeypatch,war
         c.execute('BEGIN')
         try:
             c.execute("UPDATE messages SET text='transaction',revision=2,updated_at=2000 WHERE agent_id=?",(aid,))
+            _as_a_writer(c)
             c.execute("UPDATE agents SET deleted_at=1 WHERE agent_id=?",(other,))
             c.execute("INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,created_at) VALUES('transient','Transient','V','/fixture','transient','codex',1000)")
             result = previews.dashboard_messages()
@@ -483,6 +521,7 @@ def test_cached_map_and_evicted_preview_race_keeps_original_certificate(monkeypa
             fired.append(True)
             foreign = sqlite3.connect(str(db.DB_PATH))
             foreign.execute("UPDATE messages SET text='after hit',revision=2,updated_at=2000 WHERE agent_id=?",(aid,))
+            _as_a_writer(foreign)
             foreign.commit()
             foreign.close()
         return value
@@ -505,6 +544,7 @@ def test_slow_old_batch_never_prunes_or_overwrites_new_publisher(monkeypatch):
             peer.append(None)
             foreign = sqlite3.connect(str(db.DB_PATH))
             foreign.execute("UPDATE messages SET text='new publisher',revision=2,updated_at=2000 WHERE agent_id=?",(aid,))
+            _as_a_writer(foreign)
             foreign.execute("INSERT INTO agents(agent_id,persona,voice_id,cwd,session,backend,created_at) VALUES('new-peer','Peer','V','/fixture','new-peer','codex',1000)")
             foreign.commit()
             foreign.close()
@@ -625,6 +665,7 @@ def test_unknown_after_stamp_never_prunes_a_cached_roster(monkeypatch,error):
 def test_nondefault_length_never_replaces_default_preview():
     aid = seed(1)[0]
     db.conn().execute("UPDATE messages SET text=?,revision=2,updated_at=2000 WHERE agent_id=?",('synthetic '*30,aid))
+    _as_a_writer(db.conn())
     full = previews.dashboard_messages()[aid]
     short = previews.dashboard_messages(max_len=19)[aid]
     assert short['head']['preview'] != full['head']['preview']
@@ -641,6 +682,7 @@ def test_old_publisher_retains_start_tag_if_writer_commits_after_validation(monk
             foreign = sqlite3.connect(str(db.DB_PATH))
             try:
                 foreign.execute("UPDATE messages SET text='after validation',revision=2,updated_at=2000 WHERE agent_id=?",(aid,))
+                _as_a_writer(foreign)
                 foreign.commit()
             finally:
                 foreign.close()
@@ -657,3 +699,69 @@ def test_old_publisher_retains_start_tag_if_writer_commits_after_validation(monk
     after = previews.dashboard_messages()[aid]
     assert after['head']['preview'] == 'You: after validation'
     assert after['revisions'][aid] == 2
+
+
+def test_rows_that_were_never_committed_do_not_stay_in_the_floor():
+    """The conversations whose messages outrank their head are read once for
+    a database and kept. Read inside a caller's transaction they may hold
+    rows that are rolled back: such a read is used and not kept."""
+    aid = seed(1)[0]
+    c = db.conn()
+    c.execute("BEGIN IMMEDIATE")
+    try:
+        c.execute("""INSERT INTO messages (message_id,agent_id,backend_session_id,seq,role,text,revision,updated_at)
+                     VALUES ('uncommitted',?,'never',1,'user','uncommitted',9,2000)""", (aid,))
+        assert previews.dashboard_messages()[aid]['revisions'] == {aid: 1, 'never': 9}
+    finally:
+        c.execute("ROLLBACK")
+    assert previews.dashboard_messages()[aid]['revisions'] == {aid: 1}
+    assert previews._FLOOR_CACHE.peek('all')[1] == {}
+
+
+# --- what the keys rest on: the writers, read from their SQL (issue 371) --------
+
+def _statements_on_messages():
+    """Every SQL statement in server/lib that inserts into, updates or deletes
+    from ``messages``: (file, the statement's text up to its closing quote)."""
+    import pathlib
+    import re
+    found = []
+    library = pathlib.Path(previews.__file__).resolve().parent
+    for path in sorted(library.glob("*.py")):
+        source = path.read_text()
+        for match in re.finditer(r"(UPDATE messages\b|INSERT INTO messages\b|INSERT OR REPLACE INTO messages\b"
+                                 r"|DELETE FROM messages\b)", source):
+            end = min((index for index in (source.find('"""', match.end()), source.find('",', match.end()),
+                                           source.find('")', match.end())) if index != -1),
+                      default=match.end() + 600)
+            found.append((path.name, source[match.start():min(end, match.start() + 1500)]))
+    return found
+
+
+def test_no_statement_moves_a_messages_updated_at_without_giving_it_a_revision():
+    """The cache keys are read from the conversation heads, which carry
+    revisions. They used to carry the messages' highest updated_at as well,
+    for a row rewritten in place under its old revision. No writer does that:
+    a statement that sets updated_at sets revision too."""
+    statements = _statements_on_messages()
+    assert len(statements) >= 20, "the scan no longer finds the writers"
+    for name, sql in statements:
+        if not sql.startswith("UPDATE messages"):
+            continue
+        assignments = sql.split("WHERE")[0]
+        if "updated_at" in assignments:
+            assert "revision" in assignments, (name, sql[:200])
+
+
+def test_every_module_that_writes_messages_raises_conversation_heads():
+    """A writer raises its conversation's head in the row's own transaction.
+    Read from the sources: a module with a statement on ``messages`` has one
+    on ``conversation_heads`` too. (message_import_rows writes rows for
+    message_writes, which raises the head at every committed batch.)"""
+    import pathlib
+    library = pathlib.Path(previews.__file__).resolve().parent
+    writers = {name for name, _sql in _statements_on_messages()}
+    assert {"message_writes.py", "message_live.py", "message_import_rows.py", "prompt_admissions.py"} <= writers
+    without = sorted(name for name in writers
+                     if "INSERT INTO conversation_heads" not in (library / name).read_text())
+    assert without == ["message_import_rows.py"], without
