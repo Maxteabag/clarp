@@ -408,6 +408,14 @@ NOT_BUILT = {
         'fields': ('vocab_run_id',),
         'events': (),
     },
+    # Whether a tool's use is explained in plain words, as the snapshot and `GET /live` tell an
+    # app (`tool_explanations`): on, on the Python Host, unless its owner turned it off; off on
+    # the Rust Host, where nothing explains. What the setting's own route answers is compared
+    # (the scenario live-items turns it off on both).
+    "the explaining of a tool's use": {
+        'fields': ('tool_explanations',),
+        'events': (),
+    },
 }
 # What the reference Host's stand-in for an engine that listens says by fiat, whatever was heard
 # (`StubSTT(ends_terminal=True)` in tests/replay/host.py): whether what was said ends as a

@@ -599,8 +599,9 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         "personas": [],
         "available_mcp_servers": [],
         "model_avatars": false,
-        // What the Python Host says while nobody has chosen otherwise.
-        "tool_explanations": { "detail_level": 2, "enabled": true },
+        // Nothing explains a tool's use here, and an app is told so wherever it asks: it
+        // then shows the tool's own command on the row.
+        "tool_explanations": apps::explanations_told(&app),
     });
     if without_archived {
         let archived = directory.members.iter().filter(|member| put_away(member));
