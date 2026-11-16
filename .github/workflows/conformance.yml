@@ -7,15 +7,25 @@ name: Conformance (Rust Host)
 #   gh workflow run conformance.yml -R Maxteabag/clarp --ref <branch>
 # The job is red while the Rust Host differs; the report and the written-down answers are in
 # the `conformance-report` artifact either way.
+# The whole corpus is the gate a candidate lands by. A run of some scenarios only
+# (`-f scenarios=a,b`) is a question, asked before the Rust Host is written: what the Python
+# Host answers there. It gates nothing.
 
 on:
   workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "A comma-separated subset of the corpus. Empty: all of it, which is the gate."
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
+# A newer run of the same question on the same branch takes the older one's place. A question
+# about some scenarios never ends the run of the whole corpus beside it.
 concurrency:
-  group: conformance-${{ github.ref }}
+  group: conformance-${{ github.ref }}-${{ inputs.scenarios }}
   cancel-in-progress: true
 
 jobs:
@@ -39,11 +49,14 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --group dev
       - name: Conformance
+        env:
+          SCENARIOS: ${{ inputs.scenarios }}
         run: |
           set -o pipefail
           mkdir -p conformance-report
           bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py cross \
             --build . --rust server-rs/target/debug/clarp-host --out conformance-report \
+            ${SCENARIOS:+--scenarios "$SCENARIOS"} \
             | tee conformance-report/console.txt
       # The report prints structure, counts and codes; the corpus is synthetic.
       - uses: actions/upload-artifact@v4
