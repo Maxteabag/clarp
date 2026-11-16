@@ -148,9 +148,11 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 11:35 (16 Nov) | the Host updated by the installer, `5d74ac9d` to `9781947b`: the build with the catalogue of voices | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 3 ms, with all three |
 | 13:45 (16 Nov) | the Host updated by the installer, `9781947b` to `24cddc80`: the build that shows a turn as it runs and gives an agent a face | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 14:16 (16 Nov) | the Host updated by the installer, `24cddc80` to `5976918e`: the build that offers the personas a Host has built in | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 3 ms, with all three |
+| 15:58 (16 Nov) | the Host updated by the installer, `5976918e` to `47ff6794`: the build that tells an agent's tool who the agent is, whose turn it is and how to speak | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 16:10 (16 Nov) | the Host updated by the installer, `47ff6794` to `341125e3`: the build with the personas the owner makes, agents made as them, the files where an agent works and the screens of what this Host has not | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Eighty turns in twenty-two
+completed, answered with its word, and its command ran exactly once. Eighty-six turns in twenty-four
 exercises, none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
@@ -311,8 +313,51 @@ personas (`personas` in `GET /agents/snapshot`), every one built in, 74 of them 
 They were held against the Python Host's own table on the same machine, read and not written: it has 84
 personas built in and nine the owner made. The 84 are the same 84 by their ids, and each has the same name,
 the same voices for every engine and the same way of speaking on both Hosts. The nine the owner made are
-not here: making a persona is not built yet. None of the Python Host's built-in personas is one the owner
+not here: making a persona was not built on that build (it is from `341125e3` on: see below). None of the Python Host's built-in personas is one the owner
 made first and its roster named later, the one case in which the two Hosts would list a name differently.
+
+## An agent knows who it is, and speaks when it is listened to
+
+On 16 Nov 2026 at 16:00, on the build of `47ff6794`, with real Claude Code turns on the small model. Until
+this build the Rust Host told an agent's tool nothing: no name, no way of speaking, no word that its user
+listens. A spoken turn was answered in writing and no clip was made unless the message itself asked for the
+`<speak>` tags.
+
+A message sent as spoken, with no hint in it ("Can you hear me?"), was answered `<speak><vox>[curious]</vox>
+Yes, <break time="350ms"/> I can hear you.</speak>`: the tags, and inside them the marks the owner's level
+of sounding human asks for. One clip was made of it (62,737 bytes, MP3), offered by `GET
+/clips/recoverable`, fetched, acknowledged (`play-ok`) and not offered again.
+
+An agent made that minute under the name of a persona this Host has built in, and asked who it is in
+writing, answered with the persona's name and its way of speaking in its own words. It was removed
+afterwards; the Host had its twelve agents as before.
+
+The test agent `check` has a name and no way of speaking, so all it is told as standing instruction is "You
+are Check." Asked for its name it gave the model's ("I'm Claude, the Haiku 5.5 model"), and named its
+session rightly from the line every turn carries ("Check (Clarp session check)"). That is the model with a
+thin identity and thirty turns behind it in which nobody had told it a name, not the Host leaving something
+out: what the tool was given is in the test `an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak`,
+and sign for sign against the Python Host's own words in `told_vectors.rs`.
+
+## A persona the owner makes, and an agent made as it
+
+On 16 Nov 2026 at 16:12, on the build of `341125e3`, by a check that makes a persona and an agent of its
+own and removes both.
+
+A persona was made with a picture (201; a voice picked for the one engine this machine has a key for). Its
+picture has an address of its own, `/persona-avatars/<id>?v=` and the first sixteen signs of the picture's
+digest; fetched with the token it is the picture that was given, without the token 401. The list of
+personas names it, as not built in. The same name again in capitals: 409, "QUILLON already exists."
+
+An agent was made as it, the way the app makes one that names no directory (`cwd: "~"`): it works at the
+home directory, has the persona's name and voice, and a picture of its own under `/avatars/<agent>?v=` with
+the same digest, which is the persona's picture when fetched.
+
+Beside it: `GET /dirs?path=~/` listed twenty directories of home (the most it lists); `GET /agent-files`
+listed the 81 entries where the agent works; a new conversation in place (`replace_sid`) was refused 400
+`relaunch_unsupported`, in words; `GET /past-sessions` offered none. Then the agent and the persona were
+removed: the Host had its 84 personas and twelve agents as before, and the removed persona's picture was
+404.
 
 ## The soak so far
 
@@ -342,6 +387,11 @@ twice, no turn ended twice. A completed turn took 6.0 s at the median and 138 s 
 Rounds 74 to 83 (to 13:37 on 16 Nov) completed, on the build of `9781947b` from 11:35. In all, 83 rounds
 over 20.4 hours on fifteen builds: 82 completed and answered with their word, the one of 19:31 as told
 above; none lost, none doubled. The build of `24cddc80` runs from 13:45.
+
+Rounds 84 to 93 (to 16:09 on 16 Nov) completed, on the builds of `24cddc80`, `5976918e` and, from 15:58,
+`47ff6794`. In all, 93 rounds over 22.9 hours on eighteen builds: 92 completed and answered with their
+word, the one of 19:31 as told above; none lost, none doubled. Seven audits of the whole conversation,
+the last over 84 messages: no message twice, no turn ended twice. The build of `341125e3` runs from 16:10.
 
 ## What a round does not prove
 

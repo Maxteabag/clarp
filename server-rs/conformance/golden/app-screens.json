@@ -1,0 +1,664 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "history": [],
+    "ok": true,
+    "schedule": {
+     "dormant": false,
+     "effective_interval_sec": 1800,
+     "enabled": false,
+     "last_started_at": null,
+     "next_heartbeat_at": null,
+     "noop_streak": 0
+    },
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-heartbeat/status",
+   "status": 200,
+   "step": "an agent's heartbeat"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-heartbeat/status",
+   "status": 404,
+   "step": "the heartbeat of an agent that is not there"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-heartbeat/status",
+   "status": 404,
+   "step": "the heartbeat of nobody"
+  },
+  {
+   "body": {
+    "heartbeat_prompt": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
+    "ok": true,
+    "settings": {
+     "heartbeat_backoff_cap_sec": 3600,
+     "heartbeat_backoff_strategy": "exponential",
+     "heartbeat_dormant_after_noops": 5,
+     "heartbeat_interval_sec": 1800
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/heartbeat/settings",
+   "status": 200,
+   "step": "how the heartbeat is set"
+  },
+  {
+   "body": {
+    "heartbeat_enabled": false,
+    "ok": true,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-heartbeat",
+   "status": 200,
+   "step": "a heartbeat that is off is turned off"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-heartbeat",
+   "status": 400,
+   "step": "a heartbeat for nobody"
+  },
+  {
+   "body": {
+    "error": "heartbeat_enabled required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-heartbeat",
+   "status": 400,
+   "step": "a heartbeat that is neither"
+  },
+  {
+   "body": {
+    "error": "heartbeat_enabled must be boolean"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-heartbeat",
+   "status": 400,
+   "step": "a heartbeat that is a word"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-heartbeat",
+   "status": 404,
+   "step": "the heartbeat of an agent that is not there, turned off"
+  },
+  {
+   "body": {
+    "schedules": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "an agent's schedules"
+  },
+  {
+   "body": {
+    "goal": null,
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-goal",
+   "status": 200,
+   "step": "the goal an agent works toward by itself"
+  },
+  {
+   "body": {
+    "error": "no such agent"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-goal",
+   "status": 404,
+   "step": "the goal of an agent that is not there"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-goal",
+   "status": 400,
+   "step": "the goal of nobody"
+  },
+  {
+   "body": {
+    "events": [],
+    "has_more": false,
+    "next_after": 0,
+    "plan_id": "nothing"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/goal-ledger",
+   "status": 200,
+   "step": "the ledger of a goal nobody has"
+  },
+  {
+   "body": {
+    "error": "plan_id required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/goal-ledger",
+   "status": 400,
+   "step": "the ledger of no goal"
+  },
+  {
+   "body": {
+    "error": "after and limit are integers"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/goal-ledger",
+   "status": 400,
+   "step": "a ledger asked for by a word"
+  },
+  {
+   "body": {
+    "available": false,
+    "contract": "portrait-generation.v1",
+    "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+    "count": 2,
+    "job": null,
+    "model": "gpt-image-2",
+    "provider": "openai",
+    "reason": "Configure an OpenAI API key on this Computer"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-portrait-generation",
+   "status": 200,
+   "step": "whether a picture could be made"
+  },
+  {
+   "body": {
+    "model_avatars": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/avatar-settings",
+   "status": 200,
+   "step": "how pictures are set"
+  },
+  {
+   "body": {
+    "defaults": {
+     "short_reply_bypass_enabled": true,
+     "speak_if_short_chars": 120
+    },
+    "limits": {
+     "speak_if_short_chars": [
+      0,
+      2000
+     ]
+    },
+    "settings": {
+     "disabled": false,
+     "short_reply_bypass_enabled": true,
+     "speak_if_short_chars": 120
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/herald/settings",
+   "status": 200,
+   "step": "how the herald is set"
+  },
+  {
+   "body": {
+    "defaults": {
+     "enabled": false,
+     "timeout_ms": 900
+    },
+    "limits": {
+     "timeout_ms": [
+      100,
+      30000
+     ]
+    },
+    "settings": {
+     "breaker_open_seconds": 0.0,
+     "credential": "TYPESAFE_API_KEY",
+     "credential_present": false,
+     "enabled": false,
+     "sites": {
+      "errors": false,
+      "explanations": false,
+      "junk": false,
+      "labels": false,
+      "naming": false,
+      "router": false,
+      "watch": false
+     },
+     "timeout_ms": 900
+    },
+    "sites": [
+     "errors",
+     "junk",
+     "router",
+     "naming",
+     "watch",
+     "explanations",
+     "labels"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/judgments/settings",
+   "status": 200,
+   "step": "how judgments are set"
+  },
+  {
+   "body": {
+    "ok": true,
+    "settings": {
+     "categories": [],
+     "enabled": false,
+     "retention_hours": 24,
+     "rollup_retention_days": 30
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/diagnostics/settings",
+   "status": 200,
+   "step": "how diagnostics are set"
+  },
+  {
+   "body": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/janitor-policy",
+   "status": 200,
+   "step": "the janitors' policy"
+  },
+  {
+   "body": {},
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/location",
+   "status": 200,
+   "step": "where the owner is"
+  },
+  {
+   "body": {
+    "available": false,
+    "voices": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/cartesia-voices",
+   "status": 200,
+   "step": "Cartesia's old picker"
+  },
+  {
+   "body": {
+    "conversations": [],
+    "next_cursor": null
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/podcast-history",
+   "status": 200,
+   "step": "the podcasts"
+  },
+  {
+   "body": {
+    "next_offset": null,
+    "sources": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/podcast-history/sources",
+   "status": 200,
+   "step": "what podcasts were made of"
+  },
+  {
+   "body": {
+    "packs": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/packs",
+   "status": 200,
+   "step": "the packs of the vocabulary"
+  },
+  {
+   "body": {
+    "pack_id": "nothing",
+    "terms": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/terms",
+   "status": 200,
+   "step": "the terms of a pack that is not there"
+  },
+  {
+   "body": {
+    "error": "pack_id is required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/terms",
+   "status": 400,
+   "step": "the terms of no pack"
+  },
+  {
+   "body": {
+    "profiles": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/profiles",
+   "status": 200,
+   "step": "the profiles of the vocabulary"
+  },
+  {
+   "body": {
+    "error": "no such profile"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/profile",
+   "status": 404,
+   "step": "a profile that is not there"
+  },
+  {
+   "body": {
+    "assignments": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/assignments",
+   "status": 200,
+   "step": "who has which profile"
+  },
+  {
+   "body": {
+    "runs": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/vocab/runs",
+   "status": 200,
+   "step": "the runs of the vocabulary"
+  },
+  {
+   "body": {
+    "call": null,
+    "server_now": "<time>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/calls",
+   "status": 200,
+   "step": "the call the owner is in"
+  },
+  {
+   "body": {
+    "ring": null,
+    "settings": {
+     "enabled": true,
+     "show_reason": false
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/calls/ring",
+   "status": 200,
+   "step": "whether an agent rings"
+  },
+  {
+   "body": {
+    "available": false,
+    "model": "gpt-realtime-2.1",
+    "transport": "clarp-websocket-proxy",
+    "v2": {
+     "available": false,
+     "context_memory": true,
+     "context_reset": true,
+     "direct_contact": true,
+     "direct_contact_available": false,
+     "model": "gpt-live-1",
+     "podcast": true,
+     "podcast_history": true,
+     "voice": "marin",
+     "voice_provider": "openai",
+     "voice_providers": [
+      "openai"
+     ]
+    },
+    "v2_tinkered": {
+     "available": false,
+     "context_memory": true,
+     "context_reset": true,
+     "direct_contact": true,
+     "direct_contact_available": false,
+     "mode": "api",
+     "model": "gpt-live-1",
+     "podcast": true,
+     "podcast_history": true,
+     "router": "api",
+     "voice": "marin",
+     "webrtc": false
+    },
+    "voice": "cedar",
+    "webrtc": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/status",
+   "status": 200,
+   "step": "what the Oracle can do"
+  },
+  {
+   "body": {
+    "persona": "",
+    "session": "",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "whom the Oracle is put through to"
+  },
+  {
+   "body": {
+    "delegations": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/delegations",
+   "status": 200,
+   "step": "what the Oracle handed on"
+  },
+  {
+   "body": {
+    "delegations": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/calls/status",
+   "status": 200,
+   "step": "what came of it"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "app-screens",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  }
+ ]
+}

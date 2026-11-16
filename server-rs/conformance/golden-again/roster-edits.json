@@ -1853,7 +1853,16 @@
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
-      "live_activity": null,
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
       "mcp_servers": [],
       "model": "replay-fake",
       "model_avatar_url": "",
@@ -3551,7 +3560,16 @@
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
-      "live_activity": null,
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
       "mcp_servers": [],
       "model": "replay-fake",
       "model_avatar_url": "",
@@ -6673,7 +6691,16 @@
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
-      "live_activity": null,
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
       "mcp_servers": [],
       "model": "replay-fake",
       "model_avatar_url": "",
@@ -8274,7 +8301,16 @@
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
-      "live_activity": null,
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
       "mcp_servers": [],
       "model": "replay-fake",
       "model_avatar_url": "",
@@ -8371,7 +8407,16 @@
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
-      "live_activity": null,
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:2>",
+       "turn_started_ms": null
+      },
       "mcp_servers": [],
       "model": "replay-fake",
       "model_avatar_url": "",
@@ -16987,6 +17032,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "ralfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -17094,21 +17154,6 @@
    },
    "event": null,
    "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "ralfa",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
