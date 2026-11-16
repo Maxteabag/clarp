@@ -14,6 +14,34 @@ def _check_again(lane):
     settings_store.set_text(key, json.dumps(state))
 
 
+@pytest.mark.parametrize("model,label", [
+    ("claude-fable-5-2[1m]", "Fable"),
+    ("claude-opus-5-5", "Opus"),
+])
+def test_repaired_profile_verification_uses_real_configured_model_scope(monkeypatch, model, label):
+    """A real configured model must match the producer's quota-family label."""
+    from types import SimpleNamespace
+    from lib import backends, config
+    backend = backends.by_id("claude")
+    cfg = SimpleNamespace(**{backend.config_model_field: model,
+                             backend.config_effort_field: ""})
+    monkeypatch.setattr(config, "load", lambda: cfg)
+    now = db.now_ms()
+    profile = hotseat.RepairProfile("saved", "fixture@example.invalid",
+                                   "11111111-1111-4111-8111-111111111111")
+    report = {"generated_at": now / 1000, "accounts": [{
+        "alias": profile.alias, "email": profile.email, "org_uuid": profile.org_uuid,
+        "is_active": False, "error": None, "error_code": None,
+        "usage": {"status": "allowed", "available": True, "limited": False,
+                  "used_5h": 0.1, "used_7d": 0.2, "blocked_models": [],
+                  "scoped": [{"model": label, "used": 0.3, "exhausted": False}]},
+    }]}
+    assert hotseat.repair_profile_usable(
+        report, profile, requested_model=hotseat.repair_requested_model(),
+        not_before_ms=now, now_ms=now,
+    )
+
+
 
 def claude_payload(**accounts):
     """alias -> (is_active, used_5h, used_7d) or (is_active, 'rejected') or (is_active, None)."""

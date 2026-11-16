@@ -288,10 +288,10 @@ def parse_codex(payload) -> list[dict]:
 
 
 def _repair_model_pin(value: str | None) -> str:
-    # Keep the maintained normalization lazy, as before, to avoid importing
-    # capability discovery while the Hotseat module is initialized.
-    from .provider_capabilities import claude_model_pin
-    return claude_model_pin(value)
+    # The producer reports quota-family labels, not CLI model identifiers.
+    # Share the switcher's declared family mapping before exact proof matching.
+    spec = _claude_model_spec(value)
+    return spec[1] if spec is not None else ""
 
 
 @dataclass(frozen=True)
