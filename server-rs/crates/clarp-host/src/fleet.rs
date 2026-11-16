@@ -1335,14 +1335,11 @@ impl Fleet {
         if persona.is_empty() {
             return Err(Told::new(400, "name required", "name required").into());
         }
-        let cwd = request
-            .cwd
-            .as_deref()
-            .and_then(non_empty)
-            .unwrap_or_else(|| self.works.config.default_cwd.display().to_string());
-        if !Path::new(&cwd).is_dir() {
-            return Err(format!("{cwd} is not a directory").into());
-        }
+        // Where it works: what was asked for, or this Host's own directory for agents.
+        let asked = request.cwd.as_deref().unwrap_or("");
+        let default_cwd = &self.works.config.default_cwd;
+        let cwd = crate::config::working_dir(asked, &crate::config::home(), default_cwd);
+        let cwd = cwd.display().to_string();
         // One agent has a name at a time: who is written to by name must be one agent.
         if let Some(owner) = self.owner_of_name(&persona, "") {
             return Err(NotMade::Occupied {

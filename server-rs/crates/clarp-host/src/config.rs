@@ -5,7 +5,7 @@
 //! started. Changing one is a restart with a different word, not a change of code.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -104,8 +104,28 @@ The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's c
 the push relay, when it has one, from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
 over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY.";
 
-fn home() -> PathBuf {
+/// The home of whoever runs this Host.
+pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
+}
+
+/// The directory an agent works in, by what was asked for it: `~` is the home of whoever
+/// runs this Host, nothing is the Host's own directory for agents, and so is a directory
+/// that is not there. Nothing is refused, as on the Python Host: an app sends `~` when its
+/// user named no directory, and a phone's keyboard misspells a path.
+pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
+    let asked = asked.trim();
+    let named = match asked.strip_prefix('~') {
+        _ if asked.is_empty() => otherwise.to_path_buf(),
+        Some("") => home.to_path_buf(),
+        Some(under) if under.starts_with('/') => home.join(under.trim_start_matches('/')),
+        _ => PathBuf::from(asked),
+    };
+    if named.is_dir() {
+        named
+    } else {
+        otherwise.to_path_buf()
+    }
 }
 
 impl Config {
@@ -312,6 +332,31 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Config, String> {
         Config::from_args(args.iter().map(|arg| (*arg).to_string()))
+    }
+
+    #[test]
+    fn an_agent_works_where_it_was_asked_to_or_in_the_hosts_own_directory() {
+        let root = std::env::temp_dir().join(format!("clarp-working-dir-{}", std::process::id()));
+        let (home, own) = (root.join("home"), root.join("agents"));
+        std::fs::create_dir_all(home.join("projects/site")).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        let at = |asked: &str| working_dir(asked, &home, &own);
+        assert_eq!(at("~"), home);
+        assert_eq!(at(" ~/projects/site "), home.join("projects/site"));
+        assert_eq!(at("~/projects//site"), home.join("projects//site"));
+        assert_eq!(
+            at(home.join("projects").to_str().unwrap()),
+            home.join("projects")
+        );
+        // Nothing asked for, a directory that is not there, another user's home, a file.
+        assert_eq!(at(""), own);
+        assert_eq!(at("   "), own);
+        assert_eq!(at("~/nothing-of-the-kind"), own);
+        assert_eq!(at("/nothing/of/the/kind"), own);
+        assert_eq!(at("~somebody"), own);
+        std::fs::write(home.join("a-file"), b"x").unwrap();
+        assert_eq!(at("~/a-file"), own);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
