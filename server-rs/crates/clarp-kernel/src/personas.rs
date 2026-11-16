@@ -14,12 +14,13 @@
 //! millisecond each was first written and, within one, by their ids, which is an accident
 //! of its start. Here they are in the order of the roster, the owner's own names after it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::python;
+use crate::{portraits, python, said};
 
 fn lists() -> &'static Value {
     static LISTS: LazyLock<Value> = LazyLock::new(|| {
@@ -170,4 +171,140 @@ pub fn builtins(owner: &Owner<'_>) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+// ---- the personas the owner makes himself -------------------------------------------------
+
+/// The longest name a persona can have.
+pub const NAME_MOST: usize = 60;
+/// The largest picture a persona can be given, in bytes.
+pub const AVATAR_MOST: usize = 512_000;
+/// The most of a symbol and of a personality that is kept.
+pub const SYMBOL_MOST: usize = 64;
+pub const PERSONALITY_MOST: usize = 4_000;
+/// What a new persona without a name, or with too long a one, is refused with.
+pub const NAME_NEEDED: &str = "A personality name is required (maximum 60 characters).";
+/// The same when a persona is changed.
+pub const NAME_NEEDED_TO_CHANGE: &str = "A Contact name is required (maximum 60 characters).";
+pub const AVATAR_TOO_LARGE: &str = "Avatar is too large.";
+pub const NOT_CHANGEABLE: &str = "Only saved custom Contacts can be edited.";
+pub const NO_SUCH: &str = "No such Contact.";
+/// What removing a persona that is built in, or that is not there, is refused with.
+pub const NOT_REMOVABLE: &str = "personality not removable";
+/// Where a persona's own picture is fetched from.
+pub const AVATARS: &str = "/persona-avatars";
+
+/// A persona the owner made, as it is kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Made {
+    pub persona_id: String,
+    pub name: String,
+    /// Its voices: a text of JSON by engine, or the id of a voice of ElevenLabs alone.
+    pub voice_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub avatar_symbol: String,
+    /// What is in its own picture, when it has one: what the picture's address carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub personality: String,
+    pub created_at_ms: i64,
+}
+
+/// What a name that is taken is refused with.
+pub fn taken(name: &str) -> String {
+    format!("{name} already exists.")
+}
+
+/// A persona's name as it is kept: without the space around it. `None`: nothing is left of
+/// it, or too much.
+pub fn named(said: &str) -> Option<String> {
+    let name = clarp_speech::listen::strip(said);
+    (!name.is_empty() && name.chars().count() <= NAME_MOST).then(|| name.to_string())
+}
+
+/// Whether two names are one persona: without the case of their letters.
+pub fn same(a: &str, b: &str) -> bool {
+    folded(a) == folded(b)
+}
+
+/// A persona the owner made, as an app is told it.
+pub fn told(made: &Made) -> Value {
+    let avatar_url = match &made.avatar {
+        Some(version) => portraits::address(AVATARS, &made.persona_id, version),
+        None => String::new(),
+    };
+    json!({
+        "id": made.persona_id,
+        "name": made.name,
+        "voice_id": made.voice_id,
+        "avatar_symbol": made.avatar_symbol,
+        "avatar_url": avatar_url,
+        // Nothing makes pictures here: none is ever on its way.
+        "avatar_generation_status": null,
+        "personality": made.personality,
+        "tier": tier(&made.name),
+        "builtin": false,
+    })
+}
+
+/// The voice a persona is given when its maker names none: the first voice of Cartesia's
+/// that no agent and no persona has; when every one is taken, the first that no agent has;
+/// and when agents have them all, one by turns. `candidates` are the voices this Host knows
+/// of, in order. With none to choose from, no voice (`{}`).
+pub fn picked_voice(
+    candidates: &[String],
+    of_agents: &HashSet<String>,
+    of_personas: &HashSet<String>,
+) -> String {
+    let free = |taken: &dyn Fn(&String) -> bool| candidates.iter().find(|voice| !taken(voice));
+    let voice = free(&|voice| of_agents.contains(voice) || of_personas.contains(voice))
+        .or_else(|| free(&|voice| of_agents.contains(voice)))
+        .or_else(|| {
+            let taken: HashSet<&String> = of_agents.union(of_personas).collect();
+            candidates.get(taken.len() % candidates.len().max(1))
+        });
+    match voice {
+        Some(voice) => python::compact_ascii(&json!({ "cartesia": voice })),
+        None => "{}".to_string(),
+    }
+}
+
+/// The voices of Cartesia's this Host knows of without asking anybody, in the order a voice
+/// is picked from: Cartesia's own list as it was last fetched, then the Host's voices for
+/// its names with the owner's in their places and the owner's own after them.
+pub fn candidate_voices(fetched: &[String], owner: &Owner<'_>) -> Vec<String> {
+    let mut named: Vec<(&str, &str)> = lists()["cartesia"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, voice)| Some((name.as_str(), voice.as_str()?)))
+        .collect();
+    let own: Vec<&str> = named.iter().map(|(_, voice)| *voice).collect();
+    for (name, voice) in owner.cartesia {
+        match named.iter_mut().find(|(known, _)| *known == name.as_str()) {
+            Some(held) => held.1 = voice,
+            None => named.push((name, voice)),
+        }
+    }
+    let of_names = named.iter().map(|(_, voice)| *voice);
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
+    for voice in fetched
+        .iter()
+        .map(String::as_str)
+        .chain(of_names)
+        .chain(own)
+    {
+        let voice = clarp_speech::listen::strip(voice);
+        if !voice.is_empty() && seen.insert(voice) {
+            ordered.push(voice.to_string());
+        }
+    }
+    ordered
+}
+
+/// The voice of Cartesia's a stored voice names, when it names one.
+pub fn cartesia_of(voice_id: &str) -> Option<String> {
+    said::resolve_voice(Some(voice_id), "cartesia")
 }
