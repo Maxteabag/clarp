@@ -414,12 +414,12 @@ def by_fiat(path, body):
         return body
     return {key: value for key, value in body.items() if key not in said}
 # The lists an app's screens are made of, for what the Rust Host keeps nothing of yet: janitors,
-# what speech there is, the models an agent can be given. It answers each as the Python Host
+# the engines that listen as a Host with other engines lists them, the models an agent can be
+# given. (The catalogue of voices is not among them any more: it is compared whole.) It answers each as the Python Host
 # answers a list, and empty, so that an app shows nothing there instead of an error. What is
 # compared of such an answer is what an app's reader needs of it: the status, and every field
 # with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
-NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/voice-catalog',
-                      '/agent-model-options'})
+NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
