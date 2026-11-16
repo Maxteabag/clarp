@@ -272,7 +272,7 @@ async fn archived(
                 .members
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
-            Some(edge::agent_row(&directory, &families, member))
+            Some(edge::agent_row(&directory, &families, member, &app.faces))
         })
         .collect();
     Ok(Json(json!({

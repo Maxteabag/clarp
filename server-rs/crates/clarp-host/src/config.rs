@@ -73,6 +73,9 @@ pub struct Config {
     /// A file of the Python Host's kind in which the keys of engines reached over the
     /// network are looked up when a clip is to be heard. Nothing of it is copied.
     pub speech_keys: Option<PathBuf>,
+    /// The directory that holds the pictures this Host ships for its agents (`avatars/` in
+    /// it). `None`: it ships none, and its agents are shown without a face.
+    pub static_dir: Option<PathBuf>,
     /// The engine that hears a clip nobody named one for: `local`, or a cloud engine's name.
     pub transcription_engine: String,
     /// Another address for ElevenLabs Scribe: a stand-in on this machine. Empty: the real one.
@@ -96,6 +99,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
+[--static DIR]
 The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
 the push relay, when it has one, from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
 over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY.";
@@ -139,6 +143,7 @@ impl Config {
         let mut whisper_compute = "int8".to_string();
         let mut speech_language = "en".to_string();
         let mut speech_keys = None;
+        let mut static_dir = None;
         let mut transcription_engine = "local".to_string();
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
@@ -201,6 +206,7 @@ impl Config {
                 "--whisper-compute" => whisper_compute = value("a kind")?,
                 "--speech-language" => speech_language = value("a language")?,
                 "--speech-keys" => speech_keys = Some(PathBuf::from(value("a file")?)),
+                "--static" => static_dir = Some(PathBuf::from(value("a directory")?)),
                 "--transcription-engine" => transcription_engine = value("a name")?,
                 other => return Err(format!("unknown argument {other}")),
             }
@@ -287,6 +293,7 @@ impl Config {
             whisper_compute,
             speech_language,
             speech_keys,
+            static_dir,
             transcription_engine,
             scribe_endpoint,
             cartesia_endpoint,

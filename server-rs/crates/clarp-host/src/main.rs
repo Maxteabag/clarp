@@ -136,6 +136,7 @@ async fn serve(config: Config) -> Result<(), String> {
         fleet,
         clock,
         mouth,
+        faces: Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone())),
         server_id,
         revisions,
         pusher,

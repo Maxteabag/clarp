@@ -133,6 +133,8 @@ pub struct App {
     pub ears: Arc<crate::heard::Ears>,
     /// The one that speaks, and where the clips of what agents say aloud are.
     pub mouth: Arc<crate::voice::Mouth>,
+    /// The pictures agents are shown with.
+    pub faces: Arc<crate::faces::Faces>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -236,6 +238,7 @@ pub fn router(app: App) -> Router {
         .merge(roster::routes())
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
+        .merge(crate::faces::routes())
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }
@@ -288,6 +291,9 @@ pub enum Principal {
 
 /// The only route a caller without a token may use: a device that has a code has no token yet.
 const EXCHANGE: &str = "/pairing/exchange";
+/// And the pictures this Host ships, which anybody may fetch: an address of one is put
+/// where no token goes (a notification, a page), as on the Python Host.
+const PICTURES: &str = "/static/";
 
 /// What a device with limited scope may send. Whatever it may read, it may read.
 const LIMITED_POSTS: &[&str] = &[
@@ -357,7 +363,8 @@ fn who(app: &App, request: &Request) -> Option<Principal> {
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
-    let mut response = if path == EXCHANGE {
+    let open = path == EXCHANGE || (path.starts_with(PICTURES) && request.method() == Method::GET);
+    let mut response = if open {
         next.run(request).await
     } else {
         match who(&app, &request) {
@@ -505,7 +512,12 @@ impl Families {
 }
 
 /// An agent's row in the snapshot: who it is and what it is doing.
-pub(crate) fn agent_row(directory: &Directory, families: &Families, member: &Member) -> Value {
+pub(crate) fn agent_row(
+    directory: &Directory,
+    families: &Families,
+    member: &Member,
+    faces: &crate::faces::Faces,
+) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
     let mut row = wire::summary(
@@ -516,6 +528,11 @@ pub(crate) fn agent_row(directory: &Directory, families: &Families, member: &Mem
         view.ended.as_ref(),
         focused,
     );
+    // The face it is shown with: the picture this Host ships for its name, else the one
+    // for its tool; and the one drawn for its name on its model, where there is one.
+    let record = &member.record;
+    row["avatar_url"] = json!(faces.of(&record.persona, view.backend));
+    row["model_avatar_url"] = json!(faces.on_model(&record.persona, view.backend, &record.model));
     // Two things keep an agent busy after its turn: helpers it made that are working, and
     // background processes it left running. A job that only mirrors one of its helpers is
     // not a process of its own.
@@ -567,7 +584,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
-        .map(|member| agent_row(&directory, &families, member))
+        .map(|member| agent_row(&directory, &families, member, &app.faces))
         .collect();
     // Every agent's name, whichever agents were asked for.
     let roster: Vec<&str> = directory
@@ -666,7 +683,7 @@ pub(crate) async fn make_agent(
     let directory = app.fleet.directory();
     let row = directory
         .named(&record.agent_id)
-        .map(|member| agent_row(&directory, &Families::of(&directory), member))
+        .map(|member| agent_row(&directory, &Families::of(&directory), member, &app.faces))
         .unwrap_or_default();
     // Three of them the Python Host answers as it stores them: a number, 0 or 1.
     let stored = ["muted", "heartbeat_enabled", "dreaming_enabled"];

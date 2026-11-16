@@ -153,7 +153,9 @@ class RustHost(replay.Host):
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
              '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
              '--whisper-python', sys.executable, '--whisper-worker', str(HERE.parent / 'tools' / 'whisper-worker.py'),
-             '--speech-keys', str(self.root / OWNERS_FILE)],
+             '--speech-keys', str(self.root / OWNERS_FILE),
+             # The pictures agents are shown with: the repository's own, as the reference Host has them.
+             '--static', str(REPO / 'static')],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
             env=env, cwd=str(self.root), start_new_session=True)
         first = self.process.stderr.readline().decode(errors='replace')
@@ -389,7 +391,7 @@ NOT_BUILT = {
     # With them: what a persona is like, as the old settings screen is told it (`bio` in
     # `GET /voices`).
     'portraits and the persona catalogue': {
-        'fields': ('avatar_url', 'model_avatar_url', 'personas', 'bio'),
+        'fields': ('personas', 'bio'),
         'events': (),
     },
     # What `GET /status` says of the Python Host's own way of telling whether a turn's process
