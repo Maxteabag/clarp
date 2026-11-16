@@ -787,3 +787,13 @@ Reviewers use a different model family from the authors and never edit sources.
   next, blockers. One message per decision. No acknowledgements.
 - A slice is ready for review when its CI run is green on the exact commit and its tests show the behaviour, the
   failure cases included.
+- A candidate lands when three things are green on its commit: `Server (Rust)`, the conformance workflow, and
+  the repository's own gates with a release built from a clean checkout of that commit. When main moves under
+  a green candidate (it does several times a day: the Python Host's line lands there too), the candidate is put
+  on top of it and `Server (Rust)` and the repository's gates are run on the new commit, which takes minutes.
+  The conformance workflow, which takes twenty, is run again when main moved by something a scenario can reach:
+  anything under `server/` that a route of the corpus runs through, and anything under `tests/replay/`. It is
+  not run again for a move no scenario can reach (tests, documents, and the modules the corpus has no door to:
+  the janitors' own, the hotseat, dreaming, the scheduler), because the reference it compares with would answer
+  the same. Which it was is written down with the landing. A wrong reading costs nothing that runs: the next
+  candidate's run compares with the newest reference, and says so.
