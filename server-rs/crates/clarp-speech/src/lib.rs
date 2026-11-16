@@ -10,8 +10,9 @@
 //!
 //! What an agent says aloud reaches a person as sound. [`speak`] is the port to the engines
 //! that turn a line of text into audio, and the rule by which the next one is tried;
-//! [`gemini`] is one of them.
+//! [`gemini`] and [`cartesia`] are two of them.
 
+pub mod cartesia;
 pub mod gemini;
 pub mod listen;
 pub mod markup;
