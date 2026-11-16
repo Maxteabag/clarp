@@ -146,10 +146,11 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 08:41 (16 Nov) | the Host updated by the installer, `3175ffcc` to `652c6d6a`: the build that hears (speech in) | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 10:53 (16 Nov) | the Host updated by the installer, `652c6d6a` to `5d74ac9d`: the build that speaks (speech out) and hears each agent by its own engines | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 2 ms, with all three |
 | 11:35 (16 Nov) | the Host updated by the installer, `5d74ac9d` to `9781947b`: the build with the catalogue of voices | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 3 ms, with all three |
+| 13:45 (16 Nov) | the Host updated by the installer, `9781947b` to `24cddc80`: the build that shows a turn as it runs and gives an agent a face | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Seventy-four turns in twenty exercises,
-none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. Seventy-seven turns in twenty-one
+exercises, none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -260,6 +261,46 @@ voice. It was given `{"gemini": "Kore"}` again and the catalogue showed `Kore` a
 which exists for such checks, was touched. What it says of the route is in the corpus now by the scenario
 `voices`: a voice is checked against a list for Google alone.
 
+## A turn is watched as it runs
+
+On 16 Nov 2026 at 13:46, on the build of `24cddc80`. The Host lists `live_items` among what it can do. The
+agent `check` was asked, in a real Claude Code turn, to run one command that takes six seconds and to answer
+with what it printed, while a connection that follows the agent listened (`/events?live=check`) and the
+whole was asked for three times (`GET /live?session=check`).
+
+Before the turn: nothing shown, the count at 0, the run of the Host named by twelve hex signs, explanations
+of tools off (they are not built here). While the command ran: one item, the tool, running; the agent's
+line said it was in a tool; the turn running, with one tool counted. After it: the turn completed, 12.1 s of
+work, one tool; the agent idle; two items, both settled: the tool (labelled with its command, the last line
+of its output, exit 0, 6.3 s) and the answer, final, naming its row of the conversation.
+
+Nine events were sent for it, numbered 1 to 9 without a gap, none of them with a place in the numbered
+stream of the Host (they are never kept and never replayed). In them, seventeen steps: three that open or
+replace an item, two that add to one, two that close one, the agent's line seven times and the turn three
+times.
+
+The check that matters: the Python Host's own reader of these events (`server/lib/live_projection.py`, the
+code an app's reader is tested against) was given the nine events as they arrived. What it held at the end
+is what the Host answers when asked for the whole, in the items, in the agent's line and in the turn. Every
+answer shown names a row that `GET /log` has, and the last row of the conversation carries the end of the
+turn.
+
+## An agent has a face
+
+The same build, the same minute. Each of the twelve agents on this Host is told with a picture
+(`avatar_url`): the one for a Claude agent nobody gave a persona, under an address that ends in the first
+sixteen signs of the picture's own digest. Fetched without a token, as an app's picture view fetches it: 200,
+`image/png`, 354,766 bytes, to be kept for a year and never asked for again (`immutable`), and the digest of
+what came is the one in the address. The same picture without its version: `no-cache`. For one who has it
+(`If-None-Match`): 304 and no bytes. A part of another picture (`Range`): 206, the first eight bytes of a
+PNG. A picture that is none: 404. Anything else under `/static/`: 404. A path that climbs out (`..`): 403.
+The list of agents without a token: 401, as before; the pictures are the one thing an app is given without
+one, as on the Python Host.
+
+`GET /controller-actions` answers the empty registry (no actions, no mappings, the two kinds, the two
+buttons, the nine gestures) and its audit an empty list: what the Python Host answers on this machine, where
+nobody has made an action.
+
 ## The soak so far
 
 Rounds 1 to 13 (15 Nov, 17:15 to 20:01): twelve completed and answered with their word; none lost, none
@@ -284,6 +325,10 @@ ran out six times that morning for the lead's own agent; no round failed for it.
 17.9 hours on fourteen builds: 72 completed and answered with their word, the one of 19:31 as told above;
 none lost, none doubled. Six audits of the whole conversation, the last over 72 messages: no message
 twice, no turn ended twice. A completed turn took 6.0 s at the median and 138 s at the longest.
+
+Rounds 74 to 83 (to 13:37 on 16 Nov) completed, on the build of `9781947b` from 11:35. In all, 83 rounds
+over 20.4 hours on fifteen builds: 82 completed and answered with their word, the one of 19:31 as told
+above; none lost, none doubled. The build of `24cddc80` runs from 13:45.
 
 ## What a round does not prove
 
