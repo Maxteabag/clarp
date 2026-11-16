@@ -77,6 +77,9 @@ pub struct Config {
     pub transcription_engine: String,
     /// Another address for ElevenLabs Scribe: a stand-in on this machine. Empty: the real one.
     pub scribe_endpoint: String,
+    /// The same for the engines that speak.
+    pub cartesia_endpoint: String,
+    pub gemini_endpoint: String,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
@@ -216,15 +219,18 @@ impl Config {
             beside.unwrap_or_else(|| PathBuf::from("whisper-worker.py"))
         });
         // A stand-in for an engine over the network is on this machine, or it is none.
-        let scribe_endpoint = std::env::var("CLARP_SCRIBE_ENDPOINT").unwrap_or_default();
-        let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"];
-        if !scribe_endpoint.is_empty()
-            && !local.iter().any(|begin| scribe_endpoint.starts_with(begin))
-        {
-            return Err(format!(
-                "CLARP_SCRIBE_ENDPOINT {scribe_endpoint}: an address on this machine"
-            ));
-        }
+        let stand_in = |variable: &str| -> Result<String, String> {
+            let address = std::env::var(variable).unwrap_or_default();
+            let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"];
+            if address.is_empty() || local.iter().any(|begin| address.starts_with(begin)) {
+                Ok(address)
+            } else {
+                Err(format!("{variable} {address}: an address on this machine"))
+            }
+        };
+        let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
+        let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
+        let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
         Ok(Self {
             run_dir,
             listen: listen
@@ -267,6 +273,8 @@ impl Config {
             speech_keys,
             transcription_engine,
             scribe_endpoint,
+            cartesia_endpoint,
+            gemini_endpoint,
         })
     }
 }

@@ -25,6 +25,7 @@ use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
 use clarp_kernel::media::Asset;
+use clarp_kernel::spoken::{Line as SpokenLine, Said, SpeechBook};
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
@@ -42,6 +43,7 @@ use crate::library::{self, Books, Done, Want};
 use crate::pusher::{Pusher, TurnDone};
 use crate::revisions::Revisions;
 use crate::tools::ToolAnswer;
+use crate::voice::Speaks;
 use crate::{process, wire};
 
 /// The least time between two "the conversation changed" events for one agent. A reply that
@@ -78,6 +80,15 @@ pub struct Stopped {
     pub queue: QueueState,
     /// How many goals that were being worked are paused now.
     pub goals_paused: usize,
+}
+
+/// A line that was said to its end: how many bytes its clip has, and which engine said it
+/// in which voice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spoke {
+    pub bytes: u64,
+    pub provider: String,
+    pub voice: String,
 }
 
 /// What an agent's thread is asked.
@@ -187,6 +198,36 @@ pub enum Ask {
         id: String,
         answer: Answer<Option<Versioned>>,
     },
+    /// The one that speaks takes the agent's next line. `None`: nothing of this agent's is
+    /// to be said now.
+    ClaimLine {
+        answer: Answer<Option<SpokenLine>>,
+    },
+    /// The line that was taken has a clip: its number and its file, the engine and the
+    /// voice that are asked first, and the event the clip was announced with. Answers
+    /// whether it was still that one's line.
+    LineBegun {
+        id: String,
+        clip: (u64, String),
+        asked: (String, String),
+        event_id: Option<u64>,
+        answer: Answer<bool>,
+    },
+    /// The one that took a line is done with it: the clip it made of it, when it made
+    /// one, and how it ended. Answers whether it was still that one's line.
+    LineEnded {
+        id: String,
+        clip: Option<u64>,
+        outcome: Result<Spoke, String>,
+        answer: Answer<bool>,
+    },
+    /// An app says something of playing a clip. Answers whether the agent has that clip.
+    LinePlayed {
+        clip: u64,
+        status: String,
+        error: Option<String>,
+        answer: Answer<bool>,
+    },
     /// From a turn's thread: the live turn's spool may have grown.
     SpoolChanged,
     /// From a turn's thread: nothing answers at the shim of this attempt of the turn any more.
@@ -226,6 +267,8 @@ pub struct View {
     pub jobs: Vec<Job>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
     pub books: Arc<Books>,
+    /// What the agent says aloud, and the clips it became: where a clip is looked for.
+    pub speech: Arc<SpeechBook>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
 }
@@ -247,6 +290,8 @@ pub struct Setup {
     pub pusher: Pusher,
     /// Where the pages of the agent's reports are kept.
     pub blobs: Arc<dyn Blobs>,
+    /// The way to the one that speaks: told when the agent has something to say.
+    pub speaks: Speaks,
 }
 
 /// The way to an agent's thread.
@@ -374,6 +419,62 @@ impl AgentHandle {
         self.ask(|answer| Ask::Row { id, answer }).await
     }
 
+    /// Takes the agent's next line to be said. `None`: nothing of its is to be said now.
+    pub async fn claim_line(&self) -> Result<Option<SpokenLine>, Unavailable> {
+        self.ask(|answer| Ask::ClaimLine { answer }).await
+    }
+
+    /// Writes that a line that was taken has a clip. Answers whether it was still the
+    /// taker's line.
+    pub async fn line_begun(
+        &self,
+        id: String,
+        clip: (u64, String),
+        asked: (String, String),
+        event_id: Option<u64>,
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::LineBegun {
+            id,
+            clip,
+            asked,
+            event_id,
+            answer,
+        })
+        .await
+    }
+
+    /// Writes how a line that was taken ended. Answers whether it was still the taker's.
+    pub async fn line_ended(
+        &self,
+        id: String,
+        clip: Option<u64>,
+        outcome: Result<Spoke, String>,
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::LineEnded {
+            id,
+            clip,
+            outcome,
+            answer,
+        })
+        .await
+    }
+
+    /// Writes what an app says of playing a clip. Answers whether the agent has that clip.
+    pub async fn line_played(
+        &self,
+        clip: u64,
+        status: String,
+        error: Option<String>,
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::LinePlayed {
+            clip,
+            status,
+            error,
+            answer,
+        })
+        .await
+    }
+
     /// What the agent is doing, as it last said.
     /// Asks something of the agent's artifacts. The inner error is what the rules refuse.
     pub async fn artifact(&self, want: Want) -> Result<Result<Done, Refused>, Unavailable> {
@@ -469,6 +570,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         backend: setup.backend.id(),
         jobs: Vec::new(),
         books: Arc::default(),
+        speech: Arc::default(),
         broken: Some(OPENING.to_string()),
     }));
     let now_ms = setup.clock.now_ms();
@@ -486,6 +588,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         jobs_checked: Instant::now(),
         goals_looked_at: 0,
         books: Arc::default(),
+        speech: Arc::default(),
         artifacts_told: BTreeMap::new(),
         clock_seen: (Instant::now(), now_ms),
     };
@@ -523,6 +626,9 @@ struct Worker {
     goals_looked_at: i64,
     /// The agent's books as they were last published: written anew when one of them changes.
     books: Arc<Books>,
+    /// What the agent says aloud, as it was last published. A week of lines at most: it is
+    /// written anew whenever a line changes, which is a few times for every line.
+    speech: Arc<SpeechBook>,
     /// Each artifact as the clients were last told of it.
     artifacts_told: BTreeMap<String, ToldArtifact>,
     /// The two clocks as they were read together last: what tells a sleep of the machine.
@@ -815,6 +921,7 @@ impl Worker {
             .map(|artifact| (artifact.artifact_id.clone(), told_artifact(artifact)))
             .collect();
         self.count_requests(self.now_ms());
+        self.read_speech();
         self.publish_view();
         self.after(out);
         // An answer that was given and not yet told when the Host went away is told now.
@@ -837,6 +944,45 @@ impl Worker {
                 goals: actor.goals().clone(),
                 media,
             });
+        }
+    }
+
+    /// Reads what the agent says aloud anew, for those who read it without asking the
+    /// agent. Answers whether it is not as it was last published.
+    fn read_speech(&mut self) -> bool {
+        match &self.actor {
+            Some(actor) if *self.speech != *actor.speech() => {
+                self.speech = Arc::new(actor.speech().clone());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Something is asked about what the agent says aloud. What changed is published
+    /// before the one who asked is answered: where it looks next, it finds what it was
+    /// told.
+    fn handle_speech<T>(
+        &mut self,
+        ask: impl FnOnce(&mut Actor, i64) -> Result<T, ActorError>,
+        answer: Answer<T>,
+    ) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        match ask(actor, now) {
+            Ok(done) => {
+                if self.read_speech() {
+                    self.publish_view();
+                }
+                let _ = answer.send(Ok(done));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = answer.send(Err(unavailable(&error)));
+                Err(error)
+            }
         }
     }
 
@@ -1085,6 +1231,55 @@ impl Worker {
                 let _ = taken.send(());
                 return Ok(());
             }
+            Ask::ClaimLine { answer } => {
+                return self.handle_speech(|actor, now| actor.claim_line(now), answer);
+            }
+            Ask::LineBegun {
+                id,
+                clip,
+                asked,
+                event_id,
+                answer,
+            } => {
+                let begun = |actor: &mut Actor, now| {
+                    let asked = (asked.0.as_str(), asked.1.as_str());
+                    let begun =
+                        actor.line_begun(&id, (clip.0, clip.1.as_str()), asked, event_id, now);
+                    begun.map(|line| line.is_some())
+                };
+                return self.handle_speech(begun, answer);
+            }
+            Ask::LineEnded {
+                id,
+                clip,
+                outcome,
+                answer,
+            } => {
+                let ended = |actor: &mut Actor, now| {
+                    let outcome = match &outcome {
+                        Ok(spoke) => Ok(Said {
+                            bytes: spoke.bytes,
+                            provider: &spoke.provider,
+                            voice: &spoke.voice,
+                        }),
+                        Err(why) => Err(why.as_str()),
+                    };
+                    let ended = actor.line_ended(&id, clip, outcome, now);
+                    ended.map(|line| line.is_some())
+                };
+                return self.handle_speech(ended, answer);
+            }
+            Ask::LinePlayed {
+                clip,
+                status,
+                error,
+                answer,
+            } => {
+                let played = |actor: &mut Actor, now| {
+                    actor.line_played(clip, &status, error.as_deref(), now)
+                };
+                return self.handle_speech(played, answer);
+            }
             other => other,
         };
         let now = self.now_ms();
@@ -1184,7 +1379,11 @@ impl Worker {
             | Ask::Goal { .. }
             | Ask::Amended { .. }
             | Ask::TakeLibrary { .. }
-            | Ask::TakePlans { .. } => return Ok(()),
+            | Ask::TakePlans { .. }
+            | Ask::ClaimLine { .. }
+            | Ask::LineBegun { .. }
+            | Ask::LineEnded { .. }
+            | Ask::LinePlayed { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::ShimGone { turn, attempt } => (actor.shim_gone(turn, attempt, now)?, nobody()),
@@ -1231,6 +1430,13 @@ impl Worker {
         }
         if out.changed.artifacts {
             self.tell_artifacts();
+        }
+        // What the agent says aloud is published before the one that speaks is told of it.
+        if out.changed.speech {
+            if self.read_speech() {
+                self.publish_view();
+            }
+            self.setup.speaks.wake(&self.setup.record.agent_id);
         }
         self.show(out.changed);
     }
@@ -1429,6 +1635,7 @@ impl Worker {
                 .cloned()
                 .collect(),
             books: self.books.clone(),
+            speech: self.speech.clone(),
             broken: None,
         }));
     }
@@ -1720,6 +1927,12 @@ fn refuse_for(
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(
+                Ask::LineBegun { answer, .. }
+                | Ask::LineEnded { answer, .. }
+                | Ask::LinePlayed { answer, .. },
+            ) => drop(answer.send(Err(refusal()))),
             Ok(
                 Ask::SpoolChanged
                 | Ask::ShimGone { .. }
