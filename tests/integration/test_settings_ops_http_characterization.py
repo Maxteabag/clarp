@@ -111,6 +111,38 @@ def test_dirs_lists_matching_visible_subdirectories(running_server, tmp_path):
     assert _call(base, "GET", "/dirs?path=/")[1]["base"] == "/"
 
 
+def test_dirs_says_nothing_of_what_is_not_there_and_never_lists_a_relative_path(
+        running_server, tmp_path, monkeypatch):
+    base, _ctx, _srv = running_server
+    from lib.routes import settings as settings_routes
+    logged = []
+    monkeypatch.setattr(settings_routes, "log_exception",
+                        lambda event, error, **more: logged.append((event, type(error).__name__)))
+    root = tmp_path / "browse"
+    (root / "alpha").mkdir(parents=True)
+    (root / "afile").write_text("x")
+    # Typing a path that is not there yet, or that is a file: no match, and no exception line.
+    for path, its_base in ((f"{root}/missing/", str(root / "missing")), (f"{root}/afile/", str(root / "afile")),
+                           (f"{root}/missing/x", str(root / "missing"))):
+        query = urllib.parse.urlencode({"path": path})
+        assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": its_base, "matches": []})
+    assert logged == []
+    # A relative path is never listed from the inside: not the Host's own working directory.
+    for path in ("./", "../", "relative/"):
+        query = urllib.parse.urlencode({"path": path})
+        status, body = _call(base, "GET", f"/dirs?{query}")
+        assert (status, body["matches"]) == (200, [])
+    assert _call(base, "GET", "/dirs?" + urllib.parse.urlencode({"path": "./"}))[1]["base"] == "/"
+    # A path the Host may not look at is answered, with nothing in it, and said once.
+    from lib import launch_paths
+    def refuse(_raw):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(launch_paths, "recover_user_path", refuse)
+    query = urllib.parse.urlencode({"path": "/proc/1/root/"})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": "/proc/1/root/", "matches": []})
+    assert logged == [("dirsPathRefused", "PermissionError")]
+
+
 def test_message_tool_details_requires_a_known_message(running_server):
     base, _ctx, _srv = running_server
     assert _call(base, "GET", "/message-tool-details?session=claude") == (
