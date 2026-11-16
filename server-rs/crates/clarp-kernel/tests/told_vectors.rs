@@ -10,7 +10,7 @@
 
 use clarp_kernel::told::{
     Humanness, Sound, at_head, beside, headed, narration, narration_options, natural, unheaded,
-    who, whose,
+    unheard, who, whose,
 };
 use serde_json::Value;
 
@@ -62,6 +62,13 @@ fn every_level_of_sounding_human_and_of_saying_what_one_does_is_put_as_the_pytho
     }
     assert!(clauses >= 6, "{clauses} levels");
     assert_eq!(narration_options(), vectors["options"]);
+}
+
+#[test]
+fn a_user_who_has_not_heard_the_last_reply_is_told_of_as_the_python_host_tells_it() {
+    let vectors = vectors();
+    assert_eq!(vectors["unheard"]["heard"], "Hello there.");
+    assert_eq!(unheard("Hello there."), vectors["unheard"]["unheard"]);
 }
 
 #[test]

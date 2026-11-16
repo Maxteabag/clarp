@@ -222,6 +222,24 @@ pub struct Told {
     pub sound: Sound,
 }
 
+/// What goes before the user's words when the app says its user began to speak before
+/// hearing what the agent last said aloud: the agent is told that those replies went
+/// unheard, so that it does not take them for known because they are in its own record
+/// (the Python Host's `_with_delivery_context`). The conversation keeps the user's words
+/// as they were said.
+pub const UNHEARD: &str = concat!(
+    "<clarp-delivery-context>\n",
+    "The user began a new spoken turn before hearing one or more of your previous synthesized ",
+    "replies. Treat those replies as unheard. Carry forward anything still important, but answer ",
+    "the user's newest message naturally instead of blindly repeating the old response.\n",
+    "</clarp-delivery-context>\n\n",
+);
+
+/// A prompt for a turn whose user has not heard what the agent last said aloud.
+pub fn unheard(prompt: &str) -> String {
+    format!("{UNHEARD}{prompt}")
+}
+
 /// What a turn's tool is told with its prompt.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Turn {

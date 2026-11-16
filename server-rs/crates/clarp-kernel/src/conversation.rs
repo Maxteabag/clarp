@@ -46,6 +46,10 @@ pub struct Message {
     /// only when it is asked for.
     #[serde(default, skip_serializing_if = "is_false")]
     pub speak: bool,
+    /// The app said its user began to speak before hearing what this agent last said
+    /// aloud: the agent's tool is told so with this message.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unheard: bool,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]

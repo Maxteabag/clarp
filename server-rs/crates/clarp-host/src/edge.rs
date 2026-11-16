@@ -1308,6 +1308,18 @@ pub(crate) async fn send_message(
         (true, false) => Admission::Background,
     };
     let client_msg_id = request.client_msg_id.clone().unwrap_or_else(ids::uuid);
+    // The app names the sessions whose agents said something its user has not heard (the
+    // first 64 names of a list; anything else names none). An agent that is muted says
+    // nothing aloud, and has nothing unheard.
+    let unheard = match &request.unheard_audio_sessions {
+        Some(Value::Array(sessions)) if !member.record.muted => {
+            let named = sessions.iter().take(64).filter_map(Value::as_str);
+            named
+                .map(python::strip)
+                .any(|session| session == member.record.session)
+        }
+        _ => false,
+    };
     let message = Message {
         id: format!("u-{client_msg_id}"),
         text,
@@ -1321,6 +1333,7 @@ pub(crate) async fn send_message(
             Some(asked) => asked,
             None => origin_is_user,
         },
+        unheard,
     };
     let writer = match &message.origin {
         Origin::Agent { agent_id } if !agent_id.is_empty() => Some(agent_id.clone()),

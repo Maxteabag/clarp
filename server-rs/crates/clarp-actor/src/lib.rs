@@ -1997,6 +1997,13 @@ impl Actor {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,
         };
+        // A user who began to speak before hearing the last reply: the tool is told so before
+        // the words. The conversation keeps the words as they were said.
+        let prompt = if message.unheard {
+            told::unheard(&prompt)
+        } else {
+            prompt
+        };
         let told = self.profile.told.as_ref();
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
