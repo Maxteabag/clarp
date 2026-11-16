@@ -107,6 +107,10 @@ pub struct Line {
     /// The number of the event its clip was announced with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_id: Option<u64>,
+    /// Its clip was announced to be played whichever agent is open: it had been held until
+    /// its agent's turn came (the herald).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub across: bool,
     /// What an app last said of playing the clip (`play-start`, `play-ok`, `play-fail`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub played: Option<String>,
@@ -200,6 +204,17 @@ impl Line {
             event_id,
             ..self.clone()
         })
+    }
+
+    /// The line's clip is announced to the apps, with the event of this number: a clip
+    /// that was held back when it was made (the herald), and whose turn has come. `across`:
+    /// it is announced to be played whichever agent is open.
+    pub fn announced(&self, event_id: u64, across: bool) -> Self {
+        Self {
+            event_id: Some(event_id),
+            across,
+            ..self.clone()
+        }
     }
 
     /// The one who took the line is done with it: its clip is whole, or it was not spoken,
@@ -433,9 +448,10 @@ impl SpeechBook {
 /// play. A clip no engine finished is not offered (the Python Host's `recoverable_events`).
 /// Answers their places in `lines`.
 pub fn offered_again(lines: &[&Line], now_ms: i64) -> Vec<usize> {
+    // A clip that is held back for its agent's turn was not announced, and is not offered.
     let announced = |place: &usize| {
         let line = lines[*place];
-        line.clip_id.is_some() && line.state != LineState::Failed
+        line.clip_id.is_some() && line.event_id.is_some() && line.state != LineState::Failed
     };
     // The newest first: by the event that announced the clip, then by the clip's number.
     let mut newest: Vec<usize> = (0..lines.len()).filter(announced).collect();

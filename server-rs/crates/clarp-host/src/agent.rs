@@ -225,6 +225,15 @@ pub enum Ask {
         outcome: Result<Spoke, String>,
         answer: Answer<bool>,
     },
+    /// A clip that was held back is announced with this event. Answers whether the agent
+    /// has that clip.
+    LineAnnounced {
+        clip: u64,
+        event_id: u64,
+        /// To be played whichever agent is open.
+        across: bool,
+        answer: Answer<bool>,
+    },
     /// An app says something of playing a clip. Answers whether the agent has that clip.
     LinePlayed {
         clip: u64,
@@ -465,6 +474,23 @@ impl AgentHandle {
             id,
             clip,
             outcome,
+            answer,
+        })
+        .await
+    }
+
+    /// Writes that a clip that was held back is announced, and with which event. Answers
+    /// whether the agent has that clip.
+    pub async fn line_announced(
+        &self,
+        clip: u64,
+        event_id: u64,
+        across: bool,
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::LineAnnounced {
+            clip,
+            event_id,
+            across,
             answer,
         })
         .await
@@ -1316,6 +1342,16 @@ impl Worker {
                 };
                 return self.handle_speech(ended, answer);
             }
+            Ask::LineAnnounced {
+                clip,
+                event_id,
+                across,
+                answer,
+            } => {
+                let announced =
+                    |actor: &mut Actor, now| actor.line_announced(clip, (event_id, across), now);
+                return self.handle_speech(announced, answer);
+            }
             Ask::LinePlayed {
                 clip,
                 status,
@@ -1436,6 +1472,7 @@ impl Worker {
             | Ask::ClaimLine { .. }
             | Ask::LineBegun { .. }
             | Ask::LineEnded { .. }
+            | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
@@ -1989,6 +2026,7 @@ fn refuse_for(
             Ok(
                 Ask::LineBegun { answer, .. }
                 | Ask::LineEnded { answer, .. }
+                | Ask::LineAnnounced { answer, .. }
                 | Ask::LinePlayed { answer, .. },
             ) => drop(answer.send(Err(refusal()))),
             Ok(

@@ -44,6 +44,8 @@ async fn focus(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<V
     }
     // Nobody is told: the app that says it is the one that knows.
     app.fleet.open(session.to_string()).await?;
+    // The user turned to this agent: what the herald held of it is played.
+    app.mouth.opened(session).await;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -539,6 +541,54 @@ async fn set_personalities(
     ))
 }
 
+/// How the owner has set the herald.
+fn herald_kept(app: &App) -> clarp_kernel::herald::Settings {
+    use clarp_kernel::herald::{BYPASS_KEY, DISABLED_KEY, SHORT_KEY, Settings};
+    let directory = app.fleet.directory();
+    Settings::stored(
+        directory.setting(DISABLED_KEY),
+        directory.setting(SHORT_KEY),
+        directory.setting(BYPASS_KEY),
+    )
+}
+
+/// `GET /herald/settings`: whether an agent whose user is with another raises its hand
+/// before it is heard, and how short a reply is that is said at once.
+async fn herald(State(app): State<App>) -> Json<Value> {
+    Json(herald_kept(&app).screen())
+}
+
+/// `POST /herald/settings` with `{disabled?, speak_if_short_chars?,
+/// short_reply_bypass_enabled?}`: a change of it, for the next clip. The rules and the
+/// words a change is refused in are the Python Host's.
+async fn set_herald(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let given = serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);
+    if !given.is_object() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
+    }
+    let changed = herald_kept(&app).changed(&given);
+    let changed = changed.map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    // Only what was named is written, as there: a setting nobody touched keeps following
+    // what it is when nothing is kept.
+    let named = |key: &str| given.get(key).is_some();
+    let kept = changed.kept().into_iter().filter(|(key, _)| {
+        use clarp_kernel::herald::{BYPASS_KEY, DISABLED_KEY, SHORT_KEY};
+        (key == DISABLED_KEY && named("disabled"))
+            || (key == SHORT_KEY && named("speak_if_short_chars"))
+            || (key == BYPASS_KEY && named("short_reply_bypass_enabled"))
+    });
+    let kept: Vec<(String, String)> = kept.collect();
+    if !kept.is_empty() {
+        app.fleet.set(kept).await?;
+    }
+    Ok(Json(
+        json!({ "ok": true, "settings": herald_kept(&app).told() }),
+    ))
+}
+
 /// How human voices sound on this Host, as the owner's settings keep it.
 fn humanness_kept(app: &App) -> Humanness {
     let directory = app.fleet.directory();
@@ -636,6 +686,7 @@ pub fn routes() -> Router<App> {
             get(personalities).post(set_personalities),
         )
         .route("/voice-humanness", get(humanness).post(set_humanness))
+        .route("/herald/settings", get(herald).post(set_herald))
         .route("/agent-model-options", get(model_options))
         .route(
             "/tool-explanations/settings",

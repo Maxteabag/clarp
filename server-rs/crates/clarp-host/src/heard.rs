@@ -488,7 +488,12 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     };
     // What the engine was sure was speech, unless it is something engines invent on silence.
     let text = heard::kept(&heard::joined(&said.segments));
-    let answer = heard::answer(&text, &ids::hex(8), hands_free);
+    let mut answer = heard::answer(&text, &ids::hex(8), hands_free);
+    // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
+    // the app is told, and sends nothing.
+    if !text.is_empty() && app.mouth.heard(&text).await {
+        answer["herald_consumed"] = json!(true);
+    }
     if !job.is_empty() {
         let (keeps, kept) = (ears.clone(), answer.clone());
         let done = tokio::task::spawn_blocking(move || keeps.keep(&job, &fingerprint, &kept)).await;

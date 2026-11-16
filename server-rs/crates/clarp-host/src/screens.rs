@@ -1,11 +1,11 @@
 //! What an app's screens ask of a Host that has nothing of the kind yet.
 //!
 //! The phone app asks a Host about fourteen features and calls everything else when its
-//! user opens the screen: an agent's heartbeat, its schedules and portraits, the herald, the
+//! user opens the screen: an agent's heartbeat, its schedules and portraits, the
 //! vocabulary, calls, the Oracle. Where this Host has none of that, a missing route is an
 //! error on a screen. So each is answered: a reading with what the Python Host says on its
-//! first day, corrected where that would claim something this Host does not do (the herald
-//! is off here, nobody rings, no picture is made), and a change with a refusal in words.
+//! first day, corrected where that would claim something this Host does not do (nobody
+//! rings, no picture is made), and a change with a refusal in words.
 //! Nothing here is kept: when one of these is built it leaves this file.
 //!
 //! The answers are the Python Host's own, written down from a fresh one by the conformance
@@ -176,14 +176,6 @@ async fn no_pictures() -> ApiError {
 }
 
 // ---- how the Host speaks up and judges ---------------------------------------------------------
-
-async fn herald() -> Json<Value> {
-    Json(kept("/herald/settings"))
-}
-
-async fn no_herald() -> ApiError {
-    not_built("The herald is")
-}
 
 async fn judgments() -> Json<Value> {
     Json(kept("/judgments/settings"))
@@ -479,7 +471,6 @@ pub fn routes() -> Router<App> {
             get(portrait_generation).post(no_pictures),
         )
         .route("/avatar-settings", get(avatar_settings).post(no_pictures))
-        .route("/herald/settings", get(herald).post(no_herald))
         .route("/judgments/settings", get(judgments).post(no_judgments))
         .route(
             "/diagnostics/settings",

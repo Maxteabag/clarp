@@ -9,23 +9,6 @@
    "heartbeat_interval_sec": 1800
   }
  },
- "/herald/settings": {
-  "defaults": {
-   "short_reply_bypass_enabled": true,
-   "speak_if_short_chars": 120
-  },
-  "limits": {
-   "speak_if_short_chars": [
-    0,
-    2000
-   ]
-  },
-  "settings": {
-   "disabled": true,
-   "short_reply_bypass_enabled": true,
-   "speak_if_short_chars": 120
-  }
- },
  "/judgments/settings": {
   "defaults": {
    "enabled": false,
