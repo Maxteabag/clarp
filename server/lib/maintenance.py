@@ -13,7 +13,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from . import batched_delete, db
+from . import batched_delete, db, settings_store
 from .log import log, log_exception
 from .protocol import ClipProducerStatus
 from .timing import MAINTENANCE_STARTUP_DELAY_SEC
@@ -150,13 +150,10 @@ def _prune_keeping_newest(c, statement: str, params, *, key: str, group: str,
 STATES_PRUNED_KEY = "state_log.pruned"
 
 
-def _state_rows_pruned(c) -> None:
-    c.execute(
-        """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
-           ON CONFLICT(key) DO UPDATE SET
-               value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
-               updated_at = excluded.updated_at""",
-        (STATES_PRUNED_KEY, int(time.time() * 1000)))
+def _state_rows_pruned() -> None:
+    """Through the settings' own store: one module writes that table. It
+    writes on this thread's connection, which is the sweep's."""
+    settings_store.increment(STATES_PRUNED_KEY)
 
 
 def _prune_state_log(c, cutoff_ms: int) -> int:
@@ -171,7 +168,7 @@ def _prune_state_log(c, cutoff_ms: int) -> int:
     began = []
 
     def before_first():
-        _state_rows_pruned(c)
+        _state_rows_pruned()
         began.append(True)
 
     try:
@@ -180,7 +177,7 @@ def _prune_state_log(c, cutoff_ms: int) -> int:
             batch=STATE_LOG_DELETE_BATCH, pause_s=STATE_LOG_BATCH_PAUSE_S, before_first=before_first)
     finally:
         if began:
-            _state_rows_pruned(c)
+            _state_rows_pruned()
 
 
 def _timed(phases: _Phases | None, name: str, fn):
