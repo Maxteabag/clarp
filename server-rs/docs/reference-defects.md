@@ -13,7 +13,9 @@ Taken and triaged the same day: the triage and its order are issue 360 of `Maxte
 First what can hurt a user (R14, R4, R7), then what the Host does with the transcript after a
 turn as one investigation (R1, R9, R3, R12, R13, R16), then the small exact ones (R10, R15, R5,
 R6, R8, R2). The release owner says so here each time one is fixed and installed. R14 was fixed
-the same evening (PR 361).
+the same evening (PR 361, `b30029b4`) and is in force on both of the owner's Hosts since 15 Nov
+23:03 (the release owner's word of 16 Nov: at 23:21 a message from another Host started a turn in
+an agent and the focus stayed where it was).
 
 | # | What | Evidence | State |
 |---|---|---|---|

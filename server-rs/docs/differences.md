@@ -33,6 +33,20 @@ Parts of the contract that no feature stands for, which the Rust Host sends empt
 | Part | What is empty | Planned |
 |---|---|---|
 | Portraits and the persona catalogue | `avatar_url` and `model_avatar_url` of an agent; `personas` in the snapshot | Stage 3. An agent that moves keeps its portrait from then on |
+| The probes of the Python Host | `delivery_admission` in `GET /status`: the budgets, the gate and the counts of the Python Host's own way of telling whether a turn's process is still its own | Never: this Host has no such machinery, and no client reads the block |
+
+The lists an app's screens are made of, for what the Rust Host keeps nothing of yet (`NOT_KEPT` in
+`conformance/conform.py`). An app asks for them of every Host it is paired with, whatever the Host
+says it has, so each is answered as the Python Host answers a list, and empty: an app shows nothing
+there, where a route that is not there would be an error on its screen. The run compares the status
+and every field with its kind.
+
+| Route | What the Python Host has there | What the Rust Host answers | Planned |
+|---|---|---|---|
+| `GET /janitors` | its seven janitors, their templates, triggers and providers | no janitors, `runtime_available: false` | When janitors are built |
+| `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that transcribe, the providers and their models | nothing that transcribes (`available: false`, no engine, no models); where a turn of speech ends is still found on the phone | Speech in |
+| `GET /voice-catalog` | the providers of speech and their voices | no provider, no voices, `voice_available: false` | Speech out |
+| `GET /agent-model-options` | every backend with its models, what each supports and how it is signed in | no backends listed. An agent's model is set by name (`POST /agent-llm`) | The catalogue of models |
 
 ## Compared as what a client may rely on
 
@@ -89,6 +103,11 @@ it covers that exact difference and nothing else.
 | `POST /tools/media` | not there | the same as `POST /media`, for the token a turn is given for its agent's tools | That token opens `/tools/` and nothing else, and publishing a file is a tool's act |
 | A file one agent published and another agent shows, after the second has moved to this Host (`clarp-host import`) | does not arise: the files of all agents are in one table | kept in the log of the agent that shows it too, marked as one that came along: fetched under its id, not in that agent's gallery, and no artifact of that agent is made of it. An id stands for one file on the Host: another file under it is refused | An agent's log holds what the agent needs to be shown whole. The file is kept once on the disk, whoever names it |
 | An artifact that names a published file, after its agent's session has another name | not found for this session: the file is looked up by the session name it was published under | found: an agent's files are in the agent's own log | A file belongs to the agent that published it, whatever the agent is called |
+| Where a file a user attaches is kept (`POST /upload`) | under the Host's own directory of uploads, by the agent's name | under this Host's data directory (`uploads/<agent>/`), by the agent's name | Each Host's own place. The answer says where, and the agent's tool reads the file from there. The names on the disk and the record of an upload's id are the same |
+| A file a user attaches when no agent is named and none is looked at | for the agent the Host is configured to default to | kept under `unknown`, and answered without a session | This Host has no agent it falls back to |
+| The lines of an app's own log (`POST /clog`) | written to the Host's event log when its diagnostics take them; on a Host that was not told to, answered `captured: false`, and the app keeps them | kept as lines in `logs/apps.log` under the data directory, 16 MiB of them and the 16 before, and answered without `captured` | They say why something did not work on a phone. An app keeps its lines until a Host has taken them, so a Host that takes none is asked again and again |
+| `GET /status` without a session | names the agent the Host is configured to default to | names none | This Host has no agent it falls back to |
+| What an app reports of itself (`POST /application-activity`) | kept in the settings table for 45 seconds | kept in memory for 45 seconds | No report outlives a restart usefully |
 | The name of a list of Updates (`snapshot_revision` of `GET /attention/inbox`) and the cursor a page ends with | a digest of the rows as its table has them; a cursor is that name and a place, in base 64 | a digest of the same fields as this Host has them; a cursor of the same shape | Each Host's own: a client hands a cursor back and compares names, and reads neither. The run compares whether two pages are of one list and whether a page has more after it. A cursor of one Host is stale on the other |
 | A countdown in Updates | shown where its clock stands | not shown | Countdowns are not built |
 | An artifact with a `podcast` in its payload | read as an episode (`podcast_live`) | refused: podcast episodes are not available on this Host yet | Not built. What is not there says so |

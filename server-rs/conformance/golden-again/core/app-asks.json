@@ -1,0 +1,525 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "busy": false,
+    "deployed_version": "development",
+    "release_id": "development",
+    "runtime": {
+     "active_turns": 0,
+     "available": true,
+     "drain": {
+      "phase": "idle"
+     },
+     "draining": false,
+     "fenced": false,
+     "observed_at": "<time>",
+     "reason": "",
+     "release_id": "embedded",
+     "sealed": false
+    },
+    "session": "rachel"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/status",
+   "status": 200,
+   "step": "is the Host up"
+  },
+  {
+   "body": {
+    "busy": false,
+    "deployed_version": "development",
+    "release_id": "development",
+    "runtime": {
+     "active_turns": 0,
+     "available": true,
+     "drain": {
+      "phase": "idle"
+     },
+     "draining": false,
+     "fenced": false,
+     "observed_at": "<time>",
+     "reason": "",
+     "release_id": "embedded",
+     "sealed": false
+    },
+    "session": "claire"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/status",
+   "status": 200,
+   "step": "is the agent busy"
+  },
+  {
+   "body": {
+    "busy": false,
+    "deployed_version": "development",
+    "release_id": "development",
+    "runtime": {
+     "active_turns": 0,
+     "available": true,
+     "drain": {
+      "phase": "idle"
+     },
+     "draining": false,
+     "fenced": false,
+     "observed_at": "<time>",
+     "reason": "",
+     "release_id": "embedded",
+     "sealed": false
+    },
+    "session": "nobody-here"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/status",
+   "status": 200,
+   "step": "is nobody busy"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/focus",
+   "status": 200,
+   "step": "the user looks at the agent"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "started",
+       "agent_id": "<id:1>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "spawned",
+       "persona": "Claire",
+       "phase": "spawned",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Started",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:1>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": null,
+      "context_window": 1000000,
+      "conversation_id": "",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 0,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "",
+      "last_message": "",
+      "last_message_id": "",
+      "last_turn_end": 0,
+      "latest_state": "spawned",
+      "latest_state_ts": "<time>",
+      "live_activity": null,
+      "mcp_servers": [],
+      "model": "",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:1>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "get /agents/snapshot"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/focus",
+   "status": 400,
+   "step": "the user looks at nothing"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/focus",
+   "status": 200,
+   "step": "the user looks at nobody"
+  },
+  {
+   "body": {
+    "accepted": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 200,
+   "step": "the app is in front"
+  },
+  {
+   "body": {
+    "accepted": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 200,
+   "step": "the same report again"
+  },
+  {
+   "body": {
+    "accepted": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 200,
+   "step": "the app is behind"
+  },
+  {
+   "body": {
+    "error": "stale activity report"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 400,
+   "step": "a report of long ago"
+  },
+  {
+   "body": {
+    "error": "instance_id must be a UUID"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 400,
+   "step": "a report of what has no id"
+  },
+  {
+   "body": {
+    "error": "invalid principal or sequence"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 400,
+   "step": "a report without its place"
+  },
+  {
+   "body": {
+    "error": "invalid foreground or input age"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 400,
+   "step": "a report that says neither front nor behind"
+  },
+  {
+   "body": {
+    "error": "invalid foreground or input age"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 400,
+   "step": "a report with an input that is no number"
+  },
+  {
+   "body": {
+    "error": "object required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/application-activity",
+   "status": 400,
+   "step": "a report that is a list"
+  },
+  {
+   "body": {
+    "captured": false,
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/clog",
+   "status": 200,
+   "step": "a line of the log of the app"
+  },
+  {
+   "body": {
+    "captured": false,
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/clog",
+   "status": 200,
+   "step": "lines of the log of the app"
+  },
+  {
+   "body": {
+    "teams": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/teams",
+   "status": 200,
+   "step": "the teams"
+  },
+  {
+   "body": {
+    "janitors": "<list>",
+    "providers": "<list>",
+    "runtime_available": "<yes or no>",
+    "templates": "<list>",
+    "triggers": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/janitors",
+   "status": 200,
+   "step": "the janitors"
+  },
+  {
+   "body": {
+    "special_treatment": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/automation-settings",
+   "status": 200,
+   "step": "what the Host does by itself"
+  },
+  {
+   "body": {
+    "adapters": "<list>",
+    "available": "<yes or no>",
+    "default_model": "<text>",
+    "models": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/transcription-capabilities",
+   "status": 200,
+   "step": "what the Host transcribes with"
+  },
+  {
+   "body": {
+    "agent_engines": "<fields>",
+    "agent_languages": "<fields>",
+    "call_engines": "<text>",
+    "call_languages": "<text>",
+    "call_policy_error": "<text>",
+    "engine": "<text>",
+    "language": "<text>",
+    "long_form_model": "<text>",
+    "long_form_threshold_range": "<fields>",
+    "long_form_threshold_sec": "<number>",
+    "models": "<list>",
+    "provider_turn_taking_available": "<yes or no>",
+    "providers": "<list>",
+    "retain_audio": "<yes or no>",
+    "stream_path": "<text>",
+    "turn_taking": "<text>",
+    "turn_taking_options": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "who transcribes"
+  },
+  {
+   "body": {
+    "fallback": "<text>",
+    "provider": "<text>",
+    "providers": "<list>",
+    "voice_available": "<yes or no>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/voice-catalog",
+   "status": 200,
+   "step": "the voices"
+  },
+  {
+   "body": {
+    "freshness": "<text>",
+    "freshness_note": "<text>",
+    "freshness_scope": "<text>",
+    "observed_at": "<text>",
+    "providers": "<fields>",
+    "schema_version": "<number>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-model-options",
+   "status": 200,
+   "step": "the models an agent can be given"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "app-asks",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  }
+ ]
+}

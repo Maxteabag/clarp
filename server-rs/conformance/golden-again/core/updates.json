@@ -1,0 +1,2509 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "artifacts": [],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:1>",
+    "total": 0
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "nothing was made yet"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": null,
+     "content": "# Synthetic notes",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "# Synthetic notes"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "",
+     "title": "Synthetic notes",
+     "type": "document",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make notes"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:3>",
+     "columns": [
+      "a"
+     ],
+     "completed_at": null,
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "columns": [
+       "a"
+      ],
+      "rows": [
+       [
+        1
+       ]
+      ]
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "rows": [
+      [
+       1
+      ]
+     ],
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "",
+     "title": "Synthetic table",
+     "type": "data",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make a table"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:4>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "repository": "owner/repo"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "repository": "owner/repo",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "failed",
+     "summary": "",
+     "title": "Synthetic change",
+     "type": "code_change",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make a change that failed"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:5>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "version": "0.1"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "draft",
+     "summary": "",
+     "title": "Synthetic draft",
+     "type": "release",
+     "updated_at": "<time>",
+     "version": "0.1"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make a draft"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:6>",
+     "completed_at": "<time>",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "relative_path": "src",
+      "root": "workspace"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "relative_path": "src",
+     "root": "workspace",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "cancelled",
+     "summary": "",
+     "title": "Synthetic folder",
+     "type": "directory",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make what is called off"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:7>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "provider": "github",
+      "run_id": "42",
+      "run_url": "https://github.com/owner/repo/actions/runs/42",
+      "workflow_name": "Tests"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "provider": "github",
+     "reference_id": "",
+     "run_id": "42",
+     "run_url": "https://github.com/owner/repo/actions/runs/42",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "",
+     "title": "Synthetic run",
+     "type": "workflow_run",
+     "updated_at": "<time>",
+     "workflow_name": "Tests"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make a run of a workflow"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "report-1",
+     "completed_at": null,
+     "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "answer_schema": {
+       "additionalProperties": false,
+       "properties": {},
+       "type": "object"
+      },
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "read_only": true,
+      "version": "v1"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "read_only": true,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "",
+     "title": "Synthetic report",
+     "type": "html_form",
+     "updated_at": "<time>",
+     "version": "v1"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "publish a report"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:8>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:8>",
+      "blocks_progress": false,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:9>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "no_label": "No",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "Proceed with the synthetic step?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 1,
+      "status": "pending",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {},
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "Proceed with the synthetic step?",
+     "title": "Synthetic approval",
+     "type": "decision",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 201,
+   "step": "ask for an approval"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:10>",
+     "completed_at": "<time>",
+     "content": "Synthetic findings",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "content": "Synthetic findings",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ]
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "sources": [
+      {
+       "title": "A source",
+       "url": "https://example.org/a"
+      }
+     ],
+     "status": "completed",
+     "summary": "",
+     "title": "Synthetic research",
+     "type": "research",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "make research that is done"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the list"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content_omitted": {
+       "bytes": 40,
+       "reason": "summary",
+       "sha256": "c1:7fa26841c6e05e1e4e9573dc6c63ec6ab7212ca87383a6c8ae78648fdd3c8a54",
+       "updated_at": "<time>",
+       "version": "v1"
+      },
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the list, summed up"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the list, flat"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": "<cursor:1>",
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the first page"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": "<cursor:2>",
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the second page"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the third page"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": "<cursor:3>",
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "a page of nothing is a page of one"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "a page of a thousand"
+  },
+  {
+   "body": {
+    "error": "invalid attention query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 400,
+   "step": "a limit that is no number"
+  },
+  {
+   "body": {
+    "error": "invalid attention query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 400,
+   "step": "a representation there is none of"
+  },
+  {
+   "body": {
+    "error": "invalid attention query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 400,
+   "step": "what is no cursor"
+  },
+  {
+   "body": {
+    "error": "invalid attention query"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 400,
+   "step": "a cursor without the list it is of"
+  },
+  {
+   "body": {
+    "error": "attention snapshot changed; restart pagination"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 409,
+   "step": "a cursor of a list that never was"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": "<cursor:1>",
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the first page, before a change"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": "<cursor:2>",
+    "snapshot_revision": "<snapshot:2>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the second page, with nothing changed"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "report-1",
+     "completed_at": null,
+     "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "answer_schema": {
+       "additionalProperties": false,
+       "properties": {},
+       "type": "object"
+      },
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "read_only": true,
+      "version": "v1"
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "read_only": true,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "",
+     "title": "Synthetic report",
+     "type": "html_form",
+     "updated_at": "<time>",
+     "version": "v1"
+    },
+    "changed": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/report-1/pin",
+   "status": 200,
+   "step": "pin the report"
+  },
+  {
+   "body": {
+    "error": "attention snapshot changed; restart pagination"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 409,
+   "step": "the second page, with a cursor of before the pin"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "payload_version": 1,
+      "pinned": true,
+      "pinned_at": "<time>",
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:3>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the list, with the report pinned"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "report-1",
+     "completed_at": null,
+     "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "answer_schema": {
+       "additionalProperties": false,
+       "properties": {},
+       "type": "object"
+      },
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "read_only": true,
+      "version": "v1"
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "read_only": true,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "failed",
+     "summary": "",
+     "title": "Synthetic report",
+     "type": "html_form",
+     "updated_at": "<time>",
+     "version": "v1"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/report-1",
+   "status": 200,
+   "step": "the report fails"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "report-1",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "answer_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+       },
+       "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+       "read_only": true,
+       "version": "v1"
+      },
+      "payload_version": 1,
+      "pinned": true,
+      "pinned_at": "<time>",
+      "read_only": true,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic report",
+      "type": "html_form",
+      "updated_at": "<time>",
+      "version": "v1"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:4>",
+    "total": 5
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the list, with the report first"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "report-1",
+     "completed_at": "<time>",
+     "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+     "created_at": "<time>",
+     "deleted_at": null,
+     "payload": {
+      "answer_schema": {
+       "additionalProperties": false,
+       "properties": {},
+       "type": "object"
+      },
+      "content": "<h1>Synthetic report</h1><p>Day one.</p>",
+      "read_only": true,
+      "version": "v1"
+     },
+     "payload_version": 1,
+     "pinned": true,
+     "pinned_at": "<time>",
+     "read_only": true,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "expired",
+     "summary": "",
+     "title": "Synthetic report",
+     "type": "html_form",
+     "updated_at": "<time>",
+     "version": "v1"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/report-1",
+   "status": 200,
+   "step": "the report runs out"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "attention_bucket": "blocking",
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "repository": "owner/repo"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "repository": "owner/repo",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "failed",
+      "summary": "",
+      "title": "Synthetic change",
+      "type": "code_change",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "attention_bucket": "review",
+      "completed_at": null,
+      "content": "# Synthetic notes",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "# Synthetic notes"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "ready",
+      "summary": "",
+      "title": "Synthetic notes",
+      "type": "document",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:10>",
+      "attention_bucket": "review",
+      "completed_at": "<time>",
+      "content": "Synthetic findings",
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "content": "Synthetic findings",
+       "sources": [
+        {
+         "title": "A source",
+         "url": "https://example.org/a"
+        }
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "sources": [
+       {
+        "title": "A source",
+        "url": "https://example.org/a"
+       }
+      ],
+      "status": "completed",
+      "summary": "",
+      "title": "Synthetic research",
+      "type": "research",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:3>",
+      "attention_bucket": "working",
+      "columns": [
+       "a"
+      ],
+      "completed_at": null,
+      "created_at": "<time>",
+      "deleted_at": null,
+      "payload": {
+       "columns": [
+        "a"
+       ],
+       "rows": [
+        [
+         1
+        ]
+       ]
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "rows": [
+       [
+        1
+       ]
+      ],
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "active",
+      "summary": "",
+      "title": "Synthetic table",
+      "type": "data",
+      "updated_at": "<time>"
+     }
+    ],
+    "index_version": 1,
+    "next_cursor": null,
+    "snapshot_revision": "<snapshot:5>",
+    "total": 4
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention/inbox",
+   "status": 200,
+   "step": "the list, without the report"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "updates",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#1@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#1@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#1@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#1@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:3>",
+    "event_id": "<eid:artifact-updated#2@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#2@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#2@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#2@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:4>",
+    "event_id": "<eid:artifact-updated#3@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#3@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#3@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#3@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:5>",
+    "event_id": "<eid:artifact-updated#4@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#4@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#4@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#4@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:6>",
+    "event_id": "<eid:artifact-updated#5@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#5@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#5@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#5@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:7>",
+    "event_id": "<eid:artifact-updated#6@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#6@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#6@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#6@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "report-1",
+    "event_id": "<eid:artifact-updated#7@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#7@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#7@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#7@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:8>",
+    "event_id": "<eid:artifact-updated#8@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#8@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#8@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#8@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:10>",
+    "event_id": "<eid:artifact-updated#9@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#9@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#9@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#9@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "report-1",
+    "event_id": "<eid:artifact-updated#10@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#10@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#10@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#10@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "report-1",
+    "event_id": "<eid:artifact-updated#11@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#11@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#11@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#11@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "report-1",
+    "event_id": "<eid:artifact-updated#12@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#12@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#12@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#12@cf004e>"
+  }
+ ]
+}
