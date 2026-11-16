@@ -504,7 +504,7 @@ impl ClaudeInterpreter {
                             output: None,
                             started_at_ms: t,
                             ended_at_ms: None,
-                            reply: None,
+                            ..ToolCall::default()
                         };
                         self.tools.insert(call_id.to_string(), call);
                     }
@@ -569,21 +569,14 @@ impl ClaudeInterpreter {
         }
     }
 
-    fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, t: i64, out: &mut Vec<Signal>) {
+    fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, out: &mut Vec<Signal>) {
         if self.ended {
             return;
         }
         self.ended = true;
+        // A tool that still runs when the process goes is left as it is: what becomes of
+        // it follows from how the turn ended, which is the Host's to say.
         self.settle(out);
-        // A tool that was still running when the process went did not finish.
-        for call in self.tools.values_mut() {
-            if call.status == ToolStatus::Running {
-                call.status = ToolStatus::Error;
-                call.output = Some("The turn ended before this tool finished.".to_string());
-                call.ended_at_ms = Some(t);
-                out.push(Signal::Tool(call.clone()));
-            }
-        }
         // What Claude Code said went wrong comes first; what else is known comes after it.
         let api_error = self.api_error.take();
         let failed = |detail: String| RunOutcome::Failed {
@@ -633,7 +626,7 @@ impl Interpreter for ClaudeInterpreter {
             Entry::Out(line) => self.on_line(line, record.t, out),
             Entry::Err(line) => self.stderr.push(line),
             Entry::Shim(ShimEvent::Exited { code, signal }) => {
-                self.on_exit(*code, *signal, record.t, out);
+                self.on_exit(*code, *signal, out);
             }
             Entry::Shim(_) | Entry::Hook { .. } => {}
         }
@@ -777,6 +770,7 @@ mod tests {
             started_at_ms: 1_110,
             ended_at_ms,
             reply: Some("r-1".to_string()),
+            ..ToolCall::default()
         };
         // The message is one reply: what it said and the tool it calls. It is told when it
         // is whole, and the tool's use after it.
@@ -888,7 +882,6 @@ mod tests {
                 r#"toolu_1 on r-1 Ok "a.txt""#,
                 r#"r-1-2 "" ["toolu_2"]"#,
                 r#"toolu_2 on r-1-2 Running """#,
-                r#"toolu_2 on r-1-2 Error "The turn ended before this tool finished.""#,
             ]
         );
     }
@@ -1050,7 +1043,7 @@ mod tests {
     }
 
     #[test]
-    fn a_killed_turn_keeps_what_was_said_and_closes_what_was_running() {
+    fn a_killed_turn_keeps_what_was_said_and_the_tool_it_had_called() {
         let lines = [
             INIT.to_string(),
             stream(r#"{"type":"message_start","message":{"id":"msg_1"}}"#),
@@ -1059,7 +1052,7 @@ mod tests {
         ];
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let signals = durable(&read(&lines, (None, Some(15))));
-        let tail = &signals[signals.len() - 4..];
+        let tail = &signals[signals.len() - 3..];
         assert_eq!(
             tail[0],
             Signal::Reply(Reply {
@@ -1073,16 +1066,14 @@ mod tests {
             "what the agent had written is kept, with the tool it had called"
         );
         let on_it = Some("r-1".to_string());
+        // What becomes of a tool that never came back follows from how the turn ended:
+        // the Host says it, not this reader.
         assert!(
             matches!(&tail[1], Signal::Tool(call) if call.status == ToolStatus::Running && call.reply == on_it),
             "the tool's use begins on the reply"
         );
-        assert!(
-            matches!(&tail[2], Signal::Tool(call) if call.status == ToolStatus::Error && call.ended_at_ms.is_some() && call.reply == on_it),
-            "a tool that never came back is closed"
-        );
         assert_eq!(
-            tail[3],
+            tail[2],
             Signal::Ended(RunOutcome::Interrupted {
                 reason: "claude was ended by signal 15".to_string()
             })

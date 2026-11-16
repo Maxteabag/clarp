@@ -860,8 +860,8 @@ fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
     drop(actor);
     let mut actor = world.open();
     let before = actor.tail(10).unwrap().latest_revision;
-    // The tool's process is killed. The use that never came back is closed on its row, and
-    // the word of the Host about the end is the row that closes the turn.
+    // The tool's process is killed. The use that never came back reads interrupted on its
+    // row, and the word of the Host about the end is the row that closes the turn.
     world.exits(1, None, Some(9));
     world.hint(&mut actor);
     assert_eq!(
@@ -869,7 +869,7 @@ fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
         [
             row("u-1", "user: go", "", false, ""),
             row("r-a", "agent: Looking.", "", true, ""),
-            row("r-b", "agent: ", "t1 Error", false, ""),
+            row("r-b", "agent: ", "t1 Interrupted", false, ""),
             row(
                 "n-1-turn-interrupted",
                 "notice: turn-interrupted",
@@ -884,6 +884,29 @@ fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
         .map(|row| row.0)
         .collect();
     assert_eq!(changed, ["r-b", "n-1-turn-interrupted"]);
+}
+
+#[test]
+fn only_an_interrupted_turn_changes_what_its_tools_left_unfinished() {
+    let mut world = World::new("message-rows-unfinished");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_message(&mut world, 1, "a", "", &["t1"]);
+    // The turn ends as done, and the tool never said what it gave back.
+    world.says(
+        1,
+        r#"{"type":"result","subtype":"success","is_error":false,"result":""}"#,
+    );
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        chat(&actor.tail(10).unwrap()),
+        [
+            row("u-1", "user: go", "", false, ""),
+            row("r-a", "agent: ", "t1 Running", false, "completed"),
+        ]
+    );
 }
 
 /// Two messages, the second sent while the first turn runs; a tool call; replies in pieces.

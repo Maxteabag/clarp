@@ -825,13 +825,18 @@ pub fn previewed(version: &Versioned) -> bool {
 
 /// One use of a tool as the card a conversation shows of it: what was asked of the tool in
 /// the words of its kind, `recorded` while it runs, and `ok` or `error` with the beginning
-/// of what came back once it has returned. What was given to the tool whole and what it
-/// gave back whole do not leave the Host this way.
+/// of what came back once it has returned. A use its turn was interrupted under reads
+/// `interrupted`. What was given to the tool whole and what it gave back whole do not
+/// leave the Host this way.
 fn card(call: &ToolCall) -> Value {
     let mut card = tools::card(&call.name, &call.input, &call.id);
-    if call.status != ToolStatus::Running {
-        let came_back = Value::from(call.output.clone().unwrap_or_default());
-        tools::returned(&mut card, &came_back, call.status == ToolStatus::Error);
+    match call.status {
+        ToolStatus::Running => {}
+        ToolStatus::Interrupted => card["status"] = json!("interrupted"),
+        ToolStatus::Ok | ToolStatus::Error => {
+            let came_back = Value::from(call.output.clone().unwrap_or_default());
+            tools::returned(&mut card, &came_back, call.status == ToolStatus::Error);
+        }
     }
     card
 }
@@ -925,6 +930,7 @@ pub fn row(version: &Versioned) -> Value {
         // A call no message of the agent carries is a row by itself.
         Entry::Tool(call) => {
             row["kind"] = json!("tool");
+            row["trace_id"] = json!(call.trace_id.clone().unwrap_or_default());
             row["origin"] = json!(call.origin.name());
             row["tool_name"] = json!(call.name);
             row["tools"] = json!([card(call)]);
@@ -939,6 +945,7 @@ pub fn row(version: &Versioned) -> Value {
         Entry::Notice(notice) => {
             row["kind"] = json!("notice");
             row["text"] = json!(notice.text);
+            row["trace_id"] = json!(notice.trace_id.clone().unwrap_or_default());
         }
         // Served as it came, above.
         Entry::Imported(_) => {}
@@ -1629,6 +1636,17 @@ mod tests {
             (&failed["status"], &failed["result"]),
             (&json!("error"), &json!("Exit code 1"))
         );
+        // A use its turn was interrupted under says so, and shows nothing that came back.
+        let cut = card(&ToolCall {
+            id: "toolu_4".to_string(),
+            name: "Bash".to_string(),
+            input: json!({"command": "sleep 99"}),
+            status: ToolStatus::Interrupted,
+            ended_at_ms: Some(30),
+            ..ToolCall::default()
+        });
+        assert_eq!(cut["status"], "interrupted");
+        assert!(cut.get("result").is_none());
         // What was given to a tool whole and what it gave back whole stay on the Host.
         for turn in turns {
             for card in turn["tools"].as_array().unwrap() {

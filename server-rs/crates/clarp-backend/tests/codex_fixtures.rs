@@ -163,7 +163,7 @@ fn a_real_turn_that_failed_says_why_and_codexs_remarks_are_not_the_reason() {
 }
 
 #[test]
-fn a_real_turn_that_was_stopped_closes_the_command_it_was_running() {
+fn a_real_turn_that_was_stopped_leaves_the_command_it_was_running_to_the_host() {
     let signals = read("codex-0.167.1-stopped.jsonl", "m1", (None, Some(15)));
     let calls: Vec<_> = signals
         .iter()
@@ -174,13 +174,8 @@ fn a_real_turn_that_was_stopped_closes_the_command_it_was_running() {
         .collect();
     assert_eq!(
         calls,
-        vec![
-            (ToolStatus::Running, String::new()),
-            (
-                ToolStatus::Error,
-                "The turn ended before this tool finished.".to_string()
-            )
-        ]
+        vec![(ToolStatus::Running, String::new())],
+        "what becomes of a command that never came back follows from how the turn ended"
     );
     assert_eq!(
         signals.last(),

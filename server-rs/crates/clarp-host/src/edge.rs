@@ -78,6 +78,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("pairing", 1),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
+    // A settled turn can be folded from the conversation alone: every row a turn writes
+    // carries the turn's trace, what the agent said its phase, the turn's last row how the
+    // turn ended, and a tool an interrupted turn cut off reads `interrupted`.
+    ("log_turn_summary", 47),
     // Plans with goals: `/task-plan`, `/task-plans`, `/task-plan/action`.
     ("durable_task_goals", 21),
     ("background_job_cancel_generation", 23),
