@@ -48,6 +48,9 @@ pub enum Command {
     /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
     /// hand. Only when no turn runs.
     SendNow { turn: TurnId, by: String },
+    /// The words of a waiting message were written anew, at `message_seq`: its turn answers
+    /// those. It keeps its place among what waits.
+    Reword { turn: TurnId, message_seq: u64 },
     /// End the live turn and hold the mailbox.
     Stop { by: String },
     /// Let the mailbox run again.
@@ -113,6 +116,12 @@ pub enum AgentEvent {
     SentNow {
         turn: TurnId,
         by: String,
+        at_ms: i64,
+    },
+    /// The words of a waiting turn's message were written anew, at `message_seq`.
+    Reworded {
+        turn: TurnId,
+        message_seq: u64,
         at_ms: i64,
     },
     /// The agent's own label for what it is busy with beyond its turns. Empty: none any more.
@@ -378,6 +387,16 @@ impl Agent {
                 });
                 work.let_go_of_nothing(&by, now_ms);
             }
+            Command::Reword { turn, message_seq } => {
+                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::Reworded {
+                    turn,
+                    message_seq,
+                    at_ms: now_ms,
+                });
+            }
             Command::SendNow { turn, by } => {
                 if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
                     return Err(Refusal::NotWaiting(turn));
@@ -562,6 +581,21 @@ impl Agent {
             AgentEvent::Resumed { .. } => {
                 self.paused = false;
                 self.unheld.clear();
+                self.queue_revision += 1;
+            }
+            AgentEvent::Reworded {
+                turn, message_seq, ..
+            } => {
+                let waiting = self.mailbox.iter_mut().find(|queued| queued.id == *turn);
+                let Some(queued) = waiting else {
+                    return Err(IllegalTransition {
+                        turn: *turn,
+                        state: "not waiting",
+                        event: "reworded",
+                    });
+                };
+                queued.message_seq = *message_seq;
+                // What waits changed: a client that orders queue news by the revision asks again.
                 self.queue_revision += 1;
             }
             AgentEvent::SentNow { turn, .. } => {
@@ -1233,6 +1267,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_words_of_a_waiting_message_are_written_anew_and_it_keeps_its_place() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.user(12);
+        let revision = a.agent.queue_revision();
+        let anew = |turn: u64, message_seq: u64| Command::Reword {
+            turn: TurnId(turn),
+            message_seq,
+        };
+        assert_eq!(a.send(anew(2, 20)).unwrap(), vec![]);
+        assert_eq!(a.waiting(), vec![2, 3], "it keeps its place");
+        assert_eq!(a.agent.queue_revision(), revision + 1);
+        // What runs, what has run and what never was has no words to change.
+        for turn in [1, 9] {
+            assert_eq!(
+                a.send(anew(turn, 21)),
+                Err(Refusal::NotWaiting(TurnId(turn)))
+            );
+        }
+        // Its turn answers the words as they are now.
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 20
+            }]
+        );
+        assert_eq!(a.send(anew(2, 22)), Err(Refusal::NotWaiting(TurnId(2))));
+        // Written anew twice, the last words stand; and so they do while a hold holds them.
+        a.send(stop()).unwrap();
+        a.finish(2);
+        a.send(anew(3, 23)).unwrap();
+        a.send(anew(3, 24)).unwrap();
+        assert!(a.agent.is_paused() && a.agent.holds(TurnId(3)));
+        assert_eq!(
+            a.send(by_hand(3)).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 24
+            }]
+        );
+    }
+
     fn by_hand(turn: u64) -> Command {
         Command::SendNow {
             turn: TurnId(turn),
@@ -1701,7 +1780,7 @@ mod tests {
             let mut accepted = 0u64;
             for step in 0..120u64 {
                 let live = a.live().map(TurnId);
-                let command = match next(11) {
+                let command = match next(12) {
                     0..=2 => {
                         accepted += 1;
                         let origin = if next(3) == 0 {
@@ -1749,6 +1828,10 @@ mod tests {
                     9 => Command::SendNow {
                         turn: TurnId(next(accepted + 2)),
                         by: "peter".to_string(),
+                    },
+                    10 => Command::Reword {
+                        turn: TurnId(next(accepted + 2)),
+                        message_seq: 1_000 + step,
                     },
                     _ => Command::TurnEnded {
                         turn: live.unwrap_or(TurnId(999)),

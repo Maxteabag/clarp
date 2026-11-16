@@ -176,6 +176,16 @@ impl Committed {
     }
 }
 
+/// What became of the wish to change the words of a waiting message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reworded {
+    Done,
+    /// It does not wait: it ran, was taken back, or never was.
+    NotWaiting,
+    /// It waits its turn in the conversation, where it was said: what was said stands.
+    InConversation,
+}
+
 pub struct Recorder {
     log: Box<dyn AgentLog>,
     agent: Agent,
@@ -192,7 +202,8 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
-        | AgentEvent::SentNow { turn, .. } => Some(turn.0),
+        | AgentEvent::SentNow { turn, .. }
+        | AgentEvent::Reworded { turn, .. } => Some(turn.0),
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
@@ -288,6 +299,46 @@ impl Recorder {
             cursor: None,
             failed: None,
         }
+    }
+
+    /// Writes the words of a waiting message anew. Only a message that waits outside the
+    /// conversation has words that can change: one that is in the conversation was said.
+    /// `rewrite` is given the message as it is kept, and answers it as it is to be kept. The
+    /// message as it was stays in the log where it is, and nothing reads it there any more.
+    pub fn reword(
+        &mut self,
+        turn: TurnId,
+        rewrite: impl FnOnce(&[u8]) -> Result<Vec<u8>, JournalError>,
+        now_ms: i64,
+    ) -> Result<Reworded, JournalError> {
+        let waiting = self.agent.waiting().find(|queued| queued.id == turn);
+        let Some(message_seq) = waiting.map(|queued| queued.message_seq) else {
+            return Ok(Reworded::NotWaiting);
+        };
+        let kept =
+            self.log
+                .read_after(message_seq.saturating_sub(1), Kinds::only(kind::WAITING), 1)?;
+        let Some(stored) = kept.into_iter().find(|item| item.seq == message_seq) else {
+            return Ok(Reworded::InConversation);
+        };
+        let body = rewrite(&stored.body)?;
+        // This recorder is the log's one writer: the item it writes first is the next one.
+        let anew = self.last_seq + 1;
+        let mut batch = self.batch();
+        let mut item = NewItem::new(kind::WAITING, now_ms, body).in_turn(turn.0);
+        item.key = stored.key;
+        batch.item(item);
+        batch
+            .command(
+                Command::Reword {
+                    turn,
+                    message_seq: anew,
+                },
+                now_ms,
+            )
+            .map_err(JournalError::Refused)?;
+        batch.commit()?;
+        Ok(Reworded::Done)
     }
 
     /// Records a command's events, then applies them. Returns the effects to carry out.
