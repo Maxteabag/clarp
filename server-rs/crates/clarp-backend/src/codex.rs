@@ -285,6 +285,7 @@ impl CodexInterpreter {
                         turn: self.turn,
                         text: text.to_string(),
                         trace_id: None,
+                        ..Reply::default()
                     }));
                     self.moved(Activity::Thinking, out);
                 } else {
@@ -322,6 +323,7 @@ impl CodexInterpreter {
                         output: None,
                         started_at_ms: t,
                         ended_at_ms: None,
+                        ..ToolCall::default()
                     });
                 if call.status != ToolStatus::Running {
                     return; // told twice
@@ -351,6 +353,7 @@ impl CodexInterpreter {
                     output: None,
                     started_at_ms: t,
                     ended_at_ms: None,
+                    ..ToolCall::default()
                 };
                 self.tools.insert(id.to_string(), call.clone());
                 out.push(Signal::Tool(call));
@@ -549,7 +552,8 @@ mod tests {
                     id: "r-m1-item_1".to_string(),
                     turn: 3,
                     text: "One file.".to_string(),
-                    trace_id: None
+                    trace_id: None,
+                    ..Reply::default()
                 }),
                 Signal::Moved(Activity::Thinking),
                 Signal::Usage {

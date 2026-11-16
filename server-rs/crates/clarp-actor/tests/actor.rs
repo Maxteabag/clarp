@@ -10,13 +10,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use clarp_actor::conversation::Which;
 use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder};
 use clarp_backend::Backend;
+use clarp_backend::claude::Claude;
 use clarp_backend::scripted::Scripted;
 use clarp_codec::standard_set;
 use clarp_kernel::conversation::{Entry, Message, ToolStatus};
+use clarp_kernel::journal::kind;
 use clarp_kernel::turn::{Admission, Origin, Outcome, TurnId};
 use clarp_ports::log::LogEngine;
 use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolWriter};
 use clarp_store_mem::MemEngine;
+use serde_json::json;
 
 static WORLDS: AtomicU64 = AtomicU64::new(0);
 
@@ -193,6 +196,7 @@ fn shown(actor: &Actor) -> Vec<(String, String)> {
                 Entry::Tool(call) => format!("{} {:?} {:?}", call.name, call.status, call.output),
                 Entry::Notice(notice) => format!("notice: {}", notice.code),
                 Entry::TurnEnd(end) => format!("end: {}", end.status),
+                Entry::Commentary(part) => format!("along the way: {}", part.reply),
                 Entry::Imported(imported) => format!(
                     "from before, {}: {}",
                     imported.row["role"].as_str().unwrap_or("?"),
@@ -613,6 +617,273 @@ enum Event {
     Send(&'static str, &'static str),
     Says(u64, &'static str),
     Exits(u64),
+}
+
+/// A row as a chat shows it: its id, what it says, the uses of its tools as they stand,
+/// whether tool work came after it, and how its turn ended when it is the row that closed it.
+type Shown = (String, String, String, bool, String);
+
+fn chat(page: &clarp_actor::conversation::Page) -> Vec<Shown> {
+    page.entries
+        .iter()
+        .map(|row| {
+            let said = match &row.entry {
+                Entry::Message(message) => format!("user: {}", message.text),
+                Entry::Reply(reply) if row.live => format!("writing: {}", reply.text),
+                Entry::Reply(reply) => format!("agent: {}", reply.text),
+                Entry::Notice(notice) => format!("notice: {}", notice.code),
+                other => format!("{other:?}"),
+            };
+            let tools: Vec<String> = row
+                .tools
+                .iter()
+                .map(|call| format!("{} {:?}", call.id, call.status))
+                .collect();
+            let end = row.turn.as_ref().map(|end| end.status.clone());
+            (
+                row.entry.id().to_string(),
+                said,
+                tools.join(", "),
+                row.commentary,
+                end.unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+fn row(id: &str, said: &str, tools: &str, commentary: bool, end: &str) -> Shown {
+    (
+        id.to_string(),
+        said.to_string(),
+        tools.to_string(),
+        commentary,
+        end.to_string(),
+    )
+}
+
+/// One message of Claude Code as it streams it: the message starts, what it says and each
+/// tool it calls arrive, the message stops.
+fn claude_message(world: &mut World, turn: u64, id: &str, said: &str, calls: &[&str]) {
+    let piece = |event: serde_json::Value| json!({"type": "stream_event", "event": event});
+    let name = format!("msg_{id}");
+    let start = piece(json!({"type": "message_start", "message": {"id": name}}));
+    world.says(turn, &start.to_string());
+    if !said.is_empty() {
+        let block = json!({"type": "text", "text": said});
+        let text =
+            piece(json!({"type": "content_block_start", "index": 0, "content_block": block}));
+        world.says(turn, &text.to_string());
+    }
+    for call in calls {
+        let block =
+            json!({"type": "tool_use", "id": call, "name": "Bash", "input": {"command": "ls"}});
+        let whole = json!({"type": "assistant", "message": {"id": name, "content": [block]}});
+        world.says(turn, &whole.to_string());
+    }
+    world.says(turn, &piece(json!({"type": "message_stop"})).to_string());
+}
+
+/// What a tool gave back, as Claude Code says it.
+fn claude_returns(world: &mut World, turn: u64, call: &str, output: &str, failed: bool) {
+    let result =
+        json!({"type": "tool_result", "tool_use_id": call, "content": output, "is_error": failed});
+    let whole = json!({"type": "user", "message": {"role": "user", "content": [result]}});
+    world.says(turn, &whole.to_string());
+}
+
+#[test]
+fn a_message_of_the_agent_is_one_row_with_the_tools_it_calls() {
+    let mut world = World::new("message-rows");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    let opened = actor.tail(10).unwrap();
+
+    // It says something and calls a tool: one row, with the tool's use on it.
+    claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
+    world.hint(&mut actor);
+    assert_eq!(
+        chat(&actor.tail(10).unwrap()),
+        [
+            row("u-1", "user: go", "", false, ""),
+            row("r-a", "agent: Looking.", "t1 Running", false, ""),
+        ]
+    );
+    let first = actor.after(opened.latest_revision, 10).unwrap();
+    assert_eq!(
+        chat(&first),
+        [row("r-a", "agent: Looking.", "t1 Running", false, "")],
+        "the row is new once, though it and its tool's use are two things in the log"
+    );
+
+    // The tool returns: the row changed, and whoever asks what is newer is given it again.
+    claude_returns(&mut world, 1, "t1", "a.txt", false);
+    world.hint(&mut actor);
+    let second = actor.after(first.latest_revision, 10).unwrap();
+    assert_eq!(
+        chat(&second),
+        [row("r-a", "agent: Looking.", "t1 Ok", false, "")]
+    );
+    assert!(second.entries[0].revision > first.entries[0].revision);
+    assert_eq!(second.entries[0].ts_ms, first.entries[0].ts_ms);
+
+    // A message that says nothing and calls two tools is a row all the same. Tool work came
+    // after what was said before: that row was said along the way, and changed with it.
+    claude_message(&mut world, 1, "b", "", &["t2", "t3"]);
+    world.hint(&mut actor);
+    let third = actor.after(second.latest_revision, 10).unwrap();
+    assert_eq!(
+        chat(&third),
+        [
+            row("r-a", "agent: Looking.", "t1 Ok", true, ""),
+            row("r-b", "agent: ", "t2 Running, t3 Running", false, ""),
+        ]
+    );
+    assert!(third.entries[0].revision > second.entries[0].revision);
+    assert!(
+        actor
+            .after(third.latest_revision, 10)
+            .unwrap()
+            .entries
+            .is_empty()
+    );
+    claude_returns(&mut world, 1, "t2", "one", false);
+    claude_returns(&mut world, 1, "t3", "broke", true);
+
+    // Then it answers, and the turn ends on what it answered.
+    claude_message(&mut world, 1, "c", "Done.", &[]);
+    world.says(
+        1,
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Done."}"#,
+    );
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let whole = [
+        row("u-1", "user: go", "", false, ""),
+        row("r-a", "agent: Looking.", "t1 Ok", true, ""),
+        row("r-b", "agent: ", "t2 Ok, t3 Error", false, ""),
+        row("r-c", "agent: Done.", "", false, "completed"),
+    ];
+    assert_eq!(chat(&actor.tail(10).unwrap()), whole);
+    assert_eq!(actor.status().last.unwrap().outcome, Outcome::Completed);
+
+    // A page is counted in rows, whatever the tools of a row did meanwhile, and a row on an
+    // older page is read as it is now.
+    let newest = actor.tail(2).unwrap();
+    assert_eq!(chat(&newest), whole[2..]);
+    assert!(newest.has_more);
+    let older = actor.before("r-b", 2).unwrap().unwrap();
+    assert_eq!(chat(&older), whole[..2]);
+    assert!(!older.has_more);
+    let one = actor.before("r-c", 1).unwrap().unwrap();
+    assert_eq!(chat(&one), whole[2..3]);
+    assert!(one.has_more);
+
+    // A row by its id is the row as it is now. A tool's use is no row.
+    let by_id = actor.row("r-a").unwrap().unwrap();
+    assert_eq!(by_id.tools[0].output.as_deref(), Some("a.txt"));
+    assert!(by_id.commentary);
+    assert!(actor.row("t1").unwrap().is_none());
+    assert!(actor.row("c-r-a").unwrap().is_none());
+
+    // Catching up from the beginning, two things at a time: every row, in the order it
+    // first came, and the last word on each is how it is now.
+    let mut cursor = 0;
+    let mut caught: Vec<Shown> = Vec::new();
+    loop {
+        let page = actor.after(cursor, 2).unwrap();
+        assert!(page.latest_revision >= cursor);
+        cursor = page.latest_revision;
+        caught.extend(chat(&page));
+        if !page.has_more {
+            break;
+        }
+    }
+    assert_eq!(cursor, actor.head_revision());
+    let mut ids: Vec<&str> = Vec::new();
+    for (id, ..) in &caught {
+        if !ids.contains(&id.as_str()) {
+            ids.push(id);
+        }
+    }
+    assert_eq!(ids, ["u-1", "r-a", "r-b", "r-c"]);
+    for shown in &whole {
+        let last = caught.iter().rfind(|row| row.0 == shown.0);
+        assert_eq!(last, Some(shown));
+    }
+
+    // In the log a row is written once: where it stands. The uses of its tools, that tool
+    // work came after it and how its turn ended are parts that name it.
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let keys = |kinds| -> Vec<String> {
+        let items = log.read_after(0, kinds, 100).unwrap();
+        items.into_iter().filter_map(|item| item.key).collect()
+    };
+    assert_eq!(keys(kind::ROWS), ["u-1", "r-a", "r-b", "r-c"]);
+    assert_eq!(
+        keys(kind::CONVERSATION),
+        [
+            "u-1", "r-a", "t1", "t1", "c-r-a", "r-b", "t2", "t3", "t2", "t3", "r-c", "t-1"
+        ]
+    );
+}
+
+#[test]
+fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
+    let mut world = World::new("message-rows-restart");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_message(&mut world, 1, "a", "Looking.", &[]);
+    world.hint(&mut actor);
+
+    // The server goes and comes back while the turn runs. What the turn has said is in the
+    // log, and so is that no tool work has followed it.
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(world.followed, vec![1]);
+    claude_message(&mut world, 1, "b", "", &["t1"]);
+    world.hint(&mut actor);
+    assert_eq!(
+        chat(&actor.tail(10).unwrap()),
+        [
+            row("u-1", "user: go", "", false, ""),
+            row("r-a", "agent: Looking.", "", true, ""),
+            row("r-b", "agent: ", "t1 Running", false, ""),
+        ]
+    );
+
+    // And again, with a tool running: its use is still a part of its row afterwards.
+    drop(actor);
+    let mut actor = world.open();
+    let before = actor.tail(10).unwrap().latest_revision;
+    // The tool's process is killed. The use that never came back is closed on its row, and
+    // the word of the Host about the end is the row that closes the turn.
+    world.exits(1, None, Some(9));
+    world.hint(&mut actor);
+    assert_eq!(
+        chat(&actor.tail(10).unwrap()),
+        [
+            row("u-1", "user: go", "", false, ""),
+            row("r-a", "agent: Looking.", "", true, ""),
+            row("r-b", "agent: ", "t1 Error", false, ""),
+            row(
+                "n-1-turn-interrupted",
+                "notice: turn-interrupted",
+                "",
+                false,
+                "interrupted"
+            ),
+        ]
+    );
+    let changed: Vec<String> = chat(&actor.after(before, 10).unwrap())
+        .into_iter()
+        .map(|row| row.0)
+        .collect();
+    assert_eq!(changed, ["r-b", "n-1-turn-interrupted"]);
 }
 
 /// Two messages, the second sent while the first turn runs; a tool call; replies in pieces.

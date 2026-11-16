@@ -92,7 +92,7 @@ fn a_real_turn_that_only_answers() {
 fn a_real_turn_that_calls_a_tool_and_then_answers() {
     let signals = read("claude-2.1.321-tool.jsonl");
     let stored = stored(&signals);
-    assert_eq!(stored.len(), 8, "{stored:#?}");
+    assert_eq!(stored.len(), 9, "{stored:#?}");
     assert_eq!(
         stored[0],
         &Signal::Bound {
@@ -105,14 +105,25 @@ fn a_real_turn_that_calls_a_tool_and_then_answers() {
             name: "Bash".to_string()
         })
     );
-    let Signal::Tool(started) = stored[2] else {
-        panic!("a tool call starts, not {:?}", stored[2]);
+    // The message that calls the tool says nothing: it is a reply all the same, told when
+    // the message is whole, and the tool's use is shown on it.
+    let Signal::Reply(calling) = stored[2] else {
+        panic!(
+            "the message that calls the tool is a reply, not {:?}",
+            stored[2]
+        );
     };
+    assert_eq!(calling.text, "");
+    let Signal::Tool(started) = stored[3] else {
+        panic!("a tool call starts, not {:?}", stored[3]);
+    };
+    assert_eq!(calling.tools, std::slice::from_ref(&started.id));
+    assert_eq!(started.reply.as_deref(), Some(calling.id.as_str()));
     assert_eq!(started.status, ToolStatus::Running);
     assert_eq!(started.name, "Bash");
     assert_eq!(started.input["command"], "echo clarp-spool-check");
-    let Signal::Tool(ended) = stored[3] else {
-        panic!("the tool call ends, not {:?}", stored[3]);
+    let Signal::Tool(ended) = stored[4] else {
+        panic!("the tool call ends, not {:?}", stored[4]);
     };
     assert_eq!(
         (ended.id.as_str(), ended.status),
@@ -125,13 +136,15 @@ fn a_real_turn_that_calls_a_tool_and_then_answers() {
             .unwrap()
             .contains("clarp-spool-check")
     );
-    assert_eq!(stored[4], &Signal::Moved(Activity::Thinking));
-    assert_eq!(stored[5], &Signal::Moved(Activity::Responding));
-    let Signal::Reply(reply) = stored[6] else {
-        panic!("then the agent answers, not {:?}", stored[6]);
+    assert_eq!(ended.reply, started.reply);
+    assert_eq!(stored[5], &Signal::Moved(Activity::Thinking));
+    assert_eq!(stored[6], &Signal::Moved(Activity::Responding));
+    let Signal::Reply(reply) = stored[7] else {
+        panic!("then the agent answers, not {:?}", stored[7]);
     };
     assert!(reply.text.contains("clarp-spool-check"));
-    assert_eq!(stored[7], &Signal::Ended(RunOutcome::Completed));
+    assert!(reply.tools.is_empty() && reply.id != calling.id);
+    assert_eq!(stored[8], &Signal::Ended(RunOutcome::Completed));
 }
 
 #[test]

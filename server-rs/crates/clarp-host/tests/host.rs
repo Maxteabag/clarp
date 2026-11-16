@@ -1916,13 +1916,18 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
         host.state(&session) == "done"
     });
     let turns = host.turns(&session);
+    // The tool's use is a card on the row of the message that called it.
     let tool = turns
         .iter()
-        .find(|turn| turn["kind"] == "tool")
+        .find(|turn| {
+            turn["tools"]
+                .as_array()
+                .is_some_and(|tools| !tools.is_empty())
+        })
         .expect("the tool call is in the conversation");
     assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
     assert!(
-        tool["tools"][0]["output"]
+        tool["tools"][0]["result"]
             .as_str()
             .unwrap()
             .contains("spool-survived")
@@ -2054,7 +2059,7 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
         .expect("the command is in the conversation");
     assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
     assert!(
-        tool["tools"][0]["output"]
+        tool["tools"][0]["result"]
             .as_str()
             .unwrap()
             .contains("spool-survived")

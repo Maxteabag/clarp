@@ -8,11 +8,12 @@
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
-use clarp_kernel::conversation::{Entry, Notice, ToolStatus, TurnEnd};
+use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
 use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::notify;
 use clarp_kernel::recovery;
+use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
@@ -818,8 +819,21 @@ pub fn previewed(version: &Versioned) -> bool {
                 .is_some_and(|name| !name.is_empty());
             by_hand && said && !tool
         }
-        Entry::Tool(_) | Entry::TurnEnd(_) => false,
+        Entry::Tool(_) | Entry::TurnEnd(_) | Entry::Commentary(_) => false,
     }
+}
+
+/// One use of a tool as the card a conversation shows of it: what was asked of the tool in
+/// the words of its kind, `recorded` while it runs, and `ok` or `error` with the beginning
+/// of what came back once it has returned. What was given to the tool whole and what it
+/// gave back whole do not leave the Host this way.
+fn card(call: &ToolCall) -> Value {
+    let mut card = tools::card(&call.name, &call.input, &call.id);
+    if call.status != ToolStatus::Running {
+        let came_back = Value::from(call.output.clone().unwrap_or_default());
+        tools::returned(&mut card, &came_back, call.status == ToolStatus::Error);
+    }
+    card
 }
 
 /// One thing of a conversation as the contract's "turn": a row, with every field of a row.
@@ -890,25 +904,30 @@ pub fn row(version: &Versioned) -> Value {
             if let Origin::Agent { agent_id } = &reply.origin {
                 row["reply_to_agent_id"] = json!(agent_id);
             }
+            // The tools its message calls, a card each, in the message's order.
+            row["tools"] = version.tools.iter().map(card).collect();
+            // What a message said, it said along the way when tool work came after it in
+            // its turn, and at the end otherwise. One that said nothing has no phase, and
+            // neither has one that is still being written.
+            if !version.live
+                && row["text"]
+                    .as_str()
+                    .is_some_and(|text| !text.trim().is_empty())
+            {
+                let phase = if version.commentary {
+                    "commentary"
+                } else {
+                    "final"
+                };
+                row["phase"] = json!(phase);
+            }
         }
+        // A call no message of the agent carries is a row by itself.
         Entry::Tool(call) => {
-            let status = match call.status {
-                ToolStatus::Running => "running",
-                ToolStatus::Ok => "ok",
-                ToolStatus::Error => "error",
-            };
             row["kind"] = json!("tool");
             row["origin"] = json!(call.origin.name());
             row["tool_name"] = json!(call.name);
-            row["tools"] = json!([{
-                "id": call.id,
-                "name": call.name,
-                "input": call.input,
-                "status": status,
-                "output": call.output,
-                "started_at_ms": call.started_at_ms,
-                "ended_at_ms": call.ended_at_ms,
-            }]);
+            row["tools"] = json!([card(call)]);
         }
         // Why a turn failed, under the message that caused it: the Host's own word, not the
         // agent's and not the user's.
@@ -923,15 +942,11 @@ pub fn row(version: &Versioned) -> Value {
         }
         // Served as it came, above.
         Entry::Imported(_) => {}
-        // Never a row of its own: it is told on the row it closes.
-        Entry::TurnEnd(_) => {}
+        // Never rows of their own: they are told on the row they belong to.
+        Entry::TurnEnd(_) | Entry::Commentary(_) => {}
     }
     if let Some(end) = &version.turn {
         row["turn"] = turn_end(end);
-        // The reply that closes a turn that ran to its end is the agent's final word in it.
-        if end.status == "completed" && matches!(version.entry, Entry::Reply(_)) {
-            row["phase"] = json!("final");
-        }
     }
     row
 }
@@ -1098,7 +1113,7 @@ fn preview(version: &Versioned) -> String {
             imported.row["role"] == "user",
             imported.row["text"].as_str().unwrap_or(""),
         ),
-        Entry::TurnEnd(_) => (false, ""),
+        Entry::TurnEnd(_) | Entry::Commentary(_) => (false, ""),
     };
     let shown = markup::clean_for_display(text, true);
     if shown.is_empty() {
@@ -1437,13 +1452,21 @@ mod tests {
 
     fn version(entry: Entry, revision: u64, turn: Option<TurnEnd>) -> Versioned {
         Versioned {
-            entry,
-            revision,
-            ts_ms: 0,
-            live: false,
             turn_number: Some(1),
             turn,
+            ..Versioned::of(entry, revision, 0)
         }
+    }
+
+    fn reply(id: &str, text: &str, tools: &[&ToolCall]) -> Entry {
+        Entry::Reply(Reply {
+            origin: Origin::User,
+            id: id.to_string(),
+            turn: 1,
+            text: text.to_string(),
+            trace_id: None,
+            tools: tools.iter().map(|call| call.id.clone()).collect(),
+        })
     }
 
     fn page() -> Page {
@@ -1454,11 +1477,44 @@ mod tests {
             status: "completed".to_string(),
             started_at_ms: Some(10),
             ended_at_ms: 40,
-            tool_count: 1,
+            tool_count: 3,
             trace_id: None,
             model: None,
             tokens_in: None,
             tokens_out: None,
+        };
+        let listed = ToolCall {
+            id: "toolu_1".to_string(),
+            turn: 1,
+            name: "Bash".to_string(),
+            input: json!({"command": "ls", "description": "List the files"}),
+            status: ToolStatus::Ok,
+            output: Some("a.txt".to_string()),
+            started_at_ms: 10,
+            ended_at_ms: Some(20),
+            reply: Some("r-0".to_string()),
+            ..ToolCall::default()
+        };
+        let reading = ToolCall {
+            id: "toolu_2".to_string(),
+            turn: 1,
+            name: "Read".to_string(),
+            input: json!({"file_path": "/work/a.txt"}),
+            started_at_ms: 22,
+            reply: Some("r-quiet".to_string()),
+            ..ToolCall::default()
+        };
+        // A call no message carries: a row by itself, as every call once was.
+        let alone = ToolCall {
+            id: "toolu_3".to_string(),
+            turn: 1,
+            name: "Bash".to_string(),
+            input: json!({"command": "false"}),
+            status: ToolStatus::Error,
+            output: Some("Exit code 1".to_string()),
+            started_at_ms: 24,
+            ended_at_ms: Some(26),
+            ..ToolCall::default()
         };
         Page {
             entries: vec![
@@ -1474,32 +1530,19 @@ mod tests {
                     1 << 20,
                     None,
                 ),
-                version(
-                    Entry::Tool(ToolCall {
-                        origin: Origin::User,
-                        id: "toolu_1".to_string(),
-                        turn: 1,
-                        name: "Bash".to_string(),
-                        input: json!({"command": "ls"}),
-                        status: ToolStatus::Ok,
-                        output: Some("a.txt".to_string()),
-                        started_at_ms: 10,
-                        ended_at_ms: Some(20),
-                    }),
-                    5 << 20,
-                    None,
-                ),
-                version(
-                    Entry::Reply(Reply {
-                        origin: Origin::User,
-                        id: "r-1".to_string(),
-                        turn: 1,
-                        text: "One file.".to_string(),
-                        trace_id: None,
-                    }),
-                    7 << 20,
-                    Some(end),
-                ),
+                // It said something and called a tool, and tool work came after it.
+                Versioned {
+                    tools: vec![listed.clone()],
+                    commentary: true,
+                    ..version(reply("r-0", "I will look.", &[&listed]), 4 << 20, None)
+                },
+                // It said nothing and calls a tool that still runs.
+                Versioned {
+                    tools: vec![reading.clone()],
+                    ..version(reply("r-quiet", "", &[&reading]), 5 << 20, None)
+                },
+                version(Entry::Tool(alone), 6 << 20, None),
+                version(reply("r-1", "One file.", &[]), 7 << 20, Some(end)),
             ],
             latest_revision: 7 << 20,
             has_more: true,
@@ -1540,7 +1583,9 @@ mod tests {
             said,
             vec![
                 ("u-1", "user", "go"),
-                ("toolu_1", "assistant", ""),
+                ("r-0", "assistant", "I will look."),
+                ("r-quiet", "assistant", ""),
+                ("toolu_3", "assistant", ""),
                 ("r-1", "assistant", "One file.")
             ]
         );
@@ -1550,23 +1595,69 @@ mod tests {
             keys.retain(|key| key != "turn");
             keys
         };
-        assert_eq!(fields(&turns[0]), fields(&turns[1]));
-        assert_eq!(fields(&turns[0]), fields(&turns[2]));
+        for turn in turns {
+            assert_eq!(fields(&turns[0]), fields(turn), "{}", turn["id"]);
+        }
         assert_eq!(fields(&turns[0]).len(), 20);
         assert_eq!(turns[0]["trace_id"], "t-1");
         assert_eq!(turns[0]["timestamp"], "1970-01-01T00:00:00.000Z");
-        assert_eq!(turns[1]["tools"][0]["status"], "ok");
-        // The row that closed the turn says how it ended, and is the agent's final word.
-        assert!(turns[0].get("turn").is_none() && turns[1].get("turn").is_none());
-        assert_eq!(turns[2]["phase"], "final");
+        // A message of the agent is one row: what it said, and a card for each tool it calls.
         assert_eq!(
-            turns[2]["turn"],
-            json!({"turn_id": "1", "status": "completed", "started_at_ms": 10, "ended_at_ms": 40, "worked_ms": 30, "tool_count": 1}),
+            turns[1]["tools"],
+            json!([{"name": "Bash", "summary": "List the files", "action": "running command", "file_path": "",
+                    "status": "ok", "id": "toolu_1", "command": "ls",
+                    "description": "List the files", "result": "a.txt"}])
+        );
+        assert_eq!(
+            (&turns[1]["kind"], &turns[1]["tool_name"]),
+            (&Value::Null, &Value::Null)
+        );
+        // A tool that still runs is `recorded`, and nothing came back yet.
+        let running = &turns[2]["tools"][0];
+        assert_eq!(
+            (&running["name"], &running["status"], &running["file_path"]),
+            (&json!("Read"), &json!("recorded"), &json!("/work/a.txt"))
+        );
+        assert!(running.get("result").is_none());
+        // A call that is a row by itself is shown by its card too.
+        assert_eq!(
+            (&turns[3]["kind"], &turns[3]["tool_name"]),
+            (&json!("tool"), &json!("Bash"))
+        );
+        let failed = &turns[3]["tools"][0];
+        assert_eq!(
+            (&failed["status"], &failed["result"]),
+            (&json!("error"), &json!("Exit code 1"))
+        );
+        // What was given to a tool whole and what it gave back whole stay on the Host.
+        for turn in turns {
+            for card in turn["tools"].as_array().unwrap() {
+                assert!(card.get("input").is_none() && card.get("output").is_none());
+            }
+        }
+        // What was said before tool work was said along the way; what is said after it is
+        // the agent's final word; a row that says nothing has no phase.
+        let phases: Vec<&Value> = turns.iter().map(|turn| &turn["phase"]).collect();
+        assert_eq!(
+            phases,
+            [
+                &Value::Null,
+                &json!("commentary"),
+                &Value::Null,
+                &Value::Null,
+                &json!("final")
+            ]
+        );
+        // The row that closed the turn says how it ended.
+        assert!(turns[..4].iter().all(|turn| turn.get("turn").is_none()));
+        assert_eq!(
+            turns[4]["turn"],
+            json!({"turn_id": "1", "status": "completed", "started_at_ms": 10, "ended_at_ms": 40, "worked_ms": 30, "tool_count": 3}),
             "a turn without a trace is named by its number"
         );
         // And it is the contract's shape: it reads as the type the apps are generated from.
         let typed: LogResponse = serde_json::from_value(answer).unwrap();
-        assert_eq!(typed.turns.len(), 3);
+        assert_eq!(typed.turns.len(), 5);
 
         let nothing = no_conversation("/home/me");
         assert_eq!(
@@ -2008,6 +2099,7 @@ mod tests {
                 turn: 1,
                 text: "All done.".to_string(),
                 trace_id: None,
+                ..Reply::default()
             }),
             9,
             None,
@@ -2054,6 +2146,7 @@ mod tests {
                 turn: 2,
                 text: "Done as you asked.".to_string(),
                 trace_id: None,
+                ..Reply::default()
             }),
             12,
             None,
@@ -2072,6 +2165,7 @@ mod tests {
                 turn: 3,
                 text: "The goal is reached.".to_string(),
                 trace_id: None,
+                ..Reply::default()
             }),
             15,
             None,
@@ -2110,6 +2204,7 @@ mod tests {
                     turn: 1,
                     text: text.to_string(),
                     trace_id: None,
+                    ..Reply::default()
                 }),
                 2,
                 None,
@@ -2197,6 +2292,7 @@ mod tests {
                     turn: 1,
                     text: text.to_string(),
                     trace_id: None,
+                    ..Reply::default()
                 }),
                 9,
                 None,

@@ -123,6 +123,7 @@ impl ScriptedInterpreter {
             turn: self.turn,
             text,
             trace_id: None,
+            ..Reply::default()
         }));
     }
 
@@ -158,6 +159,7 @@ impl ScriptedInterpreter {
                 output: None,
                 started_at_ms: t,
                 ended_at_ms: None,
+                ..ToolCall::default()
             };
             self.tools.insert(id, call.clone());
             out.push(Signal::Moved(Activity::Tool {
@@ -282,6 +284,7 @@ mod tests {
                 turn: 2,
                 text: "plain text is the reply\nand so is this".to_string(),
                 trace_id: None,
+                ..Reply::default()
             })
         );
         assert!(matches!(&durable[3], Signal::Tool(call) if call.status == ToolStatus::Running));
@@ -296,6 +299,7 @@ mod tests {
                 turn: 2,
                 text: "One file.".to_string(),
                 trace_id: None,
+                ..Reply::default()
             })
         );
         assert_eq!(durable[7], Signal::Ended(RunOutcome::Completed));
