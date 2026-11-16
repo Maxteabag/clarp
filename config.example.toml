@@ -308,6 +308,11 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # carry_live_rows = false           # true: a live row (the row a reply streams into) may be
 #                                   # new, rewritten or gone, unless a reply before the
 #                                   # tail's boundary carries its trace. Off by default.
+# carry_live_rows_by_words = false  # true (with carry_live_rows): such a live row is refused
+#                                   # only when a reply before the boundary with its trace has
+#                                   # words related to the row's (one begins with the other),
+#                                   # not for the trace alone. A full import then keeps those
+#                                   # words in its checkpoint. Off by default.
 # carry_settled_turns = false       # true (with carry_later_turns): a turn that was running when
 #                                   # the frontier was published may have settled, and the
 #                                   # transcript rows from the boundary on may carry its stamps.
