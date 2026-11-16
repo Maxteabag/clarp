@@ -81,12 +81,36 @@ def test_a_configuration_that_is_not_one_is_refused(monkeypatch):
         harness.configuration()
 
 
-def test_the_hosts_configuration_is_the_three_switches_under_a_tests_own(monkeypatch):
+def test_a_replace_revision_below_every_row_is_not_the_same_as_none():
+    """Both cover no row. One lane removed a slot and wrote every row again,
+    the other never said a replace: a client of the first was told to drop
+    its copy. Counted as rows covered alone, the two read the same."""
+    never = _view(ROWS, head=5, replace=0)
+    below = _view(ROWS, head=5, replace=2)
+    assert ordered(never) != ordered(below)
+    # Where it lies below the rows does not matter, only that it was said.
+    assert ordered(below) == ordered(_view(ROWS, head=5, replace=1))
+    # And one at a row is still told from one below them all.
+    assert ordered(below) != ordered(_view(ROWS, head=5, replace=3))
+
+
+def test_an_empty_conversation_that_said_a_replace_is_not_one_that_did_not():
+    assert ordered(_view([], head=4, replace=0)) != ordered(_view([], head=4, replace=4))
+    assert ordered(_view([], head=4, replace=4)) == ordered(_view([], head=9, replace=7))
+
+
+def test_the_hosts_configuration_is_the_seven_switches_under_a_tests_own(monkeypatch):
+    """What both Hosts run with (16 Nov 2026). Every one is a switch the
+    importer has and leaves off by default."""
+    from lib import transcript_incremental as inc
     monkeypatch.delenv("RM_N14_CONFIGURATION", raising=False)
     assert harness.configured() == {} and harness.tail_yields_before_it_writes()
     monkeypatch.setenv("RM_N14_CONFIGURATION", "hosts")
-    assert harness.configured() == {"carry_live_rows": True, "tail_yield_after_first_write": True,
-                                    "carry_settled_turns": True}
+    assert harness.configured() == dict.fromkeys(
+        ("carry_live_rows", "tail_yield_after_first_write", "carry_settled_turns",
+         "boundary_skips_dropped_records", "tail_keeps_frontier_when_grown",
+         "audit_grown_by_digest", "full_digest_while_parsing"), True)
+    assert all(inc._DEFAULTS[switch] is False for switch in harness.HOSTS_SWITCHES)
     assert harness.configured(carry_live_rows=False)["carry_live_rows"] is False
     assert not harness.tail_yields_before_it_writes()
     assert harness.tail_yields_before_it_writes({"settings": {"tail_yield_after_first_write": False}})

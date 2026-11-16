@@ -33,8 +33,12 @@ METADATA_TABLES = frozenset({"transcript_import_checkpoints", "transcript_import
 # with. A test's own settings come on top of either, so a test that is about
 # one of these switches being off says so itself.
 #     RM_N14_CONFIGURATION=hosts uv run --frozen --group dev python -m pytest tests/readmodel
+# The list is what the Hosts run, not what the importer could: a switch
+# joins it when it is switched on there (the seven of 16 Nov 2026).
 HOSTS_SWITCHES = {"carry_live_rows": True, "tail_yield_after_first_write": True,
-                  "carry_settled_turns": True}
+                  "carry_settled_turns": True, "boundary_skips_dropped_records": True,
+                  "tail_keeps_frontier_when_grown": True, "audit_grown_by_digest": True,
+                  "full_digest_while_parsing": True}
 
 
 def configuration() -> str:
@@ -55,6 +59,14 @@ def tail_yields_before_it_writes(faults=None) -> bool:
     one (``tail_yield_after_first_write``). A tail of three new rows, one row
     a batch, yields six times the first way and twice the second."""
     return not configured(**(faults or {}).get("settings", {})).get("tail_yield_after_first_write")
+
+
+def full_import_reads_the_file_again(faults=None) -> bool:
+    """Whether a full import reads the file a second time for its digest, with
+    these faults' settings: it does at the defaults (``digest_reads`` is
+    ``["all"]``), and takes the digest from its parse with
+    ``full_digest_while_parsing`` (``[]``)."""
+    return not configured(**(faults or {}).get("settings", {})).get("full_digest_while_parsing")
 
 
 def append_bytes(backend: str, ordinal: int, *, size: int = 1024,
@@ -135,6 +147,9 @@ def _revisions_by_order(view: dict) -> dict:
     give the same ranks, whatever numbers lie unused between them. A head's
     revision, its replace revision and the clock itself become the count of
     rows they are not older than: what a reader with that cursor has seen.
+    A head that never said a replace (0) stays apart from one whose replace
+    revision lies below every row: both cover no row, but only the second
+    told its clients to drop their copy (review of #350, finding 1).
 
     Why: once an import has removed a slot or parked a row, every batch it
     commits takes a number from the clock (message_writes.commit_batch), so
@@ -151,6 +166,11 @@ def _revisions_by_order(view: dict) -> dict:
     def covered(revision):
         return sum(1 for own in carried if own <= revision)
 
+    def ordered(table, name, value):
+        if table == "conversation_heads" and name == "replace_revision":
+            return None if not value else covered(value)
+        return covered(value)
+
     out = dict(view)
     rows = [[rank[value] if index == at else value for index, value in enumerate(row)]
             for row in view["messages"]["rows"]]
@@ -160,8 +180,9 @@ def _revisions_by_order(view: dict) -> dict:
                          ("message_clock", ("revision",))):
         if table not in view:
             continue
-        positions = [view[table]["columns"].index(name) for name in names]
-        rows = [[covered(value) if index in positions else value for index, value in enumerate(row)]
+        positions = {view[table]["columns"].index(name): name for name in names}
+        rows = [[ordered(table, positions[index], value) if index in positions else value
+                 for index, value in enumerate(row)]
                 for row in view[table]["rows"]]
         rows.sort(key=lambda r: json.dumps(r, sort_keys=True, separators=(",", ":")))
         out[table] = {"columns": view[table]["columns"], "rows": rows}

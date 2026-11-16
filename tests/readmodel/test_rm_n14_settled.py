@@ -52,9 +52,11 @@ HOUR = 3_600_000
 
 def _audited(world):
     """One import whose audit is due: a full import, which moves the boundary
-    up to the last turn."""
+    up to the last turn. That it is a full import is said, not left to the
+    default: with ``audit_grown_by_digest``, on in the Hosts' configuration,
+    a due audit of a grown file is a tail and the boundary stays."""
     kept = world.faults.get("settings")
-    world.faults["settings"] = {**(kept or {}), "audit_every": 1}
+    world.faults["settings"] = {**(kept or {}), "audit_every": 1, "audit_grown_by_digest": False}
     try:
         return world.imported()
     finally:
