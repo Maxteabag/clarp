@@ -1754,4 +1754,69 @@ SCENARIOS.append({
     ],
 })
 
+# The token the replay harness gives its Hosts (`tests/replay/capture.py`): made up, like every
+# text here. A step that carries headers of its own may say who asks otherwise, or not at all.
+TOKEN = 'replay-host-token'
+NOBODY = {'Authorization': ''}
+
+
+def asking(path, name, **headers):
+    """A request for `path` with headers of its own; an underscore in a name stands for a hyphen."""
+    return {**get(path, name), 'headers': {key.replace('_', '-'): value for key, value in headers.items()}}
+
+
+def guessing(path, name, address, body=None):
+    """A request by whoever a proxy on the Host's machine says asks from `address`, with a token
+    that is none; with a body, a pairing code that is none."""
+    step = post(path, body, name) if body is not None else get(path, name)
+    return {**step, 'headers': {'Authorization': 'Bearer synthetic-guess', 'X-Forwarded-For': address}}
+
+
+SCENARIOS.append({
+    'id': 'the-door',
+    'what': "who is trusted as the Host's own machine: the administrator's token opens the Host only when nobody "
+            'handed the request on, a token in an address is taken only there, whoever fails too often to say who '
+            'they are is told to wait, each asker for itself, and a Host that is told of no relay says so',
+    'steps': [
+        get('/network/relay', 'the relay, on a Host that is told of none'),
+        SNAPSHOT,
+        # What a proxy on the machine, the relay, or a page from elsewhere puts on a request: the socket is the
+        # machine's own, and the request is not.
+        asking('/agents/snapshot', 'handed on for an address', X_Forwarded_For='203.0.113.7'),
+        asking('/agents/snapshot', 'handed on over TLS', X_Forwarded_Proto='https'),
+        asking('/agents/snapshot', 'handed on by the tailnet', Tailscale_User_Login='owner@example.com'),
+        asking('/agents/snapshot', 'handed on by an edge', CF_Connecting_IP='203.0.113.7'),
+        asking('/agents/snapshot', 'handed on, by the standard word for it', Forwarded='for=203.0.113.7'),
+        asking('/agents/snapshot', 'handed on for a real address', X_Real_IP='203.0.113.7'),
+        asking('/agents/snapshot', 'said to have come through the relay', X_Clarp_Transport='relay'),
+        asking('/agents/snapshot', 'asked by a page from elsewhere', Origin='https://evil.example'),
+        asking('/agents/snapshot', 'asked across sites', Sec_Fetch_Site='cross-site'),
+        # And what says none of that.
+        asking('/agents/snapshot', 'asked by a page of the machine itself', Origin='http://localhost:7682'),
+        asking('/agents/snapshot', 'asked within the site', Sec_Fetch_Site='same-origin'),
+        asking('/agents/snapshot', 'asked by an app that says which it is', X_Clarp_Client='ios/141 contract=99'),
+        asking('/agents/snapshot', 'the word bearer in small letters', Authorization=f'bearer {TOKEN}'),
+        # A token in an address, and in a cookie: from the machine itself, and handed on.
+        asking(f'/agents/snapshot?token={TOKEN}', 'the token in the address', **NOBODY),
+        asking(f'/agents/snapshot?token={TOKEN}', 'the token in the address, handed on', **NOBODY,
+               X_Forwarded_For='203.0.113.7'),
+        asking('/agents/snapshot', 'the token in a cookie', **NOBODY, Cookie=f'x=1; claude_pwa_token={TOKEN}'),
+        asking('/agents/snapshot', 'the token in a cookie, handed on', **NOBODY,
+               Cookie=f'claude_pwa_token={TOKEN}', X_Forwarded_For='203.0.113.7'),
+        asking('/agents/snapshot', 'no token at all', **NOBODY),
+        asking('/agents/snapshot', 'a token that is none', Authorization='Bearer synthetic-guess'),
+        asking('/agents/snapshot', 'a token said another way', Authorization=f'Basic {TOKEN}'),
+        # Twenty failures in a minute are answered as failures; the next is told to wait. Who asks rightly is
+        # never kept waiting, and neither is another asker.
+        *[guessing('/agents/snapshot', f'a guess, the {n}th', '198.51.100.9') for n in range(1, 21)],
+        guessing('/agents/snapshot', 'one guess too many', '198.51.100.9'),
+        SNAPSHOT,
+        guessing('/agents/snapshot', 'a guess from another address', '198.51.100.10'),
+        # A pairing code that is none is such a failure too.
+        *[guessing('/pairing/exchange', f'a code that is none, the {n}th', '198.51.100.11',
+                   {'code': 'clp_synthetic', 'device_name': ''}) for n in range(1, 21)],
+        guessing('/pairing/exchange', 'one code too many', '198.51.100.11', {'code': 'clp_synthetic', 'device_name': ''}),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

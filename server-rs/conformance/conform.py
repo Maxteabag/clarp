@@ -530,6 +530,14 @@ def settle(value, sessions):
     return out
 
 
+def told_to_wait(headers):
+    """An answer's headers, with how long an asker is told to wait named and not counted: what is left
+    of a minute when the answer is written."""
+    if isinstance(headers, dict) and 'retry-after' in headers:
+        return {**headers, 'retry-after': '<seconds>'}
+    return headers
+
+
 def without_features(value):
     """A body or an event without the fields of the features the Rust Host does not have yet."""
     if isinstance(value, list):
@@ -841,7 +849,8 @@ def seen_by_a_client(raw: dict) -> dict:
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
     # An agent's own picture is asked for under the agent's id: the path is named as the address is.
     raw = {**raw, 'http': [{**exchange, 'body': by_session(settle(exchange['body'], sessions), known),
-                            'path': own_face(str(exchange.get('path') or ''), known)}
+                            'path': own_face(str(exchange.get('path') or ''), known),
+                            'headers': told_to_wait(exchange.get('headers'))}
                            for exchange in raw['http']]}
     # What a call's event says of the call is the call's record: its moments and its Host are
     # settled as in an answer.
