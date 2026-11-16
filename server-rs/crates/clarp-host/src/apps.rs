@@ -149,6 +149,87 @@ async fn app_log(State(app): State<App>, body: axum::body::Bytes) -> Result<Json
     }
 }
 
+/// How many of an app's reports of itself are kept: the oldest go first.
+const DIAGNOSTICS_KEPT: usize = 200;
+
+/// What a report counts, by kind, as the Python Host counts it (`lib/ios_diagnostics.py`):
+/// the lists the phone's system hands an app of its crashes, its hangs, and where it used
+/// too much of the processor, wrote too much to the disk, or was slow to start.
+fn diagnostic_counts(report: &Value) -> [(&'static str, usize); 5] {
+    let of = |key: &str| {
+        report
+            .get(key)
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+    };
+    [
+        ("crashes", of("crashDiagnostics")),
+        ("hangs", of("hangDiagnostics")),
+        ("cpu", of("cpuExceptionDiagnostics")),
+        ("disk", of("diskWriteExceptionDiagnostics")),
+        ("launches", of("appLaunchDiagnostics")),
+    ]
+}
+
+/// Keeps a report under its name, and of all the reports the newest ones.
+fn kept_report(directory: &Path, name: &str, report: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(directory)?;
+    written_whole(&directory.join(name), report)?;
+    // A report's name begins with the moment it came: the names in their order are the
+    // reports in theirs.
+    let mut names: Vec<String> = std::fs::read_dir(directory)?
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.starts_with("ios-diagnostic-") && name.ends_with(".json"))
+        .collect();
+    names.sort();
+    let too_many = names.len().saturating_sub(DIAGNOSTICS_KEPT);
+    for old in &names[..too_many] {
+        let _ = std::fs::remove_file(directory.join(old));
+    }
+    Ok(())
+}
+
+/// `POST /crash`: an app hands over what the phone's system told it of itself (crashes,
+/// hangs, with their call stacks). Each report is kept as a file under the data directory,
+/// the newest two hundred of them, and the journal says how many of each kind it counts,
+/// never what is in it.
+async fn app_diagnostics(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    // A report is an object; nothing at all is an empty one, as on the Python Host.
+    let report = match serde_json::from_slice::<Value>(&body) {
+        _ if body.is_empty() => json!({}),
+        Ok(report @ Value::Object(_)) => report,
+        _ => return Err(bad("bad json")),
+    };
+    let name = format!("ios-diagnostic-{}-{}.json", app.clock.now_ms(), ids::hex(4));
+    let written = serde_json::to_vec_pretty(&report).unwrap_or_default();
+    let counts = diagnostic_counts(&report);
+    let (directory, bytes, file) = (
+        app.config.data_dir.join("crashes"),
+        written.len(),
+        name.clone(),
+    );
+    let kept = tokio::task::spawn_blocking(move || kept_report(&directory, &file, &written)).await;
+    if !matches!(kept, Ok(Ok(()))) {
+        eprintln!("clarp-host: an app's report of itself could not be kept");
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store failed",
+        ));
+    }
+    let counted: Vec<String> = counts
+        .iter()
+        .map(|(kind, count)| format!("{kind}={count}"))
+        .collect();
+    eprintln!(
+        "clarp-host: an app reported of itself: {name} {} bytes={bytes}",
+        counted.join(" ")
+    );
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// The most a file a user attaches may weigh.
 const UPLOAD_MAX: usize = 50 * 1024 * 1024;
 
@@ -676,6 +757,7 @@ pub fn routes() -> Router<App> {
         .route("/application-activity", post(activity))
         .route("/upload", post(upload))
         .route("/clog", post(app_log))
+        .route("/crash", post(app_diagnostics))
         .route("/teams", get(teams))
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))

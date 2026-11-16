@@ -611,6 +611,10 @@ impl Agent {
                     self.mailbox.push_front(queued);
                 }
                 self.unheld.insert(*turn);
+                // Taken out of its place by hand, the queue changed; and it changes once
+                // more when the turn starts. The Python Host counts a message sent by hand
+                // so (it is claimed, then started), and a client orders queue news by this.
+                self.queue_revision += 1;
             }
             AgentEvent::StopRequested { turn, by, .. } => {
                 if self.live_id() != Some(*turn) {
@@ -1347,11 +1351,20 @@ mod tests {
         );
         assert!(a.agent.is_paused() && a.agent.holds(TurnId(2)));
         assert!(a.agent.live_from_queue());
-        assert_eq!(a.agent.queue_revision(), revision + 1, "it left the queue");
+        assert_eq!(
+            a.agent.queue_revision(),
+            revision + 2,
+            "it was taken out of its place, and it left the queue"
+        );
         // What does not wait is not sent, and nothing is while a turn runs.
         assert_eq!(a.send(by_hand(3)), Err(Refusal::NotWaiting(TurnId(3))));
         assert_eq!(a.send(by_hand(9)), Err(Refusal::NotWaiting(TurnId(9))));
         assert_eq!(a.send(by_hand(2)), Err(Refusal::AtWork));
+        assert_eq!(
+            a.agent.queue_revision(),
+            revision + 2,
+            "what was refused changed nothing"
+        );
         assert_eq!(a.finish(3), vec![], "the hold holds what is left");
         // The last one is sent by hand: nothing waits any more, and the hold is over.
         assert_eq!(
@@ -1364,8 +1377,8 @@ mod tests {
         assert!(!a.agent.is_paused());
         assert_eq!(
             a.agent.queue_revision(),
-            revision + 3,
-            "it left, and the hold ended"
+            revision + 5,
+            "taken out of its place, it left, and the hold ended"
         );
         assert!(matches!(a.history.last(), Some(AgentEvent::Resumed { by, .. }) if by == DRAINED));
         a.finish(2);
