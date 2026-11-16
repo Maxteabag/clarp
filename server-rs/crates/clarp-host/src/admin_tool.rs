@@ -414,40 +414,30 @@ async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
     let Some((command, rest)) = args.split_first() else {
         return usage("the following arguments are required: call_command");
     };
-    let takes = match command.as_str() {
-        "status" | "end" => 0,
-        "start" => usize::MAX,
-        "add" | "remove" | "hold" | "resume" | "switch" | "transfer" => 1,
+    // What stands for itself after the command: no agent, one, or one and more.
+    const MANY: [&str; 17] = [
+        "AGENT", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]",
+        "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]", "[AGENT]",
+        "[AGENT]",
+    ];
+    let names: &[&str] = match command.as_str() {
+        "status" | "end" => &[],
+        "start" => &MANY,
+        "add" | "remove" | "hold" | "resume" | "switch" | "transfer" => &MANY[..1],
         // Ringing the user is not on this Host yet.
         "ring" | "ring-status" | "ring-cancel" | "rings" => {
             return not_here(&format!("call {command}"));
         }
         other => {
-            return usage(&format!(
-                "argument call_command: invalid choice: {}",
-                python::text(other)
-            ));
+            let said = python::text(other);
+            return usage(&format!("argument call_command: invalid choice: {said}"));
         }
     };
-    let parsed = match parse(rest, &["--call", "--principal"], &[], &[]) {
+    let parsed = match parse(rest, &["--call", "--principal"], &[], names) {
         Ok(parsed) => parsed,
         Err(why) => return usage(&why),
     };
     let agents = &parsed.positional;
-    match takes {
-        0 if !agents.is_empty() => {
-            return usage(&format!("unrecognized arguments: {}", agents.join(" ")));
-        }
-        usize::MAX if agents.is_empty() => {
-            return usage("the following arguments are required: AGENT");
-        }
-        1 if agents.is_empty() => return usage("the following arguments are required: AGENT"),
-        1 if agents.len() != 1 => {
-            let said = json!({ "ok": false, "error": format!("call {command} takes one agent") });
-            return ToolAnswer::printed(2, said.to_string());
-        }
-        _ => {}
-    }
     let by = tool
         .env
         .get(SESSION_ENV)
