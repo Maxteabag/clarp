@@ -163,6 +163,130 @@ pub struct Mouth {
     fleet: FleetHandle,
     hub: Arc<Hub>,
     clock: Arc<dyn Clock + Send + Sync>,
+    /// Cartesia's own list of voices as it was last fetched, and when.
+    cartesia_voices: Mutex<Option<(std::time::Instant, Arc<Vec<Value>>)>>,
+    /// Where the previews of voices are kept: `<data>/voice-previews`.
+    previews: PathBuf,
+}
+
+/// How long Cartesia's list of voices is good for.
+const LIST_KEPT: Duration = Duration::from_secs(15 * 60);
+
+impl Mouth {
+    /// The owner's file as it is now. Nothing named, or nothing readable: an empty one.
+    pub(crate) fn owners(&self) -> Table {
+        self.owner.read().unwrap_or_default()
+    }
+
+    /// Whether an engine that speaks has its key.
+    pub(crate) fn has_key(&self, provider: &str, owners: &Table) -> bool {
+        self.owner.key(key_of(provider, owners)).is_some()
+    }
+
+    /// Cartesia's own list of voices: the one fetched within the last quarter of an hour,
+    /// or a new one. Without a key, or when Cartesia does not answer, there is none.
+    pub(crate) async fn cartesia_list(self: &Arc<Self>) -> Arc<Vec<Value>> {
+        let kept = |mouth: &Self| {
+            let kept = mouth
+                .cartesia_voices
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            kept.clone()
+        };
+        if let Some((at, voices)) = kept(self)
+            && at.elapsed() < LIST_KEPT
+        {
+            return voices;
+        }
+        let Some(key) = self.owner.key("cartesia") else {
+            return Arc::default();
+        };
+        let list_at = match self.cartesia_at.as_str() {
+            "" => clarp_speech::cartesia::VOICES.to_string(),
+            // A stand-in for the engine lists its voices beside where it speaks.
+            stand_in => stand_in.replace("/tts/bytes", "/voices"),
+        };
+        let fetched =
+            tokio::task::spawn_blocking(move || clarp_speech::cartesia::voices(&key, &list_at));
+        match fetched.await {
+            Ok(Ok(voices)) => {
+                let voices = Arc::new(voices);
+                let now = (std::time::Instant::now(), voices.clone());
+                *self
+                    .cartesia_voices
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(now);
+                voices
+            }
+            Ok(Err(why)) => {
+                eprintln!("clarp-host: Cartesia's voices could not be listed: {why}");
+                Arc::default()
+            }
+            Err(_) => Arc::default(),
+        }
+    }
+
+    /// A preview of a voice, in a file: the one that was made before, or a new one said by
+    /// that engine alone. `Err` is why there is none.
+    pub(crate) async fn preview(
+        self: &Arc<Self>,
+        provider: &str,
+        voice: &str,
+        said: &str,
+        name: &str,
+    ) -> Result<PathBuf, String> {
+        let file = self.previews.join(format!("{name}.mp3"));
+        if file.is_file() {
+            return Ok(file);
+        }
+        let owners = self.owners();
+        let engine = self.engine(&owners, provider);
+        let engine = engine.ok_or_else(|| format!("no engine named {provider} is built"))?;
+        // A voice of Gemini's is asked for as the door the request goes through knows it.
+        let voice = match provider {
+            said::GEMINI => {
+                let vertex = owner::gemini(&owners).vertex;
+                owner::voices(&owners).gemini_voice_at(voice, vertex)
+            }
+            _ => voice.to_string(),
+        };
+        let (previews, said) = (self.previews.clone(), said.to_string());
+        let part = file.with_extension(format!("{}.part", crate::ids::hex(4)));
+        let (being_made, whole) = (part.clone(), file.clone());
+        let _slot = self.at_once.acquire().await;
+        let made = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&previews)
+                .map_err(|error| error.to_string())?;
+            let mut sound = Vec::new();
+            let line = clarp_speech::speak::Line {
+                text: &said,
+                voice: &voice,
+            };
+            let spoken = engine.speak(line, &mut |piece| sound.extend_from_slice(piece));
+            spoken.map_err(|mute| match mute {
+                Mute::Unavailable(why) | Mute::Failed { why, .. } => why,
+            })?;
+            let mut made = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&being_made)
+                .map_err(|error| error.to_string())?;
+            made.write_all(&sound).map_err(|error| error.to_string())?;
+            std::fs::rename(&being_made, &whole).map_err(|error| error.to_string())
+        });
+        match made.await {
+            Ok(Ok(())) => Ok(file),
+            Ok(Err(why)) => {
+                let _ = std::fs::remove_file(&part);
+                Err(why)
+            }
+            Err(_) => Err("the engine's thread ended".to_string()),
+        }
+    }
 }
 
 impl Waiting {
@@ -181,6 +305,8 @@ impl Waiting {
             fleet: works.fleet,
             hub: works.hub,
             clock: works.clock,
+            cartesia_voices: Mutex::default(),
+            previews: works.config.data_dir.join("voice-previews"),
         });
         let speaking = mouth.clone();
         tokio::spawn(async move {
@@ -681,7 +807,7 @@ fn no_such_part(of: &str, as_a_file: bool) -> Response {
 
 /// A file as the Python Host sends any file (`_send_file`): all of it, or the part a
 /// `Range` header asks for, read the way that Host reads one.
-fn send_file(path: PathBuf, range: &str) -> Response {
+pub(crate) fn send_file(path: PathBuf, range: &str) -> Response {
     let total = match std::fs::symlink_metadata(&path) {
         Ok(found) if found.is_file() => found.len(),
         _ => return plain(StatusCode::NOT_FOUND, "not found"),

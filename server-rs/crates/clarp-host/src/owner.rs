@@ -155,6 +155,47 @@ pub fn google_speech(file: &Table) -> Option<clarp_speech::chirp::Account> {
     })
 }
 
+/// Why Google's voices cannot be used on this Host, in the Python Host's code for it
+/// (`google_tts.credentials`): the account's file is missing, or no project is named. An
+/// owner who wrote a `[google_tts]` section is held to it; else the account of the engine
+/// that listens is the one. `None`: they could be used.
+pub fn google_voice_error(file: &Table) -> Option<&'static str> {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let readable = |named: Option<String>, otherwise: Option<PathBuf>| -> bool {
+        let named = named.map(|named| named.trim().to_string());
+        let path = match named.filter(|named| !named.is_empty()) {
+            Some(named) => match named.strip_prefix("~/") {
+                Some(rest) => home().map(|home| home.join(rest)),
+                None => Some(PathBuf::from(named)),
+            },
+            None => otherwise,
+        };
+        path.is_some_and(|path| path.is_file() && std::fs::File::open(&path).is_ok())
+    };
+    let own = file.get("google_tts").and_then(Value::as_table);
+    let (has_file, project) = match own {
+        Some(_) => (
+            readable(text_at(file, &["google_tts", "credentials"]), None),
+            text_at(file, &["google_tts", "project"]),
+        ),
+        None => {
+            let named = text_at(file, &["google_stt", "credentials"])
+                .or_else(|| std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok());
+            let usual =
+                home().map(|home| home.join(".config/gcloud/application_default_credentials.json"));
+            (
+                readable(named, usual),
+                text_at(file, &["google_stt", "project"]),
+            )
+        }
+    };
+    match (has_file, project) {
+        (false, _) => Some("google_credentials_missing"),
+        (true, None) => Some("google_project_missing"),
+        (true, Some(_)) => None,
+    }
+}
+
 /// Which of Cartesia's models speaks.
 pub fn cartesia_model(file: &Table) -> String {
     text_at(file, &["cartesia", "model"]).unwrap_or_else(|| "sonic-3.5".to_string())

@@ -18,6 +18,69 @@ pub const ENDPOINT: &str = "https://api.cartesia.ai/tts/bytes";
 /// The dated version of Cartesia's interface the request below is written for.
 const VERSION: &str = "2025-11-04";
 
+/// Where Cartesia lists its voices, and the version of its interface that list is read by.
+pub const VOICES: &str = "https://api.cartesia.ai/voices";
+const VOICES_VERSION: &str = "2026-08-14";
+
+/// Cartesia's English voices as its interface lists them: a page at a time, eight pages at
+/// most. The key is presented the three ways Cartesia has taken one, each tried when the
+/// one before was refused (the Python Host's `cartesia_voices.py`).
+pub fn voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, String> {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15)))
+        .http_status_as_error(false)
+        .build();
+    let agent: ureq::Agent = config.into();
+    let bearer = format!("Bearer {key}");
+    let ways = [
+        ("Authorization", bearer.as_str()),
+        ("Authorization", key),
+        ("X-API-Key", key),
+    ];
+    let mut voices = Vec::new();
+    let mut after = String::new();
+    for _ in 0..8 {
+        let mut url = format!("{endpoint}?limit=100&language=en&expand%5B%5D=preview_file_url");
+        if !after.is_empty() {
+            url.push_str(&format!("&starting_after={after}"));
+        }
+        let mut page: Option<serde_json::Value> = None;
+        for (place, (header, value)) in ways.iter().enumerate() {
+            let mut response = agent
+                .get(&url)
+                .header(*header, *value)
+                .header("Cartesia-Version", VOICES_VERSION)
+                .call()
+                .map_err(|error| format!("request failed: {error}"))?;
+            let status = response.status().as_u16();
+            if status == 401 && place + 1 < ways.len() {
+                continue;
+            }
+            if !(200..300).contains(&status) {
+                return Err(format!("HTTP {status}"));
+            }
+            let said = response
+                .body_mut()
+                .read_to_string()
+                .map_err(|error| format!("request failed: {error}"))?;
+            let read = serde_json::from_str(&said);
+            page = Some(read.map_err(|error| format!("request failed: {error}"))?);
+            break;
+        }
+        let Some(page) = page else { break };
+        voices.extend(page["data"].as_array().cloned().unwrap_or_default());
+        after = match &page["next_page"] {
+            serde_json::Value::String(next) => next.clone(),
+            serde_json::Value::Null => String::new(),
+            other => other.to_string(),
+        };
+        if page["has_more"] != true || after.is_empty() {
+            break;
+        }
+    }
+    Ok(voices)
+}
+
 pub struct Cartesia {
     key: Key,
     /// The model, by Cartesia's own name (`sonic-3.5`).

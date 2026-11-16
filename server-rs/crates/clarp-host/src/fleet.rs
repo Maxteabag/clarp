@@ -131,6 +131,8 @@ pub enum Amend {
         model: Option<String>,
         effort: Option<String>,
     },
+    /// The voices it was given, as they are stored: one for each engine it has one for.
+    Voice(String),
 }
 
 /// Why an agent was not changed.
@@ -1242,6 +1244,7 @@ impl Fleet {
                     record.effort = effort;
                 }
             }
+            Amend::Voice(voices) => record.voice_id = voices,
         }
         let (took, taken) = oneshot::channel();
         if record == *before {

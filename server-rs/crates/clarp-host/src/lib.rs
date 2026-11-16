@@ -42,6 +42,7 @@ pub mod revisions;
 pub mod roster;
 pub mod tools;
 pub mod voice;
+pub mod voices;
 pub mod wire;
 
 /// The version this Host reports.
