@@ -2667,6 +2667,48 @@ fn a_call_is_the_hosts_record_of_who_is_in_it_and_its_messages_go_to_who_can_tak
     );
     let (_, seen) = host.ask("GET", &format!("/calls?principal={phone_id}"), None);
     assert_eq!(seen["call"]["call_id"], call_id);
+    // An agent manages the call with its own tool: the Host's answer as JSON, and a
+    // refusal as one too, with another way out.
+    let admin = |args: &[&str]| -> (i32, Value, String) {
+        let mut line = vec!["clarp-admin", "call"];
+        line.extend_from_slice(args);
+        let (code, out, err) = tool(&host, &place.root, None, &line);
+        (code, serde_json::from_str(&out).unwrap_or(Value::Null), err)
+    };
+    let (code, up, err) = admin(&["status"]);
+    assert_eq!(
+        (code, &up["call"]["call_id"]),
+        (0, &json!(call_id)),
+        "{err}"
+    );
+    let (code, held, _) = admin(&["hold", "nadia"]);
+    assert_eq!((code, &held["summary"]), (0, &json!("Nadia is on hold.")));
+    let (code, back, _) = admin(&["resume", "Nadia", "--call", &call_id]);
+    assert_eq!(
+        (code, &back["summary"]),
+        (0, &json!("Nadia is back in the call."))
+    );
+    let (code, unknown, _) = admin(&["switch", "nobody"]);
+    assert_eq!(
+        (code, unknown),
+        (1, json!({ "ok": false, "error": "unknown agent" }))
+    );
+    let (code, _, err) = admin(&["add", "theo", "mike"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("unrecognized arguments: mike"), "{err}");
+    let (code, _, err) = admin(&["hold"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(
+        err.contains("the following arguments are required: AGENT"),
+        "{err}"
+    );
+    let (code, _, err) = admin(&["dance", "theo"]);
+    assert_eq!(code, 2, "{err}");
+    // Ringing the user is not on this Host yet, and says so.
+    let (code, _, err) = admin(&["ring", "--reason", "a leak", "--say", "Shall I look?"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("not available on this Host yet"), "{err}");
+
     // A phone that may only read and send has no calls.
     let (limited, _) = pair(&host, "Watch", "limited");
     let (status, _) = host.ask_as(&limited, "GET", "/calls", None);
