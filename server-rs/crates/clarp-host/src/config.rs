@@ -136,22 +136,23 @@ pub fn typed_path(asked: &str, home: &Path) -> PathBuf {
 /// that ends in a slash the directories in it, for any other the directories beside it
 /// whose names begin as its last part does, whatever the case of the letters. What begins
 /// with a dot is left out. Answers where it looked, and what it found there, by name.
+///
+/// Only a path from the root is looked into: `./` and `../` are not this Host's own
+/// directory to show, as on the Python Host. Where nothing can be read, nothing is found.
 pub fn directories(asked: &str, home: &Path) -> (String, Vec<String>) {
     let typed = typed_path(asked, home);
-    let inside = asked.trim().ends_with('/') || typed == Path::new("/");
+    let ends_in_slash = asked.trim().ends_with('/') && typed.is_absolute();
+    let inside = ends_in_slash || typed == Path::new("/");
+    // Beside it: where its last name is, and how that name begins. Read off the letters of
+    // the path, as the Python Host reads them: a path that is one name is completed among
+    // what is under the root, and a last name that is a dot begins nothing that is shown.
     let (base, begins) = if inside {
         (typed, String::new())
     } else {
-        let last = typed
-            .file_name()
-            .map(|name| name.to_string_lossy().to_lowercase());
-        let beside = typed
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty());
-        (
-            beside.map_or_else(|| PathBuf::from("/"), Path::to_path_buf),
-            last.unwrap_or_default(),
-        )
+        let written = typed.display().to_string();
+        let (before, last) = written.rsplit_once('/').unwrap_or(("", &written));
+        let beside = if before.is_empty() { "/" } else { before };
+        (PathBuf::from(beside), last.to_lowercase())
     };
     let mut names: Vec<String> = std::fs::read_dir(&base)
         .into_iter()
@@ -440,8 +441,8 @@ mod tests {
                 "{path}"
             );
         }
-        // A path that ends in a slash asks what is in the directory. (The Python Host answers
-        // it with the directory itself: reference defect R22.)
+        // A path that ends in a slash asks what is in the directory. (Until 16 Nov 2026 the
+        // Python Host answered it with the directory itself: reference defect R22, fixed.)
         assert_eq!(
             asked("~/projects/"),
             (at("home/projects"), in_projects.clone())
@@ -452,6 +453,10 @@ mod tests {
         );
         let in_home = vec![at("home/Pictures"), at("home/plans"), at("home/projects")];
         assert_eq!(asked("~/"), (at("home"), in_home));
+        // Only a path from the root is looked into: one that is not is completed by its last
+        // name, among what is under the root, as on the Python Host.
+        assert_eq!(asked("relative/"), ("/".to_string(), Vec::<String>::new()));
+        assert_eq!(asked("./"), ("/".to_string(), Vec::<String>::new()));
         // The name of the account is what a phone's user leaves out: tried under the home.
         assert_eq!(
             typed_path("/home/projects/site", &home),
