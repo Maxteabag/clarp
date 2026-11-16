@@ -69,3 +69,13 @@ d7c35cb7c0f7  failed-turns: the same, of the tool that died after a turn that wo
 # The last thing a turn said before it failed has no phase (the Python Host calls it `final`).
 59a4ff8c8349  failed-turns: phase of what the turn had said when its account was out
 0b9d76905486  failed-turns: the same row, in the log at the end
+
+# `GET /status` without a session names the agent the Python Host falls back to; this Host has
+# none it falls back to, and names none.
+522a5dba49c5  app-asks: session of the status nobody named a session for
+
+# The lines of an app's own log: a Python Host that was not told to take them answers
+# `captured: false` and the app keeps them; this Host keeps them (logs/apps.log) and says so by
+# answering without `captured`, as a Python Host does that takes them.
+e520c307dcd4  app-asks: captured, of one line of an app's log
+7933fd99ead0  app-asks: captured, of several lines

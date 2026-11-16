@@ -413,6 +413,26 @@ fault that had nothing to do with forms: a fraction of seventeen digits could be
 fractions are read exactly now (`float_roundtrip`). Not there: what a form's page logs of its use
 (`html_form_events`), and the reply spoken.
 
+**What an app asks of any Host** (16 Nov 2026). The load was counted on the live Host's own log: in three
+days its clients made 147,704 requests over 469 routes, and 69.3 per cent of them went to routes this Host
+had. The phone app gates few of its calls on what a Host lists (read in its source: dreaming, the car
+controller's actions, push grants, the archived list, live items and activities, one provider of speech, the
+home terminal); everything else it asks of every Host it is paired with. So a phone paired with this Host
+would have been answered "no such route" three times in ten. What it asks regardless is answered now
+(`apps.rs`). With what is so, where this Host keeps it: `GET /status` (whether the Host is up and an agent
+is in a turn), `POST /focus` (which agent the user is looking at: the focus the Host keeps already),
+`POST /application-activity` (whether the app is in front and when it was last touched: held for 45 seconds
+by the Python Host's rules, `activity.rs`), `POST /upload` (a file a user attaches to what they say: kept
+under the agent's name, and once under an id the app gives; the names on the disk are the Python Host's,
+held by 259 recorded names), `POST /clog` (the lines of the app's own log, which an app keeps and sends again
+until a Host takes them: 26,442 calls in the three days; kept in one file that does not grow without end,
+because they say why something did not work on a phone). And with a list that is empty, in the Python Host's
+own fields, where this Host keeps nothing of the kind: teams, janitors, what the Host does by itself, what
+transcribes, the voices, the catalogue of models. Held end to end (`tests/host.rs`) and by the scenario
+`app-asks`, whose first run wrote down what the Python Host answers before any of this was written. Still
+asked and not there: the details behind a tool card (`/message-tool-details`), speech itself (`/transcribe`,
+the clips of a spoken reply), portraits, and the screens of settings (usage, logins, updates).
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as

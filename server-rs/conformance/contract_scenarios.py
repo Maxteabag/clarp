@@ -937,6 +937,14 @@ def activity(name, sent=True, **changed):
     return {**step, 'body_now': ['sent_at_ms']} if sent else step
 
 
+def attached(text, name, upload_id='synthetic-upload-1'):
+    """An app hands over a file its user attached to what they say: the file is the body, what
+    it is called and the id the app gave it are in the headers."""
+    headers = {'X-Session': AGENT, 'X-File-Name': 'synthetic%20note', 'X-Upload-ID': upload_id}
+    return {'op': 'post', 'path': '/upload', 'raw': {'bytes': text, 'content_type': 'text/markdown'},
+            'headers': headers, 'name': name}
+
+
 SCENARIOS.append({
     'id': 'app-asks',
     'what': 'what an app asks of any Host, whatever the Host says it has: whether it is up, which agent its user '
@@ -969,6 +977,12 @@ SCENARIOS.append({
         get('/transcription-providers', 'who transcribes'),
         get('/voice-catalog', 'the voices'),
         get('/agent-model-options', 'the models an agent can be given'),
+        # What a user attaches: kept once under the id the app gave it, and answered with where.
+        attached('synthetic attachment one', 'the user attaches a file'),
+        attached('synthetic attachment one', 'the same file again'),
+        attached('synthetic attachment two', 'another file under the same id'),
+        attached('synthetic attachment one', 'a file under an id that is none', upload_id='two words'),
+        attached('', 'a file of nothing', upload_id='synthetic-upload-2'),
     ],
 })
 

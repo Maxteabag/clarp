@@ -6975,6 +6975,71 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     assert!(lines[1].ends_with(" app synthetic-one {\"k\":1}"), "{log}");
     assert!(lines[2].ends_with(" app synthetic-two "), "{log}");
 
+    // Whether the Host is up, and whether an agent is in a turn.
+    let up = host.get("/status");
+    assert_eq!(
+        (
+            &up["session"],
+            &up["busy"],
+            &up["runtime"]["available"],
+            &up["runtime"]["active_turns"]
+        ),
+        (&json!(""), &json!(false), &json!(true), &json!(0))
+    );
+    assert_eq!(
+        (&up["deployed_version"], &up["release_id"]),
+        (&json!("development"), &json!("development"))
+    );
+    let idle = host.get(&format!("/status?session={first}"));
+    assert_eq!(
+        (&idle["session"], &idle["busy"]),
+        (&json!(first), &json!(false))
+    );
+    assert_eq!(host.get("/status?session=nobody-here")["busy"], false);
+    // The lists an app's screens are made of, for what this Host keeps nothing of: each is
+    // a list, and empty, in the fields an app reads.
+    assert_eq!(host.get("/teams"), json!({ "teams": [] }));
+    assert_eq!(
+        host.get("/automation-settings"),
+        json!({ "special_treatment": false })
+    );
+    let janitors = host.get("/janitors");
+    assert_eq!(
+        (&janitors["janitors"], &janitors["runtime_available"]),
+        (&json!([]), &json!(false))
+    );
+    let transcribes = host.get("/transcription-capabilities");
+    assert_eq!(
+        (&transcribes["available"], &transcribes["models"]),
+        (&json!(false), &json!([]))
+    );
+    let providers = host.get("/transcription-providers");
+    for field in [
+        "engine",
+        "turn_taking",
+        "retain_audio",
+        "turn_taking_options",
+        "providers",
+        "models",
+    ] {
+        assert!(!providers[field].is_null(), "an app's reader needs {field}");
+    }
+    assert_eq!(
+        (&providers["engine"], &providers["providers"]),
+        (&json!(""), &json!([]))
+    );
+    let voices = host.get("/voice-catalog");
+    assert_eq!(
+        (&voices["provider"], &voices["voice_available"]),
+        (&json!("none"), &json!(false))
+    );
+    let models = host.get("/agent-model-options");
+    assert_eq!(
+        (&models["schema_version"], &models["providers"]),
+        (&json!(2), &json!({}))
+    );
+    assert!(models["observed_at"].is_string() && models["freshness"].is_string());
+
     // On a Host that asks for no token, nobody is known to be a person.
     let open_place = Place::new("apps-open");
     let open = open_place.start();

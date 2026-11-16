@@ -11,9 +11,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use axum::extract::{Extension, Request, State};
+use std::collections::HashMap;
+
+use axum::extract::{Extension, Query, Request, State};
 use axum::http::StatusCode;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_kernel::media;
 use serde_json::{Value, json};
@@ -39,7 +41,8 @@ async fn focus(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<V
     if session.is_empty() {
         return Err(bad("session required"));
     }
-    app.fleet.select(session.to_string()).await?;
+    // Nobody is told: the app that says it is the one that knows.
+    app.fleet.open(session.to_string()).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -345,10 +348,113 @@ async fn upload(State(app): State<App>, request: Request) -> Result<Json<Value>,
     })))
 }
 
+/// `GET /status?session=`: whether the Host is up, and whether an agent is in a turn. What
+/// runs the turns is this one process: it is there when this answers.
+async fn status(
+    State(app): State<App>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Json<Value> {
+    let session = query.get("session").map_or("", |given| given.trim());
+    let directory = app.fleet.directory();
+    let in_a_turn = |session: &str| {
+        let member = directory.by_session(session);
+        member.is_some_and(|member| member.agent.view().status.live.is_some())
+    };
+    let sessions = directory
+        .members
+        .iter()
+        .map(|member| &member.record.session);
+    let active = sessions.filter(|session| in_a_turn(session)).count();
+    // What an installer stamped this installation with; a Host run from a build has none.
+    let build = match app.config.deployed_version.as_str() {
+        "" => "development",
+        stamped => stamped,
+    };
+    Json(json!({
+        "session": session,
+        "busy": in_a_turn(session),
+        "runtime": {
+            "available": true, "reason": "", "release_id": "embedded", "fenced": false,
+            "sealed": false, "draining": false, "drain": { "phase": "idle" },
+            "active_turns": active, "observed_at": app.clock.now_ms(),
+        },
+        "deployed_version": build,
+        "release_id": build,
+    }))
+}
+
+/// The lists an app's screens are made of, for what this Host keeps nothing of: said as
+/// the Python Host says a list, and empty. An app that reads them shows nothing there,
+/// where an answer of "no such route" would be an error on its screen.
+///
+/// Teams, janitors and what the Host does by itself are not built. Neither is speech: no
+/// engine transcribes here, and no voice speaks. Which models an agent can be given is a
+/// catalogue this Host does not keep yet; an agent's model is set by name (`/agent-llm`).
+async fn teams() -> Json<Value> {
+    Json(json!({ "teams": [] }))
+}
+
+async fn janitors() -> Json<Value> {
+    Json(json!({
+        "janitors": [], "providers": [], "runtime_available": false, "templates": [],
+        "triggers": [],
+    }))
+}
+
+async fn automation_settings() -> Json<Value> {
+    Json(json!({ "special_treatment": false }))
+}
+
+async fn transcription_capabilities() -> Json<Value> {
+    Json(json!({ "adapters": [], "available": false, "default_model": "", "models": [] }))
+}
+
+async fn transcription_providers() -> Json<Value> {
+    Json(json!({
+        "agent_engines": {}, "agent_languages": {}, "call_engines": "", "call_languages": "",
+        "call_policy_error": "", "engine": "", "language": "", "long_form_model": "",
+        "long_form_threshold_range": { "max": 3600, "min": 1 }, "long_form_threshold_sec": 30,
+        "models": [], "provider_turn_taking_available": false, "providers": [],
+        "retain_audio": false, "stream_path": "", "turn_taking": "native",
+        // Where a turn of speech ends is found on the phone itself: that much is there.
+        "turn_taking_options": [
+            { "available": true, "id": "native", "name": "Native (on-device VAD + Smart Turn)" },
+        ],
+    }))
+}
+
+async fn voice_catalog() -> Json<Value> {
+    Json(
+        json!({ "fallback": "none", "provider": "none", "providers": [], "voice_available": false }),
+    )
+}
+
+async fn model_options(State(app): State<App>) -> Json<Value> {
+    Json(json!({
+        "schema_version": 2,
+        "observed_at": crate::wire::iso(app.clock.now_ms()),
+        "freshness": "fresh",
+        "freshness_note": "This Host keeps no catalogue of models yet.",
+        "freshness_scope": "response_observation",
+        "providers": {},
+    }))
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/status", get(status))
         .route("/focus", post(focus))
         .route("/application-activity", post(activity))
         .route("/upload", post(upload))
         .route("/clog", post(app_log))
+        .route("/teams", get(teams))
+        .route("/janitors", get(janitors))
+        .route("/automation-settings", get(automation_settings))
+        .route(
+            "/transcription-capabilities",
+            get(transcription_capabilities),
+        )
+        .route("/transcription-providers", get(transcription_providers))
+        .route("/voice-catalog", get(voice_catalog))
+        .route("/agent-model-options", get(model_options))
 }
