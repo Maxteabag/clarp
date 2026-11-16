@@ -461,6 +461,37 @@ turn, a kill with a tool running) and by a recorded turn of the real CLI. Still 
 of a tool whose reader does not group them into messages (Codex, until its cells are built) and every call a
 log already holds.
 
+**A person speaks, and the Host turns the clip into text** (16 Nov 2026). The owner speaks to his agents:
+on the live elitebook Host, in seven days, 198 clips were turned into text (127 by the Host's own engine, 71 by
+ElevenLabs Scribe) and a fifth of what the user said was said aloud. An app records a clip and hands it to
+`POST /transcribe`; the Host answers with the text and the trace the message will travel under, and the app
+sends that text itself. The request and its answer are the Python Host's, rule for rule (`clarp-kernel`
+`heard.rs`, held by 500 recorded answers of that Host's own functions): what a job may be called, when two
+requests are the same job, which engine a clip goes to, which of an engine's pieces are kept, what an engine
+invents on silence and is thrown away, the refusals in the same words. **A request that comes again is
+answered with what was answered before**: the answer is kept under the job's name for thirty days, beside
+the Host's data, and no engine runs twice for one thing said, also across a restart. Nothing of a clip is
+kept. **The engines are behind one port** (`clarp-speech`, `listen.rs`: a clip in, pieces of text out, or
+why not), with two behind it. One is reached over the network (ElevenLabs Scribe, `scribe.rs`: the Python
+Host's request). The other is the Host's own (`whisper.rs`): a worker process that keeps a Whisper model
+loaded and hears one clip at a time, on the Python Host's own protocol of lines, so that the model is asked
+exactly as that Host asks it. It is a process of its own because hearing a long clip is minutes of processor
+time and the model's library is not this Host's code; a worker that says why it failed stays, one that dies
+is started again by the next clip, and none is left behind. The worker is this Host's own program
+(`tools/whisper-worker.py`); what runs it is a Python that has the library, which on the owner's machines is
+the Python Host's own, used where it is with the model's files that machine has already (`tools/install-host`
+finds both; measured on elitebook: faster-whisper 1.2.1, the model `small.en`). **A key is read where the
+owner keeps it**: the key of an engine over the network is looked up in the Python Host's own config each
+time a clip is to be heard (`--speech-keys`), so a key that is changed there is the key used next, and no key
+is copied into this Host or kept by it. The apps are told which engines there are and which one hears a clip
+nobody named one for (`/transcription-capabilities`, `/transcription-providers`). Held end to end with a
+stand-in worker and a stand-in for ElevenLabs on the loopback (`tests/host.rs`: no test reaches an engine
+outside), by the scenario `speech-in`, and once by hand with the real model on a made-up clip. Not there:
+the vocabulary an engine is asked to listen for beyond what this Host's agents are called, the judge that
+tells an invented "Okay." from one that was said (the list throws both away), a stronger engine for long
+recordings, an agent's own language or engine, the record of each thing said (`/voice-events`), changing
+these settings from an app, and calls.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
