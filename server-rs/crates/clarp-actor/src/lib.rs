@@ -40,11 +40,12 @@ use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
+use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::turn::{
-    Activity, Admission, Origin, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
+    Activity, Admission, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
     silent_when_failed,
 };
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
@@ -84,6 +85,9 @@ pub struct Profile {
     pub keep_spools: bool,
     /// Whether a turn whose account is out waits for one (`recovery::Accounts`).
     pub accounts: recovery::Accounts,
+    /// The name of this run of the Host, for those who watch a turn as it runs: a client that
+    /// is told another name knows the Host started again and asks for everything anew.
+    pub epoch: String,
 }
 
 impl Profile {
@@ -454,6 +458,26 @@ pub struct Actor {
     /// when a turn last said so, when a turn last ran to its end, and which model answered
     /// last ([`Status`]).
     remembered: Remembered,
+    /// What those who watch the agent are shown of its turn while it runs: items that
+    /// appear, grow and settle (`docs/live-items.md`). Nothing of it is kept; after a restart
+    /// it is built again from the turn's own records.
+    shown: Hub,
+    /// The turn that is shown as running, and the name it is shown under: its trace.
+    shown_turn: Option<(TurnId, String)>,
+    /// The events of it that nobody has taken yet.
+    shown_events: Vec<serde_json::Value>,
+}
+
+/// What a turn that waits for an account says of itself to those who watch.
+const ACCOUNT_WAIT: &str = "Waiting for an account with available usage";
+
+/// The name a turn is shown under: the trace its message was sent under, or one made of the
+/// message's own name where it has none.
+fn shown_name(trace_id: Option<&str>, message_id: &str) -> String {
+    match trace_id {
+        Some(trace) if !trace.is_empty() => trace.to_string(),
+        _ => format!("turn-{}", turn_name(message_id)),
+    }
 }
 
 /// What an agent's row goes on showing whatever became of the turns after.
@@ -802,7 +826,11 @@ impl Actor {
         })?;
         // What was over long ago is in the log and nowhere else.
         speech.forget_before(now_ms - KEPT_FOR_MS);
+        let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
         let mut actor = Self {
+            shown,
+            shown_turn: None,
+            shown_events: Vec::new(),
             profile,
             backend,
             recorder,
@@ -859,6 +887,143 @@ impl Actor {
             });
         }
         Ok((actor, out))
+    }
+
+    /// What those who watch the agent are to be sent now: the events of its turn that nobody
+    /// has taken yet, each a `live` event as `docs/live-items.md` has it.
+    pub fn take_shown(&mut self, now_ms: i64) -> Vec<serde_json::Value> {
+        self.show_turn(now_ms);
+        std::mem::take(&mut self.shown_events)
+    }
+
+    /// When growth that is held back for a moment is to be sent at the latest: say
+    /// [`Actor::shown_due`] then.
+    pub fn shown_due_ms(&self) -> Option<i64> {
+        self.shown.due_ms()
+    }
+
+    /// The moment [`Actor::shown_due_ms`] named has come.
+    pub fn shown_due(&mut self, now_ms: i64) {
+        let events = self.shown.fire(now_ms);
+        self.shown_events.extend(events);
+    }
+
+    /// Everything that is shown of the agent's turn, as `GET /live` answers it. An agent
+    /// that has run no turn since the Host started shows an idle, empty view.
+    pub fn shown_whole(&mut self, now_ms: i64) -> serde_json::Value {
+        self.show_turn(now_ms);
+        match self.shown.snapshot(now_ms) {
+            Some((snapshot, events)) => {
+                self.shown_events.extend(events);
+                snapshot
+            }
+            None => {
+                // An agent that was never written to has no conversation yet, here as in
+                // its conversation's own answer.
+                let written =
+                    self.head_revision() > 0 || self.recorder.agent().backend_session().is_some();
+                let conversation = match written {
+                    true => self.profile.conversation_id.as_str(),
+                    false => "",
+                };
+                live::empty_snapshot(
+                    (conversation, &self.profile.session),
+                    (&self.profile.agent_id, &self.profile.epoch),
+                    now_ms,
+                )
+            }
+        }
+    }
+
+    /// The status line of the agent's turn. `None` for an agent that has run no turn since
+    /// the Host started.
+    pub fn shown_activity(&self) -> Option<&serde_json::Value> {
+        self.shown.activity()
+    }
+
+    /// The conversation a turn is shown as part of.
+    fn shown_conversation(&self) -> String {
+        if self.profile.conversation_id.is_empty() {
+            format!("pending:{}", self.profile.agent_id)
+        } else {
+            self.profile.conversation_id.clone()
+        }
+    }
+
+    /// How a turn that no longer holds the agent ended, in the words of those who watch:
+    /// `completed`, `failed` with what went wrong, or `interrupted`.
+    fn ended_as(&self, turn: TurnId) -> (&'static str, Option<serde_json::Value>) {
+        let last = self.recorder.agent().last();
+        let Some(settled) = last.filter(|settled| settled.id == turn) else {
+            return ("interrupted", None);
+        };
+        match &settled.outcome {
+            Outcome::Completed => ("completed", None),
+            Outcome::Failed { reason, kind } => {
+                let kind = match kind.as_str() {
+                    "" => failures::classify_error(reason),
+                    kind => kind,
+                };
+                let model = self.profile.model.clone().unwrap_or_default();
+                let told = failures::told(kind, reason, &model, failures::Known::default());
+                let error = serde_json::json!({
+                    "reason": kind,
+                    "message": clarp_kernel::python::first(&told.message, 300),
+                    "detail": clarp_kernel::python::first(&told.provider_message, 500),
+                });
+                ("failed", Some(error))
+            }
+            Outcome::Stopped { .. } | Outcome::Interrupted { .. } | Outcome::Withdrawn { .. } => {
+                ("interrupted", None)
+            }
+        }
+    }
+
+    /// Brings what is shown of the turn in step with what the log says of it: a turn that
+    /// holds the agent is begun for those who watch, one that holds it no longer is ended as
+    /// it ended, and a turn that waits for an account says so.
+    fn show_turn(&mut self, now_ms: i64) {
+        let held = match self.recorder.agent().live() {
+            Some(Turn::Starting(turn)) => Some((turn.id, turn.started_at_ms)),
+            Some(Turn::Running(turn)) => Some((turn.id, turn.started_at_ms)),
+            Some(Turn::Parked(turn)) => Some((turn.id, turn.started_at_ms)),
+            _ => None,
+        };
+        let shown = self.shown_turn.as_ref().map(|(turn, _)| *turn);
+        if shown != held.map(|(turn, _)| turn) {
+            if let Some(turn) = shown {
+                let (status, error) = self.ended_as(turn);
+                let events = self.shown.end_turn(status, error.as_ref(), now_ms);
+                self.shown_events.extend(events);
+                self.shown_turn = None;
+            }
+            let followed = self.live.as_ref();
+            if let Some((turn, started_at_ms)) = held
+                && let Some(live) = followed.filter(|live| live.turn == turn)
+            {
+                let name = shown_name(live.trace_id.as_deref(), &live.message_id);
+                let conversation = self.shown_conversation();
+                let events = self.shown.begin_turn(
+                    &self.profile.session,
+                    &conversation,
+                    &name,
+                    Some(started_at_ms),
+                    now_ms,
+                );
+                self.shown_events.extend(events);
+                self.shown_turn = Some((turn, name));
+            }
+        }
+        if self.shown_turn.is_some() {
+            let waits = matches!(
+                self.recorder.agent().live(),
+                Some(Turn::Parked(parked)) if matches!(parked.wait, Wait::Account { .. })
+            );
+            let events = self
+                .shown
+                .account_recovery(waits.then_some(ACCOUNT_WAIT), now_ms);
+            self.shown_events.extend(events);
+        }
     }
 
     pub fn profile(&self) -> &Profile {
@@ -1918,6 +2083,21 @@ impl Actor {
         let mut calls = Vec::new();
         let mut signals = Vec::new();
         let mut offset = 0;
+        // Those who watch are shown the turn as it stands: its items are made again from the
+        // same records, with the times the records have. What that sends is for nobody: no
+        // client of this run of the Host has seen any of it.
+        let name = shown_name(message.trace_id.as_deref(), &message.id);
+        let began = match self.recorder.agent().live() {
+            Some(Turn::Starting(held)) => held.started_at_ms,
+            Some(Turn::Running(held)) => held.started_at_ms,
+            _ => now_ms,
+        };
+        let conversation = self.shown_conversation();
+        let session = self.profile.session.clone();
+        let _ = self
+            .shown
+            .begin_turn(&session, &conversation, &name, Some(began), began);
+        self.shown_turn = Some((turn, name.clone()));
         while offset < until {
             let read = reader
                 .read_window(offset, until, WINDOW)
@@ -1949,6 +2129,9 @@ impl Actor {
                             tokens_in,
                             tokens_out,
                         } => tokens = Some((tokens_in, tokens_out)),
+                        Signal::Glimpse(glimpse) => {
+                            let _ = self.shown.show(&glimpse, Some(&name), record.t);
+                        }
                         _ => {}
                     }
                 }
@@ -2071,6 +2254,9 @@ impl Actor {
     /// Reads what is new in the live turn's spool and writes what it means to the log.
     fn pump(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
         loop {
+            // The turn is shown from before its first record is read, and its end after its
+            // last one was.
+            self.show_turn(now_ms);
             let Some(live) = self.live.as_mut().filter(|live| !live.over) else {
                 return Ok(());
             };
@@ -2183,6 +2369,10 @@ impl Actor {
                                         live.drafts.clear();
                                         live.tools.clear();
                                         live.calls.clear();
+                                        // Nor does anything of it still run for those who
+                                        // watch.
+                                        let events = self.shown.settle("interrupted", t);
+                                        self.shown_events.extend(events);
                                         continue;
                                     }
                                 }
@@ -2235,6 +2425,17 @@ impl Actor {
                                 shown.push(reply.id.clone());
                             }
                             show(&mut live.drafts, turn, &live.origin, reply, t);
+                            continue;
+                        }
+                        Signal::Glimpse(glimpse) => {
+                            // Of the turn that is shown, and of no other: what a turn that
+                            // is over still says is not given to the one after it.
+                            if let Some((_, name)) =
+                                self.shown_turn.as_ref().filter(|(held, _)| *held == turn)
+                            {
+                                let events = self.shown.show(&glimpse, Some(name), t);
+                                self.shown_events.extend(events);
+                            }
                             continue;
                         }
                         Signal::Model(named) => {

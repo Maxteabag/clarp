@@ -61,6 +61,7 @@ impl World {
             stop_grace_ms: 3_000,
             keep_spools: false,
             accounts: clarp_kernel::recovery::Accounts::None,
+            epoch: "epoch-test".to_string(),
         };
         Self {
             root,

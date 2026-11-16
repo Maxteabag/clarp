@@ -47,10 +47,85 @@ fn stored(signals: &[Signal]) -> Vec<&Signal> {
         .filter(|signal| {
             !matches!(
                 signal,
-                Signal::Live(_) | Signal::Model(_) | Signal::Usage { .. }
+                Signal::Live(_) | Signal::Glimpse(_) | Signal::Model(_) | Signal::Usage { .. }
             )
         })
         .collect()
+}
+
+/// What those who watch are shown of a recorded turn: every event the hub sends for it, as a
+/// client that applies each of them holds it at the end.
+fn shown(fixture: &str) -> (clarp_kernel::live::View, usize) {
+    use clarp_kernel::live::{Hub, View};
+    use serde_json::json;
+
+    let mut hub = Hub::new("epoch-1", "agent-1", "claire");
+    let mut client = View::new();
+    client.apply_snapshot(&json!({"epoch": "epoch-1", "lseq": 0}));
+    let mut sent = hub.begin_turn("claire", "conv-1", "tr-1", None, 0);
+    let mut t = 0;
+    for signal in read(fixture) {
+        t += 1;
+        if let Signal::Glimpse(glimpse) = signal {
+            sent.extend(hub.show(&glimpse, Some("tr-1"), t));
+        }
+    }
+    sent.extend(hub.end_turn("completed", None, t + 1));
+    for event in &sent {
+        assert!(
+            client.apply_event(event).is_empty(),
+            "a client takes {event}"
+        );
+    }
+    (client, sent.len())
+}
+
+#[test]
+fn a_real_turn_is_shown_as_items_that_all_settle() {
+    let (plain, events) = shown("claude-2.1.321-plain.jsonl");
+    assert!(events >= 4, "{events} events");
+    let items = plain.items();
+    let kinds: Vec<&str> = items
+        .iter()
+        .map(|item| item["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"message"), "{kinds:?}");
+    for item in &items {
+        assert_eq!(item["status"], "completed", "{item}");
+        assert!(item["ended_at_ms"].is_i64(), "{item}");
+    }
+    let said = items
+        .iter()
+        .rfind(|item| item["kind"] == "message")
+        .unwrap();
+    assert_eq!(said["phase"], "final");
+    assert!(!said["text"].as_str().unwrap().is_empty());
+    assert!(said["row_id"].as_str().unwrap().starts_with("r-"), "{said}");
+    assert_eq!(plain.activity()["state"], "idle");
+    assert_eq!(plain.turn().unwrap()["status"], "completed");
+
+    let (with_tool, _) = shown("claude-2.1.321-tool.jsonl");
+    let items = with_tool.items();
+    let tool = items.iter().find(|item| item["kind"] == "tool").unwrap();
+    assert_eq!(tool["status"], "completed", "{tool}");
+    assert_eq!(tool["tool"]["output"]["exit_code"], 0, "{tool}");
+    assert!(
+        !tool["tool"]["label"].as_str().unwrap().is_empty(),
+        "{tool}"
+    );
+    assert_eq!(
+        tool["id"],
+        format!("cl:{}", tool["tool"]["call_id"].as_str().unwrap())
+    );
+    assert_eq!(with_tool.turn().unwrap()["tool_count"], 1);
+    // What was said before the tool was narration; what was said after it is the answer.
+    let phases: Vec<&str> = items
+        .iter()
+        .filter(|item| item["kind"] == "message")
+        .map(|item| item["phase"].as_str().unwrap())
+        .collect();
+    assert_eq!(phases.last(), Some(&"final"), "{phases:?}");
+    assert!(items.iter().all(|item| item["status"] == "completed"));
 }
 
 #[test]

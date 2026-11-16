@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
+use clarp_kernel::live::Glimpse;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
@@ -157,6 +158,206 @@ struct ResultFacts {
     text: String,
 }
 
+/// What the ids of Claude Code's live items begin with.
+const SHOWN: &str = "cl";
+
+/// What kind of item a block of a message is shown as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Block {
+    Reasoning,
+    Message,
+    Tool,
+}
+
+/// What those who watch a turn are shown of it: every block of a message as an item of its
+/// own, a tool call from the moment its name is known, and what each tool returned.
+///
+/// The Python Host's `ClaudeLiveItems` (`server/lib/live_claude.py`), held to it by the
+/// streams in `clarp-kernel/tests/fixtures/live-vectors.json`.
+#[derive(Debug, Default)]
+struct Shown {
+    /// The message being written, by the provider's id.
+    message: String,
+    /// Its blocks so far, in the order they began: which block, what it is shown as, and
+    /// the id of its item.
+    blocks: Vec<(i64, Block, String)>,
+    /// The text of each message and thought so far, by item.
+    texts: HashMap<String, String>,
+    /// What each tool call is given, as far as it has arrived, by block.
+    inputs: HashMap<i64, String>,
+    /// The name of each tool that was called, by the provider's id of the call.
+    tools: HashMap<String, String>,
+}
+
+impl Shown {
+    fn block(&self, index: i64) -> Option<(Block, String)> {
+        self.blocks
+            .iter()
+            .find(|(at, _, _)| *at == index)
+            .map(|(_, kind, id)| (*kind, id.clone()))
+    }
+
+    fn begin(&mut self, index: i64, kind: Block, id: &str) {
+        let block = (index, kind, id.to_string());
+        match self.blocks.iter_mut().find(|(at, _, _)| *at == index) {
+            Some(held) => *held = block,
+            None => self.blocks.push(block),
+        }
+    }
+
+    /// Takes one event of the stream. `row` names the row of the conversation that the
+    /// message with a given id is written into.
+    fn see(&mut self, event: &Value, row: &dyn Fn(&str) -> String, out: &mut Vec<Signal>) {
+        let piece = match text_of(&event["type"]) {
+            "user" => {
+                self.returned(&event["message"]["content"], out);
+                return;
+            }
+            "stream_event" if event["event"].is_object() => &event["event"],
+            _ => return,
+        };
+        let index = piece["index"].as_i64();
+        match (text_of(&piece["type"]), index) {
+            ("message_start", _) => {
+                self.message = text_of(&piece["message"]["id"]).to_string();
+                self.blocks.clear();
+                self.inputs.clear();
+            }
+            ("message_stop", _) => {
+                for (_, kind, id) in &self.blocks {
+                    if matches!(kind, Block::Reasoning | Block::Message) {
+                        out.push(Signal::Glimpse(Glimpse::Done { id: id.clone() }));
+                    }
+                }
+            }
+            ("content_block_start", Some(index)) => {
+                self.block_began(index, &piece["content_block"], row, out);
+            }
+            ("content_block_delta", Some(index)) => self.block_grew(index, &piece["delta"], out),
+            ("content_block_stop", Some(index)) => self.block_ended(index, out),
+            _ => {}
+        }
+    }
+
+    fn block_began(
+        &mut self,
+        index: i64,
+        block: &Value,
+        row: &dyn Fn(&str) -> String,
+        out: &mut Vec<Signal>,
+    ) {
+        let id = format!("{SHOWN}:{}:{index}", self.message);
+        match text_of(&block["type"]) {
+            "thinking" | "redacted_thinking" => {
+                let text = text_of(&block["thinking"]).to_string();
+                self.begin(index, Block::Reasoning, &id);
+                self.texts.insert(id.clone(), text.clone());
+                out.push(Signal::Glimpse(Glimpse::Reasoning { id, text }));
+            }
+            "text" => {
+                let text = text_of(&block["text"]).to_string();
+                self.begin(index, Block::Message, &id);
+                self.texts.insert(id.clone(), text.clone());
+                let row = Some(row(&self.message));
+                out.push(Signal::Glimpse(Glimpse::Message { id, text, row }));
+            }
+            "tool_use" | "server_tool_use" if !text_of(&block["id"]).is_empty() => {
+                let call_id = text_of(&block["id"]).to_string();
+                let name = match text_of(&block["name"]) {
+                    "" => "tool",
+                    name => name,
+                };
+                let id = format!("{SHOWN}:{call_id}");
+                self.begin(index, Block::Tool, &id);
+                self.tools.insert(call_id.clone(), name.to_string());
+                self.inputs.insert(index, String::new());
+                out.push(Signal::Glimpse(Glimpse::Tool {
+                    id,
+                    call_id,
+                    name: name.to_string(),
+                    input: block["input"].clone(),
+                    whole: false,
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    fn block_grew(&mut self, index: i64, delta: &Value, out: &mut Vec<Signal>) {
+        let Some((kind, id)) = self.block(index) else {
+            return;
+        };
+        match (kind, text_of(&delta["type"])) {
+            (Block::Reasoning, "thinking_delta") => {
+                let text = self.texts.entry(id.clone()).or_default();
+                text.push_str(text_of(&delta["thinking"]));
+                let text = text.clone();
+                out.push(Signal::Glimpse(Glimpse::Reasoning { id, text }));
+            }
+            (Block::Message, "text_delta") => {
+                let text = self.texts.entry(id.clone()).or_default();
+                text.push_str(text_of(&delta["text"]));
+                let text = text.clone();
+                out.push(Signal::Glimpse(Glimpse::Message {
+                    id,
+                    text,
+                    row: None,
+                }));
+            }
+            (Block::Tool, "input_json_delta") => {
+                self.inputs
+                    .entry(index)
+                    .or_default()
+                    .push_str(text_of(&delta["partial_json"]));
+            }
+            _ => {}
+        }
+    }
+
+    fn block_ended(&mut self, index: i64, out: &mut Vec<Signal>) {
+        let Some((kind, id)) = self.block(index) else {
+            return;
+        };
+        if kind != Block::Tool {
+            out.push(Signal::Glimpse(Glimpse::Done { id }));
+            return;
+        }
+        // What the tool is given is whole now. What is no JSON is taken for nothing given;
+        // what is JSON and no object is left alone.
+        let given = self.inputs.get(&index).map_or("", String::as_str);
+        let input = match given {
+            "" => json!({}),
+            given => serde_json::from_str::<Value>(given).unwrap_or_else(|_| json!({})),
+        };
+        if !input.is_object() {
+            return;
+        }
+        let call_id = id.split_once(':').map_or("", |(_, call)| call).to_string();
+        let name = self.tools.get(&call_id).map_or("tool", String::as_str);
+        out.push(Signal::Glimpse(Glimpse::Tool {
+            id,
+            name: name.to_string(),
+            call_id,
+            input,
+            whole: true,
+        }));
+    }
+
+    /// What tools returned: the parts of a message of the user's that are results.
+    fn returned(&self, content: &Value, out: &mut Vec<Signal>) {
+        for part in content.as_array().into_iter().flatten() {
+            if text_of(&part["type"]) != "tool_result" {
+                continue;
+            }
+            out.push(Signal::Glimpse(Glimpse::Returned {
+                id: format!("{SHOWN}:{}", text_of(&part["tool_use_id"])),
+                content: part["content"].clone(),
+                failed: clarp_kernel::live::truthy(&part["is_error"]),
+            }));
+        }
+    }
+}
+
 pub struct ClaudeInterpreter {
     turn: u64,
     /// The turn's own name, for the ids of pieces the tool does not name.
@@ -182,6 +383,8 @@ pub struct ClaudeInterpreter {
     result: Option<ResultFacts>,
     stderr: ErrorTail,
     ended: bool,
+    /// What those who watch the turn are shown of it.
+    shown: Shown,
 }
 
 fn text_of(value: &Value) -> &str {
@@ -231,6 +434,7 @@ impl ClaudeInterpreter {
             result: None,
             stderr: ErrorTail::default(),
             ended: false,
+            shown: Shown::default(),
         }
     }
 
@@ -243,12 +447,17 @@ impl ClaudeInterpreter {
     }
 
     fn reply_id(&self, draft: &Draft) -> String {
+        self.row_of(&draft.id)
+    }
+
+    /// The id of the reply that the message with this id of the provider's becomes.
+    fn row_of(&self, message: &str) -> String {
         // The provider's own name for the message, without its `msg_`: what is left is one
         // unbroken id, as every other id of a conversation is.
-        match draft.id.strip_prefix("msg_").unwrap_or(&draft.id) {
+        match message.strip_prefix("msg_").unwrap_or(message) {
             "" => format!("r-{}-{}", self.name, self.replies + 1),
             // A reply is written once. More of a message that became one is another.
-            name => match self.told.get(&draft.id) {
+            name => match self.told.get(message) {
                 Some(before) => format!("r-{name}-{}", before + 1),
                 None => format!("r-{name}"),
             },
@@ -338,6 +547,12 @@ impl ClaudeInterpreter {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
             return;
         };
+        // Those who watch are shown every event that is the turn's own, a sub-agent's too.
+        if event["isMeta"].as_bool() != Some(true) {
+            let mut shown = std::mem::take(&mut self.shown);
+            shown.see(&event, &|message| self.row_of(message), out);
+            self.shown = shown;
+        }
         // What a sub-agent says belongs to the tool call that started it, not to this reply.
         if !text_of(&event["parent_tool_use_id"]).is_empty() {
             return;
@@ -395,8 +610,18 @@ impl ClaudeInterpreter {
             }
             "status" if text_of(&event["status"]) == "compacting" => {
                 self.moved(Activity::Compacting, out);
+                out.push(Signal::Glimpse(Glimpse::Compacting {
+                    prefix: SHOWN.to_string(),
+                    over: false,
+                }));
             }
-            "compact_boundary" => self.moved(Activity::Thinking, out),
+            "compact_boundary" => {
+                self.moved(Activity::Thinking, out);
+                out.push(Signal::Glimpse(Glimpse::Compacting {
+                    prefix: SHOWN.to_string(),
+                    over: true,
+                }));
+            }
             _ => {}
         }
     }
@@ -683,11 +908,61 @@ mod tests {
             .filter(|signal| {
                 !matches!(
                     signal,
-                    Signal::Live(_) | Signal::Model(_) | Signal::Usage { .. }
+                    Signal::Live(_) | Signal::Glimpse(_) | Signal::Model(_) | Signal::Usage { .. }
                 )
             })
             .cloned()
             .collect()
+    }
+
+    #[test]
+    fn what_is_shown_of_a_stream_is_what_the_python_host_shows() {
+        use clarp_kernel::live::Hub;
+
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/live-vectors.json"
+        ))
+        .unwrap();
+        let cases = vectors["claude"].as_array().unwrap();
+        assert!(cases.len() >= 4);
+        let row = |message: &str| format!("r-{}", message.strip_prefix("msg_").unwrap_or(message));
+        let mut held = 0;
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let mut hub = Hub::new("epoch-1", "agent-1", "");
+            let mut shown = Shown::default();
+            for (place, step) in case["steps"].as_array().unwrap().iter().enumerate() {
+                let now = step["at"].as_i64().unwrap();
+                let events = if let Some(turn) = step["begin"].as_str() {
+                    hub.begin_turn("claire", "conv-1", turn, None, now)
+                } else if let Some(status) = step["end"].as_str() {
+                    hub.end_turn(status, None, now)
+                } else if step.get("fire").is_some() {
+                    hub.fire(now)
+                } else {
+                    let mut signals = Vec::new();
+                    shown.see(&step["event"], &row, &mut signals);
+                    let mut events = Vec::new();
+                    for signal in &signals {
+                        if let Signal::Glimpse(glimpse) = signal {
+                            events.extend(hub.show(glimpse, Some("tr-1"), now));
+                        }
+                    }
+                    events
+                };
+                let said = format!("{name}, step {place}: {step}");
+                assert_eq!(json!(events), step["events"], "{said}");
+                assert_eq!(json!(hub.due_ms()), step["due"], "{said}: held back until");
+                held += events.len();
+            }
+            let after = &case["after"];
+            let (snapshot, events) = hub
+                .snapshot(after["at"].as_i64().unwrap())
+                .unwrap_or((Value::Null, Vec::new()));
+            assert_eq!(json!(events), after["events"], "{name}: at the end");
+            assert_eq!(snapshot, after["snapshot"], "{name}: the snapshot");
+        }
+        assert!(held > 50, "{held} events were compared");
     }
 
     #[test]

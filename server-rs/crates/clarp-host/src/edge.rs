@@ -78,6 +78,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("pairing", 1),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
+    // A running turn as items that appear, grow and settle: `live` events on `/events?live=`
+    // and `GET /live` (`docs/live-items.md`).
+    ("live_items", 42),
     // A settled turn can be folded from the conversation alone: every row a turn writes
     // carries the turn's trace, what the agent said its phase, the turn's last row how the
     // turn ended, and a tool an interrupted turn cut off reads `interrupted`.
@@ -211,6 +214,7 @@ pub fn router(app: App) -> Router {
         .route("/stop", post(stop))
         .route("/select", post(select))
         .route("/turn-queue", get(queue))
+        .route("/live", get(shown))
         .route("/turn-queue/resume", post(resume))
         .route("/pairing/exchange", post(pairing_exchange))
         .route("/pairing/issue", post(pairing_issue))
@@ -1439,6 +1443,27 @@ async fn queue(
     })))
 }
 
+/// `GET /live?session=`: everything that is shown of an agent's turn as it runs, for a client
+/// that has just opened the chat or missed an event. Nothing explains a tool's use on this
+/// Host, and the answer says so.
+async fn shown(
+    State(app): State<App>,
+    Query(query): Query<ShownQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let session = query.session.unwrap_or_default();
+    let member = app
+        .member(session.trim())
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
+    let mut whole = member.agent.shown().await?;
+    whole["tool_explanations"] = json!({ "enabled": false, "detail_level": 2 });
+    Ok(Json(whole))
+}
+
+#[derive(Debug, Deserialize)]
+struct ShownQuery {
+    session: Option<String>,
+}
+
 /// Lets a held mailbox run again.
 async fn resume(
     State(app): State<App>,
@@ -1567,6 +1592,15 @@ async fn revoke_device(
 #[derive(Debug, Deserialize)]
 struct EventsQuery {
     last_event_id: Option<u64>,
+    /// The agents whose turns the connection wants to be shown as they run, by session or
+    /// id, with commas between them: `*` for every one, nothing for the status lines alone.
+    /// A connection that does not say `live` at all is sent no `live` events.
+    live: Option<String>,
+}
+
+/// What a `live` event is sent as: no number, and no name, as every other event without one.
+fn shown_event(json: &str) -> SseEvent {
+    SseEvent::default().data(json)
 }
 
 fn numbered(published: &Published) -> SseEvent {
@@ -1590,6 +1624,16 @@ async fn events(
         .and_then(|value| value.trim().parse().ok())
         .or(query.last_event_id);
     let (missed, live) = app.hub.subscribe(after);
+    // The turns the connection asked to be shown as they run. What they show is never kept:
+    // nothing of it is among what was missed.
+    let wanted: Option<HashSet<String>> = query.live.map(|live| {
+        live.split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect()
+    });
+    let watched = wanted.map(|wanted| (wanted, app.hub.watch()));
     // First what the client missed, then the word to look at everything: whatever happened
     // while it was away for longer than the hub remembers, the snapshot and the conversations
     // will tell.
@@ -1597,28 +1641,69 @@ async fn events(
     first.extend(missed.iter().map(|published| numbered(published)));
     first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
     let clock = app.clock.clone();
-    let stream = stream::unfold((first, live), move |(mut first, mut live)| {
-        let clock = clock.clone();
-        async move {
-            if let Some(event) = first.pop_front() {
-                return Some((Ok(event), (first, live)));
-            }
-            match tokio::time::timeout(HEARTBEAT, live.recv()).await {
-                Ok(Ok(published)) => Some((Ok(numbered(&published)), (first, live))),
-                // A client that fell too far behind is cut off. It reconnects, and what it
-                // missed is given to it then.
-                Ok(Err(RecvError::Lagged(_) | RecvError::Closed)) => None,
-                Err(_) => {
-                    let beat = json!({ "type": "heartbeat", "ts": clock.now_ms() });
-                    let event = SseEvent::default()
-                        .event("heartbeat")
-                        .data(beat.to_string());
-                    Some((Ok(event), (first, live)))
+    let stream = stream::unfold(
+        (first, live, watched),
+        move |(mut first, mut live, mut watched)| {
+            let clock = clock.clone();
+            async move {
+                // A heartbeat is due this long after the last thing that was sent, whatever was
+                // heard meanwhile and was not for this connection.
+                let beat_at = tokio::time::Instant::now() + HEARTBEAT;
+                loop {
+                    if let Some(event) = first.pop_front() {
+                        return Some((Ok(event), (first, live, watched)));
+                    }
+                    // What a turn shows, for a connection that asked for it; for one that did
+                    // not, a wait that never ends.
+                    let shown = async {
+                        match watched.as_mut() {
+                            Some((_, shown)) => shown.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    };
+                    let heard = tokio::time::timeout_at(beat_at, async {
+                        tokio::select! {
+                            published = live.recv() => Heard::Event(published),
+                            shown = shown => Heard::Shown(shown),
+                        }
+                    })
+                    .await;
+                    let event = match heard {
+                        Ok(Heard::Event(Ok(published))) => numbered(&published),
+                        Ok(Heard::Shown(Ok(shown))) => {
+                            let wanted = watched.as_ref().map(|(wanted, _)| wanted);
+                            match wanted.and_then(|wanted| shown.for_one(wanted)) {
+                                Some(json) => shown_event(json),
+                                // Not for this connection.
+                                None => continue,
+                            }
+                        }
+                        // A client that fell too far behind is cut off. It reconnects, and what
+                        // it missed is given to it then; of what turns showed it asks anew.
+                        Ok(
+                            Heard::Event(Err(RecvError::Lagged(_) | RecvError::Closed))
+                            | Heard::Shown(Err(RecvError::Lagged(_) | RecvError::Closed)),
+                        ) => return None,
+                        Err(_) => {
+                            let beat = json!({ "type": "heartbeat", "ts": clock.now_ms() });
+                            SseEvent::default()
+                                .event("heartbeat")
+                                .data(beat.to_string())
+                        }
+                    };
+                    return Some((Ok(event), (first, live, watched)));
                 }
             }
-        }
-    });
+        },
+    );
     Sse::new(stream)
+}
+
+/// What a connection that listens heard: an event every connection is sent, or something a
+/// turn shows.
+enum Heard {
+    Event(Result<Arc<Published>, RecvError>),
+    Shown(Result<Arc<crate::hub::Shown>, RecvError>),
 }
 
 #[cfg(test)]

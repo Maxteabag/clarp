@@ -111,6 +111,10 @@ pub enum Ask {
     Queue {
         answer: Answer<(Vec<Waiting>, QueueState)>,
     },
+    /// Everything that is shown of the agent's turn as it runs: what `GET /live` answers.
+    Shown {
+        answer: Answer<Value>,
+    },
     /// Take over the conversation the agent had on another Host. Answers how many rows came,
     /// or why it cannot be done.
     Import {
@@ -331,6 +335,11 @@ impl AgentHandle {
 
     pub async fn queue(&self) -> Result<(Vec<Waiting>, QueueState), Unavailable> {
         self.ask(|answer| Ask::Queue { answer }).await
+    }
+
+    /// Everything that is shown of the agent's turn as it runs.
+    pub async fn shown(&self) -> Result<Value, Unavailable> {
+        self.ask(|answer| Ask::Shown { answer }).await
     }
 
     /// Takes over the conversation the agent had on another Host.
@@ -806,12 +815,23 @@ impl Worker {
                 let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                 Instant::now() + Duration::from_millis(wait)
             });
+            // And an agent whose turn holds something back from those who watch it (a text
+            // that grows, lines a tool prints) wakes to send it.
+            let shown_due = self
+                .actor
+                .as_ref()
+                .and_then(Actor::shown_due_ms)
+                .map(|due| {
+                    let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
+                    Instant::now() + Duration::from_millis(wait)
+                });
             let due = [
                 self.transcript_due,
                 jobs_due,
                 goals_due,
                 requests_due,
                 retry_due,
+                shown_due,
             ]
             .into_iter()
             .flatten()
@@ -848,6 +868,13 @@ impl Worker {
                             );
                             self.actor = None;
                         }
+                        if shown_due.is_some_and(|due| due <= now) {
+                            let now_ms = self.now_ms();
+                            if let Some(actor) = self.actor.as_mut() {
+                                actor.shown_due(now_ms);
+                            }
+                        }
+                        self.tell_shown();
                         continue;
                     }
                     Err(RecvTimeoutError::Disconnected) => return,
@@ -865,6 +892,20 @@ impl Worker {
                 );
                 self.actor = None;
             }
+            self.tell_shown();
+        }
+    }
+
+    /// Sends those who watch the agent what its turn has to show since they were last sent
+    /// something: after everything that was asked of the agent, and after every time it
+    /// woke on its own.
+    fn tell_shown(&mut self) {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return;
+        };
+        for event in actor.take_shown(now) {
+            self.setup.hub.show(event, now);
         }
     }
 
@@ -1332,6 +1373,7 @@ impl Worker {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
             }
+            Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
                 from,
                 backend_session,
@@ -1911,6 +1953,7 @@ fn refuse_for(
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
