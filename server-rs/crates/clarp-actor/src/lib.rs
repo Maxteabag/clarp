@@ -762,13 +762,30 @@ fn cut_off(
     Ok(())
 }
 
+/// What the conversation keeps of what an agent said in a turn that began this way. An
+/// answer to a heartbeat that says no more than that nothing is to be done is kept as one
+/// line that says so, and so is that word alone in any other turn
+/// ([`clarp_kernel::heartbeat::kept`]).
+fn kept(text: String, origin: &Origin) -> String {
+    if !text.contains(clarp_kernel::heartbeat::OK) {
+        return text;
+    }
+    clarp_kernel::heartbeat::kept(&text, origin.name() == "heartbeat").0
+}
+
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
+    let text = kept(live.text, origin);
+    // An answer that is no answer is not shown while it is written.
+    if text == clarp_kernel::heartbeat::NOTHING_TO_DO {
+        drafts.retain(|draft| draft.id != live.id);
+        return;
+    }
     match drafts.iter_mut().find(|draft| draft.id == live.id) {
-        Some(draft) => draft.text = live.text,
+        Some(draft) => draft.text = text,
         None => drafts.push(Draft {
             id: live.id,
             turn: turn.0,
-            text: live.text,
+            text,
             revision: 0,
             ts_ms,
             origin: origin.clone(),
@@ -1906,7 +1923,7 @@ impl Actor {
             let piece = Entry::Reply(Reply {
                 id: draft.id,
                 turn: draft.turn,
-                text: draft.text,
+                text: kept(draft.text, &draft.origin),
                 trace_id: facts.trace_id.clone(),
                 origin: draft.origin,
                 ..Reply::default()
@@ -2526,6 +2543,7 @@ impl Actor {
                             live.drafts.retain(|draft| draft.id != reply.id);
                             reply.trace_id = live.trace_id.clone();
                             reply.origin = live.origin.clone();
+                            reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
                             // The tools it calls are work after what the turn said before.
                             if !reply.tools.is_empty() {
                                 follow(&mut batch, &mut live.said, turn, t)?;
