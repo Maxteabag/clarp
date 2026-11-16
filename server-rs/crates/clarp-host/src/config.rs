@@ -42,6 +42,8 @@ pub struct Config {
     pub jobs_checked_every_ms: u64,
     /// How often the schedules are looked at for what is due.
     pub schedules_checked_every_ms: u64,
+    /// How often the heartbeat looks which agent is due.
+    pub heartbeats_checked_every_ms: u64,
     /// How often the fleet looks after the helpers nobody speaks of any more.
     pub helpers_checked_every_ms: u64,
     /// How long a helper that is working may sit idle before it counts as having reported.
@@ -99,13 +101,17 @@ pub struct Config {
     pub relay_config: Option<PathBuf>,
     /// A stand-in for the relay, on this machine. Empty: the relay the settings name.
     pub relay_stand_in: String,
+    /// No agent of this Host is woken by a heartbeat, whatever its own switch says, and a
+    /// heartbeat sent from outside is refused (`CLARP_HEARTBEATS_DISABLED`, as on the
+    /// Python Host).
+    pub heartbeats_disabled: bool,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
 [--engine sqlite|memory] [--codec zstd|none] [--blobs files|memory] \
 [--launcher direct|systemd] [--shim PATH] \
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
-[--schedules-checked-every-ms N] \
+[--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--accounts none|follow] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -113,7 +119,8 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--static DIR] [--relay-config FILE]
 The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
 the push relay, when it has one, from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
-over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY.";
+over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY.
+CLARP_HEARTBEATS_DISABLED=1 turns the heartbeat of every agent off.";
 
 /// The home of whoever runs this Host.
 pub fn home() -> PathBuf {
@@ -244,6 +251,7 @@ impl Config {
         let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
+        let mut heartbeats_checked_every_ms = 60_000;
         let mut helpers_checked_every_ms = 60_000;
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
         let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
@@ -301,6 +309,11 @@ impl Config {
                     schedules_checked_every_ms = value("a number of milliseconds")?
                         .parse()
                         .map_err(|_| "--schedules-checked-every-ms needs a number".to_string())?;
+                }
+                "--heartbeats-checked-every-ms" => {
+                    heartbeats_checked_every_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--heartbeats-checked-every-ms needs a number".to_string())?;
                 }
                 "--helpers-checked-every-ms" => {
                     helpers_checked_every_ms = value("a number of milliseconds")?
@@ -406,6 +419,7 @@ impl Config {
             logins_checked_every_ms,
             jobs_checked_every_ms,
             schedules_checked_every_ms,
+            heartbeats_checked_every_ms,
             helpers_checked_every_ms,
             helper_idle_after_ms,
             helper_archive_grace_ms,
@@ -432,6 +446,10 @@ impl Config {
             chirp_decoder,
             relay_config,
             relay_stand_in,
+            heartbeats_disabled: {
+                let said = std::env::var("CLARP_HEARTBEATS_DISABLED").unwrap_or_default();
+                matches!(said.to_lowercase().as_str(), "1" | "true" | "yes")
+            },
         })
     }
 }

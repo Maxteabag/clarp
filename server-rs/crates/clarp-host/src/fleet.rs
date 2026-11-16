@@ -76,6 +76,9 @@ pub struct AgentRecord {
     /// The user muted it: what it says is marked unread and pages nobody.
     #[serde(default, skip_serializing_if = "is_false")]
     pub muted: bool,
+    /// It is woken from time to time to look at what it has standing (the heartbeat).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub heartbeat_enabled: bool,
     /// When the agent was put away, when it is. It keeps everything and can still be
     /// written to; the apps leave it out of their lists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -148,6 +151,8 @@ fn is_zero(value: &i64) -> bool {
 pub enum Amend {
     /// Whether what it says pages the user.
     Mute(bool),
+    /// Whether it is woken by the heartbeat.
+    Heartbeat(bool),
     /// Its name as a person reads it, as [`roster::display_name`] keeps one. Its session
     /// name and its id stay: everything that names the agent goes on naming it.
     Rename(String),
@@ -1602,6 +1607,7 @@ impl Fleet {
         let mut record = before.clone();
         match change {
             Amend::Mute(muted) => record.muted = muted,
+            Amend::Heartbeat(on) => record.heartbeat_enabled = on,
             Amend::Rename(name) => {
                 if let Some(owner) = self.owner_of_name(&name, &record.agent_id) {
                     return Ok(Err(NotAmended::Occupied {

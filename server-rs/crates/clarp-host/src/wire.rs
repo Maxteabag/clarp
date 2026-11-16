@@ -1350,7 +1350,7 @@ pub fn summary(
         "avatar_generation_status": null,
         "model_avatar_url": "",
         "mcp_servers": [],
-        "heartbeat_enabled": false,
+        "heartbeat_enabled": record.heartbeat_enabled,
         "dreaming_enabled": false,
         "muted": record.muted,
         "quiet": false,

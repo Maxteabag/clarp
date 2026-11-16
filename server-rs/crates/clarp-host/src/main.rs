@@ -163,6 +163,7 @@ async fn serve(config: Config) -> Result<(), String> {
         calls: Arc::default(),
         chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
         schedules: Arc::default(),
+        heartbeat: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
         ears: {
@@ -204,6 +205,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::chip::run(&app, is_limited);
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
+    // And an idle agent that asked for it is given a heartbeat when one is due.
+    clarp_host::heartbeat::run(&app);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",

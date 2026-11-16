@@ -15,6 +15,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::python;
@@ -59,7 +60,8 @@ pub const ACK_MAX_CHARS: usize = 300;
 const PLAN_LINES_MOST: usize = 12;
 
 /// The owner's settings for every agent of the Host that has the heartbeat on.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub interval_sec: i64,
     /// `fixed`, `linear` or `exponential`.
@@ -355,7 +357,8 @@ pub struct Known {
 }
 
 /// What the heartbeat remembers of an agent.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct State {
     /// When its last heartbeat was started, in seconds. Nothing: never.
     pub last_started: f64,
