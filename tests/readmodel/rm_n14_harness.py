@@ -189,6 +189,24 @@ def _revisions_by_order(view: dict) -> dict:
     return out
 
 
+def assert_heads_cover_messages(database: pathlib.Path) -> None:
+    """Every conversation's head is at or above the highest revision of its
+    messages. The agent list reads what changed from the heads alone (issue
+    371), so an import that gave a row a revision and left the head below it,
+    a new row or one rewritten in place, would leave a stale preview cached.
+    Asked of both lanes at every comparison."""
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        behind = connection.execute(
+            """SELECT COUNT(*) FROM (SELECT agent_id, backend_session_id, MAX(revision) AS revision
+                                      FROM messages GROUP BY agent_id, backend_session_id) m
+                LEFT JOIN conversation_heads h
+                  ON h.agent_id = m.agent_id AND h.backend_session_id IS m.backend_session_id
+               WHERE h.revision IS NULL OR h.revision < m.revision""").fetchone()[0]
+    if behind:
+        raise AssertionError(json.dumps({"code": "head_below_its_messages", "conversations": behind,
+                                         "store": database.name}))
+
+
 def assert_product_equal(reference: pathlib.Path, candidate: pathlib.Path, *,
                          revisions: str | None = None) -> None:
     """Every product table of the two stores, row for row. ``revisions``:
@@ -197,6 +215,8 @@ def assert_product_equal(reference: pathlib.Path, candidate: pathlib.Path, *,
     defaults and "order" in the Hosts' configuration: there a tail gives the
     writer away only once it has written, a replay before every batch, so
     their batches end at different rows by design."""
+    assert_heads_cover_messages(reference)
+    assert_heads_cover_messages(candidate)
     left, right = database_view(reference), database_view(candidate)
     if (revisions or ("order" if configuration() == "hosts" else "value")) == "order":
         left, right = _revisions_by_order(left), _revisions_by_order(right)
