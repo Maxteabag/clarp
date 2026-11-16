@@ -4040,10 +4040,42 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
     assert_eq!(sessions(&without), ["bob", "robert-the-second"]);
     assert_eq!(without["archived_count"], 1);
     assert_eq!(without["archived_parents"], json!([]));
+    // The names an app offers: every persona this Host has built in, then every agent's
+    // that is none of them, whichever agents were asked for.
+    let names = without["roster"].as_array().unwrap();
+    let personas = without["personas"].as_array().unwrap();
+    assert!(
+        personas.len() >= 80,
+        "{} personas are built in",
+        personas.len()
+    );
+    let built_in: Vec<&Value> = personas.iter().map(|persona| &persona["name"]).collect();
+    assert_eq!(names[..personas.len()].iter().collect::<Vec<_>>(), built_in);
     assert_eq!(
-        without["roster"],
-        json!(["Ada", "Bob", "Robert the Second"]),
-        "the names are every agent's"
+        names[personas.len()..],
+        [json!("Ada"), json!("Bob"), json!("Robert the Second")],
+        "and the names of the agents after them"
+    );
+    let mike = &personas[0];
+    assert_eq!(
+        (&mike["id"], &mike["name"], &mike["tier"], &mike["builtin"]),
+        (
+            &json!("builtin-mike"),
+            &json!("Mike"),
+            &json!("claude"),
+            &json!(true)
+        )
+    );
+    let voices: Value = serde_json::from_str(mike["voice_id"].as_str().unwrap()).unwrap();
+    assert!(
+        voices["elevenlabs"].is_string() && voices["cartesia"].is_string(),
+        "{voices}"
+    );
+    assert!(
+        mike["personality"]
+            .as_str()
+            .unwrap()
+            .starts_with("Personality: ")
     );
     let whole = host.get("/agents/snapshot");
     assert_eq!(sessions(&whole), ["ada", "bob", "robert-the-second"]);

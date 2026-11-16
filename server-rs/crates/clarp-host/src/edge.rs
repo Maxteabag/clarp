@@ -586,17 +586,36 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| agent_row(&directory, &families, member, &app.faces))
         .collect();
-    // Every agent's name, whichever agents were asked for.
-    let roster: Vec<&str> = directory
+    // Who an agent can be: the personas this Host has built in, with the voices the owner's
+    // file gives them. (A persona the owner makes himself is not built yet.)
+    let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
+    let personas = clarp_kernel::personas::builtins(&clarp_kernel::personas::Owner {
+        roster: &named,
+        cartesia: &cartesia,
+        gemini: &gemini,
+    });
+    // The names an app offers: every persona's, then every agent's that is none of them,
+    // whichever agents were asked for. A name is one name whatever the case of its letters.
+    let mut roster: Vec<&str> = Vec::new();
+    let mut offered: HashSet<String> = HashSet::new();
+    let of_personas = personas
+        .iter()
+        .filter_map(|persona| persona["name"].as_str());
+    let of_agents = directory
         .members
         .iter()
-        .map(|member| member.record.persona.as_str())
-        .collect();
+        .map(|member| member.record.persona.as_str());
+    for name in of_personas.chain(of_agents) {
+        let name = name.trim();
+        if !name.is_empty() && offered.insert(name.to_lowercase()) {
+            roster.push(name);
+        }
+    }
     let mut body = json!({
         "agents": agents,
         "focus": directory.focus,
         "roster": roster,
-        "personas": [],
+        "personas": personas,
         "available_mcp_servers": [],
         "model_avatars": false,
         // Nothing explains a tool's use here, and an app is told so wherever it asks: it
