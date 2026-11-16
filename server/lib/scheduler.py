@@ -46,15 +46,19 @@ def _parse_cron_field(field_str: str, min_val: int, max_val: int) -> set[int]:
             else:
                 start_val = int(subparts[0])
                 end_val = max_val
-            for v in range(start_val, end_val + 1, step):
-                if min_val <= v <= max_val:
-                    result.add(v)
+            # Only the values inside the field are counted: "0-999999999999/7"
+            # used to be walked value by value, holding its thread (and the
+            # interpreter) for hours. The first step at or above the field's
+            # lowest value, then by steps to the lower of the two ends.
+            first = start_val
+            if first < min_val:
+                first += -(-(min_val - first) // step) * step
+            result.update(range(first, min(end_val, max_val) + 1, step))
         elif "-" in part:
             r_start, r_end = part.split("-", 1)
             s_val, e_val = int(r_start), int(r_end)
-            for v in range(s_val, e_val + 1):
-                if min_val <= v <= max_val:
-                    result.add(v)
+            # The range is cut to the field before it is counted (see above).
+            result.update(range(max(s_val, min_val), min(e_val, max_val) + 1))
         elif part == "*":
             result.update(range(min_val, max_val + 1))
         else:
