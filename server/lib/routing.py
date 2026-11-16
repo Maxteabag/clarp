@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import unicodedata
 
 LEADING_ADDRESS_FILLERS = frozenset({
     "also",
@@ -63,6 +64,10 @@ def _word_tokens(text: str) -> list[tuple[str, int, int]]:
 
 def _strip_address_prefix(text: str, end: int) -> str:
     """Drop leading filler/name material through `end` and tidy punctuation."""
+    # Matching stays ASCII-based; the cut must include the rest of a name
+    # such as Zoë or Rachél, including decomposed accents.
+    while end < len(text) and unicodedata.category(text[end])[0] in "LM":
+        end += 1
     rest = (text or "")[end:]
     return re.sub(r"^[\s,;:!?.-]+", "", rest).strip()
 
