@@ -117,10 +117,30 @@ async fn avatar(State(app): State<App>, Path(id): Path<String>, headers: HeaderM
     media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
 }
 
+/// Where the picture an agent has of its own is fetched from.
+pub(crate) const OF_AGENTS: &str = "/avatars";
+
+/// `GET /avatars/<agent>`: the picture an agent has of its own, by the agent's id or its
+/// session name, or the part of it a `Range` header asks for.
+async fn agent_avatar(
+    State(app): State<App>,
+    Path(agent): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let directory = app.fleet.directory();
+    let member = directory.named(agent.trim_matches('/'));
+    let Some(digest) = member.and_then(|member| member.record.avatar.clone()) else {
+        return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let range = media::header_text(&headers, "range");
+    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/personas", post(create))
         .route("/personas/update", post(update))
         .route("/personas/{name}", delete(remove))
         .route("/persona-avatars/{id}", get(avatar))
+        .route("/avatars/{agent}", get(agent_avatar))
 }

@@ -9871,3 +9871,213 @@ fn the_owner_makes_changes_and_removes_a_persona_and_an_agent_can_be_it() {
     let mike = kept.iter().find(|persona| persona["id"] == "builtin-mike");
     assert_eq!(mike, Some(&dressed));
 }
+
+#[test]
+fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
+    let place = Place::new("as-persona");
+    let args = place.root.join("args");
+    let claude = place.root.join("claude");
+    // A stand-in for Claude Code that writes down what it was started with, and answers.
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!(
+            "{{ printf '%s\\n' \"$@\"; echo ----; }} >> \"{}\"\n",
+            args.display()
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("secret", &[], &world);
+    let ask = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    // Who an agent is, of its row in the list: what it takes on when it is made.
+    let row = |host: &Host, session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let found = agents.iter().find(|agent| agent["session"] == session);
+        let found = found.unwrap_or_else(|| panic!("{session} is not listed"));
+        let kept = [
+            "persona",
+            "voice_id",
+            "avatar_symbol",
+            "avatar_url",
+            "model_avatar_url",
+        ];
+        let kept = kept
+            .iter()
+            .map(|key| ((*key).to_string(), found[*key].clone()));
+        Value::Object(kept.collect())
+    };
+    // Who the tool was last told the agent is.
+    let told_last = || -> String {
+        let started = std::fs::read_to_string(&args).unwrap();
+        let launch = started.trim_end().trim_end_matches("----").trim_end();
+        let launch: Vec<&str> = launch.rsplit("----\n").next().unwrap().lines().collect();
+        let at = launch
+            .iter()
+            .position(|arg| *arg == "--append-system-prompt");
+        at.map_or("<none>", |at| launch[at + 1]).to_string()
+    };
+    let turn = |session: &str, id: &str| {
+        host.post(
+            "/send",
+            json!({ "session": session, "text": "hello", "client_msg_id": id, "synthesize_audio": false }),
+        );
+        wait_for("the turn's answer", || {
+            host.conversation(session).len() >= 2 && host.state(session) == "done"
+        });
+    };
+
+    // The owner makes a persona with a voice, a way of speaking and a picture.
+    let voice = r#"{"gemini":"Kore"}"#;
+    let (status, made) = ask(
+        "/personas",
+        json!({
+            "name": "Scout", "voice_id": voice, "personality": "Personality: curious.",
+            "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU=",
+        }),
+    );
+    assert_eq!(status, 201, "{made}");
+
+    // An agent made as it has the persona's voice, way of speaking and picture.
+    let (status, made) = ask("/agents", json!({ "name": "Scout", "backend": "claude" }));
+    assert_eq!(status, 200, "{made}");
+    let (scout, id) = (
+        made["session"].as_str().unwrap().to_string(),
+        made["agent"]["agent_id"].as_str().unwrap().to_string(),
+    );
+    let face = format!("/avatars/{id}?v=f475387a7e87a1a9");
+    assert_eq!(made["agent"]["voice_id"], voice);
+    assert_eq!(made["agent"]["avatar_url"], json!(face));
+    assert_eq!(made["agent"]["avatar_symbol"], "");
+    let listed = row(&host, &scout);
+    assert_eq!(
+        (&listed["avatar_url"], &listed["model_avatar_url"]),
+        (&json!(face), &json!(""))
+    );
+    for way in [face.clone(), format!("/avatars/{scout}")] {
+        let picture = fetch(&host, "secret", "GET", &way, &[], b"");
+        assert_eq!(
+            (picture.status, picture.text().as_str()),
+            (200, "a made-up picture"),
+            "{way}"
+        );
+        assert_eq!(picture.header("content-type"), "image/jpeg");
+        assert_eq!(picture.header("cache-control"), "no-store");
+    }
+    let part = fetch(&host, "secret", "GET", &face, &[("Range", "bytes=-7")], b"");
+    assert_eq!((part.status, part.text().as_str()), (206, "picture"));
+    assert_eq!(fetch(&host, "", "GET", &face, &[], b"").status, 401);
+    let nobody = fetch(
+        &host,
+        "secret",
+        "GET",
+        "/avatars/nobody-of-the-kind",
+        &[],
+        b"",
+    );
+    assert_eq!((nobody.status, nobody.text().as_str()), (404, "not found"));
+    turn(&scout, "m1");
+    assert_eq!(told_last(), "You are Scout. Personality: curious.");
+
+    // The persona is changed and then removed: the agent stays who it was made as.
+    let (status, changed) = ask(
+        "/personas/update",
+        json!({
+            "original_name": "Scout", "name": "Scout", "voice_id": r#"{"gemini":"Puck"}"#,
+            "personality": "Personality: another.", "avatar_base64": "YW5vdGhlciBwaWN0dXJl",
+        }),
+    );
+    assert_eq!(status, 200, "{changed}");
+    assert_eq!(host.ask("DELETE", "/personas/Scout", None).0, 200);
+    assert_eq!(row(&host, &scout), listed);
+    let picture = fetch(&host, "secret", "GET", &face, &[], b"");
+    assert_eq!(
+        (picture.status, picture.text().as_str()),
+        (200, "a made-up picture")
+    );
+    turn(&scout, "m2");
+    assert_eq!(told_last(), "You are Scout. Personality: curious.");
+
+    // An agent made as a persona that is built in has that persona's voices, and the
+    // symbol the owner gave the persona.
+    let (status, _) = ask(
+        "/personas/update",
+        json!({ "original_name": "Mike", "name": "Mike", "voice_id": "", "avatar_symbol": "bolt" }),
+    );
+    assert_eq!(status, 200);
+    let (status, made) = ask("/agents", json!({ "name": "Mike", "backend": "claude" }));
+    assert_eq!(status, 200, "{made}");
+    let voices: Value = serde_json::from_str(made["agent"]["voice_id"].as_str().unwrap()).unwrap();
+    assert!(
+        voices["elevenlabs"].is_string() && voices["cartesia"].is_string(),
+        "{voices}"
+    );
+    assert_eq!(made["agent"]["avatar_symbol"], "bolt");
+    assert_eq!(
+        made["agent"]["avatar_url"], "",
+        "a symbol, and no picture of its own"
+    );
+
+    // What the request says of the agent comes before what its persona has.
+    let (status, made) = ask(
+        "/agents",
+        json!({
+            "name": "Rachel", "backend": "claude", "voice_id": "{}", "avatar_symbol": "moon",
+            "personality": " Personality: its own. ", "avatar_base64": "YW5vdGhlciBwaWN0dXJl",
+        }),
+    );
+    assert_eq!(status, 200, "{made}");
+    let (rachel, rachel_id) = (
+        made["session"].as_str().unwrap().to_string(),
+        made["agent"]["agent_id"].as_str().unwrap().to_string(),
+    );
+    assert_eq!(made["agent"]["voice_id"], "{}");
+    assert_eq!(made["agent"]["avatar_symbol"], "moon");
+    let own = format!("/avatars/{rachel_id}?v=b2917681b4f4fee3");
+    assert_eq!(
+        made["agent"]["avatar_url"],
+        json!(own),
+        "its own picture, whatever its symbol"
+    );
+    turn(&rachel, "m3");
+    assert_eq!(told_last(), "You are Rachel. Personality: its own.");
+
+    // A picture that is none is refused, and no agent is made.
+    let before = host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .len();
+    let too_large = "QUFB".repeat(512_000 / 3 + 1);
+    for (picture, why) in [
+        ("not base64!", "Avatar is not base64."),
+        (too_large.as_str(), "avatar is too large"),
+    ] {
+        let (status, refused) = ask(
+            "/agents",
+            json!({ "name": "Zed", "avatar_base64": picture }),
+        );
+        assert_eq!(status, 400, "{refused}");
+        assert_eq!(
+            refused,
+            json!({ "error": "invalid avatar", "message": why })
+        );
+    }
+    let after = host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(after, before);
+
+    // All of it is the Host's to keep.
+    let rows = (row(&host, &scout), row(&host, &rachel));
+    host.kill();
+    let host = place.start_in("secret", &[], &world);
+    assert_eq!((row(&host, &scout), row(&host, &rachel)), rows);
+    let picture = fetch(&host, "secret", "GET", &own, &[], b"");
+    assert_eq!(
+        (picture.status, picture.text().as_str()),
+        (200, "another picture")
+    );
+}

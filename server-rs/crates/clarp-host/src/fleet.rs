@@ -108,6 +108,14 @@ pub struct AgentRecord {
     /// it begins and one when it is done, to 3, all along.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub narration: i64,
+    /// The symbol it is shown with where it has no picture of its own. Empty: none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub avatar_symbol: String,
+    /// The digest of the picture it has of its own: the one it was given when it was made,
+    /// else the one its persona had then. It is kept under that digest, and the beginning
+    /// of it is what the picture's address carries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
 }
 
 impl AgentRecord {
@@ -1392,12 +1400,58 @@ impl Fleet {
             let why = "A helper needs a parent session.";
             return Err(Told::new(400, "helper_requires_parent", why).into());
         }
-        // How it speaks: as was asked for it, else as the persona of its name does. It is
-        // written down with the agent, so that it keeps it under another name.
-        let asked = request.personality.as_deref().map_or("", strip);
-        let personality = match python::first(asked, PERSONALITY_MOST) {
-            "" => personas::personality(&persona).to_string(),
-            asked => asked.to_string(),
+        // Who it is made as: the persona of its name, built in or the owner's own. What the
+        // request does not say of the agent is the persona's, and is written down with the
+        // agent, so that it keeps it under another name.
+        let [named, cartesia, gemini] = self.works.telling.owner_tables();
+        let owner = Owner {
+            roster: &named,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        };
+        let definition = self.book.named(&owner, &persona);
+        let of_persona = |key: &str| {
+            let persona = definition.as_ref();
+            persona
+                .and_then(|persona| persona[key].as_str())
+                .unwrap_or("")
+        };
+        let asked = |said: &Option<String>| said.as_deref().map_or("", strip).to_string();
+        let or_persona = |asked: String, key: &str, most: usize| {
+            let chosen = if asked.is_empty() {
+                strip(of_persona(key))
+            } else {
+                &asked
+            };
+            python::first(chosen, most).to_string()
+        };
+        let personality = or_persona(asked(&request.personality), "personality", PERSONALITY_MOST);
+        let avatar_symbol = or_persona(
+            asked(&request.avatar_symbol),
+            "avatar_symbol",
+            personas::SYMBOL_MOST,
+        );
+        let voice_id = match asked(&request.voice_id) {
+            voice if voice.is_empty() => of_persona("voice_id").to_string(),
+            voice => voice,
+        };
+        // Its picture: the one it is given, else the one its persona has of its own.
+        let given = match personas::picture(&asked(&request.avatar_base64)) {
+            Ok(given) => given,
+            Err(why) => {
+                let why = match why {
+                    personas::AVATAR_TOO_LARGE => "avatar is too large",
+                    other => other,
+                };
+                return Err(Told::new(400, "invalid avatar", why).into());
+            }
+        };
+        let avatar = match &given {
+            Some((_, digest)) => Some(digest.clone()),
+            None => definition
+                .as_ref()
+                .and_then(|persona| persona["id"].as_str())
+                .and_then(|id| self.book.picture_of(&owner, id)),
         };
         let record = AgentRecord {
             agent_id: ids::hex(8),
@@ -1416,12 +1470,19 @@ impl Fleet {
                 String::new()
             },
             helper_state: helpers::initial_state(role).map(str::to_string),
-            voice_id: request.voice_id.unwrap_or_default().trim().to_string(),
+            voice_id,
             personality,
+            avatar_symbol,
+            avatar,
             ..AgentRecord::default()
         };
         // Refused before anything is written: an agent whose backend this Host lacks.
         let setup = setup(&self.works, &record)?;
+        // Its picture is kept before the agent that names it.
+        if let Some((bytes, digest)) = &given {
+            let kept = self.works.blobs.put(&picture_name(digest), bytes);
+            kept.map_err(|error| error.to_string())?;
+        }
         self.put(&record)?;
         self.members.push(Arc::new(Member {
             record: record.clone(),

@@ -124,10 +124,15 @@ class RustHost(replay.Host):
         # the same agents and then started again, so that making them is not part of what a client
         # sees of the scenario. The scenarios are about the first; the other two are the reference
         # Host's codex agents, which no scenario runs: they are there to be other agents.
+        # The reference Host's agents are written into its table without a voice. An agent that is
+        # made as a persona takes that persona's voices, on both Hosts, and the other two are
+        # named as personas: they are made with the word for no voice, which is what they have
+        # there.
         self._launch()
         for session, backend in ((scenarios.AGENT, 'claude'), *((other, 'codex') for other in OTHER_AGENTS)):
             status, _, made = self.request('POST', '/agents', {
-                'name': session.title(), 'backend': backend, 'cwd': str(self.root / 'workspace')})
+                'name': session.title(), 'backend': backend, 'cwd': str(self.root / 'workspace'),
+                **({'voice_id': '{}'} if session in OTHER_AGENTS else {})})
             if status != 200 or (made or {}).get('session') != session:
                 raise replay.StepFailed(f'the Rust Host did not make the agent {session} ({status})')
         self._end()
