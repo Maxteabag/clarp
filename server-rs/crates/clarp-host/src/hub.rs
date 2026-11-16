@@ -78,8 +78,9 @@ impl Hub {
         let seconds = u64::try_from(now_ms / 1_000).unwrap_or(0);
         Self {
             shown,
-            // The moment it started names a run: no two runs of a Host start in one.
-            epoch: format!("{now_ms:x}"),
+            // The moment it started names a run: no two runs of a Host start in one. Twelve
+            // hex signs, as the Python Host's name of a run has.
+            epoch: format!("{now_ms:012x}"),
             recent: Mutex::new(Recent {
                 next_id: (seconds << 20).max(1),
                 events: VecDeque::new(),
@@ -224,7 +225,7 @@ mod tests {
     #[test]
     fn what_a_turn_shows_goes_whole_to_those_who_follow_it_and_in_short_to_the_rest() {
         let hub = Hub::new(1_700_000_000_000);
-        assert_eq!(hub.epoch(), "18bcfe56800");
+        assert_eq!(hub.epoch(), "018bcfe56800");
         let event = |ops: Value| json!({"type": "live", "agent_id": "a1", "session": "claire", "lseq": 4, "server_now_ms": 1, "ops": ops});
         // Nobody watches: nothing is made.
         hub.show(event(json!([{"op": "status"}])), 5);

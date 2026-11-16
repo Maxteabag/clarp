@@ -608,11 +608,22 @@ def agent_rows(http) -> dict:
     return names
 
 
+# What a live item of a message says of the row its text is written into (`row_id`) when no
+# row of the conversation has that id. The id itself is random and names nothing a client can
+# find, so it is compared as just this, and takes no place among the ids that are named in the
+# order they appear.
+NO_SUCH_ROW = '<a row the conversation does not have>'
+
+
 def renamed(value, names: dict):
     if isinstance(value, list):
         return [renamed(item, names) for item in value]
     if isinstance(value, dict):
-        return {key: renamed(item, names) for key, item in value.items()}
+        out = {key: renamed(item, names) for key, item in value.items()}
+        named = value.get('row_id')
+        if isinstance(named, str) and named and named not in names:
+            out['row_id'] = NO_SUCH_ROW
+        return out
     if isinstance(value, str):
         return names.get(value, value)
     return value

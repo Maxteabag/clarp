@@ -245,6 +245,9 @@ fn runner(backend: &str) -> &str {
     }
 }
 
+/// The phase of a turn in which the agent writes its answer.
+pub const RESPONDING: &str = "responding";
+
 /// An agent's state, as the one that watches all states tells it. `ended` is how the last turn
 /// ended, when it is known.
 pub fn state(
@@ -274,6 +277,13 @@ pub fn state(
             "dispatch": backend,
             "message": waiting_for_account(live, backend).unwrap_or_default(),
             "origin": live.origin.name(),
+            "trace_id": live.trace_id.clone().unwrap_or_default(),
+        }),
+        // It writes its answer: thinking still, by its state, and in the phase of answering.
+        (Some(live), _) if live.activity == Activity::Responding => json!({
+            "dispatch": backend,
+            "origin": live.origin.name(),
+            "phase": RESPONDING,
             "trace_id": live.trace_id.clone().unwrap_or_default(),
         }),
         (Some(live), _) => json!({
