@@ -192,22 +192,35 @@ def small_rules(providers: dict, eleven: dict, helpers: dict, server: dict) -> d
     }
 
 
-def catalogue(providers: dict, local: dict) -> dict:
-    """Which engines there are: the cloud ones, each with what it needs and can do, and the
-    local models a Host can be given."""
+def catalogue(providers: dict, local: dict, budgets: dict, speech: dict) -> dict:
+    """Which engines there are: the cloud ones, each with what it needs and can do and how
+    many words it can be asked to listen for, and the local models a Host can be given, each
+    with what the apps call it."""
+    def budget(provider: str, model: str) -> dict:
+        fits = budgets['budget_for'](provider, model)
+        return {'unit': fits.unit, 'capacity': fits.capacity, 'max_term_chars': fits.max_term_chars}
+
     cloud = []
     for provider in providers['CATALOG']:
         cloud.append({**{key: value for key, value in provider.items() if key != 'models'},
-                      'models': [dict(model) for model in provider['models']]})
+                      'models': [{**model, 'budget': budget(provider['id'], model['model'])}
+                                 for model in provider['models']]})
+    names = sorted({model['model'] for model in local['CATALOG']} | {'tiny', 'tiny.en', 'base', 'large-v3', 'odd.name'})
     return {'cloud': cloud, 'local': [dict(model) for model in local['CATALOG']],
-            'recommended': local['RECOMMENDED_MODEL_ID']}
+            'recommended': local['RECOMMENDED_MODEL_ID'],
+            'local_budget': budget('faster-whisper', 'small.en'),
+            'local_names': [{'model': name, 'label': speech['_model_label'](name),
+                             'weight': speech['_model_weight'](name)} for name in names]}
 
 
 def main() -> int:
     results = taken(LIB / 'transcription_results.py', ['_VALID_JOB_ID', 'normalize_job_id', 'request_fingerprint'])
     router = whole(LIB / 'stt_router.py')
     blocklist = whole(LIB / 'hallucinations.py')
-    speech = taken(LIB / 'stt.py', ['_join_confident_segments'], {'Iterable': __import__('typing').Iterable})
+    speech = taken(LIB / 'stt.py', ['_join_confident_segments', '_model_label', '_model_weight'],
+                   {'Iterable': __import__('typing').Iterable})
+    budget_types = whole(LIB / 'vocab_budget.py')
+    budgets = taken(LIB / 'vocab_compile.py', ['_BUDGETS', '_MODEL_BUDGETS', 'budget_for'], budget_types)
     providers = taken(LIB / 'stt_providers.py',
                       ['CATALOG', 'VALID_IDS', 'provider_of', 'is_cloud_model', 'split_terms', 'ends_terminal'])
     eleven = whole(LIB / 'eleven_stt.py')
@@ -222,7 +235,7 @@ def main() -> int:
         'invented': invented(blocklist),
         'joined': joined(speech),
         **small_rules(providers, eleven, helpers, server),
-        'catalogue': catalogue(providers, local),
+        'catalogue': catalogue(providers, local, budgets, speech),
     }
     OUT.write_text(json.dumps(vectors, indent=1, ensure_ascii=False, sort_keys=True) + '\n')
     counts = {key: (len(value) if isinstance(value, list) else len(value.get('texts', value)))

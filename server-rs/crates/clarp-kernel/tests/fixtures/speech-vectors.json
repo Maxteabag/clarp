@@ -8,6 +8,11 @@
     "models": [
      {
       "biasing": "keyterm",
+      "budget": {
+       "capacity": 50,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
       "id": "deepgram:nova-3",
       "model": "nova-3",
       "name": "Deepgram Nova-3"
@@ -25,6 +30,11 @@
     "models": [
      {
       "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
       "id": "elevenlabs:scribe_v2",
       "model": "scribe_v2",
       "name": "ElevenLabs Scribe v2"
@@ -42,12 +52,22 @@
     "models": [
      {
       "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
       "id": "cartesia:ink-2",
       "model": "ink-2",
       "name": "Cartesia Ink-2"
      },
      {
       "biasing": "none",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
       "id": "cartesia:ink-whisper",
       "model": "ink-whisper",
       "name": "Cartesia Ink-Whisper"
@@ -65,6 +85,11 @@
     "models": [
      {
       "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
       "id": "google:chirp_3",
       "model": "chirp_3",
       "name": "Google Chirp 3"
@@ -175,6 +200,63 @@
     ],
     "provider": "whisper.cpp",
     "weight": "medium"
+   }
+  ],
+  "local_budget": {
+   "capacity": 223,
+   "max_term_chars": null,
+   "unit": "tokens"
+  },
+  "local_names": [
+   {
+    "label": "Base",
+    "model": "base",
+    "weight": "light"
+   },
+   {
+    "label": "Base En",
+    "model": "base.en",
+    "weight": "light"
+   },
+   {
+    "label": "Large-V3",
+    "model": "large-v3",
+    "weight": "very-heavy"
+   },
+   {
+    "label": "Large V3 Turbo",
+    "model": "large-v3-turbo",
+    "weight": "very-heavy"
+   },
+   {
+    "label": "Medium",
+    "model": "medium",
+    "weight": "heavy"
+   },
+   {
+    "label": "Odd Name",
+    "model": "odd.name",
+    "weight": "very-heavy"
+   },
+   {
+    "label": "Small",
+    "model": "small",
+    "weight": "medium"
+   },
+   {
+    "label": "Small En",
+    "model": "small.en",
+    "weight": "medium"
+   },
+   {
+    "label": "Tiny",
+    "model": "tiny",
+    "weight": "light"
+   },
+   {
+    "label": "Tiny En",
+    "model": "tiny.en",
+    "weight": "light"
    }
   ],
   "recommended": "faster-whisper:small.en"

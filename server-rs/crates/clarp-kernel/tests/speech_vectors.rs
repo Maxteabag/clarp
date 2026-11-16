@@ -9,8 +9,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_kernel::heard::{
-    CLOUD_PROVIDERS, INVALID_ID, Segment, ends_terminal, file_name, fingerprint, invented,
-    is_cloud, job_id, joined, plan, provider_of, terms, truthy, wants_cloud_engine, whole,
+    INVALID_ID, OWN_CAPACITY_TOKENS, PROVIDERS, Segment, cloud_model, ends_terminal, file_name,
+    fingerprint, invented, is_cloud, job_id, joined, label, plan, provider_of, terms, truthy,
+    wants_cloud_engine, weight, whole,
 };
 use serde_json::Value;
 
@@ -189,13 +190,54 @@ fn the_small_rules_are_the_python_hosts() {
 }
 
 #[test]
-fn the_cloud_providers_are_the_ones_the_python_host_lists() {
+fn the_engines_of_the_contract_are_the_ones_the_python_host_lists() {
     let vectors = vectors();
-    let listed: Vec<String> = vectors["catalogue"]["cloud"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|provider| provider["id"].as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(listed, CLOUD_PROVIDERS);
+    let listed = vectors["catalogue"]["cloud"].as_array().unwrap();
+    assert_eq!(listed.len(), PROVIDERS.len());
+    for (provider, known) in listed.iter().zip(PROVIDERS.iter()) {
+        let said = |key: &str| provider[key].as_str().unwrap();
+        assert_eq!(known.id, said("id"));
+        assert_eq!(known.name, said("name"), "{}", known.id);
+        assert_eq!(known.credential, said("credential"), "{}", known.id);
+        assert_eq!(known.streaming, provider["streaming"].as_bool().unwrap());
+        assert_eq!(known.turn_detection, said("turn_detection"), "{}", known.id);
+        assert_eq!(known.turn_detection_model, said("turn_detection_model"));
+        assert_eq!(said("kind"), "cloud");
+        let models = provider["models"].as_array().unwrap();
+        assert_eq!(models.len(), known.models.len(), "{}", known.id);
+        for (model, mine) in models.iter().zip(known.models.iter()) {
+            let said = |key: &str| model[key].as_str().unwrap();
+            assert_eq!(mine.id, said("id"));
+            assert_eq!(mine.model, said("model"));
+            assert_eq!(mine.name, said("name"));
+            assert_eq!(mine.biasing, said("biasing"));
+            assert_eq!(model["budget"]["unit"], "terms", "{}", mine.id);
+            assert_eq!(
+                u64::from(mine.capacity),
+                model["budget"]["capacity"].as_u64().unwrap()
+            );
+            assert_eq!(
+                mine.max_term_chars.map(u64::from),
+                model["budget"]["max_term_chars"].as_u64(),
+                "{}",
+                mine.id
+            );
+            assert_eq!(cloud_model(mine.id), Some((known, mine)));
+            assert!(is_cloud(mine.id));
+        }
+    }
+    assert_eq!(cloud_model("elevenlabs:scribe_v9"), None);
+    // The Host's own engine: what its models are called and how heavy they are.
+    assert_eq!(vectors["catalogue"]["local_budget"]["unit"], "tokens");
+    assert_eq!(
+        u64::from(OWN_CAPACITY_TOKENS),
+        vectors["catalogue"]["local_budget"]["capacity"]
+            .as_u64()
+            .unwrap()
+    );
+    for case in vectors["catalogue"]["local_names"].as_array().unwrap() {
+        let model = case["model"].as_str().unwrap();
+        assert_eq!(label(model), case["label"].as_str().unwrap(), "{model}");
+        assert_eq!(weight(model), case["weight"].as_str().unwrap(), "{model}");
+    }
 }

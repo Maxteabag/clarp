@@ -162,12 +162,167 @@ pub fn provider_of(model: &str) -> String {
     }
 }
 
-/// The providers of cloud engines the contract knows.
-pub const CLOUD_PROVIDERS: [&str; 4] = ["deepgram", "elevenlabs", "cartesia", "google"];
-
 /// Whether an engine's name is one of a cloud provider's.
 pub fn is_cloud(model: &str) -> bool {
-    CLOUD_PROVIDERS.contains(&provider_of(model).as_str())
+    let provider = provider_of(model);
+    PROVIDERS.iter().any(|known| known.id == provider)
+}
+
+/// An engine that is reached over the network, as the contract lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CloudModel {
+    /// The name a client asks for it by (`elevenlabs:scribe_v2`).
+    pub id: &'static str,
+    /// The provider's own name for it.
+    pub model: &'static str,
+    pub name: &'static str,
+    /// How it is told which words to listen for: `keyterms`, `keyterm`, or `none`.
+    pub biasing: &'static str,
+    /// How many words it can be asked to listen for.
+    pub capacity: u32,
+    /// How long one of them may be, when the provider cuts them.
+    pub max_term_chars: Option<u32>,
+}
+
+/// Who offers engines over the network, as the contract lists them: what each is called,
+/// what it needs to be used at all, and whether it can find the end of a turn of speech
+/// itself (`own`) or leaves that to the phone (`native`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Provider {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// The name of what it needs: a key, or a file of credentials.
+    pub credential: &'static str,
+    pub streaming: bool,
+    pub turn_detection: &'static str,
+    pub turn_detection_model: &'static str,
+    pub models: &'static [CloudModel],
+}
+
+/// The providers the contract knows, in its order.
+pub const PROVIDERS: [Provider; 4] = [
+    Provider {
+        id: "deepgram",
+        name: "Deepgram",
+        credential: "DEEPGRAM_API_KEY",
+        streaming: true,
+        turn_detection: "own",
+        turn_detection_model: "flux-general-en",
+        models: &[CloudModel {
+            id: "deepgram:nova-3",
+            model: "nova-3",
+            name: "Deepgram Nova-3",
+            biasing: "keyterm",
+            capacity: 50,
+            max_term_chars: None,
+        }],
+    },
+    Provider {
+        id: "elevenlabs",
+        name: "ElevenLabs Scribe",
+        credential: "ELEVEN_API_KEY",
+        streaming: true,
+        turn_detection: "native",
+        turn_detection_model: "",
+        models: &[CloudModel {
+            id: "elevenlabs:scribe_v2",
+            model: "scribe_v2",
+            name: "ElevenLabs Scribe v2",
+            biasing: "keyterms",
+            capacity: 100,
+            max_term_chars: Some(49),
+        }],
+    },
+    Provider {
+        id: "cartesia",
+        name: "Cartesia Ink",
+        credential: "CARTESIA_API_KEY",
+        streaming: true,
+        turn_detection: "native",
+        turn_detection_model: "",
+        models: &[
+            CloudModel {
+                id: "cartesia:ink-2",
+                model: "ink-2",
+                name: "Cartesia Ink-2",
+                biasing: "keyterms",
+                capacity: 100,
+                max_term_chars: Some(49),
+            },
+            CloudModel {
+                id: "cartesia:ink-whisper",
+                model: "ink-whisper",
+                name: "Cartesia Ink-Whisper",
+                biasing: "none",
+                capacity: 100,
+                max_term_chars: Some(49),
+            },
+        ],
+    },
+    Provider {
+        id: "google",
+        name: "Google Chirp",
+        credential: "GOOGLE_APPLICATION_CREDENTIALS",
+        streaming: false,
+        turn_detection: "native",
+        turn_detection_model: "",
+        models: &[CloudModel {
+            id: "google:chirp_3",
+            model: "chirp_3",
+            name: "Google Chirp 3",
+            biasing: "none",
+            capacity: 0,
+            max_term_chars: None,
+        }],
+    },
+];
+
+/// The engine of a cloud provider with this name, when the contract knows it.
+pub fn cloud_model(id: &str) -> Option<(&'static Provider, &'static CloudModel)> {
+    PROVIDERS.iter().find_map(|provider| {
+        let model = provider.models.iter().find(|model| model.id == id)?;
+        Some((provider, model))
+    })
+}
+
+/// What the Host's own engines are called by a client: the library that runs them.
+pub const OWN_PROVIDER: &str = "faster-whisper";
+
+/// How many tokens of words to listen for the Host's own engine takes.
+pub const OWN_CAPACITY_TOKENS: u32 = 223;
+
+/// What a model of the Host's own engine is called on a screen (`small.en`: "Small En").
+pub fn label(model: &str) -> String {
+    let spelled = model
+        .replace("large-v3-turbo", "Large v3 Turbo")
+        .replace('.', " ");
+    // Every word begins with a capital, and a word begins after anything that is no letter.
+    let mut out = String::with_capacity(spelled.len());
+    let mut in_a_word = false;
+    for sign in spelled.chars() {
+        if sign.is_alphabetic() {
+            if in_a_word {
+                out.extend(sign.to_lowercase());
+            } else {
+                out.extend(sign.to_uppercase());
+            }
+            in_a_word = true;
+        } else {
+            out.push(sign);
+            in_a_word = false;
+        }
+    }
+    out
+}
+
+/// How heavy a model of the Host's own engine is on its machine.
+pub fn weight(model: &str) -> &'static str {
+    match model.strip_suffix(".en").unwrap_or(model) {
+        "tiny" | "base" => "light",
+        "small" => "medium",
+        "medium" => "heavy",
+        _ => "very-heavy",
+    }
 }
 
 /// What was heard, from the pieces the engine is sure enough were speech.
