@@ -169,11 +169,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 21:52 (16 Nov) | the Host updated by the installer, `99fe37a7` to `6390a692`: the build with the connection relay, the door that trusts only what nobody handed on, and this Host's tools first in every bash | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 22:30 (16 Nov) | the Host updated by the installer, `6390a692` to `a60c7839`: the build that keeps an answer to a heartbeat as one line, and takes a name off a spoken message as the Python Host does since its second fix of the evening. The first update with the connection relay on: the new Host was connected to it again 194 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 00:07 (17 Nov) | the Host updated by the installer, `a60c7839` to `22ca39e7`: the build with the heartbeat, a message filed under the id its app gave it, the queue by its user's hand, and the portraits an agent keeps. The relay was on: the new Host was connected to it again 95 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 00:40 (17 Nov) | the Host updated by the installer, `22ca39e7` to `aada15c0`: the build that counts a heartbeat's turn by its last answer. The relay was on: the new Host was connected to it again 44 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and seven turns in thirty-one
-exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and fifteen of Codex
-in the five since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and ten turns in thirty-two
+exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and eighteen of Codex
+in the six since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -589,6 +590,13 @@ there over seven days without reading what was said: 87 of 122 heartbeat turns o
 280 of Muse agents counted as activity, 4 of 31 of Claude agents. Reported to the release owner as
 reference defect R28. This Host counts a heartbeat's turn by its last answer from the build after this
 one, and the same check is run on it again.
+
+Run again on 17 Nov at 00:41, on the build of `aada15c0`, with another real Codex turn: the runner gave
+the agent its heartbeat 8 seconds after it asked; the agent again said three things, two remarks on its way
+(122 and 191 signs, each a message of its own) and then that nothing was to be done. This time the turn
+counted as what its last answer says: nothing found, once (asked again, still once), and the next heartbeat
+was due two intervals after this one was started instead of one. Everything else as before, and the
+settings were put back.
 
 ## The soak so far
 
