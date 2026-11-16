@@ -97,9 +97,9 @@ class SettingsRoutes:
         inside = raw.endswith("/")
         try:
             recovered = recover_user_path(raw)
-        except OSError as e:
-            # A path the Host may not look at (the existence check raises for
-            # /proc/1/root/): an answer with nothing in it, not a closed connection.
+        except (OSError, RuntimeError) as e:
+            # A refused path or an unknown ~user: an answer with nothing in
+            # it, not a closed connection (expanduser raises RuntimeError).
             log_exception("dirsPathRefused", e, detail=raw[:200])
             self._send(200, json.dumps({"base": raw, "matches": []}).encode(), "application/json")
             return
