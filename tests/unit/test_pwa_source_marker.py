@@ -2,6 +2,8 @@ import pathlib
 import sys
 import time
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib.protocol import TurnSource  # noqa: E402
 from lib.timing import HOOK_TIMING  # noqa: E402
@@ -279,3 +281,33 @@ def test_a_claude_turn_is_told_whose_turn_it_is():
     context = pwa_source_flag._build_additional_context(
         app_dispatched=True, voiced=False, agent={"persona": "Koko", "session": "koko-5850"})
     assert "This turn belongs to Koko (Clarp session koko-5850)" in context
+
+
+@pytest.mark.parametrize("level,label", [(0, None), (1, "milestones"), (2, "steps"),
+                                         (3, "running commentary")])
+@pytest.mark.parametrize("delivery", ["voiced", "audio-disabled", "typed"])
+def test_hook_context_carries_only_the_speaking_agents_narration_level(
+        tmp_path, monkeypatch, level, label, delivery):
+    import json
+    from lib import agents as agents_db
+
+    speaker = agents_db.create_agent(persona="Speaker", voice_id="V", cwd=str(tmp_path),
+                                    session="speaker")
+    agents_db.update_agent(speaker, voice_verbosity=level)
+    other = agents_db.create_agent(persona="Other", voice_id="V", cwd=str(tmp_path),
+                                  session="other")
+    agents_db.update_agent(other, voice_verbosity=(level + 1) % 4)
+    if delivery != "typed":
+        marker = pwa_source_flag.PATHS.source_marker("speaker")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        audio = int(delivery == "voiced")
+        marker.write_text(f"{TurnSource.PWA_VOICE_MARKER} speaker {time.time():.3f} narration-trace {audio}\n")
+
+    _run_hook(monkeypatch, "speaker", "speaker-uuid")
+
+    context = json.loads(sys.stdout.getvalue())["hookSpecificOutput"]["additionalContext"]
+    if delivery == "voiced" and level:
+        assert context.count(f"Narration level: {label}.") == 1
+        assert context.count("Narration level:") == 1
+    else:
+        assert "Narration level:" not in context
