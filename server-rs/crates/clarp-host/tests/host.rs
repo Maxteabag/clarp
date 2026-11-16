@@ -14333,3 +14333,156 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
         assert!(!all.iter().any(|(_, text)| text == gone), "{all:?}");
     }
 }
+
+#[test]
+fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_the_new_ones() {
+    let place = Place::new("queue-reword");
+    let host = place.start();
+    let echo = host.new_agent("Echo");
+    let heard = host.listen();
+    let queue = |host: &Host| host.get(&format!("/turn-queue?session={echo}"));
+    let waiting = |host: &Host| -> Vec<(String, String)> {
+        let queue = queue(host);
+        let items = queue["items"].as_array().unwrap().iter();
+        let named = |item: &Value, key: &str| item[key].as_str().unwrap().to_string();
+        items
+            .map(|item| (named(item, "id"), named(item, "text")))
+            .collect()
+    };
+    let leave = |text: &str, id: &str| {
+        host.post(
+            "/send",
+            json!({ "session": echo, "text": text, "client_msg_id": id, "queue_if_busy": true }),
+        );
+    };
+    let put = |id: &str, body: Value| -> (u16, Value) {
+        host.ask("PUT", &format!("/turn-queue/{id}"), Some(&body))
+    };
+    let refused = |status: u16, why: &str| (status, json!({ "error": why }));
+    let plain_news = || -> usize {
+        let heard = heard.lock().unwrap();
+        let ours = heard.iter().filter(|event| {
+            event["type"] == "queue-updated"
+                && event["session"] == echo.as_str()
+                && event.get("client_msg_id").is_none()
+        });
+        ours.count()
+    };
+    let named = |id: &str, text: &str| (id.to_string(), text.to_string());
+
+    host.send(&echo, "sleep 60", "m1");
+    wait_for("the turn to run", || host.state(&echo) == "thinking");
+    let phones = "u-8D889886-98E3-4C12-999D-8F92DD24F57D";
+    leave("second", "m2");
+    leave("third", phones);
+    // What is asked is read before what waits is looked for; and what does not wait has no
+    // words to change: not what is not there, and not the message of the turn that runs.
+    for (id, body, why) in [
+        (
+            "m2",
+            json!({ "text": "   " }),
+            refused(400, "text required"),
+        ),
+        ("m2", json!({}), refused(400, "text required")),
+        ("m2", json!({ "text": 7 }), refused(400, "text required")),
+        (
+            "nothing",
+            json!({ "text": " " }),
+            refused(400, "text required"),
+        ),
+        (
+            "nothing",
+            json!({ "text": "x" }),
+            refused(404, "queued message not found"),
+        ),
+        (
+            "m1",
+            json!({ "text": "x" }),
+            refused(404, "queued message not found"),
+        ),
+        (
+            "u-m2",
+            json!({ "text": "x" }),
+            refused(404, "queued message not found"),
+        ),
+    ] {
+        assert_eq!(put(id, body.clone()), why, "{id} {body}");
+    }
+    assert_eq!(
+        waiting(&host),
+        [named("m2", "second"), named(phones, "third")]
+    );
+
+    // The words of one are changed: it keeps its id and its place, and the apps are told
+    // to read the queue again.
+    let before = queue(&host)["revision"].as_u64().unwrap();
+    let changed = put("m2", json!({ "text": "  second, in other words \n" }));
+    assert_eq!(changed, (200, json!({ "ok": true })));
+    assert_eq!(
+        waiting(&host),
+        [
+            named("m2", "second, in other words"),
+            named(phones, "third")
+        ]
+    );
+    assert_eq!(queue(&host)["revision"], before + 1);
+    wait_for("the news that the queue changed", || plain_news() == 1);
+    assert_eq!(
+        put(phones, json!({ "text": "third, as the phone has it now" })).0,
+        200
+    );
+
+    // The turn is stopped, and the words of what is held are changed once more. Let go,
+    // each turn answers the words its message has now, under the id it always had.
+    host.post("/stop", json!({ "session": echo }));
+    wait_for("the turn to end", || host.state(&echo) == "interrupted");
+    assert_eq!(
+        put("m2", json!({ "text": "the second, as it was held" })).0,
+        200
+    );
+    assert_eq!(queue(&host)["paused"], true);
+    host.post("/turn-queue/resume", json!({ "session": echo }));
+    wait_for("both to be answered", || {
+        let all = host.conversation(&echo);
+        all.contains(&said("assistant", "third, as the phone has it now"))
+            && host.state(&echo) == "done"
+    });
+    let rows = host.turns(&echo);
+    let of = |id: &str| -> Vec<String> {
+        let ours = rows.iter().filter(|row| row["id"] == id);
+        ours.map(|row| row["text"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(of("u-m2"), ["the second, as it was held"]);
+    assert_eq!(of(phones), ["third, as the phone has it now"]);
+    let all = host.conversation(&echo);
+    for old in ["second", "third", "second, in other words"] {
+        assert!(!all.iter().any(|(_, text)| text == old), "{all:?}");
+    }
+    assert_eq!(
+        put("m2", json!({ "text": "x" })),
+        refused(404, "queued message not found")
+    );
+
+    // A message that was said while a turn ran waits its turn in the conversation: what
+    // was said stands. One left for later beside it is changed, and that outlives the Host.
+    host.send(&echo, "sleep 60", "m5");
+    wait_for("a turn to run again", || host.state(&echo) == "thinking");
+    host.send(&echo, "said, not left", "m6");
+    leave("seventh", "m7");
+    assert_eq!(
+        put("m6", json!({ "text": "x" })),
+        refused(409, "message is already in the conversation")
+    );
+    assert_eq!(put("m7", json!({ "text": "the seventh, anew" })).0, 200);
+    let stands = [
+        named("m6", "said, not left"),
+        named("m7", "the seventh, anew"),
+    ];
+    assert_eq!(waiting(&host), stands);
+    let revision = queue(&host)["revision"].clone();
+    host.kill();
+    let host = place.start();
+    assert_eq!(waiting(&host), stands);
+    assert_eq!(queue(&host)["revision"], revision);
+}

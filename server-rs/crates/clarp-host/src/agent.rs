@@ -24,6 +24,7 @@ use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Shelf};
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
+use clarp_kernel::journal::Reworded;
 use clarp_kernel::media::Asset;
 use clarp_kernel::spoken::{Line as SpokenLine, Said, SpeechBook};
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
@@ -133,6 +134,12 @@ pub enum Ask {
         turn: TurnId,
         by: String,
         answer: Answer<ByHand>,
+    },
+    /// Change the words of a message that waits outside the conversation.
+    Reword {
+        turn: TurnId,
+        text: String,
+        answer: Answer<Reworded>,
     },
     /// The Host says something quiet in the conversation, once under its id.
     Note {
@@ -395,6 +402,11 @@ impl AgentHandle {
         self.ask(|answer| Ask::SendNow { turn, by, answer }).await
     }
 
+    /// Changes the words of a message that waits outside the conversation.
+    pub async fn reword(&self, turn: TurnId, text: String) -> Result<Reworded, Unavailable> {
+        self.ask(|answer| Ask::Reword { turn, text, answer }).await
+    }
+
     /// Writes a quiet word of the Host's into the conversation, once under its id: that the
     /// agent was asked into a call, put on hold, that the call ended. Answers whether it was
     /// written now.
@@ -647,6 +659,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         view: view_tx,
         told: None,
         let_go_by_hand: false,
+        reworded: false,
         newest: None,
         ended: None,
         transcript_sent: None,
@@ -681,6 +694,9 @@ struct Worker {
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
     let_go_by_hand: bool,
+    /// The words of a waiting message were changed a moment ago: the clients are told how
+    /// the queue stands, so that they read it again.
+    reworded: bool,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
     /// How the last turn ended.
@@ -1468,6 +1484,11 @@ impl Worker {
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
             }
             Ask::SendNow { turn, by, answer } => answered(actor.send_now(turn, &by, now), answer)?,
+            Ask::Reword { turn, text, answer } => {
+                let reworded = actor.reword(turn, &text, now);
+                self.reworded = matches!(reworded, Ok((Reworded::Done, _)));
+                answered(reworded, answer)?
+            }
             Ask::Note { id, text, answer } => answered(actor.note(&id, &text, now), answer)?,
             Ask::Tail {
                 limit,
@@ -1774,6 +1795,7 @@ impl Worker {
     /// Publishes the agent's view and tells the clients what changed since they were last told.
     fn show(&mut self, changed: Changed) {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
+        let reworded = std::mem::take(&mut self.reworded);
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
@@ -1852,7 +1874,7 @@ impl Worker {
                 && status.live.as_ref().map(|live| live.turn) != Some(*turn)
                 && status.last.as_ref().map(|last| last.id) != Some(*turn)
         });
-        if (held_or_let_go && !told_with_its_turn) || taken_back {
+        if (held_or_let_go && !told_with_its_turn) || taken_back || reworded {
             hub.publish(wire::queue_updated(&record, &status, None, false), now);
         }
         // What the agent is doing changed: its state, and the line that describes it.
@@ -2064,6 +2086,7 @@ fn refuse_for(
             Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Reword { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Note { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
                 drop(answer.send(Err(refusal())));

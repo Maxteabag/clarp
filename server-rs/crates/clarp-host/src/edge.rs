@@ -24,6 +24,7 @@ use clarp_kernel::addressed;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
+use clarp_kernel::journal::Reworded;
 use clarp_kernel::presence::Presence;
 use clarp_kernel::python;
 use clarp_kernel::trust::{self, FailureLimiter};
@@ -335,7 +336,7 @@ pub fn router(app: App) -> Router {
         .route("/turn-queue", get(queue))
         .route("/live", get(shown))
         .route("/turn-queue/resume", post(resume))
-        .route("/turn-queue/{id}", delete(take_back))
+        .route("/turn-queue/{id}", delete(take_back).put(reword))
         .route("/turn-queue/{id}/send", post(send_by_hand))
         .route("/pairing/exchange", post(pairing_exchange))
         .route("/pairing/issue", post(pairing_issue))
@@ -1991,6 +1992,33 @@ async fn take_back(
         return Err(not_waiting());
     }
     Ok(Json(json!({ "ok": true })))
+}
+
+/// `PUT /turn-queue/<id>` with `{text}`: its user changes the words of a waiting message. Its
+/// turn answers the new words. A message that waits its turn in the conversation was said,
+/// and what was said stands: on this Host that is every message that was not left for later.
+async fn reword(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    // What is asked is read before what waits is looked for, as on the Python Host.
+    let said: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let text = said["text"].as_str().map(python::strip).unwrap_or_default();
+    if text.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
+    }
+    let Some((member, turn)) = waiting_named(&app, &id).await? else {
+        return Err(not_waiting());
+    };
+    match member.agent.reword(turn, text.to_string()).await? {
+        Reworded::Done => Ok(Json(json!({ "ok": true }))),
+        Reworded::NotWaiting => Err(not_waiting()),
+        Reworded::InConversation => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "message is already in the conversation",
+        )),
+    }
 }
 
 /// `POST /turn-queue/<id>/send`: its user sends one waiting message now. It runs although

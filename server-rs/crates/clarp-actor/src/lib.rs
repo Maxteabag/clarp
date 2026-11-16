@@ -39,7 +39,7 @@ use clarp_kernel::conversation::{
 use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
-use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
+use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, kind};
 use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
@@ -1832,6 +1832,31 @@ impl Actor {
             by: by.to_string(),
         };
         self.asked(command, now_ms)
+    }
+
+    /// Changes the words of a message that waits outside the conversation. Its turn answers
+    /// the new words; everything else about it stays: its id, its place, who sent it.
+    pub fn reword(
+        &mut self,
+        turn: TurnId,
+        text: &str,
+        now_ms: i64,
+    ) -> Result<(Reworded, Outputs), ActorError> {
+        let unreadable = |error: serde_json::Error| JournalError::Encode(error.to_string());
+        let anew = |kept: &[u8]| {
+            let mut message: Message = serde_json::from_slice(kept).map_err(unreadable)?;
+            message.text = text.to_string();
+            serde_json::to_vec(&message).map_err(unreadable)
+        };
+        let reworded = self.recorder.reword(turn, anew, now_ms)?;
+        let out = Outputs {
+            changed: Changed {
+                queue: reworded == Reworded::Done,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        Ok((reworded, out))
     }
 
     /// Sends one waiting message now, whatever holds the mailbox: its user sends it by hand.
