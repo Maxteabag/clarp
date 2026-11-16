@@ -5,7 +5,12 @@
                                  [--rounds N] [--turn-timeout SECONDS]
     server-rs/tools/soak restart [--host ADDR:PORT] [--agents N] [--seconds S] [--by COMMAND]
                                  [--moment running|accepted|ending] [--evidence FILE]
+                                 [--backend codex|claude] [--model MODEL]
     server-rs/tools/soak report  [--evidence FILE]
+
+The agents of this test are Codex agents: the owner's word of 16 Nov 2026 for live test agents
+on the Host. A Claude agent is used only where Claude Code itself is what is tested
+(`--backend claude`), and then on Sonnet.
 
 `run` writes to an agent of the Host every `--every` seconds (default 900) and waits for the
 turn to end. Every message asks for one exact word back (`ack <n>`), so that an answer can be
@@ -308,7 +313,11 @@ def restart(args) -> int:
     cwd = pathlib.Path(args.cwd).expanduser()
     cwd.mkdir(parents=True, exist_ok=True)
     marks = cwd / "restart-marks.txt"
-    sessions = [f"restart-{i}" for i in range(1, args.agents + 1)]
+    # The agents of the exercise, each kind of tool with its own: Codex unless Claude Code is
+    # what is tested, and Claude on Sonnet unless another model is named.
+    stem = "restart" if args.backend == "claude" else f"restart-{args.backend}"
+    model = args.model or ("sonnet" if args.backend == "claude" else "")
+    sessions = [f"{stem}-{i}" for i in range(1, args.agents + 1)]
 
     def write(line: dict) -> None:
         with evidence.open("a") as out:
@@ -326,8 +335,11 @@ def restart(args) -> int:
     for i, session in enumerate(sessions, 1):
         if session in there:
             continue
-        status, made = host.ask("POST", "/agents", {"name": f"Restart {i}", "session": session, "backend": "claude",
-                                                    "model": args.model, "cwd": str(cwd)})
+        named = f"Restart {i}" if args.backend == "claude" else f"Restart {args.backend.capitalize()} {i}"
+        asked_for = {"name": named, "session": session, "backend": args.backend, "cwd": str(cwd)}
+        if model:
+            asked_for["model"] = model
+        status, made = host.ask("POST", "/agents", asked_for)
         if status != 200:
             return gave_up("agent_not_made", f"{session}: {status} {made}")
         host.ask("POST", "/agent-mute", {"session": session, "muted": True})
@@ -546,7 +558,7 @@ def main() -> int:
             command.add_argument("--host", default="127.0.0.1:7690")
             command.add_argument("--turn-timeout", type=float, default=900)
         if name == "run":
-            command.add_argument("--session", default="soak")
+            command.add_argument("--session", default="soak-codex")
             command.add_argument("--every", type=float, default=900)
             command.add_argument("--rounds", type=int, default=0, help="stop after so many rounds (default: never)")
         if name == "restart":
@@ -559,7 +571,10 @@ def main() -> int:
                                  help="restart when every command runs, right after the messages were accepted, "
                                       "or --settle seconds after the first command ended")
             command.add_argument("--start-timeout", type=float, default=180)
-            command.add_argument("--model", default="haiku")
+            command.add_argument("--backend", choices=("codex", "claude"), default="codex",
+                                 help="the tool of the exercise's agents: claude only to test Claude Code")
+            command.add_argument("--model", default="",
+                                 help="their model (default: the tool's own for codex, sonnet for claude)")
             command.add_argument("--cwd", default="~/clarp-host-soak")
             command.add_argument("--unit", default="clarp-host.service")
     args = parser.parse_args()
