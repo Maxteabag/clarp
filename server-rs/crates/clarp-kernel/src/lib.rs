@@ -18,6 +18,7 @@ pub mod difflib;
 pub mod failures;
 pub mod goals;
 pub mod heard;
+pub mod heartbeat;
 pub mod helpers;
 pub mod herald;
 pub mod jobs;
