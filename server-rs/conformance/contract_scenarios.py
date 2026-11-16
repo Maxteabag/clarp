@@ -1105,4 +1105,32 @@ SCENARIOS.append({
     ],
 })
 
+VOICE = '/agent-voice'
+# One of the ElevenLabs voices both Hosts list for the old settings screen: a voice an agent
+# can be given on a Host where nothing speaks.
+A_VOICE = 'nPczCjzI2devNBz1zQrb'
+
+SCENARIOS.append({
+    'id': 'voices',
+    'what': "what an app's voice picker reads and sets on a Host where nothing speaks: the catalogue for an "
+            'agent, an agent given a voice, a voice another agent has, what is no agent and no voice, a preview '
+            'that cannot be made, and a report of speech that is no report',
+    'steps': [
+        get(f'/voice-catalog?for={AGENT}', 'the catalogue for an agent'),
+        get(f'/voices?for={AGENT}', 'the voices of the old settings screen'),
+        post(VOICE, {'session': AGENT}, 'a voice that is not named'),
+        post(VOICE, {'voice_id': A_VOICE}, 'a voice for nobody'),
+        post(VOICE, {'session': 'nobody-of-the-kind', 'voice_id': A_VOICE}, 'a voice for an agent nobody has'),
+        post(VOICE, {'session': AGENT, 'provider': 'google', 'voice_id': 'Kore'}, 'a voice Google does not have'),
+        post(VOICE, {'session': AGENT, 'provider': 'ElevenLabs', 'voice_id': A_VOICE}, 'an agent is given a voice'),
+        get(f'/voice-catalog?for={AGENT}', 'the catalogue with the voice as this agent\'s'),
+        get('/voice-catalog?for=rachel', 'the catalogue for another agent: the voice is taken'),
+        post(VOICE, {'session': 'rachel', 'provider': 'elevenlabs', 'voice_id': A_VOICE}, 'a voice another agent has'),
+        get('/voice-preview?provider=elevenlabs&id=' + A_VOICE, 'a preview on a Host where nothing speaks'),
+        get('/voice-preview?provider=nothing&id=nothing', 'a preview of nothing'),
+        post('/voice-events', {'events': 'none'}, 'a report of speech that is no list'),
+        post('/voice-events', {'events': [{'event': 'tick'}] * 501}, 'a report that is too long'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
