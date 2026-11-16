@@ -14,15 +14,21 @@ def _check_again(lane):
     settings_store.set_text(key, json.dumps(state))
 
 
-@pytest.mark.parametrize("model,label", [
-    ("claude-fable-5-2[1m]", "Fable"),
-    ("claude-opus-5-5", "Opus"),
+@pytest.mark.parametrize("model,label,expected", [
+    ("claude-fable-5-2[1m]", "Fable", True),
+    ("claude-opus-5-5", "Opus", True),
+    ("default", "Fable", True),
+    ("opusplan", "Opus", False),
+    ("octopus-large", "Opus", False),
+    ("fable-ish", "Fable", False),
+    ("claude-fableplan-7", "Fable", False),
 ])
-def test_repaired_profile_verification_uses_real_configured_model_scope(monkeypatch, model, label):
-    """A real configured model must match the producer's quota-family label."""
+def test_repaired_profile_verification_uses_real_configured_model_scope(monkeypatch, model, label, expected):
+    """Known pins/defaults match their scope; unknown pins cannot borrow it."""
     from types import SimpleNamespace
     from lib import backends, config
     backend = backends.by_id("claude")
+    monkeypatch.setattr(type(backend), "cli_default_model", lambda self: "claude-fable-5-2")
     cfg = SimpleNamespace(**{backend.config_model_field: model,
                              backend.config_effort_field: ""})
     monkeypatch.setattr(config, "load", lambda: cfg)
@@ -39,7 +45,7 @@ def test_repaired_profile_verification_uses_real_configured_model_scope(monkeypa
     assert hotseat.repair_profile_usable(
         report, profile, requested_model=hotseat.repair_requested_model(),
         not_before_ms=now, now_ms=now,
-    )
+    ) is expected
 
 
 
