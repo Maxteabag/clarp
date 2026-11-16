@@ -783,9 +783,13 @@ _DEFAULTS = {
 }
 
 
-# A checkpoint's count of audits by digest since its last full import, a key
-# of its store carry (the store never reads it; no column of its own, which
-# would be a schema step).
+# A checkpoint's count of audits by digest since its last full import. It has
+# no column of its own, which would be a schema step, so it is a key beside
+# the parser's carry: the reference scans take what they need from that carry
+# by name and do not read it. Not beside the store's carry, where it was: the
+# count moves at every audit by digest, a changed value is written whole, and
+# the store's carry holds up to 64 KB of words (carry_live_rows_by_words)
+# where the parser's is a few hundred bytes.
 _AUDITS_BY_DIGEST = "audits_by_digest"
 
 
@@ -1538,11 +1542,11 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             audited = True
     audit_by_digest = False
     # How many audits of this conversation were by digest since its last full
-    # import. It is kept in the checkpoint, beside the store's carry, and a
+    # import. It is kept in the checkpoint, beside the parser's carry, and a
     # tail hands it on; a full import writes a new carry without it, so a full
     # import for any reason starts the count again. Every
     # ``audit_full_every``-th due audit stays the full import.
-    audits_by_digest = int((cp.store_carry or {}).get(_AUDITS_BY_DIGEST) or 0)
+    audits_by_digest = int((cp.parser_carry or {}).get(_AUDITS_BY_DIGEST) or 0)
     if reason == "audit" and not unchanged and bool(conf.get("audit_grown_by_digest")) \
             and audits_by_digest + 1 < max(1, int(conf.get("audit_full_every") or 1)):
         # A grown file whose audit is due. What the audit is for is the bytes
@@ -1633,8 +1637,8 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                       tail_hash=tail_hash,
                       imports_since_audit=0 if audit_by_digest else cp.imports_since_audit + 1,
                       audited_at=db.now_ms() if audit_by_digest else cp.audited_at,
-                      store_carry={**cp.store_carry, _AUDITS_BY_DIGEST: audits_by_digest + 1}
-                      if audit_by_digest else cp.store_carry,
+                      parser_carry={**cp.parser_carry, _AUDITS_BY_DIGEST: audits_by_digest + 1}
+                      if audit_by_digest else cp.parser_carry,
                       updated_at=db.now_ms())
     recorded = None
     checkpoint_status = {}

@@ -142,10 +142,10 @@ SETTLED_TURNS = "carry_settled_turns"
 LIVE_WORDS = "carry_live_rows_by_words"
 RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS, LIVE_ROWS, SETTLED_TURNS, LIVE_WORDS)
 # How many of the newest turns before the boundary have their replies' words
-# kept, and how many characters of words at most (a carry is written again
-# with every tail).
+# kept, and how many bytes of words at most, counted as the checkpoint stores
+# them (``stored_size``): the carry is written whole whenever it changes.
 _WORDS_TRACES = 3
-_WORDS_CHARS = 65536
+_WORDS_BYTES = 65536
 
 # The kinds of message row, by where the row is now: one digest each, and the
 # word a refusal names it by. ``row_tail`` is a transcript row of this file
@@ -534,7 +534,9 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
                 continue
             showing = _strip_voice_markup(row[table.at["text"]])
             if any(_related(said, showing) for said in words):
-                found.add("live_row_of_old_reply")
+                # Its own word: how often the trace alone still refuses (a
+                # turn not kept) and how often the words do can be counted.
+                found.add("live_row_shows_old_reply")
     turn_values = _turn_values(turns)
     settled: list[tuple] = []
     if _digest(turn_values) != recorded["turns"]:
@@ -575,14 +577,23 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     return ",".join(sorted(found))
 
 
+def stored_size(text: str) -> int:
+    """The bytes one reply's words take in the stored carry. The checkpoint
+    writes its carry as JSON in ASCII (transcript_incremental.write_checkpoint),
+    where a character that is not ASCII takes six bytes and one outside the
+    basic plane twelve: 60,152 such characters, counted as characters, made a
+    carry of 360 KB under a limit of 64 KB."""
+    return len(json.dumps(text))
+
+
 def reply_words(said) -> dict[str, list[str]]:
     """What the store carry keeps of the replies before the boundary, for
     LIVE_WORDS. ``said`` is (trace, words) for every reply so far, in the
     transcript's order, the trace as the import's batch names it and words ""
     for a reply that has none. {trace: its replies' words} for the newest
     ``_WORDS_TRACES`` turns, newest first, while their words fit in
-    ``_WORDS_CHARS``: a turn whose words do not fit is left out, and so is
-    every turn older than it."""
+    ``_WORDS_BYTES`` as stored: a turn whose words do not fit is left out,
+    and so is every turn older than it."""
     newest: list[str] = []
     for trace, _words in reversed(said):
         if trace and trace not in newest:
@@ -590,10 +601,10 @@ def reply_words(said) -> dict[str, list[str]]:
             if len(newest) == _WORDS_TRACES:
                 break
     kept: dict[str, list[str]] = {}
-    left = _WORDS_CHARS
+    left = _WORDS_BYTES
     for trace in newest:
         words = sorted({words for own, words in said if own == trace and words})
-        left -= sum(len(text) for text in words)
+        left -= sum(stored_size(text) for text in words)
         if left < 0:
             break
         kept[trace] = words
