@@ -78,8 +78,8 @@ Host's first day says there what this Host must not say of itself.
 Not answered yet, each "no such route": how an engine is told what to listen for
 (`/transcription-guidance`), the orchestrator's settings, the list of engines that speak as the old
 settings screen reads it (`/tts/providers`), the budgets of the vocabulary, dreaming's settings and
-runs (an app asks for them only of a Host that lists `dreaming`), an agent's portraits
-(`/agent-portraits`), the providers of models (`/harness-providers`), the Oracle's voice, compacting
+runs (an app asks for them only of a Host that lists `dreaming`), the providers of models
+(`/harness-providers`), the Oracle's voice, compacting
 a conversation (`POST /compact`), a tool's own servers (`POST /agent-mcp`), nudging a team.
 
 ## Compared as what a client may rely on
@@ -191,7 +191,7 @@ it covers that exact difference and nothing else.
 | A built-in persona whose name the owner takes out of his file | stays listed for good, with the voices it last had | gone from the list at once: the built-in personas are what the file and the Host's own lists say now | The Python Host writes its built-in personas into its table at each start and never takes one out |
 | The order of the personas a Host offers (`personas`, and their names in `roster`) | by the millisecond each was first written, and within one by its id | the roster's, the owner's own names after it | The first is an accident of a Host's start. Compared each by its id |
 | A voice the owner's file names with space around it (`[roster]`, `[cartesia.voices]`) | kept with the space | kept without it | A voice's id has none |
-| A picture an agent chooses after it is made (`GET` and `POST /agent-portraits`: one of the images it published becomes its picture), the janitors' pictures, and the making of pictures | kept, chosen and made | not there: an agent has the picture it was made with (its own, or its persona's own), else its symbol, else the picture this Host ships for its name or its tool | Not built |
+| A picture an agent chooses after it is made (`POST /agent-portraits`: one of the images it published becomes its picture, of three it may keep), the janitors' pictures, and the making of pictures | kept, chosen and made | refused as not built. An agent has the picture it was made with (its own, or its persona's own), else its symbol, else the picture this Host ships for its name or its tool; `GET /agent-portraits` lists the picture it wears as its one portrait, as the Python Host lists a picture nobody chose from a gallery | Not built |
 | The picture of an agent that was made as a persona, after the persona is given another picture | the agent's changes with it: the two share one file | the agent keeps the picture it was made with | One rule for all an agent takes on from its persona. Its voice, its way of speaking and its symbol stay as they were on both Hosts |
 | An agent made under a name no persona has, without a voice | given the first voice of the roster, an ElevenLabs id as plain text | no voice of its own: it speaks with the voice the settings of the engine give its name | That voice is from the days of one engine. An app that offers personas sends the voice |
 | A picture that is no base64 for a new agent (`avatar_base64` of `POST /agents`) | refused, 400 `invalid avatar`, with the words of Python's decoder | refused, 400 `invalid avatar`, with `Avatar is not base64.` | As for a persona's picture |

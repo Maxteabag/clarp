@@ -136,8 +136,94 @@ async fn agent_avatar(
     media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
 }
 
+/// The most portraits an agent keeps, as the Python Host has it.
+const PORTRAITS_MOST: usize = 3;
+
+/// The id of the portrait that is the picture an agent wears, as the Python Host names one
+/// nobody chose from a gallery.
+fn worn_id(agent_id: &str, digest: &str) -> String {
+    format!(
+        "portrait_legacy_{agent_id}_{}",
+        digest.get(..24).unwrap_or(digest)
+    )
+}
+
+/// Whether these bytes begin as a picture a portrait can hold: PNG, JPEG, GIF or WebP.
+fn is_portrait(begins: &[u8]) -> bool {
+    begins.starts_with(b"\x89PNG\r\n\x1a\n")
+        || begins.starts_with(b"\xff\xd8\xff")
+        || begins.starts_with(b"GIF87a")
+        || begins.starts_with(b"GIF89a")
+        || (begins.len() >= 12 && &begins[..4] == b"RIFF" && &begins[8..12] == b"WEBP")
+}
+
+/// `GET /agent-portraits?session=`: the portraits an agent keeps. Here that is the picture
+/// it wears, when it has one of its own and that is a picture: choosing another from what
+/// it published is not built.
+async fn portraits(
+    State(app): State<App>,
+    axum::extract::Query(asked): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let session = asked.get("session").map_or("", |said| said.trim());
+    let directory = app.fleet.directory();
+    let member = directory.by_session(session);
+    let member = member.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
+    let record = &member.record;
+    let worn = record.avatar.as_deref().filter(|digest| {
+        let begins = app.blobs.read(&picture_name(digest), 0, 12);
+        begins.is_ok_and(|begins| is_portrait(&begins))
+    });
+    let listed: Vec<Value> = worn
+        .map(|digest| {
+            let id = worn_id(&record.agent_id, digest);
+            let version = rules::version(digest);
+            json!({
+                "portrait_id": id,
+                "media_asset_id": null,
+                "role": "primary",
+                "content_version": version,
+                "url": format!("/agent-portraits/{id}/content?v={version}"),
+                "source": "legacy_avatar",
+                "created_by": "legacy_avatar",
+                "created_at": record.created_at_ms,
+                "available": true,
+            })
+        })
+        .into_iter()
+        .collect();
+    Ok(Json(json!({
+        "contract": "agent-portraits.v1",
+        "session": record.session,
+        "agent_id": record.agent_id,
+        "primary_portrait_id": listed.first().map(|portrait| portrait["portrait_id"].clone()),
+        "portraits": listed,
+        "max_portraits": PORTRAITS_MOST,
+    })))
+}
+
+/// `GET /agent-portraits/<id>/content`: a portrait's picture.
+async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
+    let directory = app.fleet.directory();
+    let worn = directory.members.iter().find_map(|member| {
+        let digest = member.record.avatar.as_deref()?;
+        (worn_id(&member.record.agent_id, digest) == id).then(|| digest.to_string())
+    });
+    let Some(digest) = worn else {
+        return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let range = media::header_text(&headers, "range");
+    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+}
+
+async fn no_portraits() -> ApiError {
+    let why = "Choosing a portrait from what an agent published is not built on this Host yet";
+    ApiError::new(StatusCode::NOT_IMPLEMENTED, why)
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/agent-portraits", get(portraits).post(no_portraits))
+        .route("/agent-portraits/{id}/content", get(portrait))
         .route("/personas", post(create))
         .route("/personas/update", post(update))
         .route("/personas/{name}", delete(remove))

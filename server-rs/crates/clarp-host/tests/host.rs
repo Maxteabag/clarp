@@ -10556,3 +10556,105 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         false
     );
 }
+
+#[test]
+fn an_agents_portraits_are_the_picture_it_wears() {
+    let place = Place::new("portraits");
+    let host = place.start();
+    // A picture that is one: the first bytes of a PNG, as an app hands it over.
+    let png = [&b"\x89PNG\r\n\x1a\n"[..], &[0, 0, 0, 13], b"IHDR", &[0; 13]].concat();
+    let handed = clarp_kernel::python::b64encode(&png);
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Pictured", "backend": "scripted", "avatar_base64": handed }),
+    );
+    let (session, id) = (
+        made["session"].as_str().unwrap().to_string(),
+        made["agent"]["agent_id"].as_str().unwrap().to_string(),
+    );
+    let kept = host.get(&format!("/agent-portraits?session={session}"));
+    let portrait = kept["portraits"][0].clone();
+    let portrait_id = portrait["portrait_id"].as_str().unwrap().to_string();
+    assert!(
+        portrait_id.starts_with(&format!("portrait_legacy_{id}_")),
+        "{portrait_id}"
+    );
+    assert_eq!(
+        portrait_id.len(),
+        format!("portrait_legacy_{id}_").len() + 24
+    );
+    let version = portrait["content_version"].as_str().unwrap();
+    assert_eq!(version.len(), 16);
+    assert_eq!(
+        kept,
+        json!({
+            "contract": "agent-portraits.v1", "session": session, "agent_id": id,
+            "primary_portrait_id": portrait_id, "max_portraits": 3,
+            "portraits": [{
+                "portrait_id": portrait_id, "media_asset_id": null, "role": "primary",
+                "content_version": version,
+                "url": format!("/agent-portraits/{portrait_id}/content?v={version}"),
+                "source": "legacy_avatar", "created_by": "legacy_avatar",
+                "created_at": portrait["created_at"], "available": true,
+            }],
+        })
+    );
+    assert!(
+        made["agent"]["avatar_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("?v={version}"))
+    );
+    let picture = fetch(
+        &host,
+        "",
+        "GET",
+        portrait["url"].as_str().unwrap(),
+        &[],
+        b"",
+    );
+    assert_eq!(
+        (picture.status, picture.body.as_slice()),
+        (200, png.as_slice())
+    );
+    let nobody = fetch(
+        &host,
+        "",
+        "GET",
+        "/agent-portraits/portrait_nobody/content",
+        &[],
+        b"",
+    );
+    assert_eq!((nobody.status, nobody.text().as_str()), (404, "not found"));
+
+    // An agent with no picture of its own keeps none; and what is no picture is no portrait.
+    let plain = host.new_agent("Plain");
+    let none = host.get(&format!("/agent-portraits?session={plain}"));
+    assert_eq!(
+        (&none["portraits"], &none["primary_portrait_id"]),
+        (&json!([]), &json!(null))
+    );
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Texted", "backend": "scripted", "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU=" }),
+    );
+    let texted = made["session"].as_str().unwrap();
+    assert_eq!(
+        host.get(&format!("/agent-portraits?session={texted}"))["portraits"],
+        json!([])
+    );
+    let (status, why) = host.ask("GET", "/agent-portraits?session=nobody", None);
+    assert_eq!(
+        (status, why["error"].as_str()),
+        (404, Some("unknown session"))
+    );
+    // Choosing another is refused as not built.
+    let (status, why) = host.ask(
+        "POST",
+        "/agent-portraits",
+        Some(
+            &json!({ "session": session, "action": "select_primary", "portrait_id": portrait_id }),
+        ),
+    );
+    assert_eq!(status, 501, "{why}");
+}
