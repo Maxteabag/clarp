@@ -47,14 +47,14 @@ pub struct Refused {
     pub body: Value,
 }
 
-fn refused(status: u16, error: &str) -> Refused {
+pub(crate) fn refused(status: u16, error: &str) -> Refused {
     Refused {
         status,
         body: json!({ "ok": false, "error": error }),
     }
 }
 
-fn refused_with(status: u16, error: &str, more: Value) -> Refused {
+pub(crate) fn refused_with(status: u16, error: &str, more: Value) -> Refused {
     let mut body = json!({ "ok": false, "error": error });
     if let (Some(body), Value::Object(more)) = (body.as_object_mut(), more) {
         body.extend(more);
@@ -555,6 +555,13 @@ impl Calls {
     /// One phone's calls, to be kept.
     pub fn of(&self, principal: &str) -> &[Call] {
         self.books.get(principal).map_or(&[], Vec::as_slice)
+    }
+
+    /// Any call, up or over, by its id, as an app reads it.
+    pub fn by_id(&self, call_id: &str, now_ms: i64) -> Option<Value> {
+        let mut all = self.books.values().flatten();
+        all.find(|call| call.call_id == call_id)
+            .map(|call| call.told(now_ms))
     }
 
     /// The call a turn of this session's agent belongs to: one that is up, in which the
