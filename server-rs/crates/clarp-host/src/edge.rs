@@ -297,6 +297,9 @@ const EXCHANGE: &str = "/pairing/exchange";
 /// And the pictures this Host ships, which anybody may fetch: an address of one is put
 /// where no token goes (a notification, a page), as on the Python Host.
 const PICTURES: &str = "/static/";
+/// And the picture an agent has of its own, by an address this Host signed for a day: what
+/// a push carries, for a phone that shows the notification without the app's token.
+const SIGNED_PICTURES: &str = "/notification-avatars/";
 
 /// What a device with limited scope may send. Whatever it may read, it may read.
 const LIMITED_POSTS: &[&str] = &[
@@ -398,7 +401,8 @@ fn who(app: &App, request: &Request) -> Option<Principal> {
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
-    let open = path == EXCHANGE || (path.starts_with(PICTURES) && request.method() == Method::GET);
+    let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
+    let open = path == EXCHANGE || (picture && request.method() == Method::GET);
     let mut response = if open {
         next.run(request).await
     } else {

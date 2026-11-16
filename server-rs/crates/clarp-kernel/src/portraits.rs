@@ -133,3 +133,228 @@ pub fn quoted(text: &str) -> String {
     }
     out
 }
+
+// ---- the face a push shows ---------------------------------------------------------------------
+
+/// Where a phone fetches, without a token of its own, the picture an agent has of its own.
+pub const FOR_NOTIFICATIONS: &str = "/notification-avatars";
+/// For how long such an address is good, in seconds: a push service may hold a notification
+/// while a phone is away.
+pub const GOOD_FOR_S: i64 = 24 * 60 * 60;
+
+/// HMAC-SHA256 (RFC 2104) of a message under a key, in hex.
+pub fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    const BLOCK: usize = 64;
+    let mut padded = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        padded[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        padded[..key.len()].copy_from_slice(key);
+    }
+    let inner: Vec<u8> = padded.iter().map(|byte| byte ^ 0x36).collect();
+    let outer: Vec<u8> = padded.iter().map(|byte| byte ^ 0x5c).collect();
+    let first = Sha256::new()
+        .chain_update(&inner)
+        .chain_update(message)
+        .finalize();
+    let second = Sha256::new()
+        .chain_update(&outer)
+        .chain_update(first)
+        .finalize();
+    second.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// What signs an address of [`FOR_NOTIFICATIONS`]: it holds for one agent, one picture and
+/// until one moment, and only the Host that knows `secret` can have written it.
+pub fn notification_signature(
+    secret: &str,
+    agent_id: &str,
+    version: &str,
+    expires_at: i64,
+) -> String {
+    let message = format!("{agent_id}\n{version}\n{expires_at}");
+    hmac_sha256_hex(secret.as_bytes(), message.as_bytes())
+}
+
+/// Whether such an address is to be answered now (`now` in seconds): signed by this Host,
+/// not run out, and not good for longer than this Host would have made it.
+pub fn notification_authorized(
+    secret: &str,
+    (agent_id, version): (&str, &str),
+    (expires_at, signature): (i64, &str),
+    now: i64,
+) -> bool {
+    if secret.is_empty() || expires_at < now || expires_at > now + GOOD_FOR_S + 60 * 60 {
+        return false;
+    }
+    let expected = notification_signature(secret, agent_id, version, expires_at);
+    // Compared whole, whatever differs: how long it took says nothing of where.
+    let (ours, theirs) = (expected.as_bytes(), signature.as_bytes());
+    let differing = ours
+        .iter()
+        .zip(theirs)
+        .fold(0u8, |seen, (a, b)| seen | (a ^ b));
+    ours.len() == theirs.len() && differing == 0
+}
+
+/// The face a push shows of the agent it is about: its address for the phone that is told,
+/// and whether it is a picture of the agent's own. `base` is where that phone reaches this
+/// Host (empty: it never said, and no face is sent); `own` is what the address of the
+/// agent's own picture carries; `shipped` the address of the picture this Host ships for it.
+/// The agent's own picture is fetched by an address signed for a day; on a Host that asks
+/// no token of anybody, by its plain address.
+pub fn face_for_push(
+    base: &str,
+    (agent_id, own): (&str, Option<&str>),
+    shipped: &str,
+    (secret, now): (&str, i64),
+) -> Option<(String, bool)> {
+    if base.is_empty() {
+        return None;
+    }
+    match own {
+        Some(version) if secret.is_empty() => {
+            let agent = quoted(agent_id);
+            Some((format!("{base}/avatars/{agent}?v={version}"), true))
+        }
+        Some(version) => {
+            let expires_at = now + GOOD_FOR_S;
+            let signature = notification_signature(secret, agent_id, version, expires_at);
+            let agent = quoted(agent_id);
+            let address = format!(
+                "{base}{FOR_NOTIFICATIONS}/{agent}?v={version}&exp={expires_at}&sig={signature}"
+            );
+            Some((address, true))
+        }
+        None if shipped.is_empty() => None,
+        None => Some((format!("{base}{shipped}"), false)),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod push_tests {
+    use super::*;
+
+    #[test]
+    fn a_face_for_a_push_is_signed_for_a_day_and_for_one_agent_and_one_picture() {
+        // RFC 4231, test case 2; and two values Python's own `hmac` gives.
+        assert_eq!(
+            hmac_sha256_hex(b"Jefe", b"what do ya want for nothing?"),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        assert_eq!(
+            hmac_sha256_hex(&[b'k'; 100], b"x"),
+            "8c1858bff6cf9cb73708b4b54f43bca6e1b8b4c3380760dc009001b265b64c6f"
+        );
+        let (agent, version, until) = ("agent-1", "f475387a7e87a1a9", 1_794_900_000);
+        let signature = notification_signature("made-up-secret", agent, version, until);
+        assert_eq!(
+            signature,
+            "2b42b72e0b06f2be5053d24c86041173bdc3fba56d9a4ea0bc416dfe55da9835"
+        );
+        let good = |secret: &str, who: (&str, &str), until: i64, signature: &str, now: i64| {
+            notification_authorized(secret, who, (until, signature), now)
+        };
+        let now = until - 100;
+        assert!(good(
+            "made-up-secret",
+            (agent, version),
+            until,
+            &signature,
+            now
+        ));
+        // Another agent, another picture, another moment, another Host, a sign off: none.
+        assert!(!good(
+            "made-up-secret",
+            ("agent-2", version),
+            until,
+            &signature,
+            now
+        ));
+        assert!(!good(
+            "made-up-secret",
+            (agent, "0000000000000000"),
+            until,
+            &signature,
+            now
+        ));
+        assert!(!good(
+            "made-up-secret",
+            (agent, version),
+            until + 1,
+            &signature,
+            now
+        ));
+        assert!(!good(
+            "another-secret",
+            (agent, version),
+            until,
+            &signature,
+            now
+        ));
+        let mut off = signature.clone();
+        off.replace_range(0..1, "f");
+        assert!(!good("made-up-secret", (agent, version), until, &off, now));
+        assert!(!good(
+            "made-up-secret",
+            (agent, version),
+            until,
+            &signature[..63],
+            now
+        ));
+        // Run out; good for longer than this Host makes one; and a Host without a secret.
+        assert!(!good(
+            "made-up-secret",
+            (agent, version),
+            until,
+            &signature,
+            until + 1
+        ));
+        let early = until - GOOD_FOR_S - 2 * 60 * 60;
+        assert!(!good(
+            "made-up-secret",
+            (agent, version),
+            until,
+            &signature,
+            early
+        ));
+        let unsigned = notification_signature("", agent, version, until);
+        assert!(!good("", (agent, version), until, &unsigned, now));
+
+        // What a push carries.
+        let base = "https://host.example:7682";
+        let pushed = |own: Option<&str>, shipped: &str, secret: &str| {
+            face_for_push(base, ("agent 1", own), shipped, (secret, 1_794_813_600))
+        };
+        assert_eq!(
+            pushed(
+                Some(version),
+                "/static/avatars/mike.png?v=1",
+                "made-up-secret"
+            ),
+            Some((
+                format!(
+                    "{base}/notification-avatars/agent%201?v={version}&exp=1794900000&sig={}",
+                    notification_signature("made-up-secret", "agent 1", version, 1_794_900_000)
+                ),
+                true
+            ))
+        );
+        assert_eq!(
+            pushed(Some(version), "", ""),
+            Some((format!("{base}/avatars/agent%201?v={version}"), true))
+        );
+        assert_eq!(
+            pushed(None, "/static/avatars/mike.png?v=1", "made-up-secret"),
+            Some((format!("{base}/static/avatars/mike.png?v=1"), false))
+        );
+        assert_eq!(pushed(None, "", "made-up-secret"), None);
+        let nowhere = face_for_push("", ("agent-1", Some(version)), "/x", ("s", 1));
+        assert_eq!(
+            nowhere, None,
+            "a phone that never said where it reaches the Host"
+        );
+    }
+}
