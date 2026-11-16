@@ -118,15 +118,6 @@ async fn no_heartbeat() -> ApiError {
     not_built("The heartbeat is")
 }
 
-/// `GET /agent-schedules`: nothing wakes an agent of this Host at a time.
-async fn schedules() -> Json<Value> {
-    Json(json!({ "schedules": [] }))
-}
-
-async fn no_schedules() -> ApiError {
-    not_built("Schedules are")
-}
-
 /// `GET /agent-goal?session=`: the goal an agent works toward by itself in the old way.
 /// This Host keeps an agent's goals as its plans (`GET /task-plans`), and none of that kind.
 async fn agent_goal(State(app): State<App>, Query(asked): Asked) -> Answered {
@@ -444,11 +435,6 @@ pub fn routes() -> Router<App> {
             "/heartbeat/settings",
             get(heartbeat_settings).post(no_heartbeat),
         )
-        .route(
-            "/agent-schedules",
-            get(schedules).post(no_schedules).delete(no_schedules),
-        )
-        .route("/agent-schedules/toggle", post(no_schedules))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))
         .route("/goal-ledger", get(goal_ledger))

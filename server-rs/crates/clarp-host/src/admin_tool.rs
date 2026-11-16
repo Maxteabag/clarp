@@ -646,6 +646,201 @@ async fn ring(app: &App, tool: &ToolCall, command: &str, rest: &[String]) -> Too
     }
 }
 
+/// A moment as the Python tool prints it: `2026-11-17 09:00:00 UTC`.
+fn utc(ms: i64) -> String {
+    let seconds = ms.div_euclid(1000);
+    let (days, of_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    // The day counted from 1970-01-01 as a date of the calendar.
+    let shifted = days + 719_468;
+    let (era, of_era) = (shifted.div_euclid(146_097), shifted.rem_euclid(146_097));
+    let year_of_era = (of_era - of_era / 1_460 + of_era / 36_524 - of_era / 146_096) / 365;
+    let of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * of_year + 2) / 153;
+    let day = of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    let (hour, minute, second) = (of_day / 3_600, of_day % 3_600 / 60, of_day % 60);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
+}
+
+/// `clarp-admin schedule list|add|toggle|remove`: an agent, or the owner, sets what an agent
+/// is sent at set times (the skill `clarp-self-prompt`). Printed as the Python tool prints
+/// it; what the Host refuses is said in a line, with exit 1.
+async fn schedule(app: &App, args: &[String]) -> ToolAnswer {
+    let usage = |command: &str, line: &str, why: &str| {
+        // The tool itself, or one of its commands, as argparse names it.
+        let named = match command {
+            "" => "clarp-admin schedule".to_string(),
+            command => format!("clarp-admin schedule {command}"),
+        };
+        ToolAnswer::said(
+            2,
+            format!("usage: {named} [-h] {line}\n{named}: error: {why}"),
+        )
+    };
+    let refused = |why: &str| ToolAnswer::said(1, format!("clarp-admin schedule: {why}"));
+    let desk = app.schedules.clone();
+    let Some((command, rest)) = args.split_first() else {
+        let why = "the following arguments are required: schedule_command";
+        return usage("", "{list,add,toggle,remove} ...", why);
+    };
+    match command.as_str() {
+        "list" => {
+            let parsed = match parse(rest, &["--session", "-s"], &[], &[]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("list", "[--session SESSION]", &why),
+            };
+            let session = parsed.option("--session").or(parsed.option("-s"));
+            let session = session.unwrap_or("").to_string();
+            let listed = desk.ask(app, |schedules, _| {
+                let listed = schedules.list(&session, "");
+                listed.into_iter().cloned().collect::<Vec<_>>()
+            });
+            let listed = match listed.await {
+                Ok(listed) => listed,
+                Err(unavailable) => return refused(&unavailable.0),
+            };
+            if listed.is_empty() {
+                return ToolAnswer::printed(0, "No scheduled jobs found.");
+            }
+            let mut lines = Vec::new();
+            for schedule in listed {
+                let status = if schedule.enabled {
+                    "ENABLED"
+                } else {
+                    "DISABLED"
+                };
+                lines.push(format!(
+                    "\u{2022} [{status}] {} (ID: {})",
+                    schedule.name, schedule.schedule_id
+                ));
+                lines.push(format!(
+                    "   Session: {} | Cron: {}",
+                    schedule.session, schedule.cron_expression
+                ));
+                lines.push(format!("   Prompt:  {}", schedule.prompt));
+                if let Some(next) = schedule.next_run_at.filter(|next| *next != 0) {
+                    lines.push(format!("   Next:    {}", utc(next)));
+                }
+                lines.push(String::new());
+            }
+            ToolAnswer::printed(0, lines.join("\n"))
+        }
+        "add" => {
+            let line = "--name NAME --cron CRON --prompt PROMPT [--disabled] session";
+            let valued = ["--name", "-n", "--cron", "-c", "--prompt", "-p"];
+            let parsed = match parse(rest, &valued, &["--disabled"], &["session"]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("add", line, &why),
+            };
+            let given = |long: &str, short: &str| parsed.option(long).or(parsed.option(short));
+            let (name, cron, prompt) = (
+                given("--name", "-n"),
+                given("--cron", "-c"),
+                given("--prompt", "-p"),
+            );
+            let missing: Vec<&str> = [
+                ("--name/-n", name),
+                ("--cron/-c", cron),
+                ("--prompt/-p", prompt),
+            ]
+            .into_iter()
+            .filter(|(_, given)| given.is_none())
+            .map(|(option, _)| option)
+            .collect();
+            if !missing.is_empty() {
+                let why = format!(
+                    "the following arguments are required: {}",
+                    missing.join(", ")
+                );
+                return usage("add", line, &why);
+            }
+            let session = python::strip(&parsed.positional[0]).to_string();
+            let said = |given: Option<&str>| python::strip(given.unwrap_or("")).to_string();
+            let (name, cron, prompt) = (said(name), said(cron), said(prompt));
+            if [&session, &name, &cron, &prompt]
+                .iter()
+                .any(|given| given.is_empty())
+            {
+                let why = "session, name, cron_expression, and prompt are required";
+                return refused(&format!("HTTP 400: {why}"));
+            }
+            let enabled = !parsed.flags.contains("--disabled");
+            let made = desk.create(app, (&session, &name, &cron, &prompt), enabled);
+            match made.await {
+                Ok(Ok(made)) => ToolAnswer::printed(
+                    0,
+                    format!(
+                        "\u{2713} Created schedule '{}' ({}) for {session}",
+                        made["name"].as_str().unwrap_or(""),
+                        made["schedule_id"].as_str().unwrap_or("")
+                    ),
+                ),
+                Ok(Err(why)) => refused(&format!("HTTP 400: {why}")),
+                Err(unavailable) => refused(&unavailable.0),
+            }
+        }
+        "toggle" => {
+            let line = "[--enable] [--disable] schedule_id";
+            let flags = ["--enable", "--disable"];
+            let parsed = match parse(rest, &[], &flags, &["schedule_id"]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("toggle", line, &why),
+            };
+            let (on, off) = (
+                parsed.flags.contains("--enable"),
+                parsed.flags.contains("--disable"),
+            );
+            if !on && !off {
+                return ToolAnswer::said(1, "Must specify --enable or --disable");
+            }
+            let schedule_id = parsed.positional[0].clone();
+            let change = clarp_kernel::schedules::Change {
+                enabled: Some(on),
+                ..Default::default()
+            };
+            let done = desk.ask(app, |schedules, now| {
+                let done = schedules.update(&schedule_id, &change, now);
+                done.map(|schedule| schedule.is_some())
+            });
+            match done.await {
+                Ok(Ok(true)) => {
+                    let word = if on { "enabled" } else { "disabled" };
+                    ToolAnswer::printed(0, format!("\u{2713} Schedule {schedule_id} {word}"))
+                }
+                Ok(Ok(false)) => refused("HTTP 404: schedule not found"),
+                Ok(Err(why)) => refused(&format!("HTTP 400: {why}")),
+                Err(unavailable) => refused(&unavailable.0),
+            }
+        }
+        "remove" => {
+            let parsed = match parse(rest, &[], &[], &["schedule_id"]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("remove", "schedule_id", &why),
+            };
+            let schedule_id = parsed.positional[0].clone();
+            let removed = desk.ask(app, |schedules, _| schedules.delete(&schedule_id));
+            match removed.await {
+                // As the Python tool: removing what is not there is no failure.
+                Ok(_) => ToolAnswer::printed(0, format!("\u{2713} Schedule {schedule_id} removed")),
+                Err(unavailable) => refused(&unavailable.0),
+            }
+        }
+        other => {
+            let said = python::text(other);
+            let why = format!(
+                "argument schedule_command: invalid choice: {said} (choose from 'list', 'add', \
+                 'toggle', 'remove')"
+            );
+            usage("", "{list,add,toggle,remove} ...", &why)
+        }
+    }
+}
+
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
@@ -656,6 +851,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,
         Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
         Some((command, rest)) if command == "call" => self::call(app, call, rest).await,
+        Some((command, rest)) if command == "schedule" => schedule(app, rest).await,
         Some((command, _)) => not_here(command),
         None => ToolAnswer::said(2, "usage: clarp-admin COMMAND ..."),
     }
