@@ -737,6 +737,19 @@ an activity's token has no grant of the phone's. The relay tells the gate when i
 alert as well. The feature is listed (`live_activity_push`) only on a Host that has that account. Not built
 with it: the same summary for a phone of another kind.
 
+**Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
+or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
+on, changes and removes it, and a runner looks every fifteen seconds for what is due, moves each schedule
+on to its next time first, so that none fires twice, and then sends its prompt as something the Host sends
+by itself: nobody is waited for, nothing is said aloud, and the user's focus stays where it is. The rules
+are the kernel's (`schedules.rs`), the Python Host's scheduler (`server/lib/scheduler.py`) without a store
+or a clock, held to it by 87 expressions (49 taken, 38 refused in its words) each run from 8 moments, and
+by 4 scripts of 81 steps of making, changing, running and removing (`tools/schedule-vectors.py`). The
+schedules are kept whole with the fleet. A schedule is sent to the agent it was made for, by its id. The
+Python Host has no feature that stands for schedules, and neither has this one: the apps call the routes.
+Found on the way and reported: the Python scheduler counts through a range far larger than its field
+(reference defect R24).
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as

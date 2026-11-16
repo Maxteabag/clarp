@@ -164,6 +164,8 @@ pub struct App {
     pub calls: Arc<crate::calls::Desk>,
     /// The chip a phone shows of the fleet on its lock screen, and what keeps it current.
     pub chip: Arc<crate::chip::Chip>,
+    /// The prompts agents are sent at set times.
+    pub schedules: Arc<crate::schedules::Desk>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -268,6 +270,7 @@ pub fn router(app: App) -> Router {
         .merge(roster::routes())
         .merge(crate::calls::routes())
         .merge(crate::chip::routes())
+        .merge(crate::schedules::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
         .merge(crate::files::routes())

@@ -46,6 +46,7 @@ pub mod relay;
 pub mod request_tool;
 pub mod revisions;
 pub mod roster;
+pub mod schedules;
 pub mod screens;
 pub mod telling;
 pub mod tools;

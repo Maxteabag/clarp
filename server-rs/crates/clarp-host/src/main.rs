@@ -162,6 +162,7 @@ async fn serve(config: Config) -> Result<(), String> {
         activity: Arc::default(),
         calls: Arc::default(),
         chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
+        schedules: Arc::default(),
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
             // nobody will ask for again are forgotten on the side.
@@ -199,6 +200,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::calls::resume(&app);
     // And the chips of the phones are kept current from now on.
     clarp_host::chip::run(&app, is_limited);
+    // And what is due of the schedules is sent.
+    clarp_host::schedules::run(&app);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",

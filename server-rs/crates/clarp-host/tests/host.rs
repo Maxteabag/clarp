@@ -4726,6 +4726,268 @@ fn the_chip_on_a_phones_lock_screen_is_kept_current_while_agents_work() {
 }
 
 #[test]
+fn an_agent_is_sent_a_prompt_at_the_times_its_schedule_names() {
+    let place = Place::new("schedules");
+    let fast = ["--schedules-checked-every-ms", "200"];
+    let host = place.start_with("", &fast);
+    let echo = host.new_agent("Echo");
+    let all = |host: &Host| host.get("/agent-schedules")["schedules"].clone();
+    assert_eq!(all(&host), json!([]));
+
+    // What is no schedule is refused in the Python Host's words.
+    let make = |body: Value| host.ask("POST", "/agent-schedules", Some(&body));
+    let refused = |why: &str| (400, json!({ "error": why }));
+    assert_eq!(
+        make(json!({ "session": echo, "name": "n", "cron": "* * * * *" })),
+        refused("session, name, cron_expression, and prompt are required")
+    );
+    assert_eq!(make(json!(["x"])), refused("bad json"));
+    assert_eq!(
+        make(json!({ "session": "nobody", "name": "n", "cron": "* * * * *", "prompt": "p" })),
+        refused("Agent session 'nobody' not found")
+    );
+    assert_eq!(
+        make(json!({ "session": echo, "name": "n", "cron_expression": "nonsense", "prompt": "p" })),
+        refused("Cron expression must have 5 fields, got 1: nonsense")
+    );
+    assert_eq!(
+        make(json!({ "session": echo, "name": "n", "cron": "61 * * * *", "prompt": "p" })),
+        refused("Value 61 out of range (0-59)")
+    );
+    assert_eq!(all(&host), json!([]));
+
+    // One for a day far off, made off, and one for every minute.
+    let (status, far) = make(json!({
+        "session": echo, "name": " New year ", "cron_expression": " 0 0 1 1 * ",
+        "prompt": " Happy new year. ", "enabled": false,
+    }));
+    assert_eq!(status, 201, "{far}");
+    let far = far["schedule"].clone();
+    let far_id = far["schedule_id"].as_str().unwrap().to_string();
+    assert!(
+        far_id.starts_with("sched_") && far_id.len() == 18,
+        "{far_id}"
+    );
+    assert_eq!(
+        (&far["name"], &far["cron_expression"], &far["prompt"]),
+        (
+            &json!("New year"),
+            &json!("0 0 1 1 *"),
+            &json!("Happy new year.")
+        )
+    );
+    assert_eq!(
+        (
+            &far["enabled"],
+            &far["next_run_at"],
+            &far["last_run_at"],
+            &far["session"]
+        ),
+        (&json!(false), &Value::Null, &Value::Null, &json!(echo))
+    );
+    let (status, minutely) = make(json!({
+        "session": echo, "name": "Every minute", "cron": "* * * * *", "prompt": "the minute has come",
+    }));
+    assert_eq!((status, &minutely["ok"]), (201, &json!(true)));
+    let minutely = minutely["schedule"].clone();
+    let minutely_id = minutely["schedule_id"].as_str().unwrap().to_string();
+    let next = minutely["next_run_at"].as_i64().unwrap();
+    let made_at = minutely["created_at"].as_i64().unwrap();
+    assert!(next > made_at && next - made_at <= 60_000 && next % 60_000 == 0);
+    assert_eq!(all(&host).as_array().unwrap().len(), 2);
+    let of_agent = host.get(&format!(
+        "/agent-schedules?agent_id={}",
+        far["agent_id"].as_str().unwrap()
+    ));
+    assert_eq!(of_agent["schedules"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        host.get("/agent-schedules?session=somebody-else"),
+        json!({ "schedules": [] })
+    );
+
+    // Turned on, a schedule has its next time; changed, it is as it was told; what is no
+    // change is refused.
+    let toggle = |body: Value| host.ask("POST", "/agent-schedules/toggle", Some(&body));
+    let (status, on) = toggle(json!({ "schedule_id": far_id, "enabled": true }));
+    assert_eq!(status, 200, "{on}");
+    assert!(
+        on["schedule"]["next_run_at"]
+            .as_i64()
+            .is_some_and(|next| next > made_at)
+    );
+    assert_eq!(
+        toggle(json!({ "schedule_id": far_id })),
+        refused("schedule_id and enabled boolean required")
+    );
+    assert_eq!(
+        toggle(json!({ "schedule_id": "sched_nothing", "enabled": true })),
+        (404, json!({ "error": "schedule not found" }))
+    );
+    let patch = |id: &str, body: Value| host.ask("PATCH", &format!("/schedules/{id}"), Some(&body));
+    let (status, renamed) = patch(&far_id, json!({ "name": " First day ", "enabled": false }));
+    assert_eq!(
+        (
+            status,
+            &renamed["schedule"]["name"],
+            &renamed["schedule"]["next_run_at"]
+        ),
+        (200, &json!("First day"), &Value::Null)
+    );
+    assert_eq!(
+        patch(&far_id, json!({ "cron": "* * *" })),
+        refused("Cron expression must have 5 fields, got 3: * * *")
+    );
+    assert_eq!(
+        patch("sched_nothing", json!({ "name": "x" })),
+        (404, json!({ "error": "schedule not found" }))
+    );
+
+    // An agent sets schedules with its own tool, and reads them as the Python tool prints.
+    let admin = |args: &[&str]| -> (i32, String, String) {
+        let mut line = vec!["clarp-admin", "schedule"];
+        line.extend_from_slice(args);
+        tool(&host, &place.root, None, &line)
+    };
+    let (code, out, err) = admin(&[
+        "add",
+        &echo,
+        "--name",
+        "By the tool",
+        "-c",
+        "@monthly",
+        "--prompt",
+        "Count the month.",
+        "--disabled",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        out.starts_with("\u{2713} Created schedule 'By the tool' (sched_"),
+        "{out}"
+    );
+    let by_tool = out.split(['(', ')']).nth(1).unwrap().to_string();
+    let (code, listed, _) = admin(&["list", "--session", &echo]);
+    assert_eq!(code, 0);
+    assert!(
+        listed.contains(&format!(
+            "\u{2022} [DISABLED] By the tool (ID: {by_tool})\n"
+        )),
+        "{listed}"
+    );
+    assert!(
+        listed.contains(&format!(
+            "   Session: {echo} | Cron: @monthly\n   Prompt:  Count the month.\n\n"
+        )),
+        "{listed}"
+    );
+    assert!(
+        listed.contains("\u{2022} [ENABLED] Every minute (ID: "),
+        "{listed}"
+    );
+    assert!(
+        listed.contains("   Next:    20") && listed.contains(":00 UTC\n"),
+        "{listed}"
+    );
+    let (code, out, _) = admin(&["toggle", &by_tool, "--enable"]);
+    assert_eq!(
+        (code, out),
+        (0, format!("\u{2713} Schedule {by_tool} enabled\n"))
+    );
+    let (code, _, err) = admin(&["toggle", &by_tool]);
+    assert_eq!(
+        (code, err.trim()),
+        (1, "Must specify --enable or --disable")
+    );
+    let (code, _, err) = admin(&[
+        "add", &echo, "--name", "n", "--cron", "nonsense", "--prompt", "p",
+    ]);
+    assert_eq!(code, 1);
+    assert!(
+        err.contains("Cron expression must have 5 fields, got 1: nonsense"),
+        "{err}"
+    );
+    let (code, out, _) = admin(&["remove", &by_tool]);
+    assert_eq!(
+        (code, out),
+        (0, format!("\u{2713} Schedule {by_tool} removed\n"))
+    );
+    let (code, none, _) = admin(&["list", "-s", "somebody-else"]);
+    assert_eq!((code, none.as_str()), (0, "No scheduled jobs found.\n"));
+
+    // When the minute comes, the agent is sent the prompt, once, as something the Host sends
+    // by itself; and the schedule has moved on to the next minute.
+    let sent = |host: &Host| -> Vec<Value> {
+        let rows = host.turns(&echo);
+        // The prompt as the Host sent it: not the agent's answer, which says the same and
+        // belongs to the same turn.
+        let prompts = rows
+            .iter()
+            .filter(|row| row["text"] == "the minute has come" && row["role"] == "user");
+        prompts.cloned().collect()
+    };
+    let began = Instant::now();
+    while sent(&host).is_empty() {
+        assert!(
+            began.elapsed() < Duration::from_secs(75),
+            "the schedule did not fire"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    wait_for("the turn of the schedule to be over", || {
+        host.state(&echo) == "done"
+    });
+    let fired = sent(&host);
+    assert_eq!(fired.len(), 1, "{fired:?}");
+    assert_eq!(fired[0]["origin"], "automation");
+    let now = |host: &Host| {
+        let listed = all(host);
+        let mut rows = listed.as_array().unwrap().iter();
+        rows.find(|row| row["schedule_id"] == minutely_id.as_str())
+            .cloned()
+            .unwrap()
+    };
+    let moved = now(&host);
+    let ran_at = moved["last_run_at"].as_i64().unwrap();
+    assert!(
+        ran_at >= next && ran_at - next < 5_000,
+        "{ran_at} for {next}"
+    );
+    assert_eq!(moved["next_run_at"], next + 60_000);
+
+    // The schedules are the Host's to keep: a Host that was killed has them as they were.
+    // (Turned off first, so that no minute comes between the two readings.)
+    let off = json!({ "schedule_id": minutely_id, "enabled": false });
+    assert_eq!(
+        host.ask("POST", "/agent-schedules/toggle", Some(&off)).0,
+        200
+    );
+    let before = all(&host);
+    assert_eq!(before.as_array().unwrap().len(), 2);
+    host.kill();
+    let host = place.start_with("", &fast);
+    assert_eq!(all(&host), before);
+
+    // Removed, a schedule is gone, and is sent no more.
+    let gone = host.ask("DELETE", &format!("/schedules/{minutely_id}"), None);
+    assert_eq!(gone, (200, json!({ "ok": true })));
+    let again = host.ask("DELETE", &format!("/schedules/{minutely_id}"), None);
+    assert_eq!(again, (404, json!({ "error": "schedule not found" })));
+    let by_post = |id: &str| {
+        host.ask(
+            "POST",
+            "/agent-schedules/delete",
+            Some(&json!({ "schedule_id": id })),
+        )
+    };
+    assert_eq!(by_post(&far_id), (200, json!({ "ok": true })));
+    assert_eq!(by_post(&far_id), (200, json!({ "ok": false })));
+    assert_eq!(
+        host.ask("POST", "/agent-schedules/delete", Some(&json!({}))),
+        (400, json!({ "error": "schedule_id required" }))
+    );
+    assert_eq!(all(&host), json!([]));
+}
+
+#[test]
 fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     let relay = StandInRelay::start();
     let place = Place::new("push");
@@ -12358,10 +12620,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         1800
     );
     assert_eq!(
-        read("/agent-schedules?session=echo"),
-        json!({ "schedules": [] })
-    );
-    assert_eq!(
         read(&format!("/agent-goal?session={echo}")),
         json!({ "session": echo, "goal": null })
     );
@@ -12539,14 +12797,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         (
             "/heartbeat/settings",
             json!({ "heartbeat_interval_sec": 600 }),
-        ),
-        (
-            "/agent-schedules",
-            json!({ "session": echo, "name": "n", "cron": "* * * * *", "prompt": "p" }),
-        ),
-        (
-            "/agent-schedules/toggle",
-            json!({ "schedule_id": "s", "enabled": true }),
         ),
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),

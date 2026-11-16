@@ -40,6 +40,8 @@ pub struct Config {
     pub logins_checked_every_ms: u64,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
+    /// How often the schedules are looked at for what is due.
+    pub schedules_checked_every_ms: u64,
     /// How often the fleet looks after the helpers nobody speaks of any more.
     pub helpers_checked_every_ms: u64,
     /// How long a helper that is working may sit idle before it counts as having reported.
@@ -95,6 +97,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--engine sqlite|memory] [--codec zstd|none] [--blobs files|memory] \
 [--launcher direct|systemd] [--shim PATH] \
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
+[--schedules-checked-every-ms N] \
 [--accounts none|follow] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -211,6 +214,7 @@ impl Config {
         let mut accounts = clarp_kernel::recovery::Accounts::None;
         let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
+        let mut schedules_checked_every_ms = 15_000;
         let mut helpers_checked_every_ms = 60_000;
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
         let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
@@ -262,6 +266,11 @@ impl Config {
                     jobs_checked_every_ms = value("a number of milliseconds")?
                         .parse()
                         .map_err(|_| "--jobs-checked-every-ms needs a number".to_string())?;
+                }
+                "--schedules-checked-every-ms" => {
+                    schedules_checked_every_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--schedules-checked-every-ms needs a number".to_string())?;
                 }
                 "--helpers-checked-every-ms" => {
                     helpers_checked_every_ms = value("a number of milliseconds")?
@@ -356,6 +365,7 @@ impl Config {
             accounts,
             logins_checked_every_ms,
             jobs_checked_every_ms,
+            schedules_checked_every_ms,
             helpers_checked_every_ms,
             helper_idle_after_ms,
             helper_archive_grace_ms,

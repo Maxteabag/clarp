@@ -1693,4 +1693,65 @@ SCENARIOS.append({
     ],
 })
 
+SCHEDULES = '/agent-schedules'
+
+
+def scheduled(name, cron, prompt, **more):
+    return {'session': AGENT, 'name': name, 'cron_expression': cron, 'prompt': prompt, **more}
+
+
+SCENARIOS.append({
+    'id': 'schedules',
+    'what': 'the prompts an agent is sent at set times: a schedule is made for an agent by its session, with '
+            'a name, a cron expression and what to send; made off; listed for one agent and for all; turned '
+            'off and on; changed and removed, by its id in the request and in the address. What is no '
+            'schedule and no expression is refused in words. No schedule of the scenario comes due while it '
+            'runs: when an expression runs next is held by its own vectors.',
+    'steps': [
+        get(SCHEDULES, 'no schedules'),
+        get(f'{SCHEDULES}?session={AGENT}', 'none of the agent'),
+        post(SCHEDULES, {}, 'a schedule that says nothing'),
+        post(SCHEDULES, ['x'], 'a schedule that is no object'),
+        post(SCHEDULES, {'session': AGENT, 'name': 'n', 'cron': '0 0 1 1 *'}, 'a schedule without a prompt'),
+        post(SCHEDULES, {**scheduled('n', '0 0 1 1 *', 'p'), 'session': 'nobody-there'}, 'a schedule for nobody'),
+        post(SCHEDULES, scheduled('n', 'nonsense', 'p'), 'an expression that is none'),
+        post(SCHEDULES, scheduled('n', '0 0 1 1', 'p'), 'an expression of four fields'),
+        post(SCHEDULES, scheduled('n', '61 0 1 1 *', 'p'), 'a minute there is none of'),
+        post(SCHEDULES, scheduled('n', '*/0 0 1 1 *', 'p'), 'a step of nothing'),
+        post(SCHEDULES, scheduled('n', 'a 0 1 1 *', 'p'), 'a field that is no number'),
+        {**post(SCHEDULES, scheduled('  Synthetic new year ', ' 0 0 1 1 * ', '  synthetic prompt one  '),
+                'a schedule is made'), 'save': {'first': 'schedule.schedule_id'}},
+        {**post(SCHEDULES, {**scheduled('Synthetic off', '@monthly', 'synthetic prompt two'), 'enabled': False},
+                'a schedule is made off'), 'save': {'second': 'schedule.schedule_id'}},
+        post(SCHEDULES, {'session': AGENT, 'name': 'Synthetic short', 'cron': '30 4 29 2 *', 'prompt': 'synthetic prompt three',
+                         'enabled': 0}, 'made by the short word for its expression, off by a number'),
+        get(SCHEDULES, 'the schedules'),
+        get(f'{SCHEDULES}?session={AGENT}', 'the schedules of the agent'),
+        get(f'{SCHEDULES}?session=nobody-there', 'the schedules of nobody'),
+        post(f'{SCHEDULES}/toggle', {'schedule_id': '{second}', 'enabled': True}, 'turned on'),
+        post(f'{SCHEDULES}/toggle', {'schedule_id': '{second}', 'enabled': True}, 'on already'),
+        post(f'{SCHEDULES}/toggle', {'schedule_id': '{first}', 'enabled': False}, 'turned off'),
+        post(f'{SCHEDULES}/toggle', {'schedule_id': '{first}'}, 'a switch that says neither'),
+        post(f'{SCHEDULES}/toggle', {'schedule_id': '{first}', 'enabled': 'yes'}, 'a switch that is no switch'),
+        post(f'{SCHEDULES}/toggle', {'schedule_id': 'sched_nothing', 'enabled': True}, 'a switch for no schedule'),
+        post(f'{SCHEDULES}/toggle', ['x'], 'a switch that is no object'),
+        {'op': 'patch', 'path': '/schedules/{first}', 'body': {'name': '  Synthetic first day ', 'enabled': True},
+         'name': 'given another name, and on'},
+        {'op': 'patch', 'path': '/schedules/{first}', 'body': {'cron_expression': '15 3 1 1 *', 'prompt': ' synthetic prompt four '},
+         'name': 'given another expression and prompt'},
+        {'op': 'patch', 'path': '/schedules/{first}', 'body': {'cron': 'nonsense'}, 'name': 'given an expression that is none'},
+        {'op': 'patch', 'path': '/schedules/{first}', 'body': {'name': '', 'prompt': ''}, 'name': 'given nothing'},
+        {'op': 'patch', 'path': '/schedules/sched_nothing', 'body': {'name': 'x'}, 'name': 'a change of no schedule'},
+        {'op': 'patch', 'path': '/schedules/{first}', 'body': ['x'], 'name': 'a change that is no object'},
+        get(SCHEDULES, 'the schedules as they are now'),
+        post(f'{SCHEDULES}/delete', {}, 'nothing is removed'),
+        post(f'{SCHEDULES}/delete', {'schedule_id': '{second}'}, 'a schedule is removed'),
+        post(f'{SCHEDULES}/delete', {'schedule_id': '{second}'}, 'removed already'),
+        {'op': 'delete', 'path': '/schedules/{first}', 'name': 'a schedule is removed by its address'},
+        {'op': 'delete', 'path': '/schedules/{first}', 'name': 'removed already, by its address'},
+        {'op': 'delete', 'path': SCHEDULES, 'name': 'what is no route'},
+        get(SCHEDULES, 'the schedule that is left'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
