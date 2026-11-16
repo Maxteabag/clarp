@@ -400,6 +400,118 @@
   },
   {
    "body": {
+    "fallback": "none",
+    "provider": "none",
+    "providers": [
+     {
+      "allows_custom_voice": false,
+      "available": false,
+      "can_fallback": true,
+      "credential": "CARTESIA_API_KEY",
+      "custom": false,
+      "fallback": false,
+      "id": "cartesia",
+      "installed": true,
+      "kind": "cloud",
+      "name": "Cartesia Sonic",
+      "selected": false,
+      "streaming": true,
+      "supports_preview": true
+     },
+     {
+      "allows_custom_voice": false,
+      "available": false,
+      "can_fallback": true,
+      "credential": "ELEVEN_API_KEY",
+      "custom": false,
+      "fallback": false,
+      "id": "elevenlabs",
+      "installed": true,
+      "kind": "cloud",
+      "name": "ElevenLabs",
+      "selected": false,
+      "streaming": true,
+      "supports_preview": true
+     },
+     {
+      "allows_custom_voice": false,
+      "available": false,
+      "can_fallback": true,
+      "credential": "GEMINI_API_KEY",
+      "custom": false,
+      "fallback": false,
+      "id": "gemini",
+      "installed": true,
+      "kind": "cloud",
+      "name": "Gemini TTS",
+      "selected": false,
+      "streaming": true,
+      "supports_preview": true
+     },
+     {
+      "allows_custom_voice": false,
+      "available": false,
+      "can_fallback": true,
+      "credential": "DEEPGRAM_API_KEY",
+      "custom": false,
+      "fallback": false,
+      "id": "deepgram",
+      "installed": true,
+      "kind": "cloud",
+      "name": "Deepgram",
+      "selected": false,
+      "streaming": true,
+      "supports_preview": true
+     },
+     {
+      "allows_custom_voice": false,
+      "available": false,
+      "can_fallback": true,
+      "capabilities": {
+       "batch_ssml_breaks": true,
+       "streaming": false
+      },
+      "credential": "google",
+      "credential_source": "google_stt",
+      "custom": false,
+      "error": "google_credentials_missing",
+      "fallback": false,
+      "id": "google",
+      "installed": true,
+      "kind": "cloud",
+      "name": "Google Chirp 3 HD",
+      "selected": false,
+      "streaming": false,
+      "supports_preview": true
+     },
+     {
+      "allows_custom_voice": false,
+      "available": true,
+      "can_fallback": false,
+      "custom": false,
+      "fallback": true,
+      "id": "none",
+      "installed": true,
+      "kind": "disabled",
+      "name": "No voice output",
+      "selected": true,
+      "streaming": false,
+      "supports_preview": false
+     }
+    ],
+    "voice": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/tts/providers",
+   "status": 200,
+   "step": "the engines that speak, for the old settings screen"
+  },
+  {
+   "body": {
     "conversations": [],
     "next_cursor": null
    },

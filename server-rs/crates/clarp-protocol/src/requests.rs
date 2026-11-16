@@ -28,6 +28,10 @@ pub struct SendRequest {
     /// The app could not tell whom it is for and asks the Host's router of spoken messages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestrator_fallback: Option<bool>,
+    /// The sessions whose agents said something aloud that the user has not heard: a list of
+    /// names. An agent among them is told so with this message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unheard_audio_sessions: Option<Value>,
     /// Wait behind a running turn instead of taking its place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_if_busy: Option<bool>,

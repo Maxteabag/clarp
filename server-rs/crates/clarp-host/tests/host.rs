@@ -10288,6 +10288,37 @@ fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
     let (identity, _, _) = ask(&zed, "third", false);
     assert_eq!(identity, "You are Zed.");
 
+    // The app says its user began to speak before hearing what this agent last said aloud:
+    // the tool is told so before the words, and the conversation keeps the words as they
+    // were said. An agent the app does not name is told nothing of the kind.
+    let handed_before = std::fs::read_to_string(&lines).unwrap().lines().count();
+    host.post(
+        "/send",
+        json!({
+            "session": mike, "text": "and then?", "synthesize_audio": false, "client_msg_id": "unheard-1",
+            "unheard_audio_sessions": ["somebody-else", format!(" {mike} "), 7],
+        }),
+    );
+    wait_for("the turn of the unheard", || {
+        let handed = std::fs::read_to_string(&lines).unwrap().lines().count();
+        handed > handed_before && host.state(&mike) == "done"
+    });
+    let (_, words, _) = last();
+    assert_eq!(
+        words,
+        "<clarp-delivery-context>\nThe user began a new spoken turn before hearing one or more of your \
+         previous synthesized replies. Treat those replies as unheard. Carry forward anything still \
+         important, but answer the user's newest message naturally instead of blindly repeating the old \
+         response.\n</clarp-delivery-context>\n\nand then?"
+    );
+    assert!(
+        host.conversation(&mike)
+            .contains(&("user".to_string(), "and then?".to_string())),
+        "the conversation has the user's words alone"
+    );
+    let (_, words, _) = ask(&mike, "and now?", false);
+    assert_eq!(words, "and now?");
+
     // All of it is the Host's to keep: a Host that was killed tells the same.
     host.kill();
     let host = place.start_in("", &[], &world);

@@ -96,8 +96,8 @@ def one(case: dict) -> dict:
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
     sys.path.insert(0, str(REPO / 'plugin' / 'hooks'))
-    from lib import agents as agents_db, clarp_guidance, personalities, voice_humanness, voice_preamble, \
-        voice_verbosity
+    from lib import agents as agents_db, clarp_guidance, personalities, turn_command, voice_humanness, \
+        voice_preamble, voice_verbosity
     import pwa_source_flag as hook
     agent = dict(case['agent'])
     # The one thing made up: the table of agents has this agent and no other.
@@ -130,6 +130,10 @@ def one(case: dict) -> dict:
                     'gemini': voice_humanness.guidance(level, gemini=True)} for level in LEVELS],
         'narration': [{'level': level, 'clause': voice_verbosity.narration_clause(level)} for level in NARRATION],
         'options': voice_verbosity.options(),
+        # What is put before the user's words when the app says its user began to speak before
+        # hearing what the agent last said aloud.
+        'unheard': {'heard': turn_command._with_delivery_context('Hello there.'),
+                    'unheard': turn_command._with_delivery_context('Hello there.', unheard_audio=True)},
         'written': [{'text': text, 'given': voice_preamble.apply_voice_preamble(text, voice=False),
                      'read': voice_preamble.strip_voice_preamble(voice_preamble.apply_voice_preamble(text, voice=True)),
                      'read_plain': voice_preamble.strip_voice_preamble(text),
@@ -203,7 +207,7 @@ def main() -> int:
     out = ['{', ' "about": "Written by server-rs/tools/told-vectors.py from plugin/hooks/pwa_source_flag.py and '
                 'server/lib/voice_preamble.py, voice_humanness.py, voice_verbosity.py, clarp_guidance.py. Do not edit '
                 'by hand.",']
-    for key in ('guidance', 'options'):
+    for key in ('guidance', 'options', 'unheard'):
         out.append(f' "{key}": ' + json.dumps(shared[key], ensure_ascii=True) + ',')
     for key in ('levels', 'narration', 'written', 'changes'):
         out.append(f' "{key}": [')
