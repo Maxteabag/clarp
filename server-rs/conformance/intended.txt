@@ -21,6 +21,10 @@ f2243c3156c0  routine-turns: the last reply, in a page without automation
 80e273b5bd0a  routine-turns: the reply to a watcher's event
 c9827f59a66a  roster-edits: the last reply
 df2b41e383ab  retried-turns: the reply of the turn after one that was tried twice
+5b59f0fbe603  agent-is-told: the third reply of the agent with a way of speaking of its own
+32c484ab1cb3  agent-is-told: its second reply (computed: the defect shows at a later turn or does not, from run to run)
+5eeb25bb406d  agent-is-told: the second reply of the agent named as a persona (computed)
+fe87cf73356b  agent-is-told: its third reply (computed)
 
 # A notification's preview of what was said aloud does not show an emotion tag the engine
 # acts out (the Python Host shows "[sigh]" there: reference defect R10).
@@ -38,6 +42,8 @@ ecd38a2b9306  roster-edits: the same, in the snapshot of the tuned agent
 cbaf110bc254  roster-edits: last_completed_message at rest, after the turn of the tuned agent
 713b6d78996c  roster-edits: the same, in the last snapshot
 e5de879ae9b8  retried-turns: last_completed_message at rest, after the turn that followed a retried one
+25f3ea0bd60d  agent-is-told: last_completed_message at rest, after the third turn of the agent with a way of speaking of its own
+61b7ecd94462  agent-is-told: the same of the agent named as a persona (computed)
 
 # The model that answered is shown after a turn that completed (the Python Host shows none
 # after some: reference defect R13).
