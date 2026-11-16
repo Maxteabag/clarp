@@ -10419,6 +10419,35 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         assert_eq!(usage["providers"][tool]["source"]["kind"], "unavailable");
     }
 
+    // The Host's own software: who it is, that nobody looked for a newer one, and that it
+    // is not updated from an app. And it keeps no skills installed.
+    let (software, who) = (read("/server-update?force=1"), read("/server-info"));
+    for key in [
+        "server_id",
+        "name",
+        "clarp_version",
+        "deployment_mode",
+        "capabilities",
+    ] {
+        assert_eq!(software[key], who[key], "{key}");
+    }
+    assert_eq!(
+        (
+            &software["checked"],
+            &software["can_update_in_app"],
+            &software["update_available"]
+        ),
+        (&json!(false), &json!(false), &json!(null))
+    );
+    assert!(
+        software["update_command"]
+            .as_str()
+            .unwrap()
+            .contains("install-host")
+    );
+    assert!(software["version"].is_string() && software["image_version"].is_string());
+    assert_eq!(read("/managed-skills"), json!({ "skills": [] }));
+
     // What cannot be read as asked, in the Python Host's words.
     for (path, status, why) in [
         (
@@ -10478,6 +10507,11 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/oracle/handoff", json!({ "session": echo })),
         ("/oracle/v2/calls/control", json!({ "action": "end" })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
+        ("/server-update", json!({})),
+        (
+            "/managed-skills",
+            json!({ "id": "clarp-media", "enabled": true }),
+        ),
         ("/backend-auth/logout", json!({ "backend": "claude" })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));

@@ -433,7 +433,7 @@ async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
 }
 
 /// Who this Host is: what `GET /server-info` answers and what a pairing hands the new device.
-fn identity(app: &App) -> ServerInfo {
+pub(crate) fn identity(app: &App) -> ServerInfo {
     ServerInfo {
         server_id: app.server_id.clone(),
         name: app.config.name.clone(),
