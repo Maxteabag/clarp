@@ -267,9 +267,21 @@
   },
   {
    "body": {
-    "defaults": "<fields>",
-    "limits": "<fields>",
-    "settings": "<fields>"
+    "defaults": {
+     "short_reply_bypass_enabled": true,
+     "speak_if_short_chars": 120
+    },
+    "limits": {
+     "speak_if_short_chars": [
+      0,
+      2000
+     ]
+    },
+    "settings": {
+     "disabled": false,
+     "short_reply_bypass_enabled": true,
+     "speak_if_short_chars": 120
+    }
    },
    "headers": {
     "cache-control": "no-store",

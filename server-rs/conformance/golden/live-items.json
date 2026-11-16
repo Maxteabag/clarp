@@ -304,7 +304,7 @@
      "agent_id": "<id:1>",
      "runtime_instance": "<instance>",
      "runtime_release": "in-process",
-     "server_id": "<id:13>"
+     "server_id": "<id:12>"
     },
     "delivery_stop_generation": 0,
     "file": "<id:4>.jsonl",
@@ -357,7 +357,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 4,
+      "revision": 7,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -391,7 +391,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 5,
+      "revision": 8,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -419,14 +419,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "msg-<id:12>",
+      "id": "live-<id:10>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 6,
+      "revision": 10,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -435,7 +435,15 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:3>"
+      "trace_id": "<id:3>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 2,
+       "turn_id": "<id:3>",
+       "worked_ms": "<duration>"
+      }
      }
     ]
    },
@@ -508,7 +516,7 @@
       "last_activity": "<time>",
       "last_completed_message": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",
       "last_message": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",
-      "last_message_id": "msg-<id:12>",
+      "last_message_id": "live-<id:10>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -2152,21 +2160,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "shown-1",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -2449,6 +2442,21 @@
    },
    "event": null,
    "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "shown-1",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -3315,7 +3323,7 @@
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#1@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:14>",
+    "notification_id": "pn-<id:13>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",

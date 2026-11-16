@@ -457,7 +457,9 @@ HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at',
                         'helper_completed_at', 'server_now',
                         # A call: when an agent joined it and when its state last changed.
-                        'joined_at', 'changed_at'})
+                        'joined_at', 'changed_at',
+                        # A schedule: when it runs next. Which minute that is, is held by vectors.
+                        'next_run_at'})
 # The ids a Host gives to what agents make and ask, and to a persona its owner makes. Under their
 # own keys the harness's normalizer names them by the order they appear in (`artifact-<id:1>`).
 # They are also in the paths a client calls (`/decisions/<id>/resolve`), in what an agent is told
@@ -482,6 +484,9 @@ CALL = re.compile(r'gcl_[0-9a-f]{32}')
 # event of the ring, in the path a client reads it by, in the trail, and in the id of the notice
 # in the agent's conversation. Named as the calls are.
 RING = re.compile(r'rng_[0-9a-f]{32}')
+# The clip of a ring's opening line, where a Host voiced it: the name of its file begins with the
+# moment it was made. The harness's normalizer names such a file only under the keys it knows.
+RING_CLIP = re.compile(r'/audio/1[5-9][0-9]{11}(__[A-Za-z0-9._-]+\.mp3)')
 
 
 def settle(value, sessions):
@@ -503,6 +508,8 @@ def settle(value, sessions):
             item = '<time>'
         elif key == 'retry_after_s' and isinstance(item, int) and not isinstance(item, bool):
             item = '<seconds>'  # how long an agent waits before it rings again: what is left of a minute
+        elif key in ('opening_audio_url', 'audio_url') and isinstance(item, str):
+            item = RING_CLIP.sub(r'/audio/<time>\1', item)
         elif key == 'agents' and isinstance(item, list):
             # Both Hosts have two codex agents (rachel, mike) that no scenario is about. Both
             # sides are cut to the scenario's own.
