@@ -3479,6 +3479,19 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     let was_before = old_host.get("/artifacts/findings/revisions?version=v1");
     let before = old_host.conversation(&session);
+    // It is heard its own way there: in two languages, by two engines in order.
+    let its_own = |text: &str| -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert(session.clone(), json!(text));
+        Value::Object(map)
+    };
+    old_host.post(
+        "/transcription-providers",
+        json!({
+            "agent_languages": its_own("no,en"),
+            "agent_engines": its_own("elevenlabs:scribe_v2,google:chirp_3"),
+        }),
+    );
 
     // The move, as its owner would run it.
     let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
@@ -3499,12 +3512,21 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         "with the 4 rows of its conversation, the 5 things in its library, its plan and the 3 \
          files it published or shows.\nOne file that it names is not on the Host at {old} either: \
          there was nothing to bring. If another Host has it, `clarp-host import --files --from \
-         {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is still on \
-         the Host at",
+         {old} --session {session} --files-from ADDR:PORT` brings it from there.\nIt is heard \
+         here as it was there: in no,en, by elevenlabs:scribe_v2, then google:chirp_3.\nIt is \
+         still on the Host at",
         old = old_host.address
     );
     assert!(told.contains(&said_of_it), "{told}");
     assert!(!told.contains("did not arrive"), "{told}");
+    let heard_here = new_host.get("/transcription-providers");
+    assert_eq!(
+        (&heard_here["agent_languages"], &heard_here["agent_engines"]),
+        (
+            &its_own("no,en"),
+            &its_own("elevenlabs:scribe_v2,google:chirp_3")
+        )
+    );
 
     // Its goal came with it: the plan as it stood, at its revision, with its steps, its
     // history, its working notes, and the artifact it is shown as.

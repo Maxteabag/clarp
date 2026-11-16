@@ -536,7 +536,12 @@ to its end, as on that Host. After a restart, a line that was being said a momen
 long before is over, and one that has waited more than half an hour for a Host that was away is not spoken
 any more. Clips are kept a week, 256 MiB at most, to be played again. Held end to end with a stand-in for
 Cartesia on the loopback (`tests/host.rs`: the clip fetched while it grows, an engine that is down, a Host
-killed and started again; no test reaches an engine outside) and by the scenario `speech-out`. Not there:
+killed and started again; no test reaches an engine outside). The corpus holds less of it than of speech in:
+the reference speaks what a Claude agent says from the transcript Claude Code writes, the harness's fake
+Claude writes none, and so the reference says nothing aloud there. The scenario `speech-out` compares what
+both Hosts answer when nothing was said (no clip missed, what an app may not say of a clip, what is no clip);
+what a clip is and how it is fetched is this Host's reading of `clip_stream.py`, not a recorded answer. Not
+there:
 ElevenLabs, Google's Chirp voices, a local voice and custom adapters as engines that speak; the raw and HLS
 ways of delivering a clip; the herald that decides which of several agents' clips is played first; what the
 apps read and set of voices (`/voice-catalog`, `/voices`, `/agent-voice`, `/voice-preview`); the record of

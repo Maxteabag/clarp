@@ -433,6 +433,71 @@ fn get(address: &str, path: &str, token: &str) -> Result<Value, String> {
 /// It reads what any app reads from the other Host, and all of it before it gives this Host
 /// anything: the agent's row in the snapshot, the conversation page by page, its plans, its
 /// library, its pictures. The other Host is not changed. Returns what to show.
+/// How an agent is heard on the Host it comes from, when it is heard its own way there: the
+/// language it is spoken to in and the engines that hear it, in the order they are tried.
+/// That Host keeps both under the agent's name, its persona or its session.
+fn heard_as(from: &str, source_token: &str, agent: &Value) -> (Option<String>, Option<String>) {
+    let Ok(settings) = get(from, "/transcription-providers", source_token) else {
+        return (None, None);
+    };
+    let own = |entries: &Value| -> Option<String> {
+        ["name", "persona", "session"].iter().find_map(|key| {
+            let named = agent[*key].as_str()?.trim().to_lowercase();
+            let entry = entries[named.as_str()].as_str()?.trim();
+            (!entry.is_empty()).then(|| entry.to_string())
+        })
+    };
+    (
+        own(&settings["agent_languages"]),
+        own(&settings["agent_engines"]),
+    )
+}
+
+/// Sets how the agent is heard on this Host as it was heard where it comes from, and says
+/// so. What cannot be set here does not undo the move: it is said, with why.
+fn bring_hearing(way: &Way<'_>, agent: &Value) -> String {
+    let (language, engines) = heard_as(way.from, way.source_token, agent);
+    if language.is_none() && engines.is_none() {
+        return String::new();
+    }
+    // Here it is known by its session, which is its own.
+    let its_own = |text: &str| -> Value {
+        let mut entry = serde_json::Map::new();
+        entry.insert(way.session.to_string(), Value::String(text.to_string()));
+        Value::Object(entry)
+    };
+    let mut change = serde_json::Map::new();
+    let mut said = Vec::new();
+    if let Some(language) = &language {
+        change.insert("agent_languages".to_string(), its_own(language));
+        said.push(format!("in {language}"));
+    }
+    if let Some(engines) = &engines {
+        change.insert("agent_engines".to_string(), its_own(engines));
+        said.push(format!("by {}", engines.replace(',', ", then ")));
+    }
+    let said = said.join(", ");
+    match post(
+        way.host,
+        "/transcription-providers",
+        way.token,
+        &Value::Object(change),
+    ) {
+        Ok((200, _)) => format!("It is heard here as it was there: {said}.\n"),
+        Ok((status, answer)) => {
+            let why = answer["error"].as_str().unwrap_or("no reason given");
+            format!(
+                "There it was heard {said}. That could not be set here ({status}): {why}. \
+                 Until it is, it is heard like every agent of this Host.\n"
+            )
+        }
+        Err(why) => format!(
+            "There it was heard {said}. That could not be set here: {why}. Until it is, it is \
+             heard like every agent of this Host.\n"
+        ),
+    }
+}
+
 pub fn import(
     mut args: impl Iterator<Item = String>,
     source_token: &str,
@@ -602,9 +667,11 @@ pub fn import(
     // The agent is here. Its files follow: one that does not arrive does not undo the move.
     let followed = files(&way, &wants);
     let (came, more) = followed.told(&way);
+    // And how it is heard, when it is heard its own way.
+    let heard = bring_hearing(&way, &agent);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
-         {more}\
+         {more}{heard}\
          It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns.\n\
          Here it is held until then: it answers what you say to it, and what would start by itself \
          (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \
