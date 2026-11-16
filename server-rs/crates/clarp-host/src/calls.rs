@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -308,7 +308,7 @@ async fn start(
 async fn change(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
-    Path(action): Path<String>,
+    action: String,
     bytes: Bytes,
 ) -> Response {
     let caller = match caller(&principal) {
@@ -340,7 +340,17 @@ async fn change(
 }
 
 pub fn routes() -> Router<App> {
-    Router::new()
-        .route("/calls", get(snapshot).post(start))
-        .route("/calls/{action}", post(change))
+    // A route for each change there is: anything else under `/calls/` is no route, as on
+    // the Python Host.
+    let changes = [
+        "add", "remove", "hold", "resume", "switch", "transfer", "end",
+    ];
+    let router = Router::new().route("/calls", get(snapshot).post(start));
+    changes.iter().fold(router, |router, action| {
+        let (path, action) = (format!("/calls/{action}"), (*action).to_string());
+        let change = move |app: State<App>, principal: Extension<Principal>, bytes: Bytes| {
+            change(app, principal, action.clone(), bytes)
+        };
+        router.route(&path, post(change))
+    })
 }

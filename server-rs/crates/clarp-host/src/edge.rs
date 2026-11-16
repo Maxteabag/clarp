@@ -78,6 +78,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("background_jobs", 1),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
+    // Calls: the Host's record of who is in a phone's call, on hold and on the floor
+    // (`/calls`, the `group-call` event, `call_id` of a send; `docs/group-calls.md`).
+    ("group_calls", 60),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
     // A running turn as items that appear, grow and settle: `live` events on `/events?live=`

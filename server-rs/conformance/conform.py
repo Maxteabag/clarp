@@ -455,7 +455,9 @@ HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 # was pinned, put away or thrown away, and when what it asked was answered. Whether there is
 # one is compared; which moment it was is not.
 CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at',
-                        'helper_completed_at', 'server_now'})
+                        'helper_completed_at', 'server_now',
+                        # A call: when an agent joined it and when its state last changed.
+                        'joined_at', 'changed_at'})
 # The ids a Host gives to what agents make and ask, and to a persona its owner makes. Under their
 # own keys the harness's normalizer names them by the order they appear in (`artifact-<id:1>`).
 # They are also in the paths a client calls (`/decisions/<id>/resolve`), in what an agent is told
@@ -471,6 +473,11 @@ CUT_ID = re.compile(r'((?:artifact|decision)-[0-9a-f]{4,})…$')
 # in the path a client then asks for. So these are named here, before the normalizer reads the
 # capture, in the order a client first learns of them.
 ASSET = re.compile(r'asset_[A-Za-z0-9_]{24}')
+# The id a Host gives a call: `gcl_` and thirty-two hex signs. It is in the call's record, in
+# every event of the call, in what a refusal of a message of the call names, and in the ids of
+# the notices in the agents' conversations. Named here in the order a client first learns of
+# them, as the files are.
+CALL = re.compile(r'gcl_[0-9a-f]{32}')
 
 
 def settle(value, sessions):
@@ -484,6 +491,8 @@ def settle(value, sessions):
     for key, item in value.items():
         if key == 'runtime_instance' and isinstance(item, str) and item:
             item = '<instance>'  # one per Host process
+        elif key == 'host_id' and isinstance(item, str) and item:
+            item = '<host>'  # a call says which Host keeps it: each Host's own id
         elif key == 'turn_started_at' and isinstance(item, int) and item in EPOCH_MS:
             item = '<time>'  # a reading no TurnClock has told: there is none in a capture of this suite
         elif key in CLOCK_KEYS and isinstance(item, int) and not isinstance(item, bool) and item in EPOCH_MS:
@@ -760,6 +769,20 @@ def published(value, found: dict) -> dict:
     return found
 
 
+def called(value, found: dict) -> dict:
+    """The ids of the calls a capture names, each with the name it is given here."""
+    if isinstance(value, list):
+        for item in value:
+            called(item, found)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key == 'call_id' and isinstance(item, str) and CALL.fullmatch(item):
+                found.setdefault(item, f'<call:{len(found) + 1}>')
+            else:
+                called(item, found)
+    return found
+
+
 def cut_lists(value, found: dict) -> dict:
     """The names of the lists of Updates a capture's pages were cut from, and the cursors its
     pages ended with: each Host's own, named here in the order a client learns of them. What is
@@ -786,6 +809,9 @@ def seen_by_a_client(raw: dict) -> dict:
     lists = cut_lists([exchange['body'] for exchange in raw['http']], {})
     if lists:
         raw = {**raw, 'http': by_name(raw['http'], lists)}
+    calls = called([exchange['body'] for exchange in raw['http']], {})
+    if calls:
+        raw = {**raw, 'http': by_name(raw['http'], calls), 'sse': by_name(raw['sse'], calls)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
@@ -793,6 +819,11 @@ def seen_by_a_client(raw: dict) -> dict:
     raw = {**raw, 'http': [{**exchange, 'body': by_session(settle(exchange['body'], sessions), known),
                             'path': own_face(str(exchange.get('path') or ''), known)}
                            for exchange in raw['http']]}
+    # What a call's event says of the call is the call's record: its moments and its Host are
+    # settled as in an answer.
+    raw = {**raw, 'sse': [{**frame, 'data': by_session(settle(frame['data'], sessions), known)}
+                          if isinstance(frame.get('data'), dict) and frame['data'].get('type') == 'group-call' else frame
+                          for frame in raw['sse']]}
     whole = normalize.normalize(raw, str(REPO))
     # The normalizer keeps the answers in the order they were given, one for one.
     names: dict = {}
