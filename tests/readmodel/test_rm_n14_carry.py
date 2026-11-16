@@ -136,6 +136,11 @@ class World:
                     (message_id, corpus.AGENT, session, source_file, -5000 - self.rows, role,
                      _stamp(harness.BASE_MS + at), text, harness.BASE_MS + at, revision, origin,
                      sender, trace))
+                # As every writer does: a row under a new revision raises its
+                # conversation's head. A row that claims an old revision leaves
+                # the head where its writer left it.
+                if claimed is None:
+                    self._head(other, revision, session)
 
     def send(self, name, text, *, at, trace=None, origin="user", sender=None,
              session=corpus.SESSION):
