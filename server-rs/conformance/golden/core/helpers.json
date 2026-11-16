@@ -9108,46 +9108,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "detail": {
-     "session": "helper-one"
-    },
-    "event_id": "<eid:agent-state#1@626a03>",
-    "kind": "spawned",
-    "persona": "Helper One",
-    "session": "helper-one",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@626a03>"
-  },
-  {
-   "data": {
-    "action": "started",
-    "agent_id": "<id:1>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#2@626a03>",
-    "file_path": "",
-    "kind": "spawned",
-    "persona": "Helper One",
-    "phase": "spawned",
-    "session": "helper-one",
-    "started_at_ms": null,
-    "state": "idle",
-    "status": "ok",
-    "summary": "Started",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": null,
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#2@626a03>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "event_id": "<eid:transcript-updated#1@37405d>",
     "session": "helper-one",
     "type": "transcript-updated"
@@ -9184,6 +9144,46 @@
    },
    "event": null,
    "id": "<eid:agent-state#1@7169e8>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "session": "helper-one"
+    },
+    "event_id": "<eid:agent-state#1@626a03>",
+    "kind": "spawned",
+    "persona": "Helper One",
+    "session": "helper-one",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@626a03>"
+  },
+  {
+   "data": {
+    "action": "started",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@626a03>",
+    "file_path": "",
+    "kind": "spawned",
+    "persona": "Helper One",
+    "phase": "spawned",
+    "session": "helper-one",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Started",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@626a03>"
   },
   {
    "data": {

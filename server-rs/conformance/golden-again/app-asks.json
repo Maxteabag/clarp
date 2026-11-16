@@ -5824,7 +5824,7 @@
        "tint_dark": "#c0caf5",
        "tint_light": "#3c4257"
       },
-      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"88d9bd59-250b-427f-8c40-bffe74b83e46\"}",
+      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"f1f3731f-86d3-4599-b0c3-b6a882ccbdfa\"}",
       "cli_version_source": {
        "detail": "<ROOT>/provider/fake-codex --version",
        "freshness": "fresh",
@@ -6638,6 +6638,32 @@
    "path": "/upload",
    "status": 400,
    "step": "a file of nothing"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/crash",
+   "status": 200,
+   "step": "what a phone's system told an app of itself"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/crash",
+   "status": 400,
+   "step": "a report that is no object"
   }
  ],
  "live": {
