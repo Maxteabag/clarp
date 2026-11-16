@@ -237,6 +237,7 @@ pub fn router(app: App) -> Router {
         .merge(peers::routes())
         .merge(roster::routes())
         .merge(crate::personas::routes())
+        .merge(crate::files::routes())
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::faces::routes())
@@ -308,6 +309,33 @@ const LIMITED_POSTS: &[&str] = &[
     "/voice-events",
 ];
 
+/// What a device with limited scope is kept from altogether, also from reading: the Host's
+/// logins and software, its owner's settings, what is on its disk, calls. The Python Host's
+/// list (`_DEVICE_FULL_ONLY_PREFIXES`), whether or not this Host has the route yet: a route
+/// that is built later is closed from its first day.
+const FULL_ONLY: &[&str] = &[
+    "/backend-auth",
+    "/harness-providers",
+    "/server-update",
+    "/managed-skills",
+    "/hotseat/desk",
+    "/hotseat/switch",
+    "/hotseat/resume",
+    "/orchestrator/",
+    "/herald/",
+    "/personalities/",
+    "/automation-settings",
+    "/avatar-settings",
+    "/paired-devices",
+    "/tts/providers",
+    "/network/",
+    "/server-terminal",
+    "/oracle/",
+    "/agent-file",
+    "/janitor-runs/",
+    "/calls",
+];
+
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     // An agent's own tools are asked for from this machine, with the token a turn was given
@@ -326,7 +354,8 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     else {
         return false;
     };
-    if path.starts_with("/paired-devices") || path.starts_with("/pairing/issue") {
+    let closed = |prefix: &&str| path == prefix.trim_end_matches('/') || path.starts_with(*prefix);
+    if FULL_ONLY.iter().any(closed) || path.starts_with("/pairing/issue") {
         return true;
     }
     // What is on this machine's disk, by a path the caller chooses.
@@ -1854,6 +1883,17 @@ mod tests {
             (Method::POST, "/pairing/issue", true),
             (Method::GET, "/dirs", true),
             (Method::GET, "/past-sessions", true),
+            (Method::GET, "/personalities/settings", true),
+            (Method::GET, "/automation-settings", true),
+            (Method::GET, "/agent-files", true),
+            (Method::GET, "/agent-file", true),
+            (Method::GET, "/backend-auth", true),
+            (Method::GET, "/orchestrator/settings", true),
+            (Method::GET, "/orchestrator", true),
+            (Method::GET, "/calls", true),
+            (Method::GET, "/voice-humanness", false),
+            (Method::GET, "/persona-avatars/persona-1", false),
+            (Method::POST, "/personas", true),
         ] {
             assert_eq!(
                 out_of_scope(&limited, &method, path),
