@@ -13,6 +13,7 @@ use clarp_kernel::heard::{
     fingerprint, invented, is_cloud, job_id, joined, label, plan, provider_of, terms, truthy,
     wants_cloud_engine, weight, whole,
 };
+use clarp_kernel::languages;
 use serde_json::Value;
 
 fn vectors() -> Value {
@@ -239,5 +240,123 @@ fn the_engines_of_the_contract_are_the_ones_the_python_host_lists() {
         let model = case["model"].as_str().unwrap();
         assert_eq!(label(model), case["label"].as_str().unwrap(), "{model}");
         assert_eq!(weight(model), case["weight"].as_str().unwrap(), "{model}");
+    }
+}
+
+/// A map of texts, whatever order it is written in.
+fn map_of(value: &Value) -> std::collections::BTreeMap<String, String> {
+    let fields = value.as_object().unwrap().iter();
+    fields
+        .map(|(name, value)| (name.clone(), value.as_str().unwrap().to_string()))
+        .collect()
+}
+
+#[test]
+fn the_language_an_agent_is_spoken_to_in_is_read_and_changed_as_the_python_host_does() {
+    let vectors = vectors();
+    let all = &vectors["spoken_to"];
+    assert_eq!(all["default"], languages::DEFAULT);
+    assert_eq!(
+        texts(&all["keys"]),
+        [
+            languages::LANGUAGE_KEY,
+            languages::AGENT_LANGUAGES_KEY,
+            languages::AGENT_ENGINES_KEY
+        ]
+    );
+    // What a language may be, and what a set of them may be.
+    let (codes, sets) = (
+        all["codes"].as_array().unwrap(),
+        all["sets"].as_array().unwrap(),
+    );
+    assert!(codes.len() >= 20 && sets.len() >= 15);
+    for (cases, read) in [
+        (
+            codes,
+            languages::code as fn(&Value) -> Result<String, &'static str>,
+        ),
+        (sets, languages::set),
+    ] {
+        for case in cases {
+            let given = case.get("given").unwrap_or(&Value::Null);
+            match case.get("answer") {
+                Some(answer) => assert_eq!(
+                    read(given).as_deref(),
+                    Ok(answer.as_str().unwrap()),
+                    "{case}"
+                ),
+                None => assert_eq!(
+                    read(given),
+                    Err(case["message"].as_str().unwrap()),
+                    "{case}"
+                ),
+            }
+        }
+    }
+    // How the settings are read: a map of anything is a map of texts, and what is no
+    // language is no agent's language.
+    let stored = all["stored"].as_array().unwrap();
+    assert!(stored.len() >= 12);
+    for case in stored {
+        let raw = case["stored"].as_str();
+        let as_map =
+            |entries: Vec<(String, String)>| -> std::collections::BTreeMap<String, String> {
+                entries.into_iter().collect()
+            };
+        assert_eq!(
+            as_map(languages::stored(raw)),
+            map_of(&case["map"]),
+            "{case}"
+        );
+        assert_eq!(
+            as_map(languages::languages(raw)),
+            map_of(&case["languages"]),
+            "{case}"
+        );
+        assert_eq!(
+            languages::selected(raw, "en"),
+            case["selected"].as_str().unwrap(),
+            "{case}"
+        );
+    }
+    assert_eq!(languages::selected(Some(" NO "), "en"), "no");
+    assert_eq!(languages::selected(None, "sv"), "sv");
+    for case in all["engines"].as_array().unwrap() {
+        assert_eq!(
+            languages::engines(case["value"].as_str().unwrap()),
+            texts(&case["engines"]),
+            "{case}"
+        );
+    }
+    // What a change of the settings leaves, and what is refused in which words.
+    let valid = texts(&all["valid_engines"]);
+    let is_valid = |engine: &str| valid.iter().any(|known| known == engine);
+    let (engine_changes, language_changes) = (
+        all["engine_changes"].as_array().unwrap(),
+        all["language_changes"].as_array().unwrap(),
+    );
+    assert!(engine_changes.len() >= 18 && language_changes.len() >= 12);
+    for case in engine_changes {
+        let changed =
+            languages::engines_changed(case["stored"].as_str(), &case["change"], &is_valid);
+        match case.get("answer") {
+            Some(answer) => assert_eq!(changed.as_deref(), Ok(answer.as_str().unwrap()), "{case}"),
+            None => assert_eq!(
+                changed,
+                Err(case["message"].as_str().unwrap().to_string()),
+                "{case}"
+            ),
+        }
+    }
+    for case in language_changes {
+        let changed = languages::languages_changed(case["stored"].as_str(), &case["change"]);
+        match case.get("answer") {
+            Some(answer) => assert_eq!(changed.as_deref(), Ok(answer.as_str().unwrap()), "{case}"),
+            None => assert_eq!(
+                changed,
+                Err(case["message"].as_str().unwrap().to_string()),
+                "{case}"
+            ),
+        }
     }
 }

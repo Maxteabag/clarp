@@ -32,6 +32,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 LIB = REPO / 'server' / 'lib'
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'speech-vectors.json'
+CHIRP_OUT = HERE.parent / 'crates' / 'clarp-speech' / 'tests' / 'fixtures' / 'chirp-vectors.json'
 
 
 def taken(path: pathlib.Path, names: list[str], given: dict | None = None) -> dict:
@@ -213,6 +214,133 @@ def catalogue(providers: dict, local: dict, budgets: dict, speech: dict) -> dict
                              'weight': speech['_model_weight'](name)} for name in names]}
 
 
+class Settings:
+    """The settings an agent's language and engines are read from, as a test sets them."""
+
+    def __init__(self):
+        self.kept: dict = {}
+
+    def get_text(self, key, default=None):
+        return self.kept.get(key, default)
+
+
+def spoken_to() -> dict:
+    """The language an agent is spoken to in and the engines that hear it
+    (`stt_language.py`): what a code may be, what a set of codes may be, how the settings are
+    read, and what a change of them leaves."""
+    settings = Settings()
+    names = ['LANGUAGE_KEY', 'AGENT_LANGUAGES_KEY', 'AGENT_ENGINES_KEY', 'DEFAULT_LANGUAGE', '_CODE', 'selected',
+             '_map', 'agent_languages', 'agent_engines', 'engines_for', 'validate', 'validate_agent',
+             'merge_agent_engines', 'merge_agent_languages']
+    # Whose entry it is, is decided by the agent's name, persona and session, which are not
+    # read here: the settings are asked for one key.
+    language = taken(LIB / 'stt_language.py', names,
+                     {'settings_store': settings, 'json': json,
+                      '_for_session': lambda overrides, session: overrides.get(session)})
+    codes = [None, 1, True, '', ' ', 'en', 'EN', ' no ', 'nb', 'nob', 'e', 'engl', 'e1', 'en-GB', 'en,no', 'ÉN',
+             'é', '\ten\n', 'En', 'zh', ['en'], 'en ', 'n o']
+    sets = [None, 3, '', 'en', 'no,en', ' NO , en ', 'no,en,pt', 'no,en,pt,sv', 'no,no,en', 'no,,en', 'no,english',
+            ',', 'no,', 'en,EN,en', 'a,b', 'nb,nn,no', ['no'], 'no;en']
+    stored = [None, '', '{}', '[]', 'nonsense', '"text"', '3', '{"Koko": "no,en"}',
+              '{" Koko-8255 ": " elevenlabs:scribe_v2 , google:chirp_3 ", "": "x", "empty": "", "blank": "  "}',
+              '{"a": 1, "b": true, "c": null, "d": ["x"], "e": {"f": 1}}', '{"ÜNÏ": "No"}',
+              '{"koko": "english", "mochi": "no,pt,sv,da", "ok": "NO, en"}', '{"A": "x", "a": "y"}']
+
+    def read(raw):
+        settings.kept = {} if raw is None else {language['AGENT_LANGUAGES_KEY']: raw,
+                                                language['AGENT_ENGINES_KEY']: raw,
+                                                language['LANGUAGE_KEY']: raw}
+        return {'stored': raw, 'map': language['_map'](language['AGENT_ENGINES_KEY']),
+                'languages': language['agent_languages'](), 'selected': language['selected']()}
+
+    valid = {'elevenlabs:scribe_v2', 'google:chirp_3', 'deepgram:nova-3'}
+    engine_changes = [
+        ('{}', {'Koko': 'elevenlabs:scribe_v2,google:chirp_3'}),
+        ('{"koko":"google:chirp_3"}', {' KOKO ': ' elevenlabs:scribe_v2 , google:chirp_3 '}),
+        ('{"koko":"google:chirp_3","mochi":"elevenlabs:scribe_v2"}', {'koko': None}),
+        ('{"koko":"google:chirp_3"}', {'koko': ''}),
+        ('{"koko":"google:chirp_3"}', {'nobody': None}),
+        ('{"koko":"google:chirp_3"}', {'koko': 'nothing:of-the-kind'}),
+        ('{"koko":"google:chirp_3"}', {'koko': 'google:chirp_3,nothing'}),
+        ('{"koko":"google:chirp_3"}', {'koko': ' , '}),
+        ('{"koko":"google:chirp_3"}', {'koko': ',google:chirp_3,'}),
+        ('{"koko":"google:chirp_3"}', {'': 'google:chirp_3'}),
+        ('{"koko":"google:chirp_3"}', {'  ': 'google:chirp_3'}),
+        ('{"koko":"google:chirp_3"}', {'koko': 3}),
+        ('{"koko":"google:chirp_3"}', {'koko': ['google:chirp_3']}),
+        ('{"koko":"google:chirp_3"}', ['koko']),
+        ('{"koko":"google:chirp_3"}', 'koko'),
+        ('{"koko":"google:chirp_3"}', {}),
+        ('nonsense', {'b': 'deepgram:nova-3', 'a': 'google:chirp_3'}),
+        ('{"koko":"google:chirp_3"}', {7: 'google:chirp_3'}),
+    ]
+    language_changes = [
+        ('{}', {'Koko': 'no,en'}),
+        ('{"koko":"no"}', {' KOKO ': ' EN , no '}),
+        ('{"koko":"no","mochi":"pt"}', {'koko': None}),
+        ('{"koko":"no"}', {'koko': ''}),
+        ('{"koko":"no"}', {'koko': 'english'}),
+        ('{"koko":"no"}', {'koko': 'no,en,pt,sv'}),
+        ('{"koko":"no"}', {'': 'no'}),
+        ('{"koko":"no"}', {'koko': 3}),
+        ('{"koko":"no"}', ['koko']),
+        ('{"koko":"no"}', {}),
+        ('{"koko":"english","mochi":"pt"}', {'new': 'sv'}),
+        ('nonsense', {'b': 'no', 'a': 'en,en'}),
+    ]
+
+    def changed(function, raw, change, key, **more):
+        settings.kept = {key: raw}
+        return {'stored': raw, 'change': change, **said(function, change, **more)}
+
+    def heard_by(raw):
+        settings.kept = {language['AGENT_ENGINES_KEY']: json.dumps({'koko': raw})}
+        return {'value': raw, 'engines': language['engines_for']('koko')}
+
+    return {
+        'default': language['DEFAULT_LANGUAGE'],
+        'keys': [language['LANGUAGE_KEY'], language['AGENT_LANGUAGES_KEY'], language['AGENT_ENGINES_KEY']],
+        'codes': [{'given': code, **said(language['validate'], code)} for code in codes],
+        'sets': [{'given': codes, **said(language['validate_agent'], codes)} for codes in sets],
+        'stored': [read(raw) for raw in stored],
+        'engines': [heard_by(raw) for raw in ['', 'google:chirp_3', ' elevenlabs:scribe_v2 , google:chirp_3 ', ',,',
+                                              'a,,b', ' one ']],
+        'engine_changes': [changed(language['merge_agent_engines'], raw, change, language['AGENT_ENGINES_KEY'],
+                                   is_valid=lambda engine: engine in valid) for raw, change in engine_changes],
+        'language_changes': [changed(language['merge_agent_languages'], raw, change,
+                                     language['AGENT_LANGUAGES_KEY']) for raw, change in language_changes],
+        'valid_engines': sorted(valid),
+    }
+
+
+def chirp() -> dict:
+    """Google's Chirp as an engine that listens (`google_stt.py`): what a language is called
+    when it is asked for, and how a long clip is cut into pieces."""
+    google = whole(LIB / 'google_stt.py')
+    languages = ['en', 'no', 'nb', 'nn', 'NO', ' no ', '', 'xx', 'en-GB', 'nb-NO', 'no,en', 'no,nb,en', 'pt,no',
+                 'zh', 'sv,da,fi', 'en,en', 'no, en', 'EN-gb,no']
+
+    def asked(language):
+        tag = google['language_tag'](language)
+        return list(dict.fromkeys(google['language_tag'](code) for code in tag.split(',')))
+
+    def cut(length, seconds):
+        pcm = bytes(at % 251 for at in range(length))
+        return {'bytes': length, 'seconds': seconds,
+                'pieces': [{'bytes': len(piece), 'sha256': hashlib.sha256(piece).hexdigest()}
+                           for piece in google['pieces'](pcm, seconds)]}
+
+    return {
+        'written_by': f'server-rs/tools/speech-vectors.py with Python {sys.version_info.major}.{sys.version_info.minor}',
+        'sample_rate': google['SAMPLE_RATE'], 'piece_seconds': google['PIECE_SECONDS'],
+        'token_url': google['TOKEN_URL'],
+        'tags': [{'language': language, 'tag': google['language_tag'](language), 'asked': asked(language)}
+                 for language in languages],
+        'pieces': [cut(0, 1), cut(2, 1), cut(32_000, 1), cut(32_001, 1), cut(70_000, 1), cut(64_000, 2),
+                   cut(100_000, 55)],
+    }
+
+
 def main() -> int:
     results = taken(LIB / 'transcription_results.py', ['_VALID_JOB_ID', 'normalize_job_id', 'request_fingerprint'])
     router = whole(LIB / 'stt_router.py')
@@ -236,8 +364,11 @@ def main() -> int:
         'joined': joined(speech),
         **small_rules(providers, eleven, helpers, server),
         'catalogue': catalogue(providers, local, budgets, speech),
+        'spoken_to': spoken_to(),
     }
     OUT.write_text(json.dumps(vectors, indent=1, ensure_ascii=False, sort_keys=True) + '\n')
+    CHIRP_OUT.parent.mkdir(parents=True, exist_ok=True)
+    CHIRP_OUT.write_text(json.dumps(chirp(), indent=1, ensure_ascii=False, sort_keys=True) + '\n')
     counts = {key: (len(value) if isinstance(value, list) else len(value.get('texts', value)))
               for key, value in vectors.items() if isinstance(value, (list, dict))}
     print(f'wrote {OUT.relative_to(REPO)}: {counts}')

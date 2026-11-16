@@ -4162,6 +4162,582 @@
    "provider": ""
   }
  ],
+ "spoken_to": {
+  "codes": [
+   {
+    "given": null,
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": 1,
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": true,
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": " ",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "en",
+    "given": "en"
+   },
+   {
+    "answer": "en",
+    "given": "EN"
+   },
+   {
+    "answer": "no",
+    "given": " no "
+   },
+   {
+    "answer": "nb",
+    "given": "nb"
+   },
+   {
+    "answer": "nob",
+    "given": "nob"
+   },
+   {
+    "given": "e",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "engl",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "e1",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "en-GB",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "en,no",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "ÉN",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "é",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "en",
+    "given": "\ten\n"
+   },
+   {
+    "answer": "en",
+    "given": "En"
+   },
+   {
+    "answer": "zh",
+    "given": "zh"
+   },
+   {
+    "given": [
+     "en"
+    ],
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "en",
+    "given": "en "
+   },
+   {
+    "given": "n o",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   }
+  ],
+  "default": "en",
+  "engine_changes": [
+   {
+    "answer": "{\"koko\":\"elevenlabs:scribe_v2,google:chirp_3\"}",
+    "change": {
+     "Koko": "elevenlabs:scribe_v2,google:chirp_3"
+    },
+    "stored": "{}"
+   },
+   {
+    "answer": "{\"koko\":\"elevenlabs:scribe_v2,google:chirp_3\"}",
+    "change": {
+     " KOKO ": " elevenlabs:scribe_v2 , google:chirp_3 "
+    },
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "answer": "{\"mochi\":\"elevenlabs:scribe_v2\"}",
+    "change": {
+     "koko": null
+    },
+    "stored": "{\"koko\":\"google:chirp_3\",\"mochi\":\"elevenlabs:scribe_v2\"}"
+   },
+   {
+    "answer": "{}",
+    "change": {
+     "koko": ""
+    },
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "answer": "{\"koko\":\"google:chirp_3\"}",
+    "change": {
+     "nobody": null
+    },
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "koko": "nothing:of-the-kind"
+    },
+    "message": "unknown transcription engine: nothing:of-the-kind",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "koko": "google:chirp_3,nothing"
+    },
+    "message": "unknown transcription engine: google:chirp_3,nothing",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "koko": " , "
+    },
+    "message": "unknown transcription engine:  , ",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "answer": "{\"koko\":\"google:chirp_3\"}",
+    "change": {
+     "koko": ",google:chirp_3,"
+    },
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "": "google:chirp_3"
+    },
+    "message": "agent_engines keys must be agent names",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "  ": "google:chirp_3"
+    },
+    "message": "agent_engines keys must be agent names",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "koko": 3
+    },
+    "message": "unknown transcription engine: 3",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": {
+     "koko": [
+      "google:chirp_3"
+     ]
+    },
+    "message": "unknown transcription engine: ['google:chirp_3']",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": [
+     "koko"
+    ],
+    "message": "agent_engines must be an object of agent -> engine",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "change": "koko",
+    "message": "agent_engines must be an object of agent -> engine",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "answer": "{\"koko\":\"google:chirp_3\"}",
+    "change": {},
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   },
+   {
+    "answer": "{\"a\":\"google:chirp_3\",\"b\":\"deepgram:nova-3\"}",
+    "change": {
+     "a": "google:chirp_3",
+     "b": "deepgram:nova-3"
+    },
+    "stored": "nonsense"
+   },
+   {
+    "answer": "{\"7\":\"google:chirp_3\",\"koko\":\"google:chirp_3\"}",
+    "change": {
+     "7": "google:chirp_3"
+    },
+    "stored": "{\"koko\":\"google:chirp_3\"}"
+   }
+  ],
+  "engines": [
+   {
+    "engines": [],
+    "value": ""
+   },
+   {
+    "engines": [
+     "google:chirp_3"
+    ],
+    "value": "google:chirp_3"
+   },
+   {
+    "engines": [
+     "elevenlabs:scribe_v2",
+     "google:chirp_3"
+    ],
+    "value": " elevenlabs:scribe_v2 , google:chirp_3 "
+   },
+   {
+    "engines": [],
+    "value": ",,"
+   },
+   {
+    "engines": [
+     "a",
+     "b"
+    ],
+    "value": "a,,b"
+   },
+   {
+    "engines": [
+     "one"
+    ],
+    "value": " one "
+   }
+  ],
+  "keys": [
+   "transcription.language",
+   "transcription.agent_languages",
+   "transcription.agent_engines"
+  ],
+  "language_changes": [
+   {
+    "answer": "{\"koko\":\"no,en\"}",
+    "change": {
+     "Koko": "no,en"
+    },
+    "stored": "{}"
+   },
+   {
+    "answer": "{\"koko\":\"en,no\"}",
+    "change": {
+     " KOKO ": " EN , no "
+    },
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "answer": "{\"mochi\":\"pt\"}",
+    "change": {
+     "koko": null
+    },
+    "stored": "{\"koko\":\"no\",\"mochi\":\"pt\"}"
+   },
+   {
+    "answer": "{}",
+    "change": {
+     "koko": ""
+    },
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "change": {
+     "koko": "english"
+    },
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "change": {
+     "koko": "no,en,pt,sv"
+    },
+    "message": "agent language set accepts at most three language codes",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "change": {
+     "": "no"
+    },
+    "message": "agent_languages keys must be agent names",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "change": {
+     "koko": 3
+    },
+    "message": "agent language must be a string of ISO language codes",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "change": [
+     "koko"
+    ],
+    "message": "agent_languages must be an object of agent -> language",
+    "refused": "ValueError",
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "answer": "{\"koko\":\"no\"}",
+    "change": {},
+    "stored": "{\"koko\":\"no\"}"
+   },
+   {
+    "answer": "{\"mochi\":\"pt\",\"new\":\"sv\"}",
+    "change": {
+     "new": "sv"
+    },
+    "stored": "{\"koko\":\"english\",\"mochi\":\"pt\"}"
+   },
+   {
+    "answer": "{\"a\":\"en\",\"b\":\"no\"}",
+    "change": {
+     "a": "en,en",
+     "b": "no"
+    },
+    "stored": "nonsense"
+   }
+  ],
+  "sets": [
+   {
+    "given": null,
+    "message": "agent language must be a string of ISO language codes",
+    "refused": "ValueError"
+   },
+   {
+    "given": 3,
+    "message": "agent language must be a string of ISO language codes",
+    "refused": "ValueError"
+   },
+   {
+    "given": "",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "en",
+    "given": "en"
+   },
+   {
+    "answer": "no,en",
+    "given": "no,en"
+   },
+   {
+    "answer": "no,en",
+    "given": " NO , en "
+   },
+   {
+    "answer": "no,en,pt",
+    "given": "no,en,pt"
+   },
+   {
+    "given": "no,en,pt,sv",
+    "message": "agent language set accepts at most three language codes",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "no,en",
+    "given": "no,no,en"
+   },
+   {
+    "given": "no,,en",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "no,english",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": ",",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "given": "no,",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "en",
+    "given": "en,EN,en"
+   },
+   {
+    "given": "a,b",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   },
+   {
+    "answer": "nb,nn,no",
+    "given": "nb,nn,no"
+   },
+   {
+    "given": [
+     "no"
+    ],
+    "message": "agent language must be a string of ISO language codes",
+    "refused": "ValueError"
+   },
+   {
+    "given": "no;en",
+    "message": "language must be an ISO 639-1 code such as 'en' or 'no'",
+    "refused": "ValueError"
+   }
+  ],
+  "stored": [
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": null
+   },
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": ""
+   },
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": "{}"
+   },
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": "[]"
+   },
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": "nonsense"
+   },
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": "\"text\""
+   },
+   {
+    "languages": {},
+    "map": {},
+    "selected": "en",
+    "stored": "3"
+   },
+   {
+    "languages": {
+     "koko": "no,en"
+    },
+    "map": {
+     "koko": "no,en"
+    },
+    "selected": "en",
+    "stored": "{\"Koko\": \"no,en\"}"
+   },
+   {
+    "languages": {},
+    "map": {
+     "koko-8255": "elevenlabs:scribe_v2 , google:chirp_3"
+    },
+    "selected": "en",
+    "stored": "{\" Koko-8255 \": \" elevenlabs:scribe_v2 , google:chirp_3 \", \"\": \"x\", \"empty\": \"\", \"blank\": \"  \"}"
+   },
+   {
+    "languages": {},
+    "map": {
+     "a": "1",
+     "b": "True",
+     "c": "None",
+     "d": "['x']",
+     "e": "{'f': 1}"
+    },
+    "selected": "en",
+    "stored": "{\"a\": 1, \"b\": true, \"c\": null, \"d\": [\"x\"], \"e\": {\"f\": 1}}"
+   },
+   {
+    "languages": {
+     "ünï": "no"
+    },
+    "map": {
+     "ünï": "No"
+    },
+    "selected": "en",
+    "stored": "{\"ÜNÏ\": \"No\"}"
+   },
+   {
+    "languages": {
+     "ok": "no,en"
+    },
+    "map": {
+     "koko": "english",
+     "mochi": "no,pt,sv,da",
+     "ok": "NO, en"
+    },
+    "selected": "en",
+    "stored": "{\"koko\": \"english\", \"mochi\": \"no,pt,sv,da\", \"ok\": \"NO, en\"}"
+   },
+   {
+    "languages": {},
+    "map": {
+     "a": "y"
+    },
+    "selected": "en",
+    "stored": "{\"A\": \"x\", \"a\": \"y\"}"
+   }
+  ],
+  "valid_engines": [
+   "deepgram:nova-3",
+   "elevenlabs:scribe_v2",
+   "google:chirp_3"
+  ]
+ },
  "terms": [
   {
    "payload": "",

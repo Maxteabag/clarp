@@ -16,6 +16,7 @@ pub mod heard;
 pub mod helpers;
 pub mod jobs;
 pub mod journal;
+pub mod languages;
 pub mod media;
 pub mod notify;
 pub mod presence;
