@@ -128,6 +128,12 @@ pub enum Ask {
         by: String,
         answer: Answer<bool>,
     },
+    /// The Host says something quiet in the conversation, once under its id.
+    Note {
+        id: String,
+        text: String,
+        answer: Answer<bool>,
+    },
     Tail {
         limit: usize,
         which: Which,
@@ -371,6 +377,13 @@ impl AgentHandle {
 
     pub async fn withdraw(&self, turn: TurnId, by: String) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::Withdraw { turn, by, answer }).await
+    }
+
+    /// Writes a quiet word of the Host's into the conversation, once under its id: that the
+    /// agent was asked into a call, put on hold, that the call ended. Answers whether it was
+    /// written now.
+    pub async fn note(&self, id: String, text: String) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::Note { id, text, answer }).await
     }
 
     pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
@@ -1428,6 +1441,7 @@ impl Worker {
                 answer,
             } => answered(actor.import(&from, backend_session, rows, now), answer)?,
             Ask::Withdraw { turn, by, answer } => answered(actor.withdraw(turn, &by, now), answer)?,
+            Ask::Note { id, text, answer } => answered(actor.note(&id, &text, now), answer)?,
             Ask::Tail {
                 limit,
                 which,
@@ -2008,6 +2022,7 @@ fn refuse_for(
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Note { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
             }

@@ -1044,7 +1044,9 @@ pub fn row(version: &Versioned) -> Value {
         }
         // Why a turn failed, under the message that caused it: the Host's own word, not the
         // agent's and not the user's.
-        Entry::Notice(notice) if notice.code == Notice::TURN_FAILED => {
+        Entry::Notice(notice)
+            if matches!(notice.code.as_str(), Notice::TURN_FAILED | Notice::SYSTEM) =>
+        {
             row["origin"] = json!("system");
             row["text"] = json!(notice.text);
             row["trace_id"] = json!(notice.trace_id.clone().unwrap_or_default());

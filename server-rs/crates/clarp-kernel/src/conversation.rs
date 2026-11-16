@@ -162,6 +162,10 @@ pub struct Notice {
 impl Notice {
     /// The code of the row that says why a turn failed, under the message that caused it.
     pub const TURN_FAILED: &'static str = "turn-failed";
+    /// The code of a quiet word of the Host's in a conversation that belongs to no turn:
+    /// that the agent was asked into a call, put on hold, that the call ended. Shown in
+    /// the chat, never spoken, never a reason to page anybody.
+    pub const SYSTEM: &'static str = "system";
 }
 
 /// How a turn ended. It is not a row of the conversation: it belongs to the row that closed

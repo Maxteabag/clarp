@@ -1704,6 +1704,38 @@ impl Actor {
         Ok((Ok(count), out))
     }
 
+    /// The Host says something in the conversation that belongs to no turn, quietly: that the
+    /// agent was asked into a call, put on hold, that the call ended. A notice is written
+    /// once, under its id. Answers whether it was written now.
+    pub fn note(
+        &mut self,
+        id: &str,
+        text: &str,
+        now_ms: i64,
+    ) -> Result<(bool, Outputs), ActorError> {
+        if id.is_empty() || text.trim().is_empty() || self.row(id)?.is_some() {
+            return Ok((false, Outputs::default()));
+        }
+        let notice = Entry::Notice(Notice {
+            id: id.to_string(),
+            turn: None,
+            code: Notice::SYSTEM.to_string(),
+            text: text.to_string(),
+            trace_id: None,
+        });
+        let mut batch = self.recorder.batch();
+        batch.item(written(&notice, now_ms)?);
+        batch.commit()?;
+        let out = Outputs {
+            changed: Changed {
+                conversation: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        Ok((true, out))
+    }
+
     /// Ends the live turn and holds the mailbox. Returns how many turns were told to end.
     pub fn stop(&mut self, by: &str, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
         let command = Command::Stop { by: by.to_string() };
