@@ -11,6 +11,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import pytest
+
 from tests.integration.test_server_di import (  # noqa: F401 - fixtures
     _model_catalog_never_probes_installed_clis, fake_ctx, running_server)
 
@@ -141,6 +143,24 @@ def test_dirs_says_nothing_of_what_is_not_there_and_never_lists_a_relative_path(
     query = urllib.parse.urlencode({"path": "/proc/1/root/"})
     assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": "/proc/1/root/", "matches": []})
     assert logged == [("dirsPathRefused", "PermissionError")]
+
+
+@pytest.mark.parametrize("suffix", ["", "/", "/projects/"])
+def test_dirs_answers_when_a_tilde_user_does_not_exist(running_server, monkeypatch, suffix):
+    pwd = pytest.importorskip("pwd")
+    username = "clarp-no-such-user-7182"
+    with pytest.raises(KeyError):
+        pwd.getpwnam(username)
+    base, _ctx, _srv = running_server
+    from lib.routes import settings as settings_routes
+
+    logged = []
+    monkeypatch.setattr(settings_routes, "log_exception",
+                        lambda event, error, **more: logged.append((event, type(error).__name__)))
+    path = f"~{username}{suffix}"
+    query = urllib.parse.urlencode({"path": path})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
+    assert logged == [("dirsPathRefused", "RuntimeError")]
 
 
 def test_message_tool_details_requires_a_known_message(running_server):
