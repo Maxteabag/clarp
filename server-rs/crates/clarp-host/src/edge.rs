@@ -126,6 +126,8 @@ pub struct App {
     pub blobs: Arc<dyn Blobs>,
     /// What the apps have reported of themselves: whether one is in front, and touched.
     pub activity: Arc<Mutex<Leases>>,
+    /// The engines that listen: what turns a clip of speech into text.
+    pub ears: Arc<crate::heard::Ears>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -219,6 +221,7 @@ pub fn router(app: App) -> Router {
         )
         .route("/tools/run", post(run_tool))
         .merge(apps::routes())
+        .merge(crate::heard::routes())
         .merge(library::routes())
         .merge(media::routes())
         .merge(plans::routes())
@@ -279,7 +282,14 @@ pub enum Principal {
 const EXCHANGE: &str = "/pairing/exchange";
 
 /// What a device with limited scope may send. Whatever it may read, it may read.
-const LIMITED_POSTS: &[&str] = &["/send", "/select", "/focus", "/upload", "/clog"];
+const LIMITED_POSTS: &[&str] = &[
+    "/send",
+    "/transcribe",
+    "/select",
+    "/focus",
+    "/upload",
+    "/clog",
+];
 
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {

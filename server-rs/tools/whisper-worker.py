@@ -23,6 +23,7 @@ another.
 
 With CLARP_WHISPER_FAKE=1 (or the Python Host's CLAUDE_PWA_STT_FAKE=1) no model is loaded and
 every clip is heard as the same words: for tests, and for holding the two Hosts to each other.
+CLARP_WHISPER_FAKE_SAYS names other words for it to hear, and is the same switch.
 """
 from __future__ import annotations
 
@@ -37,13 +38,14 @@ class _FakeModel:
 
     def transcribe(self, path, **asked):
         class Piece:
-            text = ' fake transcript.'
+            text = ' ' + (os.environ.get('CLARP_WHISPER_FAKE_SAYS') or 'fake transcript.')
             no_speech_prob = 0.0
         return iter([Piece()]), None
 
 
 def fake() -> bool:
-    return os.environ.get('CLARP_WHISPER_FAKE') == '1' or os.environ.get('CLAUDE_PWA_STT_FAKE') == '1'
+    return (os.environ.get('CLARP_WHISPER_FAKE') == '1' or os.environ.get('CLAUDE_PWA_STT_FAKE') == '1'
+            or bool(os.environ.get('CLARP_WHISPER_FAKE_SAYS')))
 
 
 def load(asked: dict):
