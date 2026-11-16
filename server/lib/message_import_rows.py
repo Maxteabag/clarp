@@ -10,7 +10,7 @@ import os
 from typing import Any, NamedTuple
 
 from .clock import now_ms
-from .message_text import _strip_voice_markup
+from .message_text import _related, _strip_voice_markup  # noqa: F401 - _related is used from here too
 from .message_turns import iso_ms
 from .message_import_common import (
     _FINAL_TWIN_WINDOW_S,
@@ -210,10 +210,6 @@ def _diagnose(event: str, detail: str) -> None:
             os.write(2, b"transcriptDiagnosticFallback code=primary_log_failed count=1\n")
         except OSError:
             return
-
-
-def _related(a: str, b: str) -> bool:
-    return bool(a and b) and (a.startswith(b) or b.startswith(a))
 
 
 def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,

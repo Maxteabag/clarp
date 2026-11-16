@@ -11,6 +11,14 @@ def _strip_voice_markup(text: str | None) -> str:
     return clean_for_display(text, oneline=True)
 
 
+def _related(a: str, b: str) -> bool:
+    """Whether one text is the beginning of the other (neither empty): a
+    streamed row and the reply it became, or is becoming. The one test a full
+    import (message_writes, message_import_rows) and the guard of a tail
+    (message_carry) both ask."""
+    return bool(a and b) and (a.startswith(b) or b.startswith(a))
+
+
 # The server appends a team-context block to the prompt the backend sees (see
 # turn_dispatch._with_team_context). The backend's transcript copies the whole
 # augmented prompt back, so on import we must strip the block from user turns —

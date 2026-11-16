@@ -255,6 +255,75 @@ def test_a_live_row_is_let_through_unless_a_reply_before_the_boundary_carries_it
                          carry=stored, boundary_seq=5, **WHERE) == ""
 
 
+# ---- a live row beside old replies of its turn, by their words (LIVE_WORDS) ----------
+
+def test_a_live_row_of_an_old_turn_is_refused_for_related_words_only():
+    """What the lane shows with real imports (test_rm_n14_live_words.py), in
+    the comparator's own words. The carry holds what the old turn's replies
+    said, as the import that chose the boundary kept it."""
+    old = [{**_row("m-1", seq=1, trace="old-turn", revision=1, text="stored otherwise"), "kind": None},
+           {**_row("m-7", seq=7, trace="running", revision=3), "kind": None}]
+    before = _inputs(rows=old)
+    stored = dict(prefix_latest_ms=0, initial_provenance_used=False,
+                  reply_words={"old-turn": ["Done.", "the old reply's words"]})
+
+    def said(text, *, rules=carry.RULES, trace="old-turn", carried=stored):
+        rows = [*old, _live("more", text, trace=trace, revision=9)]
+        return _changed(before, _inputs(rows=rows), rules=rules, **carried)
+
+    refused = "live_row_of_old_reply"
+    assert said("other words") == ""
+    assert said("the old reply's words") == refused                     # the same
+    assert said("the old reply's words, and more") == refused           # begin with them
+    assert said("the old") == refused                                   # what they begin with
+    assert said("Done. And then some") == refused                       # the other reply
+    assert said("the old reply's worDs") == ""                          # differ at one letter
+    assert said("<speak>the old reply's words</speak>") == refused      # compared without markup
+    assert said("") == "" and said("<speak></speak>") == ""             # shows nothing
+    assert said("stored otherwise") == ""           # the row's text is not what is asked
+    # Without the rule, without the words, or for a turn the carry did not
+    # keep: by the trace alone, as before.
+    assert said("other words", rules=carry.RULES[:5]) == refused
+    assert said("other words", carried={**stored, "reply_words": None}) == refused
+    assert said("other words", carried={k: v for k, v in stored.items() if k != "reply_words"}) == refused
+    assert said("other words", carried={**stored, "reply_words": {"another": []}}) == refused
+    # A turn that is kept and said nothing is related to nothing.
+    assert said("the old reply's words", carried={**stored, "reply_words": {"old-turn": []}}) == ""
+    # The rule adds nothing where LIVE_ROWS already lets the row through.
+    assert said("the old reply's words", trace="running") == ""
+
+
+def test_the_words_kept_are_those_of_the_newest_turns_while_they_fit(monkeypatch):
+    said = [("a", "one"), ("a", ""), ("", "no turn"), ("b", "two"), ("a", "one"), ("c", ""),
+            ("d", "four"), ("b", "two more")]
+    assert carry.reply_words(said) == {"b": ["two", "two more"], "d": ["four"], "c": []}
+    assert list(carry.reply_words(said)) == ["b", "d", "c"]             # newest first
+    assert carry.reply_words([]) == {} == carry.reply_words([("", "words of no turn")])
+    monkeypatch.setattr(carry, "_WORDS_TRACES", 1)
+    assert carry.reply_words(said) == {"b": ["two", "two more"]}
+    monkeypatch.setattr(carry, "_WORDS_TRACES", 3)
+    # A turn whose words do not fit is left out, and every older one with it.
+    monkeypatch.setattr(carry, "_WORDS_CHARS", 10)
+    assert carry.reply_words(said) == {}
+    monkeypatch.setattr(carry, "_WORDS_CHARS", 11)                      # "two" + "two more"
+    assert carry.reply_words(said) == {"b": ["two", "two more"]}
+    monkeypatch.setattr(carry, "_WORDS_CHARS", 15)                      # and "four"
+    assert carry.reply_words(said) == {"b": ["two", "two more"], "d": ["four"], "c": []}
+    monkeypatch.setattr(carry, "_WORDS_CHARS", 14)
+    assert carry.reply_words(said) == {"b": ["two", "two more"]}
+
+
+def test_related_is_one_function():
+    """The full import and the guard ask the same test, not two copies."""
+    from lib import message_import_rows, message_text, message_writes
+    assert message_import_rows._related is message_text._related is message_writes._related \
+        is carry._related
+    related = message_text._related
+    assert related("abc", "abc") and related("abc", "ab") and related("ab", "abc")
+    assert not related("abc", "abd") and not related("", "abc") and not related("abc", "")
+    assert not related("", "")
+
+
 def test_the_live_rows_rule_is_for_live_rows_of_this_session_only():
     old = [{**_row("m-1", seq=1, trace="old-turn", revision=1), "kind": None}]
     before = _inputs(rows=old)
@@ -333,7 +402,7 @@ def test_the_latest_user_row_counts_unless_the_checkpoint_says_no_reply_read_it(
 
 def test_every_rule_has_its_switch_and_the_live_rows_rule_is_off_until_switched_on():
     assert set(carry.RULES) == {key for key in inc._DEFAULTS if key.startswith("carry_")}
-    off = {carry.LIVE_ROWS, carry.SETTLED_TURNS}
+    off = {carry.LIVE_ROWS, carry.SETTLED_TURNS, carry.LIVE_WORDS}
     on = frozenset(carry.RULES) - off
     assert {rule for rule in carry.RULES if inc._DEFAULTS[rule] is True} == on
     assert all(inc._DEFAULTS[rule] is False for rule in off)

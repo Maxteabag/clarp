@@ -52,7 +52,7 @@ import operator
 import pickle
 
 from .message_import_common import _PARKED_SEQ_BASE, _norm_text
-from .message_text import DELIVERY_CONTEXT_OPEN
+from .message_text import DELIVERY_CONTEXT_OPEN, _related, _strip_voice_markup
 from .message_turns import _SETTLED_REACH_MS, _START_SLACK_MS, _UNSETTLED_REACH_MS
 
 # Message rows of the agent's other sessions do not count. The replay of one
@@ -116,7 +116,36 @@ LIVE_ROWS = "carry_live_rows"
 # turn row or a message row is refused as before. Needs LATER_TURNS. Off
 # unless switched on.
 SETTLED_TURNS = "carry_settled_turns"
-RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS, LIVE_ROWS, SETTLED_TURNS)
+# LIVE_ROWS refuses a changed live row when a reply before the boundary
+# carries its trace, whatever the words. What a full replay does with such a
+# row is narrower. It removes a leftover live row only when a reply of the
+# row's own trace in its batch has words related to the row's
+# (message_writes._finish_import), and a reply takes a live row over only
+# when it is of the reply's trace and their words are related
+# (message_import_rows._streamed_twin); related is message_text._related, one
+# text beginning with the other. A tail's batch is the replies from the
+# boundary on. So the two can differ only when a reply BEFORE the boundary
+# has the row's trace and related words, and with this rule only that is
+# refused.
+#
+# The rows do not hold those words. A reply is stored as the automation left
+# it (an acknowledgement replaced by a notice, a dream's marker cut off), and
+# the replay compares what the transcript said. So the import that chooses
+# the boundary keeps the words itself, in the store carry it captures there
+# (``reply_words``): for the newest turns before the boundary, each reply's
+# words as its batch names them and as they were stored when the two differ.
+# A trace it did not keep (an older turn, a turn with too many words, a carry
+# captured while the switch was off) is refused as before. It happens when a
+# running turn spans the boundary: a context compaction leaves a user record
+# inside the turn, and the next full import puts the boundary there (issue
+# 352). Needs LIVE_ROWS. Off unless switched on.
+LIVE_WORDS = "carry_live_rows_by_words"
+RULES = (SESSION_ROWS, LATER_TURNS, NEW_SENDS, LIVE_ROWS, SETTLED_TURNS, LIVE_WORDS)
+# How many of the newest turns before the boundary have their replies' words
+# kept, and how many characters of words at most (a carry is written again
+# with every tail).
+_WORDS_TRACES = 3
+_WORDS_CHARS = 65536
 
 # The kinds of message row, by where the row is now: one digest each, and the
 # word a refusal names it by. ``row_tail`` is a transcript row of this file
@@ -495,7 +524,16 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
                 continue        # no reply's batch can name it
             if replied is None:
                 replied = _reply_traces(table, old, boundary_seq, source_file, backend_session_id)
-            if row[trace] in replied:
+            if row[trace] not in replied:
+                continue
+            # The words of those replies, if the carry kept them for this turn.
+            kept = carry.get("reply_words") if LIVE_WORDS in rules else None
+            words = kept.get(row[trace]) if isinstance(kept, dict) else None
+            if words is None:
+                found.add("live_row_of_old_reply")
+                continue
+            showing = _strip_voice_markup(row[table.at["text"]])
+            if any(_related(said, showing) for said in words):
                 found.add("live_row_of_old_reply")
     turn_values = _turn_values(turns)
     settled: list[tuple] = []
@@ -535,6 +573,31 @@ def changed(recorded, current, *, rules=frozenset(), carry=None, boundary_seq: i
     if _oracle(oracle) != recorded["oracle"]:
         found.add("oracle_rows")
     return ",".join(sorted(found))
+
+
+def reply_words(said) -> dict[str, list[str]]:
+    """What the store carry keeps of the replies before the boundary, for
+    LIVE_WORDS. ``said`` is (trace, words) for every reply so far, in the
+    transcript's order, the trace as the import's batch names it and words ""
+    for a reply that has none. {trace: its replies' words} for the newest
+    ``_WORDS_TRACES`` turns, newest first, while their words fit in
+    ``_WORDS_CHARS``: a turn whose words do not fit is left out, and so is
+    every turn older than it."""
+    newest: list[str] = []
+    for trace, _words in reversed(said):
+        if trace and trace not in newest:
+            newest.append(trace)
+            if len(newest) == _WORDS_TRACES:
+                break
+    kept: dict[str, list[str]] = {}
+    left = _WORDS_CHARS
+    for trace in newest:
+        words = sorted({words for own, words in said if own == trace and words})
+        left -= sum(len(text) for text in words)
+        if left < 0:
+            break
+        kept[trace] = words
+    return kept
 
 
 def _reply_traces(table, old, boundary_seq, source_file, backend_session_id) -> set[str]:

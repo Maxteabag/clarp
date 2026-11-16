@@ -764,6 +764,12 @@ _DEFAULTS = {
     # was running when the frontier was published has settled, and the rows
     # from the boundary on carry its stamps (lib.message_carry.SETTLED_TURNS).
     "carry_settled_turns": False,
+    # Off unless switched on (and only with carry_live_rows): a changed live
+    # row is refused only when a reply before the boundary with its trace has
+    # words related to the row's, not for the trace alone
+    # (lib.message_carry.LIVE_WORDS). A full import then keeps those words
+    # in the store carry, for the newest turns before the boundary.
+    "carry_live_rows_by_words": False,
     # Off unless switched on: a tail gives the writer away only once it has
     # written something (message_writes._TailWriter). False: its batch budget
     # runs from BEGIN IMMEDIATE, so a tail on a long conversation yields
@@ -1897,6 +1903,8 @@ def _store_full_with_tail_checkpoint(backend, path, agent_id, backend_session_id
                         kwargs = {"capture_at": boundary.seq, "captured": captured,
                                   "on_stored": publish, "recertify_checkpoint": prepare_publication,
                                   "carry_session_rows": session_rows}
+                        if conf.get("carry_live_rows") and conf.get("carry_live_rows_by_words"):
+                            kwargs["reply_words"] = True
     except OSError:
         _tail_log("bootstrap_file_io", retention=True)
         refusal_logged = True
