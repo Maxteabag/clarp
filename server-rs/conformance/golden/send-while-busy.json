@@ -53,7 +53,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 10,
+    "latest_revision": 9,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -157,11 +157,11 @@
       "id": "live-<id:5>",
       "kind": null,
       "origin": "user",
-      "phase": "final",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 10,
+      "revision": 9,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -238,7 +238,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 10,
+      "head_revision": 9,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -249,7 +249,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "Claude replay reply: synthetic replacement india",
+      "last_completed_message": "Claude replay reply: [qa-slow] synthetic running task",
       "last_message": "Claude replay reply: synthetic replacement india",
       "last_message_id": "live-<id:5>",
       "last_turn_end": "<time>",
@@ -1908,47 +1908,6 @@
   {
    "data": {
     "agent_id": "<id:7>",
-    "event_id": "<eid:delivery-updated#2@0e9287>",
-    "message_id": "u-india",
-    "session": "claire",
-    "type": "delivery-updated"
-   },
-   "event": null,
-   "id": "<eid:delivery-updated#2@0e9287>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "client_msg_id": "india",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 0,
-    "queue_paused": false,
-    "queue_revision": 2,
-    "queue_started": true,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "client_msg_id": "india",
-    "event_id": "<eid:agent-state#2@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#2@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -1994,6 +1953,69 @@
   {
    "data": {
     "agent_id": "<id:7>",
+    "badge": true,
+    "cause_message_id": "u-hotel",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic running task",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "live-<id:4>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "event_id": "<eid:delivery-updated#2@0e9287>",
+    "message_id": "u-india",
+    "session": "claire",
+    "type": "delivery-updated"
+   },
+   "event": null,
+   "id": "<eid:delivery-updated#2@0e9287>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "client_msg_id": "india",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 0,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": true,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "client_msg_id": "india",
+    "event_id": "<eid:agent-state#2@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -2034,28 +2056,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#6@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "badge": true,
-    "cause_message_id": "u-hotel",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:8>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic running task",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "live-<id:4>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {

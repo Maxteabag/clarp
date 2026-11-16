@@ -5824,7 +5824,7 @@
        "tint_dark": "#c0caf5",
        "tint_light": "#3c4257"
       },
-      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"3df44757-ba87-4572-bc08-c5a10b7b612d\"}",
+      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"2e64fc78-ec35-4621-b224-42ebc39cf813\"}",
       "cli_version_source": {
        "detail": "<ROOT>/provider/fake-codex --version",
        "freshness": "fresh",
@@ -6431,6 +6431,140 @@
    "path": "/agent-model-options",
    "status": 200,
    "step": "the models an agent can be given"
+  },
+  {
+   "body": {
+    "actions": [],
+    "buttons": [
+     "primary",
+     "secondary"
+    ],
+    "gestures": [
+     "double-click",
+     "hold",
+     "rotate-clockwise",
+     "rotate-counterclockwise",
+     "single-click",
+     "swipe-down",
+     "swipe-left",
+     "swipe-right",
+     "swipe-up"
+    ],
+    "mappings": [],
+    "revision": 0,
+    "types": [
+     "http_post",
+     "agent_prompt"
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/controller-actions",
+   "status": 200,
+   "step": "what a button of a controller can run"
+  },
+  {
+   "body": {
+    "entries": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/controller-actions/audit",
+   "status": 200,
+   "step": "what was defined and run"
+  },
+  {
+   "body": {
+    "error": "limit must be an integer"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/controller-actions/audit",
+   "status": 400,
+   "step": "an audit of no number of rows"
+  },
+  {
+   "body": {
+    "<bytes>": 374545,
+    "<sha256>": "a0594fc9aaa5ffdf83e0fe5db8655b930f1ecc10490f29d0f812c229097174a0"
+   },
+   "headers": {
+    "accept-ranges": "bytes",
+    "cache-control": "no-cache",
+    "content-type": "image/png",
+    "etag": "\"a0594fc9aaa5ffdf\""
+   },
+   "method": "GET",
+   "path": "/static/avatars/rachel.png",
+   "status": 200,
+   "step": "the picture of a name"
+  },
+  {
+   "body": {
+    "<bytes>": 8,
+    "<sha256>": "4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6"
+   },
+   "headers": {
+    "accept-ranges": "bytes",
+    "cache-control": "no-cache",
+    "content-range": "bytes 0-7/374545",
+    "content-type": "image/png",
+    "etag": "\"a0594fc9aaa5ffdf\""
+   },
+   "method": "GET",
+   "path": "/static/avatars/rachel.png",
+   "status": 206,
+   "step": "a part of the picture"
+  },
+  {
+   "body": null,
+   "headers": {
+    "cache-control": "no-cache",
+    "etag": "\"a0594fc9aaa5ffdf\""
+   },
+   "method": "GET",
+   "path": "/static/avatars/rachel.png",
+   "status": 304,
+   "step": "the picture, for one who has it"
+  },
+  {
+   "body": {
+    "<bytes>": 354766,
+    "<sha256>": "e6ac65e6c935cff9200390fbae57dcdffdf4ec59a76c01f9974d942033ccdaa3"
+   },
+   "headers": {
+    "accept-ranges": "bytes",
+    "cache-control": "no-cache",
+    "content-type": "image/png",
+    "etag": "\"e6ac65e6c935cff9\""
+   },
+   "method": "GET",
+   "path": "/static/avatars/default-claude.png",
+   "status": 200,
+   "step": "the picture of a kind of tool"
+  },
+  {
+   "body": {
+    "<bytes>": 9,
+    "<sha256>": "907ba78b4545338d3539683e63ecb51cf51c10adc9dabd86e92bd52339f298b9"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain"
+   },
+   "method": "GET",
+   "path": "/static/avatars/nobody-of-the-kind.png",
+   "status": 404,
+   "step": "a picture that is not there"
   },
   {
    "body": {

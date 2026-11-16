@@ -53,7 +53,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 8,
+    "latest_revision": 9,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -100,7 +100,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 4,
+      "revision": 5,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -139,7 +139,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 5,
+      "revision": 6,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -161,7 +161,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 8,
+      "revision": 9,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -239,6 +239,21 @@
   {
    "data": {
     "agent_id": "<id:7>",
+    "client_msg_id": "delta",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -279,21 +294,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "client_msg_id": "delta",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
