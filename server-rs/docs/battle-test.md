@@ -147,9 +147,10 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 10:53 (16 Nov) | the Host updated by the installer, `652c6d6a` to `5d74ac9d`: the build that speaks (speech out) and hears each agent by its own engines | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 2 ms, with all three |
 | 11:35 (16 Nov) | the Host updated by the installer, `5d74ac9d` to `9781947b`: the build with the catalogue of voices | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 3 ms, with all three |
 | 13:45 (16 Nov) | the Host updated by the installer, `9781947b` to `24cddc80`: the build that shows a turn as it runs and gives an agent a face | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 14:16 (16 Nov) | the Host updated by the installer, `24cddc80` to `5976918e`: the build that offers the personas a Host has built in | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 3 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Seventy-seven turns in twenty-one
+completed, answered with its word, and its command ran exactly once. Eighty turns in twenty-two
 exercises, none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
@@ -300,6 +301,18 @@ one, as on the Python Host.
 `GET /controller-actions` answers the empty registry (no actions, no mappings, the two kinds, the two
 buttons, the nine gestures) and its audit an empty list: what the Python Host answers on this machine, where
 nobody has made an action.
+
+## Who an agent can be
+
+On 16 Nov 2026 at 14:18, on the build of `5976918e`, with the owner's file as it is. The Host offers 84
+personas (`personas` in `GET /agents/snapshot`), every one built in, 74 of them with a way of speaking, and
+96 names (`roster`: the personas', then those of its twelve agents that are none of them).
+
+They were held against the Python Host's own table on the same machine, read and not written: it has 84
+personas built in and nine the owner made. The 84 are the same 84 by their ids, and each has the same name,
+the same voices for every engine and the same way of speaking on both Hosts. The nine the owner made are
+not here: making a persona is not built yet. None of the Python Host's built-in personas is one the owner
+made first and its roster named later, the one case in which the two Hosts would list a name differently.
 
 ## The soak so far
 

@@ -1858,21 +1858,6 @@
   {
    "data": {
     "agent_id": "<id:5>",
-    "client_msg_id": "mike",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
     "badge": true,
     "cause_message_id": "u-mike",
     "done_ts": "<time>",
@@ -1891,6 +1876,21 @@
    },
    "event": null,
    "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "mike",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   }
  ]
 }

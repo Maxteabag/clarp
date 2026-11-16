@@ -240,36 +240,6 @@
   {
    "data": {
     "agent_id": "<id:4>",
-    "client_msg_id": "slow",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "bravo",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -310,6 +280,36 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "client_msg_id": "slow",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "client_msg_id": "bravo",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
   },
   {
    "data": {
@@ -433,6 +433,28 @@
   {
    "data": {
     "agent_id": "<id:4>",
+    "badge": true,
+    "cause_message_id": "u-slow",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:5>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic long task",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -474,28 +496,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#8@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "badge": true,
-    "cause_message_id": "u-slow",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:5>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic long task",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:1>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {
