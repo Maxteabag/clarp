@@ -500,6 +500,10 @@ class TurnStateMachine:
                                       to_state=target, ts=stamp, detail=detail, forced=force)
             else:
                 stored_detail, unlaunched_target = _unlaunched_write_detail(conn(), agent_id, event, detail)
+                # State rows are only ever inserted, here and below: the agent
+                # list keeps an agent's clocks for its newest row
+                # (agents.dashboard_states). A row changed in place would not
+                # be seen there; see agents.STATES_PRUNED_KEY before adding one.
                 cursor = conn().execute(
                     """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
                        VALUES (?, ?, ?, ?, ?)""",

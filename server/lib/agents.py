@@ -696,10 +696,14 @@ def is_busy(agent_id: str) -> bool:
     return bool(s) and s["kind"] in turn_lifecycle.BUSY
 
 
-# What the retention sweep adds one to when it has deleted state rows
+# What the retention sweep adds one to when it deletes state rows
 # (maintenance._prune_state_log). An agent's cached state clocks are valid for
 # its newest state row and this number: a new row is the only other way an
-# agent's state history changes.
+# agent's state history changes. That rests on two facts nothing in the
+# database enforces: state rows are only ever inserted (turn_lifecycle), never
+# updated, and only that sweep deletes them. An UPDATE of a state row, or a
+# DELETE anywhere else, must add to this number, or the agent list answers
+# with clocks from before it.
 STATES_PRUNED_KEY = "state_log.pruned"
 # One entry an agent; headroom above the roster, as for the previews.
 _STATE_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
