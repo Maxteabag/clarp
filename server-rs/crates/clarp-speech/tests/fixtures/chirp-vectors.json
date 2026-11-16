@@ -1,0 +1,220 @@
+{
+ "piece_seconds": 55,
+ "pieces": [
+  {
+   "bytes": 0,
+   "pieces": [],
+   "seconds": 1
+  },
+  {
+   "bytes": 2,
+   "pieces": [
+    {
+     "bytes": 46,
+     "sha256": "f84825ff8ccef4dab4373a8b4f277d0268a153b9ac632a6908ae0dd9a7e51cc2"
+    }
+   ],
+   "seconds": 1
+  },
+  {
+   "bytes": 32000,
+   "pieces": [
+    {
+     "bytes": 32044,
+     "sha256": "59e0c42c00102a8163b57a983cffb185fb89f12108bf422a384acc74dc63856a"
+    }
+   ],
+   "seconds": 1
+  },
+  {
+   "bytes": 32001,
+   "pieces": [
+    {
+     "bytes": 32044,
+     "sha256": "59e0c42c00102a8163b57a983cffb185fb89f12108bf422a384acc74dc63856a"
+    },
+    {
+     "bytes": 45,
+     "sha256": "e3cd16bdcdb455e4a2f0178f5a5ec2fe942e501a15fc397748b2ce5670e26512"
+    }
+   ],
+   "seconds": 1
+  },
+  {
+   "bytes": 70000,
+   "pieces": [
+    {
+     "bytes": 32044,
+     "sha256": "59e0c42c00102a8163b57a983cffb185fb89f12108bf422a384acc74dc63856a"
+    },
+    {
+     "bytes": 32044,
+     "sha256": "2060611a3504a09ac309ba3290a235c12138cfeb63288b72ef82677a5983217a"
+    },
+    {
+     "bytes": 6044,
+     "sha256": "aa15d947f7b9f7d4f59f76f1b9d7192e7f6c3a2914c7f7c946cbfffe38b76ec6"
+    }
+   ],
+   "seconds": 1
+  },
+  {
+   "bytes": 64000,
+   "pieces": [
+    {
+     "bytes": 64044,
+     "sha256": "0df12a665d22b1fdd99cbbba75929d932115e2888af476bedeb797e79be12b08"
+    }
+   ],
+   "seconds": 2
+  },
+  {
+   "bytes": 100000,
+   "pieces": [
+    {
+     "bytes": 100044,
+     "sha256": "fecd3880bb4be842c9d1b7b73d930a28451d6d5ee637a4c2024b71de147fda03"
+    }
+   ],
+   "seconds": 55
+  }
+ ],
+ "sample_rate": 16000,
+ "tags": [
+  {
+   "asked": [
+    "en-US"
+   ],
+   "language": "en",
+   "tag": "en-US"
+  },
+  {
+   "asked": [
+    "nb-NO"
+   ],
+   "language": "no",
+   "tag": "nb-NO"
+  },
+  {
+   "asked": [
+    "nb-NO"
+   ],
+   "language": "nb",
+   "tag": "nb-NO"
+  },
+  {
+   "asked": [
+    "nn-NO"
+   ],
+   "language": "nn",
+   "tag": "nn-NO"
+  },
+  {
+   "asked": [
+    "nb-NO"
+   ],
+   "language": "NO",
+   "tag": "nb-NO"
+  },
+  {
+   "asked": [
+    "nb-NO"
+   ],
+   "language": " no ",
+   "tag": "nb-NO"
+  },
+  {
+   "asked": [
+    "en-US"
+   ],
+   "language": "",
+   "tag": "en-US"
+  },
+  {
+   "asked": [
+    "xx"
+   ],
+   "language": "xx",
+   "tag": "xx"
+  },
+  {
+   "asked": [
+    "en-GB"
+   ],
+   "language": "en-GB",
+   "tag": "en-GB"
+  },
+  {
+   "asked": [
+    "nb-NO"
+   ],
+   "language": "nb-NO",
+   "tag": "nb-NO"
+  },
+  {
+   "asked": [
+    "nb-NO",
+    "en-US"
+   ],
+   "language": "no,en",
+   "tag": "no,en"
+  },
+  {
+   "asked": [
+    "nb-NO",
+    "en-US"
+   ],
+   "language": "no,nb,en",
+   "tag": "no,nb,en"
+  },
+  {
+   "asked": [
+    "pt-BR",
+    "nb-NO"
+   ],
+   "language": "pt,no",
+   "tag": "pt,no"
+  },
+  {
+   "asked": [
+    "cmn-Hans-CN"
+   ],
+   "language": "zh",
+   "tag": "cmn-Hans-CN"
+  },
+  {
+   "asked": [
+    "sv-SE",
+    "da-DK",
+    "fi-FI"
+   ],
+   "language": "sv,da,fi",
+   "tag": "sv,da,fi"
+  },
+  {
+   "asked": [
+    "en-US"
+   ],
+   "language": "en,en",
+   "tag": "en,en"
+  },
+  {
+   "asked": [
+    "nb-NO",
+    "en-US"
+   ],
+   "language": "no, en",
+   "tag": "no, en"
+  },
+  {
+   "asked": [
+    "EN-gb",
+    "nb-NO"
+   ],
+   "language": "EN-gb,no",
+   "tag": "EN-gb,no"
+  }
+ ],
+ "token_url": "https://oauth2.googleapis.com/token",
+ "written_by": "server-rs/tools/speech-vectors.py with Python 3.13"
+}

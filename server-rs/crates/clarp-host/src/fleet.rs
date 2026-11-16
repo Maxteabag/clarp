@@ -207,9 +207,17 @@ pub struct Directory {
     pub push: Arc<PushBook>,
     /// The other Hosts this one may write to, by name.
     pub peers: Arc<BTreeMap<String, Peer>>,
+    /// The settings the owner makes from an app, each a text under its key
+    /// (`transcription.agent_engines`), as the Python Host keeps them.
+    pub settings: Arc<BTreeMap<String, String>>,
 }
 
 impl Directory {
+    /// A setting's text, when it is set.
+    pub fn setting(&self, key: &str) -> Option<&str> {
+        self.settings.get(key).map(String::as_str)
+    }
+
     pub fn by_session(&self, session: &str) -> Option<&Arc<Member>> {
         self.members
             .iter()
@@ -403,6 +411,12 @@ enum Ask {
     PeerRemove {
         name: String,
         answer: Answer<bool>,
+    },
+    /// The owner sets settings. The inner error is a store that failed, or a key that is
+    /// no setting's.
+    Set {
+        settings: Vec<(String, String)>,
+        answer: Answer<Result<(), Unavailable>>,
     },
 }
 
@@ -610,6 +624,12 @@ impl FleetHandle {
         self.ask(|answer| Ask::PeerRemove { name, answer }).await
     }
 
+    /// Sets settings, each a text under its key. They are there for every reader when this
+    /// returns, and after a restart.
+    pub async fn set(&self, settings: Vec<(String, String)>) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Set { settings, answer }).await?
+    }
+
     /// Says what became of a push to a token. Does not wait.
     pub fn pushed(&self, token: String, outcome: Pushed) {
         let _ = self.tx.send(Ask::Pushed { token, outcome });
@@ -650,6 +670,8 @@ struct Fleet {
     push: PushBook,
     /// The other Hosts this one may write to.
     peers: BTreeMap<String, Peer>,
+    /// The owner's settings, by key.
+    settings: BTreeMap<String, String>,
     directory: watch::Sender<Arc<Directory>>,
 }
 
@@ -747,12 +769,21 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
             .map_err(|error| format!("the entry for the peer {name} cannot be read: {error}"))?;
         peers.insert(name, peer);
     }
+    // The owner's settings have a dot in their key (`transcription.language`); what the
+    // Host keeps for itself in the same table (its id, the focus) has none.
+    let mut settings = BTreeMap::new();
+    for (key, stored) in store.list(SETTINGS).map_err(|error| error.to_string())? {
+        if key.contains('.') {
+            settings.insert(key, String::from_utf8_lossy(&stored).into_owned());
+        }
+    }
     let (directory, read) = watch::channel(Arc::new(Directory {
         members: members.clone(),
         focus: focus.clone(),
         devices: devices.clone(),
         push: Arc::new(push.clone()),
         peers: Arc::new(peers.clone()),
+        settings: Arc::new(settings.clone()),
     }));
     let (tx, rx) = mpsc::channel();
     let fleet = Fleet {
@@ -764,6 +795,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         jobs,
         push,
         peers,
+        settings,
         directory,
     };
     std::thread::Builder::new()
@@ -890,6 +922,9 @@ impl Fleet {
                 Ask::PeerRemove { name, answer } => {
                     let _ = answer.send(self.peer_remove(&name));
                 }
+                Ask::Set { settings, answer } => {
+                    let _ = answer.send(Ok(self.set(settings)));
+                }
             }
         }
     }
@@ -923,7 +958,23 @@ impl Fleet {
             devices: self.devices.clone(),
             push: Arc::new(self.push.clone()),
             peers: Arc::new(self.peers.clone()),
+            settings: Arc::new(self.settings.clone()),
         }));
+    }
+
+    /// Writes settings and publishes them. Only what has a dot in its key is a setting.
+    fn set(&mut self, settings: Vec<(String, String)>) -> Result<(), Unavailable> {
+        for (key, text) in settings {
+            if !key.contains('.') {
+                return Err(Unavailable(format!("`{key}` is no setting")));
+            }
+            self.store
+                .put(SETTINGS, &key, text.as_bytes())
+                .map_err(|error| Unavailable(error.to_string()))?;
+            self.settings.insert(key, text);
+        }
+        self.publish();
+        Ok(())
     }
 
     fn peer_add(

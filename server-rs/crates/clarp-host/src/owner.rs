@@ -128,6 +128,33 @@ pub fn gemini(file: &Table) -> GeminiChoice {
     }
 }
 
+/// The owner's own account at Google, for the engine that listens there (`[google_stt]`):
+/// the file of that account, the project that is asked and pays, and where. The file is the
+/// one the owner names, else the one his environment names, else where `gcloud` puts it.
+/// `None`: no project is named, or the file cannot be read: this Host has no such engine.
+pub fn google_speech(file: &Table) -> Option<clarp_speech::chirp::Account> {
+    let project = text_at(file, &["google_stt", "project"])?;
+    let named = text_at(file, &["google_stt", "credentials"])
+        .or_else(|| std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok())
+        .map(|named| named.trim().to_string())
+        .filter(|named| !named.is_empty());
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let credentials = match named {
+        Some(named) => match named.strip_prefix("~/") {
+            Some(rest) => home()?.join(rest),
+            None => PathBuf::from(named),
+        },
+        None => home()?.join(".config/gcloud/application_default_credentials.json"),
+    };
+    // Readable now: a file that is there and cannot be opened is no account.
+    std::fs::File::open(&credentials).ok()?;
+    credentials.is_file().then(|| clarp_speech::chirp::Account {
+        credentials,
+        project,
+        location: text_at(file, &["google_stt", "location"]).unwrap_or_else(|| "eu".to_string()),
+    })
+}
+
 /// Which of Cartesia's models speaks.
 pub fn cartesia_model(file: &Table) -> String {
     text_at(file, &["cartesia", "model"]).unwrap_or_else(|| "sonic-3.5".to_string())

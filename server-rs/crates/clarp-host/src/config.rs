@@ -80,6 +80,12 @@ pub struct Config {
     /// The same for the engines that speak.
     pub cartesia_endpoint: String,
     pub gemini_endpoint: String,
+    /// And for Google's engine that listens: where a token is bought, and where speech is
+    /// asked.
+    pub google_token_endpoint: String,
+    pub google_speech_endpoint: String,
+    /// A stand-in for the program that decodes a clip for that engine. Empty: `ffmpeg`.
+    pub chirp_decoder: String,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
@@ -231,6 +237,9 @@ impl Config {
         let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
         let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
+        let google_token_endpoint = stand_in("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
+        let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
+        let chirp_decoder = std::env::var("CLARP_CHIRP_DECODER").unwrap_or_default();
         Ok(Self {
             run_dir,
             listen: listen
@@ -275,6 +284,9 @@ impl Config {
             scribe_endpoint,
             cartesia_endpoint,
             gemini_endpoint,
+            google_token_endpoint,
+            google_speech_endpoint,
+            chirp_decoder,
         })
     }
 }
