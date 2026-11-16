@@ -76,6 +76,11 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 6. **Never `pkill -f` or `pgrep -f`.** Kill only process ids you captured.
 7. **Spending and capacity are Peter's.** No new paid service, no build-machine time beyond his cap, no helper on a
    model or account he has not approved. His own agents come first.
+8. **A live test agent on the Host is a Codex agent** (Peter, 16 Nov 2026: "if he's going to test live agents on
+   the host use codex. Use Claude only if testing Claude. But use sonnet."). The soak, the restart exercises and
+   the checks that make agents of their own run on Codex. A Claude agent is used only where Claude Code itself is
+   what is tested (what its tool is handed, how its session is taken up again), and then on Sonnet: not on Haiku,
+   Fable or Opus. A test that cannot be done so is a question for Peter, never an exception.
 
 ## 4. Decisions already made (do not reopen without the lead)
 

@@ -53,6 +53,15 @@ lead's own agent on the Python Host (`rust-host-soak-1`), so that the owner sees
 does not come back by itself after the machine is started again: the lead looks after it, and a run that is
 started again goes on counting where the evidence ends.
 
+Since 16 Nov 2026, 18:23, the agents of this test are Codex agents, by the owner's word that day: "if he's
+going to test live agents on the host use codex. Use Claude only if testing Claude. But use sonnet." The
+soak writes to `Soak Codex` (session `soak-codex`, Codex on its own model, the same directory, muted) from
+round 102 on, as the job `rust-host-soak-3`; the job on the Claude agent was stopped that minute. The restart
+exercises make Codex agents of their own (`restart-codex-1` and so on). The Claude agents that were made
+before (`soak`, `restart-1` to `restart-10`, `check`) are kept for what tests Claude Code itself, and were set
+to Sonnet that minute. Everything in this record up to then, the first 101 rounds and the first 26 exercises
+included, was done with Claude Code on Haiku, and says so where it says "the small model".
+
 ## Installing, updating, removing
 
 ```sh
@@ -93,14 +102,16 @@ was up: an update or a restart between or during turns is on record.
 The installer puts the program there (`tools/soak` in this repository), so that a run of a week does not
 depend on a checkout.
 
-The soak agent runs on a small model, in a directory of its own, and is asked for two words a quarter of an
-hour apart: the load on the owner's accounts is small on purpose. Heavier work comes with agents the owner
+The soak agent (a Codex agent since 16 Nov, 18:23; Claude Code on the small model before) works in a
+directory of its own, and is asked for two words a quarter of an hour apart: the load on the owner's
+accounts is small on purpose. Heavier work comes with agents the owner
 chooses to move.
 
 ## A restart with turns running
 
 `tools/soak restart` is the second rule on the installed Host: a running turn survives any restart of the
-server. It gives each of its agents (`restart-1` to `restart-N`, made once, muted, on the small model) one
+server. It gives each of its agents (Codex agents `restart-codex-1` to `-N`, made once and muted; with
+`--backend claude` the Claude agents `restart-1` to `restart-N`, on Sonnet, for what tests Claude Code) one
 command that takes a while and leaves a mark in a file, and a word to answer with afterwards. When every one
 of them is in its command, the Host's service is restarted. Afterwards every message must be in its
 conversation once, with one turn end, completed and answered with its word, and every command must have run
@@ -110,6 +121,7 @@ exactly once: a turn that was run a second time would leave a second mark.
 ~/.local/share/clarp-host/libexec/soak restart --agents 10                    # the service is restarted
 ~/.local/share/clarp-host/libexec/soak restart --agents 3 \
     --by "server-rs/tools/install-host --start"                               # an update, with turns running
+~/.local/share/clarp-host/libexec/soak restart --agents 3 --backend claude    # the same with Claude Code, on Sonnet
 ```
 
 The result is in the same evidence file, one line for each agent and one for the exercise, and `soak report`
