@@ -32,7 +32,8 @@ pub mod kind {
     pub const MESSAGE: u16 = 100;
     /// A [`Reply`](crate::conversation::Reply) of the agent.
     pub const REPLY: u16 = 101;
-    /// A [`ToolCall`](crate::conversation::ToolCall).
+    /// A [`ToolCall`](crate::conversation::ToolCall) that is a row by itself: a call no
+    /// message of the agent carries, and every call written before messages were rows.
     pub const TOOL: u16 = 102;
     /// A [`Notice`](crate::conversation::Notice) from the Host.
     pub const NOTICE: u16 = 103;
@@ -41,6 +42,12 @@ pub mod kind {
     pub const IMPORTED: u16 = 104;
     /// A [`TurnEnd`](crate::conversation::TurnEnd): how a turn ended, for the row that closed it.
     pub const TURN_END: u16 = 110;
+    /// A [`ToolCall`](crate::conversation::ToolCall) that names the reply its message is: a
+    /// part of that row, written when the call starts and again when it ends.
+    pub const TOOL_USE: u16 = 111;
+    /// A [`Commentary`](crate::conversation::Commentary): tool work came after a reply in the
+    /// same turn, for that reply's row.
+    pub const COMMENTARY: u16 = 112;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
@@ -65,7 +72,9 @@ pub mod kind {
     pub const PUBLISHED: Kinds = Kinds::range(600, 699);
     /// What a conversation is read from.
     pub const CONVERSATION: Kinds = Kinds::range(100, 199);
-    /// The rows of a conversation: what a page of a chat is counted in.
+    /// The rows of a conversation: what a page of a chat is counted in. An item of one of
+    /// these kinds is where its row stands. What changes a row afterwards is an item of
+    /// another kind that names the row: its tools' uses, what followed it, how its turn ended.
     pub const ROWS: Kinds = Kinds::range(MESSAGE, IMPORTED);
 }
 

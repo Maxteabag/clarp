@@ -28,6 +28,13 @@ EXTRA_ENV="${CLARP_BUILD_ENV:-}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"           # .../server-rs
 name="$(basename "$(dirname "$here")")"                            # the worktree's name keys the remote copy
 remote="/var/tmp/clarp-build/$name"
+# Two checkouts of one name share that copy (a working tree and the clean checkout a landing is
+# built from). One of them at a time copies its sources and builds: the other waits here, so
+# that nothing is built from the sources of both.
+if [ "${1:-}" != status ]; then
+    exec 9>"/var/tmp/clarp-build-$name.lock"
+    flock 9
+fi
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
 cmd="${1:-check}"; shift || true
 

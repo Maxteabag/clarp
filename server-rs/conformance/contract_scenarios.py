@@ -927,4 +927,134 @@ SCENARIOS.append({
     ],
 })
 
+# What an app says of itself: one running copy of it (an id it made), counting what it reports.
+ACTIVITY = {'instance_id': '0a1b2c3d-0000-4000-8000-0000000000aa', 'sequence': 1, 'foreground': True, 'input_age_ms': 0}
+
+
+def activity(name, sent=True, **changed):
+    """An app reports whether it is in front. It says when it sent the report."""
+    step = post('/application-activity', {**ACTIVITY, **changed}, name)
+    return {**step, 'body_now': ['sent_at_ms']} if sent else step
+
+
+def attached(text, name, upload_id='synthetic-upload-1'):
+    """An app hands over a file its user attached to what they say: the file is the body, what
+    it is called and the id the app gave it are in the headers."""
+    headers = {'X-Session': AGENT, 'X-File-Name': 'synthetic%20note', 'X-Upload-ID': upload_id}
+    return {'op': 'post', 'path': '/upload', 'raw': {'bytes': text, 'content_type': 'text/markdown'},
+            'headers': headers, 'name': name}
+
+
+SCENARIOS.append({
+    'id': 'app-asks',
+    'what': 'what an app asks of any Host, whatever the Host says it has: whether it is up, which agent its user '
+            'is looking at, whether the app is in front, the lines of its own log, and the lists its screens are '
+            'made of',
+    'steps': [
+        get('/status', 'is the Host up'),
+        get(f'/status?session={AGENT}', 'is the agent busy'),
+        get('/status?session=nobody-here', 'is nobody busy'),
+        post('/focus', {'session': AGENT}, 'the user looks at the agent'),
+        SNAPSHOT,
+        post('/focus', {}, 'the user looks at nothing'),
+        post('/focus', {'session': 'nobody-here'}, 'the user looks at nobody'),
+        activity('the app is in front'),
+        activity('the same report again'),
+        activity('the app is behind', sequence=2, foreground=False),
+        activity('a report of long ago', sent=False, sequence=3, sent_at_ms=1),
+        activity('a report of what has no id', instance_id='not-an-id'),
+        activity('a report without its place', sequence=0),
+        activity('a report that says neither front nor behind', sequence=4, foreground='yes'),
+        activity('a report with an input that is no number', sequence=5, input_age_ms='now'),
+        post('/application-activity', ['front'], 'a report that is a list'),
+        post('/clog', {'event': 'synthetic-event', 'detail': 'a synthetic line'}, 'a line of the log of the app'),
+        post('/clog', {'events': [{'event': 'synthetic-one', 'detail': {'k': 1}}, {'event': 'synthetic-two'}]},
+             'lines of the log of the app'),
+        get('/teams', 'the teams'),
+        get('/janitors', 'the janitors'),
+        get('/automation-settings', 'what the Host does by itself'),
+        get('/transcription-capabilities', 'what the Host transcribes with'),
+        get('/transcription-providers', 'who transcribes'),
+        get('/voice-catalog', 'the voices'),
+        get('/agent-model-options', 'the models an agent can be given'),
+        # What a user attaches: kept once under the id the app gave it, and answered with where.
+        attached('synthetic attachment one', 'the user attaches a file'),
+        attached('synthetic attachment one', 'the same file again'),
+        attached('synthetic attachment two', 'another file under the same id'),
+        attached('synthetic attachment one', 'a file under an id that is none', upload_id='two words'),
+        attached('', 'a file of nothing', upload_id='synthetic-upload-2'),
+    ],
+})
+
+SCENARIOS.append({
+    'id': 'tool-turns',
+    'what': 'a turn in which the agent uses its tools (a command, a file read and a search at once, an edit, a '
+            'command that fails, a tool no Host knows by name): what the conversation shows of each use, whole and '
+            'in the short form an app asks for, and the details of one card when it is opened',
+    'steps': [
+        send('[qa-tools] synthetic work with tools', 'tools-1'),
+        {'op': 'wait_reply', 'after': 'u-tools-1'},
+        {'op': 'quiesce'},
+        LOG,
+        SNAPSHOT,
+        get(f'/log?session={AGENT}&include_tool_details=0', 'the conversation without the details of its tools'),
+        {'op': 'get', 'path': '/message-tool-details?session=' + AGENT + '&message_id={row}',
+         'from_last': {'row': 'turns.1.id'}, 'name': 'the details of the first card'},
+        get(f'/message-tool-details?session={AGENT}&message_id=nothing-of-the-kind', 'the details of nothing'),
+        get(f'/message-tool-details?session={AGENT}', 'the details of no message'),
+        get('/message-tool-details?session=nobody-here&message_id=u-tools-1', 'the details of what nobody has'),
+        # A second turn with tools: its cards are its own.
+        send('[qa-tools] more synthetic work', 'tools-2'),
+        {'op': 'wait_reply', 'after': 'u-tools-2'},
+        {'op': 'quiesce'},
+        get(f'/log?session={AGENT}&include_tool_details=0', 'both turns without the details of their tools'),
+        LOG,
+    ],
+})
+
+# What the reference Host's stand-in for an engine that listens hears in every clip
+# (`StubSTT` in tests/replay/host.py). The Rust Host's worker is told to hear the same.
+HEARD = 'replay voice prompt'
+
+
+def spoken(name, clip='synthetic-audio-bytes-one', **headers):
+    """A clip of speech handed to the Host: made-up bytes, with what the app says of them."""
+    return {'op': 'post', 'path': '/transcribe', 'name': name,
+            'raw': {'content_type': 'audio/webm', 'bytes': clip}, 'headers': headers}
+
+
+UTTERANCE = {'X-Transcription-ID': 'utt-one', 'X-Utterance-ID': 'utt-one', 'X-Transcription-Session': AGENT,
+             'X-Hands-Free': '1'}
+
+SCENARIOS.append({
+    'id': 'speech-in',
+    'what': 'a person speaks: a clip becomes text and the text is sent as their message under the trace the clip '
+            'was given; the same request again, another clip under the same name, a clip nobody named, a name '
+            'that is none, an engine nobody installed, and what the Host says it listens with',
+    'steps': [
+        spoken('a clip becomes text', **UTTERANCE),
+        {**send(HEARD, 'spoken-1', utterance_id='utt-one'), 'name': 'what was said is sent',
+         'body_from_last': {'trace_id': 'trace_id'}},
+        {'op': 'wait_reply', 'after': 'u-spoken-1'},
+        {'op': 'quiesce'},
+        LOG,
+        SNAPSHOT,
+        spoken('the same request again', **UTTERANCE),
+        spoken('another clip under the same name', clip='synthetic-audio-bytes-two', **UTTERANCE),
+        spoken('the same clip, not said hands-free', **{**UTTERANCE, 'X-Hands-Free': '0'}),
+        spoken('a clip nobody named'),
+        spoken('a clip under another name', **{**UTTERANCE, 'X-Transcription-ID': 'utt-two'}),
+        spoken('a name that is none', **{'X-Transcription-ID': 'has space'}),
+        spoken('an engine nobody installed', **{'X-Transcription-Model': 'nothing-of-the-kind'}),
+        spoken('the engine of the Host by its plain name', **{'X-Transcription-Model': 'server-default'}),
+        get('/transcription-capabilities', 'what the Host listens with'),
+        get('/transcription-providers', 'who listens'),
+        # The app has sent what was said and will not ask for the answer again.
+        {'op': 'delete', 'path': '/transcription-results/utt-one', 'name': 'the answer is no longer wanted'},
+        spoken('the same name for what is said next', clip='synthetic-audio-bytes-two', **UTTERANCE),
+        {'op': 'delete', 'path': '/transcription-results/has%20space', 'name': 'forget under a name that is none'},
+        {'op': 'delete', 'path': '/transcription-results/utt-one', 'name': 'forgotten once more'},
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

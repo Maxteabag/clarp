@@ -13,7 +13,7 @@ they are; what is new is a corpus that only does what a client can do, and a sec
 
 | File | What it is |
 |---|---|
-| `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would. A step sends JSON, or a body as it is (`raw`: a file an agent publishes) |
+| `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would. A step sends JSON, or a body as it is (`raw`: a file an agent publishes or a user attaches); it may say when it is sent (`body_now`: an app's report of itself) and keep something of its answer for a later step (`save`: a cursor) |
 | `contract_plants.py` | Deliberate changes to a copy of the Python server that the suite must see. A reviewer adds their own |
 | `conform.py` | The driver: `record`, `plants`, `compare`, `cross` |
 | `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand |

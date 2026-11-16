@@ -5,12 +5,14 @@
 //! the state machines and the events. It does no I/O: the actor that drives it and the log it
 //! writes to are given to it through `clarp-ports`.
 
+pub mod activity;
 pub mod agent;
 pub mod artifacts;
 pub mod conversation;
 pub mod devices;
 pub mod failures;
 pub mod goals;
+pub mod heard;
 pub mod helpers;
 pub mod jobs;
 pub mod journal;
@@ -22,5 +24,6 @@ pub mod python;
 pub mod recovery;
 pub mod requests;
 pub mod roster;
+pub mod said;
 pub mod tools;
 pub mod turn;

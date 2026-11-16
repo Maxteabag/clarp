@@ -19,6 +19,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_actor::conversation::Which;
+use clarp_kernel::activity::Leases;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
@@ -45,7 +46,7 @@ use crate::pairing::{self, Device, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
-use crate::{ids, joblog, library, media, peers, plans, push, roster, wire};
+use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire};
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
@@ -77,6 +78,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("pairing", 1),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
+    // A settled turn can be folded from the conversation alone: every row a turn writes
+    // carries the turn's trace, what the agent said its phase, the turn's last row how the
+    // turn ended, and a tool an interrupted turn cut off reads `interrupted`.
+    ("log_turn_summary", 47),
     // Plans with goals: `/task-plan`, `/task-plans`, `/task-plan/action`.
     ("durable_task_goals", 21),
     ("background_job_cancel_generation", 23),
@@ -119,6 +124,10 @@ pub struct App {
     pub desks: Arc<Mutex<Presence>>,
     /// The bytes of the files agents publish.
     pub blobs: Arc<dyn Blobs>,
+    /// What the apps have reported of themselves: whether one is in front, and touched.
+    pub activity: Arc<Mutex<Leases>>,
+    /// The engines that listen: what turns a clip of speech into text.
+    pub ears: Arc<crate::heard::Ears>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -185,6 +194,7 @@ impl App {
 pub fn router(app: App) -> Router {
     Router::new()
         .route("/server-info", get(server_info))
+        .route("/message-tool-details", get(tool_details))
         .route("/agents/snapshot", get(snapshot))
         .route("/agents", post(create_agent))
         .route("/agents/{session}", delete(remove_agent))
@@ -210,6 +220,8 @@ pub fn router(app: App) -> Router {
             get(background_job).delete(cancel_background_job),
         )
         .route("/tools/run", post(run_tool))
+        .merge(apps::routes())
+        .merge(crate::heard::routes())
         .merge(library::routes())
         .merge(media::routes())
         .merge(plans::routes())
@@ -270,7 +282,14 @@ pub enum Principal {
 const EXCHANGE: &str = "/pairing/exchange";
 
 /// What a device with limited scope may send. Whatever it may read, it may read.
-const LIMITED_POSTS: &[&str] = &["/send", "/select"];
+const LIMITED_POSTS: &[&str] = &[
+    "/send",
+    "/transcribe",
+    "/select",
+    "/focus",
+    "/upload",
+    "/clog",
+];
 
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
@@ -863,6 +882,8 @@ struct LogQuery {
     before: Option<String>,
     /// `0`, `false` or `no`: without what a watcher or the Host's own routine began.
     include_automated: Option<String>,
+    /// `0`, `false` or `no`: with one header for a row's tools instead of every card whole.
+    include_tool_details: Option<String>,
 }
 
 async fn log(
@@ -902,6 +923,13 @@ async fn log(
     let status = &member.agent.view().status;
     let mut answer = wire::log_response(&member.record, status, &page, replace);
     answer["includes_automated"] = json!(include_automated);
+    let no = |said: &Option<String>| {
+        let said = said.as_deref().map(str::to_lowercase);
+        matches!(said.as_deref(), Some("0" | "false" | "no"))
+    };
+    if no(&query.include_tool_details) {
+        wire::without_tool_details(&mut answer);
+    }
     // An answer to another agent says whom it answers, by the name that agent has today.
     let directory = app.fleet.directory();
     wire::reply_to(&mut answer, &|agent_id| {
@@ -909,6 +937,31 @@ async fn log(
         Some((asked.record.persona.clone(), asked.record.session.clone()))
     });
     Ok(Json(answer))
+}
+
+/// `GET /message-tool-details?session=&message_id=`: the cards of one row whole, for an app
+/// that was given their header and is asked to open them.
+async fn tool_details(
+    State(app): State<App>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let said = |name: &str| query.get(name).map_or("", |given| given.trim());
+    let (session, message_id) = (said("session"), said("message_id"));
+    if session.is_empty() || message_id.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "session and message_id required",
+        ));
+    }
+    let none = || ApiError::new(StatusCode::NOT_FOUND, "message not found");
+    let member = app.member(session).ok_or_else(none)?;
+    let version = member.agent.row(message_id.to_string()).await?;
+    let row = wire::row(&version.ok_or_else(none)?);
+    Ok(Json(json!({
+        "message_id": message_id,
+        "tools": row["tools"],
+        "display_cells": row["display_cells"],
+    })))
 }
 
 // ---- the commands ----------------------------------------------------------------------------

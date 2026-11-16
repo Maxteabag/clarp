@@ -1,0 +1,558 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "cached": false,
+    "hands_free": true,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:1>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "a clip becomes text"
+  },
+  {
+   "body": {
+    "dispatch": "claude",
+    "ok": true,
+    "queue_depth": 0,
+    "queue_revision": 0,
+    "queued": false,
+    "session": "claire",
+    "trace_id": "<id:1>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/send",
+   "status": 200,
+   "step": "what was said is sent"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:2>",
+    "cwd": "<ROOT>/workspace",
+    "file": "<id:2>.jsonl",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 1,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-spoken-1",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "replay voice prompt",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:1>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: replay voice prompt",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  },
+  {
+   "body": {
+    "agents": [
+     {
+      "activity": {
+       "action": "done",
+       "agent_id": "<id:3>",
+       "call_id": null,
+       "file_path": "",
+       "kind": "done",
+       "persona": "Claire",
+       "phase": "done",
+       "session": "claire",
+       "started_at_ms": null,
+       "state": "idle",
+       "status": "ok",
+       "summary": "Done",
+       "tool": "",
+       "ts": "<time>",
+       "turn_started_ms": null,
+       "type": "agent-activity"
+      },
+      "agent_id": "<id:3>",
+      "alive": true,
+      "archived_at": null,
+      "avatar_generation_status": null,
+      "avatar_symbol": "",
+      "backend": "claude",
+      "backend_quota": null,
+      "backend_session_id": "<id:2>",
+      "background_jobs": {
+       "count": 0,
+       "sub_agents": 0
+      },
+      "busy": false,
+      "call_mode": "classic",
+      "child_count": 0,
+      "compacting": false,
+      "context_tokens": 5,
+      "context_window": 1000000,
+      "conversation_id": "<id:2>",
+      "cwd": "<ROOT>/workspace",
+      "dreaming_enabled": false,
+      "effort": "",
+      "focused": true,
+      "goal": null,
+      "head_revision": 1,
+      "heartbeat_enabled": false,
+      "helper_state": null,
+      "interaction_capabilities": {
+       "can_chat": true,
+       "can_inspect": true,
+       "can_restart": true,
+       "can_voice_target": true
+      },
+      "is_janitor": false,
+      "last_activity": "<time>",
+      "last_completed_message": "Claude replay reply: replay voice prompt",
+      "last_message": "Claude replay reply: replay voice prompt",
+      "last_message_id": "<row:1>",
+      "last_turn_end": "<time>",
+      "latest_state": "done",
+      "latest_state_ts": "<time>",
+      "live_activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:1>",
+       "turn_started_ms": null
+      },
+      "mcp_servers": [],
+      "model": "replay-fake",
+      "muted": false,
+      "parent_agent_id": null,
+      "persona": "Claire",
+      "queue_paused": false,
+      "queued_turn_count": 0,
+      "queued_turn_revision": 0,
+      "quiet": false,
+      "role": "agent",
+      "running_children": 0,
+      "schedules": [],
+      "session": "claire",
+      "status_text": null,
+      "team_ids": [],
+      "turn_started_at": 0,
+      "voice_id": ""
+     }
+    ],
+    "available_mcp_servers": [],
+    "focus": "<id:3>",
+    "model_avatars": false,
+    "roster": [
+     "Claire"
+    ],
+    "tool_explanations": {
+     "detail_level": 2,
+     "enabled": true
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agents/snapshot",
+   "status": 200,
+   "step": "get /agents/snapshot"
+  },
+  {
+   "body": {
+    "cached": true,
+    "hands_free": true,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:1>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "the same request again"
+  },
+  {
+   "body": {
+    "error": "transcription id reused for different audio"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 409,
+   "step": "another clip under the same name"
+  },
+  {
+   "body": {
+    "error": "transcription id reused for different audio"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 409,
+   "step": "the same clip, not said hands-free"
+  },
+  {
+   "body": {
+    "cached": false,
+    "hands_free": false,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:4>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "a clip nobody named"
+  },
+  {
+   "body": {
+    "cached": false,
+    "hands_free": true,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:5>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "a clip under another name"
+  },
+  {
+   "body": {
+    "error": "invalid transcription id"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 400,
+   "step": "a name that is none"
+  },
+  {
+   "body": {
+    "error": "transcription model not installed: nothing-of-the-kind"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 400,
+   "step": "an engine nobody installed"
+  },
+  {
+   "body": {
+    "cached": false,
+    "hands_free": false,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:6>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "the engine of the Host by its plain name"
+  },
+  {
+   "body": {
+    "adapters": "<list>",
+    "available": "<yes or no>",
+    "default_model": "<text>",
+    "models": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/transcription-capabilities",
+   "status": 200,
+   "step": "what the Host listens with"
+  },
+  {
+   "body": {
+    "agent_engines": "<fields>",
+    "agent_languages": "<fields>",
+    "call_engines": "<text>",
+    "call_languages": "<text>",
+    "call_policy_error": "<text>",
+    "engine": "<text>",
+    "language": "<text>",
+    "long_form_model": "<text>",
+    "long_form_threshold_range": "<fields>",
+    "long_form_threshold_sec": "<number>",
+    "models": "<list>",
+    "provider_turn_taking_available": "<yes or no>",
+    "providers": "<list>",
+    "retain_audio": "<yes or no>",
+    "stream_path": "<text>",
+    "turn_taking": "<text>",
+    "turn_taking_options": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "who listens"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "speech-in",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "event_id": "<eid:transcript-updated#1@45bbad>",
+    "session": "claire",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@45bbad>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "client_msg_id": "spoken-1",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "detail": {
+     "backend_session_id": "<id:2>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:3>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:3>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:3>",
+    "badge": true,
+    "cause_message_id": "u-spoken-1",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:7>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: replay voice prompt",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  }
+ ]
+}

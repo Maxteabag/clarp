@@ -358,6 +358,15 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 return read_digest(path, previous_size, current_size, digest=digest)
 
             stack.enter_context(patch.object(inc, "_read_digest", counted_digest))
+            # Each read of a byte range for its hash alone: [start, end].
+            metrics["range_hashes"] = []
+            range_hash = inc.range_hash
+
+            def counted_range(path, start, end):
+                metrics["range_hashes"].append([start, end])
+                return range_hash(path, start, end)
+
+            stack.enter_context(patch.object(inc, "range_hash", counted_range))
             if faults.get("settings"):
                 settings = inc.settings
                 stack.enter_context(patch.object(
@@ -511,6 +520,8 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                 # last old record changes in place), "rewrite_at" (the
                 # same, the byte where "words" begin: a record an earlier
                 # tail imported, one the reader has passed, one it has not),
+                # "rewrite_kept" (that byte alone, nothing appended and the
+                # mtime put back: only the change time tells),
                 # "replace" (the same bytes in a new file under the name).
                 moves, moved = faults["source_moves"], []
 
@@ -531,6 +542,12 @@ def run_lane(database: pathlib.Path, transcript: pathlib.Path, backend: str,
                             output.write(append_bytes(backend, 900 + tick))
                         if how == "grow_older":
                             os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns - 1_000_000_000))
+                    elif how == "rewrite_kept":
+                        data = transcript.read_bytes()
+                        with transcript.open("r+b") as output:
+                            output.seek(data.index(moves["words"].encode()))
+                            output.write(b"S")
+                        os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns))
                     elif how == "touch":
                         os.utime(transcript, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
                     elif how == "replace":
