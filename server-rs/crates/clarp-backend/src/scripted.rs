@@ -203,6 +203,7 @@ impl ScriptedInterpreter {
                 id: format!("{SHOWN}:{}", call.id),
                 content: Value::String(text("output").unwrap_or("").to_string()),
                 failed,
+                exit_code: None,
             }));
             out.push(Signal::Tool(call.clone()));
             out.push(Signal::Moved(Activity::Thinking));
