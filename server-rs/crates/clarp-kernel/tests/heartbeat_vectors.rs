@@ -8,7 +8,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use clarp_kernel::heartbeat::{self, Known, Latest, PlanLine, Settings, State};
+use clarp_kernel::heartbeat::{self, Counted, Known, Latest, PlanLine, Settings, State};
 use serde_json::{Value, json};
 
 fn vectors() -> Value {
@@ -64,6 +64,22 @@ fn an_answer_to_a_heartbeat_is_shown_or_not_as_the_python_host_decides() {
         assert_eq!(json!(is_neutral), row["neutral"], "{text:?}");
         hidden += usize::from(skip);
         neutral += usize::from(is_neutral);
+        assert_eq!(
+            json!(heartbeat::only_the_word(text)),
+            row["only"],
+            "{text:?}"
+        );
+        // What the conversation keeps of it, in a heartbeat's turn and in any other.
+        for (in_its_turn, theirs) in [(true, &row["in_its_turn"]), (false, &row["in_another"])] {
+            let (kept, counted) = heartbeat::kept(text, in_its_turn);
+            let counted = match counted {
+                Counted::Neither => "",
+                Counted::Nothing => "noop",
+                Counted::Activity => "activity",
+            };
+            assert_eq!(json!(kept), theirs["text"], "{text:?} {in_its_turn}");
+            assert_eq!(json!(counted), theirs["counted"], "{text:?} {in_its_turn}");
+        }
     }
     assert_eq!((hidden, neutral), (24, 45));
 }

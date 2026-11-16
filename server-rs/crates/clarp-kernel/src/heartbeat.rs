@@ -200,6 +200,53 @@ pub fn answered(text: &str) -> (bool, String) {
     }
 }
 
+/// What the conversation keeps in place of an answer that says no more than that nothing is
+/// to be done.
+pub const NOTHING_TO_DO: &str = "Heartbeat check: no action needed.";
+
+/// Whether an answer is the word and nothing else: no letter or digit beside it.
+pub fn only_the_word(text: &str) -> bool {
+    let beside = text.replace(OK, "");
+    let of_a_word = |sign: char| sign.is_alphanumeric() || sign == '_';
+    text.contains(OK) && !beside.chars().any(of_a_word)
+}
+
+/// What an answer counts as for its agent's heartbeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Counted {
+    /// Nothing: it is no heartbeat's answer, or says nothing either way.
+    Neither,
+    /// The agent found nothing to do.
+    Nothing,
+    /// The agent did or said something.
+    Activity,
+}
+
+/// What the conversation keeps of an answer, and what the answer counts as. In a
+/// heartbeat's own turn the word at an edge of the answer is the heartbeat's; in any other
+/// turn an answer is kept as it is, unless it is nothing but the word.
+pub fn kept(text: &str, in_its_turn: bool) -> (String, Counted) {
+    let (nothing_to_do, said) = if in_its_turn {
+        answered(text)
+    } else {
+        (only_the_word(text), text.to_string())
+    };
+    if nothing_to_do {
+        let counted = if in_its_turn {
+            Counted::Nothing
+        } else {
+            Counted::Neither
+        };
+        return (NOTHING_TO_DO.to_string(), counted);
+    }
+    let counted = if in_its_turn && !is_neutral_status(&said) {
+        Counted::Activity
+    } else {
+        Counted::Neither
+    };
+    (said, counted)
+}
+
 /// Whether what an agent says while it answers a heartbeat is no more than a word about the
 /// heartbeat itself: nothing, the word, or a short line that begins as such lines do.
 pub fn is_neutral_status(text: &str) -> bool {
