@@ -60,6 +60,14 @@ pub struct Worker {
     pub hear_within: Duration,
 }
 
+/// The threads a model is given on a machine with this many cores: half of them, four at
+/// most, one at least. The Python Host's rule (`inference_cpu_threads`): a model left to
+/// take every core starves the server that answers the apps beside it.
+#[must_use]
+pub fn threads_for(cores: usize) -> u32 {
+    u32::try_from((cores / 2).clamp(1, 4)).unwrap_or(1)
+}
+
 impl Worker {
     pub fn new(program: impl Into<PathBuf>, model: impl Into<String>) -> Self {
         Self {
@@ -413,6 +421,15 @@ mod tests {
     use super::*;
 
     static PLACES: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn a_model_is_given_half_the_cores_four_at_most_and_one_at_least() {
+        let given: Vec<u32> = [0, 1, 2, 3, 4, 6, 8, 9, 64]
+            .into_iter()
+            .map(threads_for)
+            .collect();
+        assert_eq!(given, [1, 1, 1, 1, 2, 3, 4, 4, 4]);
+    }
 
     /// A worker that hears nothing and answers as the real one does: how many bytes the clip
     /// has, and a piece it is not sure was speech. What it is prompted with says how it
