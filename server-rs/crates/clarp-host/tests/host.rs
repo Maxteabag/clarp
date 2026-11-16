@@ -14283,13 +14283,33 @@ fn an_agent_that_asked_for_it_is_given_a_heartbeat_and_what_it_answers_is_counte
 fn a_heartbeat_shows_an_agent_the_plan_it_has_standing_and_leaves_alone_one_its_goal_wakes() {
     use clarp_kernel::heartbeat::PROMPT;
     let place = Place::new("heartbeat-plan");
-    // A stand-in for Claude Code that writes down what it was handed, and answers.
+    // A stand-in for Claude Code that writes down what it was handed, and answers. Given
+    // a heartbeat it answers as a tool that narrates does: a remark on its way, in a message
+    // of its own, and then that nothing is to be done.
     let lines = place.root.join("lines");
     let claude = place.root.join("claude");
+    let said = |id: &str, text: &str| {
+        format!(
+            "printf '%s\\n' '{{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{{\"id\":\"{id}\",\
+             \"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{{\"type\":\"text\",\"text\":\"{text}\"}}]}}}}'\n"
+        )
+    };
+    let narrated = [
+        "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n",
+        &said("msg_a", "I will look at the plan first."),
+        &said("msg_b", "HEARTBEAT_OK"),
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\
+         \"result\":\"HEARTBEAT_OK\",\"num_turns\":1}'\n",
+    ]
+    .concat();
     let script = [
         "#!/bin/sh\nread -r message\n",
         &format!("printf '%s\\n' \"$message\" >> \"{}\"\n", lines.display()),
+        "case \"$message\" in\n*'continuity check'*)\n",
+        &narrated,
+        ";;\n*)\n",
         STAND_IN_ANSWERS,
+        ";;\nesac\n",
     ]
     .concat();
     program(&claude, &script);
@@ -14388,7 +14408,39 @@ fn a_heartbeat_shows_an_agent_the_plan_it_has_standing_and_leaves_alone_one_its_
     };
     assert!(started(&planner).is_i64());
     assert_eq!(started(&keeper), Value::Null);
-    // What it answered says something: it is asked again at the owner's interval.
+    // What the turn counts as is what its last answer says. It remarked on its way and then
+    // found nothing to do: that is nothing found, once, and the next heartbeat comes later.
+    // The remark is kept as it was said, and the answer as the line for it.
+    let status = host.get(&format!("/agent-heartbeat/status?session={planner}"));
+    let answers: Vec<&str> = status["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|answer| answer["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            clarp_kernel::heartbeat::NOTHING_TO_DO,
+            "I will look at the plan first."
+        ]
+    );
+    assert_eq!(
+        (
+            &status["schedule"]["noop_streak"],
+            &status["schedule"]["effective_interval_sec"]
+        ),
+        (&json!(1), &json!(3600))
+    );
+    // And a turn whose last answer says something counts as activity, whatever was
+    // remarked before it: asked again at the owner's interval.
+    host.post(
+        "/send",
+        json!({ "session": planner, "text": "anything else", "client_msg_id": "p2", "origin": "heartbeat" }),
+    );
+    wait_for("the answer that says something", || {
+        handed().len() == 3 && host.state(&planner) == "done"
+    });
     let status = host.get(&format!("/agent-heartbeat/status?session={planner}"));
     assert_eq!(status["history"][0]["text"], "on it");
     assert_eq!(

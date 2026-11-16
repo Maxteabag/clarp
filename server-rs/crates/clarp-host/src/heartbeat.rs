@@ -110,24 +110,26 @@ struct Seen {
     history: Vec<Value>,
 }
 
-/// What the answers of one turn count as: activity when one of them says something, else
-/// nothing found when one of them is the line for that.
+/// What a heartbeat's turn counts as: what its last answer says. Nothing found, when that
+/// is the line for it; activity, when it says something else.
+///
+/// What an agent remarks on its way to its answer is not what it found. The Python Host
+/// counts every message of the turn, and one remark ("I will look at the plan first")
+/// makes a turn that found nothing count as activity: an agent whose tool narrates is then
+/// never asked less often and never goes dormant (reference defect R28). Measured on the
+/// owner's Host over seven days, 87 of 122 heartbeat turns of Codex agents and 230 of 280
+/// of Muse agents counted as activity, against 4 of 31 of Claude agents.
 fn counted(rows: &[Versioned], turn: u64) -> Counted {
-    let mut found_nothing = false;
-    for row in rows.iter().filter(|row| row.turn_number == Some(turn)) {
-        let Entry::Reply(reply) = &row.entry else {
-            continue;
-        };
-        if reply.text == rules::NOTHING_TO_DO {
-            found_nothing = true;
-        } else if !rules::is_neutral_status(&reply.text) {
-            return Counted::Activity;
-        }
-    }
-    if found_nothing {
-        Counted::Nothing
-    } else {
-        Counted::Neither
+    let of_the_turn = rows.iter().filter(|row| row.turn_number == Some(turn));
+    let mut said = of_the_turn.filter_map(|row| match &row.entry {
+        // A message that only calls tools says nothing: it is no answer.
+        Entry::Reply(reply) if !python::strip(&reply.text).is_empty() => Some(&reply.text),
+        _ => None,
+    });
+    match said.next_back() {
+        Some(last) if last == rules::NOTHING_TO_DO => Counted::Nothing,
+        Some(last) if !rules::is_neutral_status(last) => Counted::Activity,
+        _ => Counted::Neither,
     }
 }
 
