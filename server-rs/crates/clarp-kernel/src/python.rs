@@ -349,6 +349,26 @@ pub fn b64decode(text: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Bytes as a text of base64, as Python's `base64.b64encode(bytes)` writes them: the
+/// standard alphabet, in fours, padded with `=`. What [`b64decode`] reads back.
+pub fn b64encode(bytes: &[u8]) -> String {
+    const SIGNS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for three in bytes.chunks(3) {
+        let at = |index: usize| u32::from(three.get(index).copied().unwrap_or(0));
+        let bits = (at(0) << 16) | (at(1) << 8) | at(2);
+        for place in 0..4 {
+            if place <= three.len() {
+                let six = (bits >> (18 - 6 * place)) & 0x3f;
+                out.push(char::from(SIGNS[six as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// The first `count` signs of a text, as Python's `text[:count]` cuts it.
 pub fn first(text: &str, count: usize) -> &str {
     match text.char_indices().nth(count) {
@@ -378,6 +398,22 @@ mod tests {
             "YQ", "YQ=", "Y===", "YQ==YQ==", "YW Jj", "YWJj\n", "YWJ-", "=YWJ", "YQ=a",
         ] {
             assert_eq!(b64decode(no_base64), None, "{no_base64:?}");
+        }
+        // And written as Python writes it: what is written is read back as it was.
+        assert_eq!(b64encode(b""), "");
+        assert_eq!(b64encode(b"a"), "YQ==");
+        assert_eq!(b64encode(b"ab"), "YWI=");
+        assert_eq!(b64encode(b"abc"), "YWJj");
+        assert_eq!(b64encode(b"a made-up picture"), "YSBtYWRlLXVwIHBpY3R1cmU=");
+        assert_eq!(b64encode(&[0xfb, 0xff, 0xbf]), "+/+/");
+        let every: Vec<u8> = (0..=255).collect();
+        for length in [0, 1, 2, 3, 4, 5, 255, 256] {
+            let bytes = &every[..length];
+            assert_eq!(
+                b64decode(&b64encode(bytes)).as_deref(),
+                Some(bytes),
+                "{length} bytes"
+            );
         }
     }
 

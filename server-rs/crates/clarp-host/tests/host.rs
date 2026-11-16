@@ -10158,3 +10158,137 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     assert_eq!(dirs["base"], "/");
     assert!(!dirs["matches"].as_array().unwrap().is_empty());
 }
+
+#[test]
+fn an_agent_that_moves_stays_who_it_was() {
+    // Two Hosts whose Claude Code is a stand-in that writes down what it was started with.
+    let (old_place, new_place) = (Place::new("who-from"), Place::new("who-to"));
+    // Each answers with a message of its own name: what the tool says on the second Host is
+    // not what it said on the first.
+    let stand_in = |place: &Place, message: &str| -> (std::path::PathBuf, std::path::PathBuf) {
+        let (args, claude) = (place.root.join("args"), place.root.join("claude"));
+        let script = [
+            "#!/bin/sh\nread -r message\n",
+            &format!(
+                "{{ printf '%s\\n' \"$@\"; echo ----; }} >> \"{}\"\n",
+                args.display()
+            ),
+            &STAND_IN_ANSWERS.replace("msg_1", message),
+        ]
+        .concat();
+        program(&claude, &script);
+        (args, claude)
+    };
+    let (_, old_claude) = stand_in(&old_place, "msg_there");
+    let (new_args, new_claude) = stand_in(&new_place, "msg_here");
+    let old_host = old_place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", old_claude.to_str().unwrap())],
+    );
+    let new_host = new_place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", new_claude.to_str().unwrap())],
+    );
+
+    // On the first Host the owner made a persona with a way of speaking and a picture, and an
+    // agent as it, with a symbol of its own. It said something there.
+    let (status, made) = old_host.ask(
+        "POST",
+        "/personas",
+        Some(&json!({
+            "name": "Scout", "voice_id": r#"{"gemini":"Kore"}"#, "personality": "Personality: curious.",
+            "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU=",
+        })),
+    );
+    assert_eq!(status, 201, "{made}");
+    let work = old_place.root.join("work");
+    let made = old_host.post(
+        "/agents",
+        json!({ "name": "Scout", "backend": "claude", "cwd": work.to_str().unwrap(), "avatar_symbol": "leaf" }),
+    );
+    let (session, agent_id) = (
+        made["session"].as_str().unwrap().to_string(),
+        made["agent"]["agent_id"].as_str().unwrap().to_string(),
+    );
+    old_host.send(&session, "what we spoke of", "old-1");
+    wait_for("the first Host's answer", || {
+        old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
+    });
+
+    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["import", "--from", &old_host.address, "--session", &session])
+        .args(["--host", &new_host.address])
+        .current_dir(&new_place.root)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&moved.stdout).into_owned();
+    assert!(
+        moved.status.success(),
+        "{said}{}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+
+    // On the second Host it has the face, the symbol and the voice it had, under the id it had.
+    let row = |host: &Host| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let found = agents
+            .iter()
+            .find(|agent| agent["session"] == session.as_str());
+        let found = found.unwrap_or_else(|| panic!("{session} is not listed"));
+        let kept = [
+            "agent_id",
+            "persona",
+            "voice_id",
+            "avatar_symbol",
+            "avatar_url",
+        ];
+        let kept = kept
+            .iter()
+            .map(|key| ((*key).to_string(), found[*key].clone()));
+        Value::Object(kept.collect())
+    };
+    let there = row(&old_host);
+    assert_eq!(
+        there["avatar_url"],
+        json!(format!("/avatars/{agent_id}?v=f475387a7e87a1a9"))
+    );
+    assert_eq!(there["avatar_symbol"], "leaf");
+    assert_eq!(row(&new_host), there);
+    let face = there["avatar_url"].as_str().unwrap();
+    let picture = fetch(&new_host, "", "GET", face, &[], b"");
+    assert_eq!(
+        (picture.status, picture.text().as_str()),
+        (200, "a made-up picture")
+    );
+    // And it speaks as it did: the second Host has no persona of that name, and tells the
+    // agent's tool the way of speaking that came with it.
+    new_host.send(&session, "and now here", "new-1");
+    let answered =
+        || new_host.conversation(&session).len() == 4 && new_host.state(&session) == "done";
+    for _ in 0..100 {
+        if answered() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        answered(),
+        "the second Host did not answer: {:?}, {}, started with: {:?}",
+        new_host.conversation(&session),
+        new_host.state(&session),
+        std::fs::read_to_string(&new_args)
+    );
+    let started = std::fs::read_to_string(&new_args).unwrap();
+    let launch: Vec<&str> = started.lines().collect();
+    let at = launch
+        .iter()
+        .position(|arg| *arg == "--append-system-prompt");
+    assert_eq!(
+        at.map(|at| launch[at + 1]),
+        Some("You are Scout. Personality: curious."),
+        "{started}"
+    );
+}
