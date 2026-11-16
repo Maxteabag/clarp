@@ -59,6 +59,17 @@ pub const MIN_IOS_CONTRACT: u64 = 1;
 /// introduced it (the Python Host's `FEATURE_CONTRACTS`): the apps gate on a feature being
 /// listed, some on it being listed with its number. A feature is listed here when everything
 /// it names is built and held to the Python Host; what is half there is not listed.
+const CHIP: &str = "live_activity_push";
+
+/// The features this Host has now: all of [`FEATURES`], without what it cannot do as it is
+/// set up.
+fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
+    let chip = app.chip.pushes();
+    FEATURES
+        .iter()
+        .filter(move |(feature, _)| *feature != CHIP || chip)
+}
+
 pub const FEATURES: &[(&str, u64)] = &[
     // What agents make and ask: the library, the inbox, requests and every way they end.
     // `GET /attention/inbox`: what agents made, a page at a time.
@@ -86,6 +97,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `docs/agent-rings.md`). The ring whose line is said: not the live voice call
     // (`agent_ring_live`), not the one that listens first, not a phone's own switch.
     ("agent_rings", 64),
+    // The chip a phone shows of the fleet on its lock screen is kept current by pushes
+    // (`POST /devices/live-activity`; `docs/live-items.md` §8). Listed only by a Host that
+    // can reach an activity: one with a relay and an account of its own there.
+    (CHIP, 45),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
     // A running turn as items that appear, grow and settle: `live` events on `/events?live=`
@@ -147,6 +162,8 @@ pub struct App {
     pub faces: Arc<crate::faces::Faces>,
     /// The calls: who is in each phone's call, on hold, and has the floor.
     pub calls: Arc<crate::calls::Desk>,
+    /// The chip a phone shows of the fleet on its lock screen, and what keeps it current.
+    pub chip: Arc<crate::chip::Chip>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -250,6 +267,7 @@ pub fn router(app: App) -> Router {
         .merge(peers::routes())
         .merge(roster::routes())
         .merge(crate::calls::routes())
+        .merge(crate::chip::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
         .merge(crate::files::routes())
@@ -474,16 +492,14 @@ pub(crate) fn identity(app: &App) -> ServerInfo {
         min_app_version: "1.0".to_string(),
         capabilities: Capabilities {
             version: 1,
-            features: FEATURES
-                .iter()
+            features: features(app)
                 .map(|(feature, _)| (*feature).to_string())
                 .collect(),
         },
         contract: Contract {
             host: HOST_CONTRACT,
             min_ios: MIN_IOS_CONTRACT,
-            features: FEATURES
-                .iter()
+            features: features(app)
                 .map(|(feature, introduced)| ((*feature).to_string(), *introduced))
                 .collect(),
         },

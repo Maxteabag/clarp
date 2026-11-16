@@ -1661,4 +1661,36 @@ SCENARIOS.append({
 })
 
 
+ACTIVITY = '/devices/live-activity'
+
+SCENARIOS.append({
+    'id': 'activities',
+    'what': "the activity a phone shows the fleet's work in on its lock screen: the phone leaves the token "
+            'its pushes go to, under a name or under the beginning of the token; the same name again takes '
+            'the place of what was there; it is taken back when the activity ended on the phone, by its name '
+            'or by its token. What is no token, no kind and no side of the push service is refused in words.',
+    'steps': [
+        post(ACTIVITY, {}, 'an activity without a token'),
+        post(ACTIVITY, ['ab' * 20], 'an activity that is no object'),
+        post(ACTIVITY, {'token': 'not hex at all'}, 'a token that is none'),
+        post(ACTIVITY, {'token': 'ab' * 201}, 'a token that is too long'),
+        post(ACTIVITY, {'token': 'ab' * 20, 'kind': 'something-else'}, 'a kind nobody knows'),
+        post(ACTIVITY, {'token': 'ab' * 20, 'environment': 'moon'}, 'a side of the push service nobody knows'),
+        post(ACTIVITY, {'token': 'AB' * 20, 'activity_id': 'act-1', 'kind': 'agents-working', 'environment': 'sandbox'},
+             'a phone leaves an activity'),
+        post(ACTIVITY, {'token': 'cd' * 20, 'activity_id': 'act-1'}, 'the activity has another token now'),
+        post(ACTIVITY, {'token': ' ' + 'ef' * 20 + ' ', 'kind': 'agents', 'environment': 'development'},
+             'an activity without a name'),
+        post(ACTIVITY, {'token': 'ef' * 20, 'activity_id': '  act-2  '}, 'the same token under a name'),
+        post(ACTIVITY, {'platform': 'fcm', 'kind': 'agents-working'}, 'the same for a phone of another kind, by nobody\'s phone'),
+        post(ACTIVITY, {'activity_id': 'act-1', 'ended': True}, 'the activity ended on the phone'),
+        post(ACTIVITY, {'activity_id': 'act-1', 'ended': True}, 'ended already'),
+        post(ACTIVITY, {'ended': True}, 'an end that names nothing'),
+        {'op': 'delete', 'path': ACTIVITY + '?token=' + 'EF' * 20, 'name': 'taken back by its token'},
+        {'op': 'delete', 'path': ACTIVITY + '?activity_id=act-2', 'name': 'taken back already'},
+        {'op': 'delete', 'path': ACTIVITY, 'name': 'nothing is named'},
+        {'op': 'delete', 'path': ACTIVITY + '?platform=fcm', 'name': 'the same for a phone of another kind'},
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
