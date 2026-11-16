@@ -454,6 +454,9 @@ ${codex:+Environment="CLARP_CODEX_PROGRAM=$codex"}
 # (The Python Host's own tools do not read it. They are off the path above.)
 Environment="CLARP_CONFIG_DIR=$config"
 Environment="CLAUDE_PWA_CONFIG=$config/config.toml"
+# A Python Host's tool that is found in a turn of this Host hands the call over by these two: the
+# Host's address, which every turn is given, and this directory, whose tools/ has a tool under
+# every name (issue 388). Neither is to go missing from a turn.
 Environment="CLARP_SHARE_DIR=$share"
 Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
