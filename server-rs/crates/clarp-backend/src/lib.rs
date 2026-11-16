@@ -149,6 +149,16 @@ fn named(variable: &str) -> Option<String> {
         .filter(|program| !program.trim().is_empty())
 }
 
+/// The program a tool is started as: the one its environment variable names, else the
+/// tool's own name, found on the path. `None` for what is no tool a person installs.
+pub fn program(id: &str) -> Option<String> {
+    match id {
+        "claude" => Some(named(CLAUDE_PROGRAM_ENV).unwrap_or_else(|| "claude".to_string())),
+        "codex" => Some(named(CODEX_PROGRAM_ENV).unwrap_or_else(|| "codex".to_string())),
+        _ => None,
+    }
+}
+
 /// The backend with this name, as built in.
 pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
     match id {

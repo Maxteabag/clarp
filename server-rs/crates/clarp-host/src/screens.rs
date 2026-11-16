@@ -298,8 +298,31 @@ async fn no_oracle() -> ApiError {
     not_built("The Oracle is")
 }
 
+// ---- the tools' logins and what they use ------------------------------------------------------
+
+/// `GET /backend-auth` (`?harnesses=all` for an app that lists every harness): whether each
+/// tool this Host runs is installed and has a login, read off the file the tool keeps it in.
+async fn logins(State(app): State<App>, Query(asked): Asked) -> Answered {
+    let every = asked.get("harnesses").is_some_and(|said| said == "all");
+    let now = app.clock.now_ms();
+    let read = move || crate::logins::told(&crate::config::home(), every, now);
+    let told = tokio::task::spawn_blocking(read).await;
+    told.map(Json).map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the logins could not be read",
+        )
+    })
+}
+
+async fn no_logins() -> ApiError {
+    not_built("Signing a tool in or out from an app is")
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/backend-auth", get(logins))
+        .route("/backend-auth/{action}", post(no_logins))
         .route("/agent-heartbeat/status", get(heartbeat_status))
         .route("/agent-heartbeat", post(set_heartbeat))
         .route("/agent-dreaming", post(set_dreaming))
