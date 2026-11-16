@@ -603,6 +603,18 @@ def _save_reap_cursor(name, con, cursor):
     setattr(_REAP_PROGRESS, name, (con, cursor))
 
 
+def _nothing_to_write(row, turn) -> bool:
+    """A ``started`` receipt whose latest turn is still open: it needs no
+    start, and a turn that has neither ended nor settled gets no settle, so
+    whatever its launch evidence says the pass writes nothing for it. Asking
+    walks the agent's whole state history three times. The runtime's queue
+    recovery asked about such receipts 32,012 times in three days on one Host,
+    97 % of all its looks, at about once a second for as long as their turns
+    ran (issue 363)."""
+    return (row["status"] == "started"
+            and turn["settled_at"] is None and turn["ended_at"] is None)
+
+
 def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
                        on_deferred: Callable[[str, int, str], None] | None = None) -> dict[str, int]:
     """Converge one bounded page from exact durable turn evidence.
@@ -614,6 +626,15 @@ def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
     full every pass (issue 363). Neither changes what a pass decides about the
     receipts it does examine. A receipt is its row: a queue id comes again
     (goal wakes, peer requests) and the new row has a new ``queue_seq``.
+
+    A started receipt whose latest turn is still open is passed over without
+    being asked about (``_nothing_to_write``): no caller is told of it and no
+    ``queueReceiptDeferred`` line is written for it.
+
+    A pass that ends at its limit with receipts of its page not looked at
+    writes one ``queueReceiptPassCut left=N`` line (``left=unknown`` when the
+    limit was spent before the page was read); the next pass of the same
+    thread goes on from the last receipt looked at.
 
     At most 100 receipts are examined per pass. A connection-local keyset
     cursor advances only after commit and wraps, including past no-turn rows
@@ -643,6 +664,8 @@ def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
     if not rows:
         if time.monotonic() < deadline:
             _save_reap_cursor("convergence", con, None)
+        else:
+            log("queueReceiptPassCut", "left=unknown")  # the limit was spent reading the page
         return {}
     counts: dict[str, int] = {}
     repaired = []
@@ -651,12 +674,15 @@ def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
     cursor = after
     admission_ms = min(50, int((deadline - time.monotonic()) * 1000))
     if admission_ms <= 0:
+        log("queueReceiptPassCut", f"left={len(rows)}")
         return {}  # no admitted work, so no cursor progress or fresh wait
+    left = 0
     with db.busy_timeout_at_most(admission_ms):
         with _receipt_write("reconcile", [str(row["queue_id"]) for row in rows],
                             agent_ids={row["queue_id"]: row["agent_id"] for row in rows}):
-            for observed in rows:
+            for reached, observed in enumerate(rows):
                 if time.monotonic() >= deadline:
+                    left = len(rows) - reached
                     break
                 cursor = (observed["status"], observed["queue_seq"])
                 row = con.execute(
@@ -672,7 +698,7 @@ def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
                         WHERE agent_id = ? AND trace_id = ?
                         ORDER BY turn_id DESC LIMIT 1""",
                     (row["agent_id"], row["trace_id"])).fetchone()
-                if turn is None:
+                if turn is None or _nothing_to_write(row, turn):
                     continue
                 if skip is not None and skip(str(row["queue_id"]), int(row["queue_seq"])):
                     continue  # deferred a moment ago: the caller looks again later
@@ -703,6 +729,10 @@ def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
             for agent_id in changed_agents:
                 _bump_revision(agent_id)
     _save_reap_cursor("convergence", con, cursor if cursor else None)
+    if left:
+        # A Host that stands at the limit shows in its journal: a pass on a
+        # loaded machine examined nothing before its 200 ms were spent.
+        log("queueReceiptPassCut", f"left={left}")
     for queue_id, agent_id, target, turn_id in repaired:
         log("queueReceiptReconciled", f"queue={queue_id} agent={agent_id} "
             f"reason=durable_turn target={target} turn={turn_id}")
