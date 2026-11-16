@@ -17,6 +17,7 @@ pub mod admin_tool;
 pub mod agent;
 pub mod apps;
 pub mod artifact_tool;
+pub mod calls;
 pub mod config;
 pub mod edge;
 pub mod faces;

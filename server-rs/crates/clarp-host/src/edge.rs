@@ -137,6 +137,8 @@ pub struct App {
     pub mouth: Arc<crate::voice::Mouth>,
     /// The pictures agents are shown with.
     pub faces: Arc<crate::faces::Faces>,
+    /// The calls: who is in each phone's call, on hold, and has the floor.
+    pub calls: Arc<crate::calls::Desk>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -239,6 +241,7 @@ pub fn router(app: App) -> Router {
         .merge(push::routes())
         .merge(peers::routes())
         .merge(roster::routes())
+        .merge(crate::calls::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
         .merge(crate::files::routes())
@@ -1171,19 +1174,54 @@ fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
 
 async fn send(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Json(request): Json<SendRequest>,
-) -> Result<Json<SendResponse>, ApiError> {
-    send_message(&app, request).await.map(Json)
+) -> Response {
+    sent_from(&app, &principal, request).await
 }
 
 /// `POST /orchestrator/route-delegation`: a message the app could not tell the agent of. It
 /// is a send that asks the router of spoken messages.
 async fn route_delegation(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Json(mut request): Json<SendRequest>,
-) -> Result<Json<SendResponse>, ApiError> {
+) -> Response {
     request.orchestrator_fallback = Some(true);
-    send_message(&app, request).await.map(Json)
+    sent_from(&app, &principal, request).await
+}
+
+/// A message from an app: one that carries its call goes to the agent of the call that can
+/// take speech, whoever it names; then it is a message like any other.
+async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -> Response {
+    let call_id: String = python::strip(request.call_id.as_deref().unwrap_or(""))
+        .chars()
+        .take(64)
+        .collect();
+    // A message that says nothing is refused before its call is asked.
+    if !call_id.is_empty() && !python::strip(&request.text).is_empty() {
+        let caller = match principal {
+            Principal::Device { device_id, .. } => device_id.as_str(),
+            Principal::Administrator | Principal::Tools => clarp_kernel::calls::ADMINISTRATOR,
+        };
+        let named = match python::strip(&request.session) {
+            "" => addressed::DEFAULT_SESSION,
+            named => named,
+        };
+        let desk = app.calls.clone();
+        match desk.route(app, (caller, &call_id, named)).await {
+            Ok(Ok(session)) => request.session = session,
+            Ok(Err(refused)) => {
+                let status = StatusCode::from_u16(refused.status).unwrap_or(StatusCode::CONFLICT);
+                return (status, Json(refused.body)).into_response();
+            }
+            Err(unavailable) => return ApiError::from(unavailable).into_response(),
+        }
+    }
+    match send_message(app, request).await {
+        Ok(sent) => Json(sent).into_response(),
+        Err(refused) => refused.into_response(),
+    }
 }
 
 /// Takes a message for an agent: what `POST /send` does, and what an agent's own tool does

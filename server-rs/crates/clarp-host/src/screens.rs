@@ -251,11 +251,6 @@ async fn no_vocabulary() -> ApiError {
 
 // ---- calls and the Oracle ----------------------------------------------------------------------
 
-/// `GET /calls`: the call the owner is in with his agents. There is none here, ever.
-async fn calls(State(app): State<App>) -> Json<Value> {
-    Json(json!({ "call": null, "server_now": app.clock.now_ms() }))
-}
-
 /// `GET /calls/ring`: whether an agent is ringing the owner. Nobody rings from here.
 async fn ring() -> Json<Value> {
     Json(kept("/calls/ring"))
@@ -492,9 +487,9 @@ pub fn routes() -> Router<App> {
         .route("/vocab/run", post(no_vocabulary))
         .route("/vocab/preview", post(no_vocabulary))
         .route("/vocab/profiles/workspace", post(no_vocabulary))
-        .route("/calls", get(calls).post(no_calls))
         .route("/calls/ring", get(ring).post(no_calls))
-        .route("/calls/{*rest}", post(no_calls))
+        .route("/calls/ring/{*rest}", post(no_calls))
+        .route("/calls/live", post(no_calls))
         .route(
             "/orchestrator/settings",
             get(router_settings).post(no_router),

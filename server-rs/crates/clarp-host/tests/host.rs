@@ -2448,6 +2448,285 @@ fn a_phone_says_where_it_is_and_an_agent_asks_for_it() {
 }
 
 #[test]
+fn a_call_is_the_hosts_record_of_who_is_in_it_and_its_messages_go_to_who_can_take_them() {
+    let place = Place::new("calls");
+    let host = place.start_with_token("secret");
+    let (theo, mike, nadia) = (
+        host.new_agent("Theo"),
+        host.new_agent("Mike"),
+        host.new_agent("Nadia"),
+    );
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let events = host.listen_at("/events?token=secret");
+    let changes = || -> Vec<Value> {
+        let heard = events.lock().unwrap();
+        let calls = heard.iter().filter(|event| event["type"] == "group-call");
+        calls.cloned().collect()
+    };
+    let as_phone = |method: &str, path: &str, body: Option<Value>| {
+        host.ask_as(&phone, method, path, body.as_ref())
+    };
+    let did = |path: &str, body: Value| -> Value {
+        let (status, answer) = as_phone("POST", path, Some(body.clone()));
+        assert_eq!(status, 200, "{path} {body}: {answer}");
+        answer
+    };
+    let states = |call: &Value| -> Vec<(String, String)> {
+        let parts = call["participants"].as_array().unwrap().iter();
+        parts
+            .map(|part| {
+                let said = |key: &str| part[key].as_str().unwrap().to_string();
+                (said("session"), said("state"))
+            })
+            .collect()
+    };
+    let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        let each = list.iter();
+        each.map(|(session, state)| ((*session).to_string(), (*state).to_string()))
+            .collect()
+    };
+
+    // No call is up.
+    let (status, nothing) = as_phone("GET", "/calls", None);
+    assert_eq!((status, &nothing["call"]), (200, &Value::Null));
+    assert!(nothing["server_now"].is_i64());
+
+    // The phone starts one with two agents, by their names: the first has the floor.
+    let started = did("/calls", json!({ "agents": ["Theo", "mike"] }));
+    assert_eq!(
+        (&started["ok"], &started["changed"], &started["summary"]),
+        (
+            &json!(true),
+            &json!(true),
+            &json!("Started a call with Theo and Mike.")
+        )
+    );
+    let call = &started["call"];
+    let call_id = call["call_id"].as_str().unwrap().to_string();
+    assert!(
+        call_id.starts_with("gcl_") && call_id.len() == 36,
+        "{call_id}"
+    );
+    assert_eq!(
+        (
+            &call["principal"],
+            &call["state"],
+            &call["floor"],
+            &call["revision"]
+        ),
+        (&json!(phone_id), &json!("live"), &json!(theo), &json!(1))
+    );
+    assert_eq!(call["host_id"], host.get("/server-info")["server_id"]);
+    assert_eq!(
+        states(call),
+        pairs(&[(&theo, "active"), (&mike, "invited")])
+    );
+    wait_for("the apps to be told", || changes().len() == 1);
+    let told = changes()[0].clone();
+    assert_eq!(
+        (&told["call_id"], &told["revision"], &told["change"]),
+        (
+            &json!(call_id),
+            &json!(1),
+            &json!({ "action": "start", "session": theo, "by": "" })
+        )
+    );
+    // Each agent finds a quiet word of the Host's about it in its conversation.
+    let noted = said(
+        "assistant",
+        "Group call: a call started with Theo and Mike.",
+    );
+    for session in [&theo, &mike] {
+        wait_for("the notice", || host.conversation(session).contains(&noted));
+        let rows = host.turns(session);
+        let row = rows
+            .iter()
+            .find(|row| row["text"] == noted.1.as_str())
+            .unwrap();
+        assert_eq!(
+            (&row["origin"], &row["role"]),
+            (&json!("system"), &json!("assistant"))
+        );
+        assert!(
+            row["id"].as_str().unwrap().starts_with("call:gcl_"),
+            "{row}"
+        );
+    }
+    assert!(!host.conversation(&nadia).contains(&noted));
+    let (_, up) = as_phone("GET", "/calls", None);
+    assert_eq!(up["call"]["call_id"], call_id);
+
+    // A message of the call for the one who was only asked in: it takes it, is in, and has
+    // the floor.
+    let send = |session: &str, words: &str, id: &str| -> (u16, Value) {
+        as_phone(
+            "POST",
+            "/send",
+            Some(json!({
+                "session": session, "text": words, "client_msg_id": id, "call_id": call_id,
+                "hands_free": true, "force_session": true, "synthesize_audio": false,
+            })),
+        )
+    };
+    let (status, sent) = send(&mike, "word one", "c1");
+    assert_eq!((status, &sent["session"]), (200, &json!(mike)));
+    wait_for("the floor to move", || changes().len() == 2);
+    assert_eq!(
+        changes()[1]["change"],
+        json!({ "action": "route", "session": mike, "by": "" })
+    );
+    let (_, up) = as_phone("GET", "/calls", None);
+    assert_eq!(
+        (&up["call"]["floor"], &up["call"]["revision"]),
+        (&json!(mike), &json!(2))
+    );
+    assert_eq!(
+        states(&up["call"]),
+        pairs(&[(&theo, "active"), (&mike, "active")])
+    );
+
+    // On hold, an agent takes no speech: what is said to it goes to who has the floor.
+    let held = did("/calls/hold", json!({ "agent": "Mike" }));
+    assert_eq!(
+        (&held["summary"], &held["call"]["floor"]),
+        (&json!("Mike is on hold."), &json!(theo))
+    );
+    let (status, sent) = send(&mike, "word two", "c2");
+    assert_eq!((status, &sent["session"]), (200, &json!(theo)));
+    wait_for("the word to arrive", || {
+        host.conversation(&theo).contains(&said("user", "word two"))
+    });
+    assert!(!host.conversation(&mike).contains(&said("user", "word two")));
+    // With everybody on hold nobody can be talked to, and nothing is sent.
+    did("/calls/hold", json!({ "agent": "theo" }));
+    let (status, nobody) = send(&theo, "word three", "c3");
+    assert_eq!(
+        (status, nobody),
+        (
+            409,
+            json!({ "ok": false, "error": "nobody to talk to", "call_id": call_id })
+        )
+    );
+    // A message that says nothing is refused as one, before its call is asked.
+    let none = fetch(
+        &host,
+        &phone,
+        "POST",
+        "/send",
+        &[("Content-Type", "application/json")],
+        json!({ "session": theo, "text": " ", "call_id": call_id })
+            .to_string()
+            .as_bytes(),
+    );
+    assert_eq!((none.status, none.text().as_str()), (400, "empty text"));
+
+    // Somebody is asked in by a name as it is said; with nobody on the floor, the floor is
+    // hers. A name nobody has, two things that are no request.
+    let joined = did("/calls/add", json!({ "agent": "nadja" }));
+    assert_eq!(
+        (&joined["summary"], &joined["call"]["floor"]),
+        (&json!("Nadia joined the call."), &json!(nadia))
+    );
+    wait_for("her notice", || {
+        let hers = said(
+            "assistant",
+            "Group call: you joined the call with Theo and Mike.",
+        );
+        host.conversation(&nadia).contains(&hers)
+    });
+    let (status, unknown) = as_phone("POST", "/calls/add", Some(json!({ "agent": "nobody" })));
+    assert_eq!(
+        (status, unknown),
+        (404, json!({ "ok": false, "error": "unknown agent" }))
+    );
+    let (status, odd) = as_phone("POST", "/calls/dance", Some(json!({ "agent": "theo" })));
+    assert_eq!(
+        (status, &odd["error"]),
+        (400, &json!("unknown action 'dance'"))
+    );
+    let (status, bad) = as_phone("POST", "/calls", Some(json!({ "agents": "theo" })));
+    assert_eq!(
+        (status, bad),
+        (400, json!({ "error": "agents must be a list" }))
+    );
+    let (status, bad) = as_phone("POST", "/calls/add", Some(json!(["theo"])));
+    assert_eq!((status, bad), (400, json!({ "error": "bad json" })));
+
+    // The Host's own tools act on the call that is up, and say which agent asked.
+    let before = changes().len();
+    let (status, back) = host.ask(
+        "POST",
+        "/calls/resume",
+        Some(&json!({ "agent": "theo", "by": mike })),
+    );
+    assert_eq!(
+        (status, &back["summary"]),
+        (200, &json!("Theo is back in the call."))
+    );
+    wait_for("the change to be told", || changes().len() > before);
+    assert_eq!(
+        changes().last().unwrap()["change"],
+        json!({ "action": "resume", "session": theo, "by": mike })
+    );
+    let (_, seen) = host.ask("GET", &format!("/calls?principal={phone_id}"), None);
+    assert_eq!(seen["call"]["call_id"], call_id);
+    // A phone that may only read and send has no calls.
+    let (limited, _) = pair(&host, "Watch", "limited");
+    let (status, _) = host.ask_as(&limited, "GET", "/calls", None);
+    assert_eq!(status, 403);
+
+    // The call is the Host's to keep: a Host that was killed has it as it was.
+    let (_, kept) = as_phone("GET", "/calls", None);
+    host.kill();
+    let host = place.start_with_token("secret");
+    let (_, mut again) = host.ask_as(&phone, "GET", "/calls", None);
+    let mut kept = kept;
+    for read in [&mut again, &mut kept] {
+        read.as_object_mut().unwrap().remove("server_now");
+        read["call"].as_object_mut().unwrap().remove("server_now");
+    }
+    assert_eq!(again, kept);
+
+    // It ends; a message of a call that is over is refused as one, and the phone closes
+    // its call.
+    let (status, ended) = host.ask_as(&phone, "POST", "/calls/end", Some(&json!({})));
+    assert_eq!(
+        (
+            status,
+            &ended["summary"],
+            &ended["call"]["state"],
+            &ended["call"]["reason"]
+        ),
+        (
+            200,
+            &json!("The call has ended."),
+            &json!("ended"),
+            &json!("ended")
+        )
+    );
+    let (status, over) = host.ask_as(
+        &phone,
+        "POST",
+        "/send",
+        Some(&json!({ "session": theo, "text": "word four", "call_id": call_id })),
+    );
+    assert_eq!(
+        (status, over),
+        (
+            409,
+            json!({ "ok": false, "error": "call ended", "call_id": call_id })
+        )
+    );
+    let (status, none) = host.ask_as(&phone, "POST", "/calls/end", Some(&json!({})));
+    assert_eq!(
+        (status, none),
+        (404, json!({ "ok": false, "error": "no live call" }))
+    );
+    let (_, nothing) = host.ask_as(&phone, "GET", "/calls", None);
+    assert_eq!(nothing["call"], Value::Null);
+}
+
+#[test]
 fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
     let place = Place::new("focus");
     let host = place.start();
@@ -11251,7 +11530,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/diagnostics/settings", json!({ "enabled": true })),
         ("/vocab/packs", json!({ "name": "p" })),
         ("/vocab/run", json!({ "session": echo })),
-        ("/calls", json!({ "sessions": [echo] })),
         ("/calls/ring/voip-token", json!({ "token": "t" })),
         ("/calls/ring/answer", json!({ "ring_id": "r" })),
         ("/oracle/contact", json!({ "session": echo })),
