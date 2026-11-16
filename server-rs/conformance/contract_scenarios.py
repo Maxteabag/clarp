@@ -986,4 +986,30 @@ SCENARIOS.append({
     ],
 })
 
+SCENARIOS.append({
+    'id': 'tool-turns',
+    'what': 'a turn in which the agent uses its tools (a command, a file read and a search at once, an edit, a '
+            'command that fails, a tool no Host knows by name): what the conversation shows of each use, whole and '
+            'in the short form an app asks for, and the details of one card when it is opened',
+    'steps': [
+        send('[qa-tools] synthetic work with tools', 'tools-1'),
+        {'op': 'wait_reply', 'after': 'u-tools-1'},
+        {'op': 'quiesce'},
+        LOG,
+        SNAPSHOT,
+        get(f'/log?session={AGENT}&include_tool_details=0', 'the conversation without the details of its tools'),
+        {'op': 'get', 'path': '/message-tool-details?session=' + AGENT + '&message_id={row}',
+         'from_last': {'row': 'turns.1.id'}, 'name': 'the details of the first card'},
+        get(f'/message-tool-details?session={AGENT}&message_id=nothing-of-the-kind', 'the details of nothing'),
+        get(f'/message-tool-details?session={AGENT}', 'the details of no message'),
+        get('/message-tool-details?session=nobody-here&message_id=u-tools-1', 'the details of what nobody has'),
+        # A second turn with tools: its cards are its own.
+        send('[qa-tools] more synthetic work', 'tools-2'),
+        {'op': 'wait_reply', 'after': 'u-tools-2'},
+        {'op': 'quiesce'},
+        get(f'/log?session={AGENT}&include_tool_details=0', 'both turns without the details of their tools'),
+        LOG,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
