@@ -1760,6 +1760,86 @@ TOKEN = 'replay-host-token'
 NOBODY = {'Authorization': ''}
 
 
+SCENARIOS.append({
+    'id': 'the-apps-own-ids',
+    'what': "a message is filed under the id its app gave it: an id that comes with the mark of a message, as "
+            "the phone's ids do, is kept as it is, and one that comes without, as the desk's do, gets the mark; "
+            'the queue and the news of a turn and of the queue name each message as its app named it',
+    'steps': [
+        send(SLOW + 'synthetic ids alfa', 'u-phone-alfa'),
+        {'op': 'wait_busy', 'busy': True},
+        send('synthetic ids bravo', 'u-phone-bravo', queue_if_busy=True),
+        send('synthetic ids charlie', 'desk-charlie', queue_if_busy=True),
+        {**QUEUE, 'name': 'the queue names each as its app named it'},
+        {'op': 'wait_reply', 'after': 'u-phone-alfa'},
+        {'op': 'wait_reply', 'after': 'u-phone-bravo'},
+        {'op': 'wait_reply', 'after': 'u-desk-charlie'},
+        {'op': 'quiesce'},
+        {**LOG, 'name': 'the conversation: each row under the id its app looks for'},
+        {**QUEUE, 'name': 'the queue afterwards'},
+        {**SNAPSHOT, 'name': 'the snapshot afterwards'},
+    ],
+})
+
+
+def by_hand(queue_id, name):
+    return {'op': 'post', 'path': f'/turn-queue/{queue_id}/send', 'body': {}, 'name': name}
+
+
+def taken_back(queue_id, name):
+    return {'op': 'delete', 'path': f'/turn-queue/{queue_id}', 'name': name}
+
+
+SCENARIOS.append({
+    'id': 'the-queue-by-hand',
+    'what': 'what waits is taken back or sent now by its user: by the id its app gave it; nothing is sent past '
+            'a turn that runs; one that is sent by hand runs although the queue is held, and the rest stays '
+            'held; and a hold that holds nothing any more is over without a resume',
+    'steps': [
+        send(SLOW + 'synthetic queue first', 'q-first'),
+        {'op': 'wait_busy', 'busy': True},
+        send('synthetic queue golf', 'q-golf', queue_if_busy=True),
+        send('synthetic queue hotel', 'u-q-hotel', queue_if_busy=True),
+        send('synthetic queue india', 'q-india', queue_if_busy=True),
+        send('synthetic queue juliett', 'q-juliett', queue_if_busy=True),
+        {**QUEUE, 'name': 'four wait'},
+        by_hand('q-india', 'sent by hand while a turn runs'),
+        by_hand('nothing-there', 'what is not there, sent by hand'),
+        taken_back('nothing-there', 'what is not there, taken back'),
+        taken_back('u-q-hotel', 'one is taken back, by the id its app gave it'),
+        taken_back('u-q-hotel', 'taken back a second time'),
+        {**QUEUE, 'name': 'three wait'},
+        post('/stop', {'session': AGENT}),
+        {'op': 'wait_busy', 'busy': False},
+        {'op': 'quiesce', 'held': True},
+        {**QUEUE, 'name': 'three are held'},
+        by_hand('q-india', 'one is sent by hand past the hold, and not the first'),
+        {'op': 'wait_reply', 'after': 'u-q-india'},
+        {'op': 'quiesce', 'held': True},
+        {**QUEUE, 'name': 'two are still held'},
+        {**SNAPSHOT, 'name': 'the snapshot while two are held'},
+        taken_back('q-golf', 'one more is taken back'),
+        {**QUEUE, 'name': 'one is still held'},
+        by_hand('q-juliett', 'the last is sent by hand'),
+        {'op': 'wait_reply', 'after': 'u-q-juliett'},
+        {'op': 'quiesce'},
+        {**QUEUE, 'name': 'nothing waits, and nothing is held'},
+        # A hold that holds one thing ends when that thing is taken back.
+        send(SLOW + 'synthetic queue kilo', 'q-kilo'),
+        {'op': 'wait_busy', 'busy': True},
+        send('synthetic queue lima', 'q-lima', queue_if_busy=True),
+        post('/stop', {'session': AGENT}),
+        {'op': 'wait_busy', 'busy': False},
+        {'op': 'quiesce', 'held': True},
+        {**QUEUE, 'name': 'one is held'},
+        taken_back('q-lima', 'the one thing a hold held is taken back'),
+        {**QUEUE, 'name': 'the hold is over'},
+        {**LOG, 'name': 'the conversation: nothing that was taken back is in it'},
+        {**SNAPSHOT, 'name': 'the snapshot afterwards'},
+    ],
+})
+
+
 def settings(change, name):
     return post('/heartbeat/settings', change, name)
 
