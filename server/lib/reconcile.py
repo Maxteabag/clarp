@@ -323,7 +323,7 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
     return repaired
 
 
-def end_idle_agent_receipts(status: dict[str, Any]) -> dict[str, int]:
+def end_idle_agent_receipts(status: dict[str, Any], *, skip=None, on_deferred=None) -> dict[str, int]:
     """End the ``started`` queue receipts of agents that run no turn.
 
     ``status`` is the runtime's ownership snapshot (turn_dispatch.runtime_status
@@ -332,7 +332,7 @@ def end_idle_agent_receipts(status: dict[str, Any]) -> dict[str, int]:
     does one has_live_work still sees a process for. When the provider turns
     are unknown nothing is ended."""
     from . import turn_queue
-    repaired = turn_queue.reconcile_receipts()
+    repaired = turn_queue.reconcile_receipts(skip=skip, on_deferred=on_deferred)
     provider_turns = set(status.get("provider_turns") or ())
     if "<unknown>" in provider_turns:
         return repaired
@@ -351,14 +351,16 @@ def end_idle_agent_receipts(status: dict[str, Any]) -> dict[str, int]:
     return repaired
 
 
-def end_idle_agent_receipts_now() -> dict[str, int]:
-    """The periodic pass: read the ownership snapshot fresh, then end."""
+def end_idle_agent_receipts_now(*, skip=None, on_deferred=None) -> dict[str, int]:
+    """The periodic pass: read the ownership snapshot fresh, then end.
+
+    ``skip`` and ``on_deferred`` are turn_queue.reconcile_receipts's."""
     if getattr(backends, "_RUNTIME_CLIENT", None) is None:
         from . import turn_dispatch
         status = turn_dispatch.runtime_status()
     else:
         status = backends.runtime_status(max_age=0)
-    return end_idle_agent_receipts(status)
+    return end_idle_agent_receipts(status, skip=skip, on_deferred=on_deferred)
 
 
 def reconcile_all(*, home: pathlib.Path | None = None) -> int:

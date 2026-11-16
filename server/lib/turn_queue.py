@@ -603,8 +603,15 @@ def _save_reap_cursor(name, con, cursor):
     setattr(_REAP_PROGRESS, name, (con, cursor))
 
 
-def reconcile_receipts() -> dict[str, int]:
+def reconcile_receipts(*, skip: Callable[[str], bool] | None = None,
+                       on_deferred: Callable[[str, str], None] | None = None) -> dict[str, int]:
     """Converge one bounded page from exact durable turn evidence.
+
+    ``skip(queue_id)`` lets a periodic caller leave a receipt unexamined this
+    pass, and ``on_deferred(queue_id, reason)`` tells it which ones this pass
+    could not decide. Deciding one reads the agent's state history; a receipt
+    that stays undecidable was read again in full every pass (issue 363).
+    Neither changes what a pass decides about the receipts it does examine.
 
     At most 100 receipts are examined per pass. A connection-local keyset
     cursor advances only after commit and wraps, including past no-turn rows
@@ -665,6 +672,8 @@ def reconcile_receipts() -> dict[str, int]:
                     (row["agent_id"], row["trace_id"])).fetchone()
                 if turn is None:
                     continue
+                if skip is not None and skip(str(row["queue_id"])):
+                    continue  # deferred a moment ago: the caller looks again later
                 launch = _launch_status(row)
                 if launch != "observed":
                     if launch != "retryable":
@@ -697,6 +706,8 @@ def reconcile_receipts() -> dict[str, int]:
             f"reason=durable_turn target={target} turn={turn_id}")
     for queue_id, agent_id, reason in deferred:
         log("queueReceiptDeferred", f"queue={queue_id} agent={agent_id} reason=launch_{reason}")
+        if on_deferred is not None:
+            on_deferred(str(queue_id), str(reason))
     return counts
 
 

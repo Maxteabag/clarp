@@ -15,6 +15,13 @@ class BackgroundJobWatcher:
     # minute is plenty and keeps the per-agent scan off the fast tick.
     STALE_WORK_INTERVAL_SEC = 60.0
     PROVIDER_INTERVAL_SEC = 5.0
+    # A queue receipt the pass could not decide is looked at again after this
+    # long, then after twice that, up to the cap. Deciding one reads the
+    # agent's whole state history, and one that stays undecidable (a message
+    # queued weeks ago for an agent that never ran it) was read again every
+    # minute: 170 MB a pass on a Host with 56 such rows (issue 363).
+    RECEIPT_RECHECK_SEC = 120.0
+    RECEIPT_RECHECK_MAX_SEC = 3600.0
 
     def __init__(self, stream):
         self._statuses: dict[str, tuple[int, str]] = {}
@@ -22,6 +29,8 @@ class BackgroundJobWatcher:
         self._last_id = 0
         self._stale_work_due = 0.0
         self._provider_due = 0.0
+        # queue_id -> (not before, the wait that led there), monotonic seconds.
+        self._receipt_waits: dict[str, tuple[float, float]] = {}
         from .provider_background_jobs import ProviderJobObserver
         self._provider_observer = ProviderJobObserver()
         self._stop = threading.Event()
@@ -51,9 +60,30 @@ class BackgroundJobWatcher:
                 try:
                     # A receipt the ledger never settled must not wait for a
                     # runtime restart to end (turn_queue, idle_agent).
-                    reconcile.end_idle_agent_receipts_now()
+                    reconcile.end_idle_agent_receipts_now(
+                        skip=self._receipt_waiting, on_deferred=self._receipt_deferred)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("idleReceiptSweepFail", exc)
+
+    def _receipt_waiting(self, queue_id: str, *, now: float | None = None) -> bool:
+        """This receipt was undecidable a moment ago; not yet time to look again."""
+        entry = self._receipt_waits.get(queue_id)
+        return entry is not None and (time.monotonic() if now is None else now) < entry[0]
+
+    def _receipt_deferred(self, queue_id: str, reason: str = "", *, now: float | None = None) -> None:
+        """The pass could not decide this receipt: look again later, each time
+        after twice as long, and forget the ones that are no longer deferred."""
+        now = time.monotonic() if now is None else now
+        previous = self._receipt_waits.get(queue_id)
+        wait = self.RECEIPT_RECHECK_SEC if previous is None else min(
+            previous[1] * 2, self.RECEIPT_RECHECK_MAX_SEC)
+        self._receipt_waits[queue_id] = (now + wait, wait)
+        # A receipt that was decided, or is gone, is never deferred again and
+        # so never refreshed: drop it once it is well past its time.
+        stale = [key for key, (due, _wait) in self._receipt_waits.items()
+                 if now - due > 2 * self.RECEIPT_RECHECK_MAX_SEC]
+        for key in stale:
+            del self._receipt_waits[key]
 
     def _tick(self) -> None:
         # Publish managed-job progress before any provider backlog work.
