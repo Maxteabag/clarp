@@ -17,22 +17,23 @@ from lib.herald import DEFAULT_SPEAK_IF_SHORT_CHARS, MAX_SPEAK_IF_SHORT_CHARS, g
 from lib.personalities import get_settings as get_personality_settings, update_settings as update_personality_settings
 
 
-def _expand_completion_user_path(raw: str) -> str | None:
-    """Expand a typed ~user; None means an unknown or malformed username."""
+def _named_user_miss(raw: str) -> bool:
+    """Classify a typed ~user miss without supplying a recovered path."""
     if not raw.startswith("~"):
-        return raw
+        return False
     path = pathlib.Path(raw)
     username = path.parts[0][1:]
     if not username:  # ~ and ~/ use the Host account, whose failures must log.
-        return raw
+        return False
     if "\0" in username:
-        return None
+        return True
     try:
-        return str(path.expanduser())
+        path.expanduser()
     except RuntimeError:
         # expanduser cannot resolve this named user. No recovery/home work
         # is in this catch; its failures retain the handler's diagnostics.
-        return None
+        return True
+    return False
 
 
 class SettingsRoutes:
@@ -115,8 +116,7 @@ class SettingsRoutes:
         # the question is read before the path is recovered.
         inside = raw.endswith("/")
         try:
-            expanded = _expand_completion_user_path(raw)
-            recovered = recover_user_path(expanded) if expanded is not None else None
+            recovered = None if _named_user_miss(raw) else recover_user_path(raw)
         except (OSError, RuntimeError) as e:
             log_exception("dirsPathRefused", e, detail=raw[:200])
             recovered = None
