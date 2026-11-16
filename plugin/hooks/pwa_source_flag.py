@@ -233,12 +233,16 @@ def _build_additional_context(*, app_dispatched: bool, voiced: bool,
     if identity:
         parts.append(identity)
     if voiced:
-        from lib.voice_verbosity import narration_clause
-
         parts.append(_SPEAK_INSTRUCTIONS + _natural_delivery(agent))
-        narration = narration_clause((agent or {}).get("voice_verbosity"))
-        if narration:
-            parts.append(narration)
+        try:
+            from lib.voice_verbosity import narration_clause
+
+            narration = narration_clause((agent or {}).get("voice_verbosity"))
+        except Exception as exc:
+            report("userprompt_hook", "narrationFail", exc)
+        else:
+            if narration:
+                parts.append(narration)
     header = _group_call_header(agent) if app_dispatched else ""
     if header:
         parts.append(header)
