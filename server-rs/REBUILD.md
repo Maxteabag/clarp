@@ -430,8 +430,36 @@ because they say why something did not work on a phone). And with a list that is
 own fields, where this Host keeps nothing of the kind: teams, janitors, what the Host does by itself, what
 transcribes, the voices, the catalogue of models. Held end to end (`tests/host.rs`) and by the scenario
 `app-asks`, whose first run wrote down what the Python Host answers before any of this was written. Still
-asked and not there: the details behind a tool card (`/message-tool-details`), speech itself (`/transcribe`,
-the clips of a spoken reply), portraits, and the screens of settings (usage, logins, updates).
+asked and not there: speech itself (`/transcribe`, the clips of a spoken reply), portraits, and the screens of
+settings (usage, logins, updates).
+
+**A message of the agent is one row, with a card for each tool it calls** (16 Nov 2026). The Python Host
+shows a turn's tool work as cards on the rows of the agent's messages; this Host had a row of its own for every
+use of a tool, with what the tool was given and gave back, whole. Now a conversation is rows of four kinds: a
+message to the agent, a message of the agent, a word of the Host, a row an agent brought along. **A row's item
+is written once and stands where the row stands. What happens to a row afterwards is a part that names it**
+(`Entry::part_of`): the use of a tool its message calls (written when it starts and when it ends), that tool
+work came after it in the same turn, how its turn ended. Three things follow, and each was wrong or costly
+before. A page is counted in rows (a tool's use was two items and a page of fifty held thirty-eight rows). The
+place of a row is found by its id, whatever happened to it since. And whoever asks what is newer is given a
+row again whenever a part of it was written, as it is now: a row is read with its parts (`conversation.rs` in
+`clarp-actor`), and carries the revision of the newest. The Claude reader tells a message when it is whole (it
+stops, another begins, one of its calls is answered, the process ends) and its tools' uses after it; a message
+that only calls tools is a row that says nothing. What was said before tool work was said along the way
+(`phase: commentary`), what is said after it is the agent's final word, and a row that says nothing has no
+phase: the Python Host's rule (`message_writes._row_phases`), written by the actor when the work comes, from
+what the log says the turn has said, so that an attempt before or a restart in between loses nothing. A card
+is the Python Host's (`tools::card`, held by 433 recorded cards and 16 results): the tool's name, what was
+asked of it in the words of its kind, `recorded` while it runs, `ok` or `error` with the first 300 signs of
+what came back, and `interrupted` when its turn was interrupted under it, which the Host writes, not each
+tool's reader. What a tool was given whole and gave back whole stays on the Host. The short form an app asks
+for (`include_tool_details=0`) and the details of one row (`/message-tool-details`) are made of the same
+cards. With this every row a turn writes carries the turn's trace, and the feature `log_turn_summary` is
+listed. Held by the scenario `tool-turns` (five messages with six uses: the first turn is the same on both
+Hosts in every field), by the actor's own tests with Claude Code's stream (a restart in the middle of a
+turn, a kill with a tool running) and by a recorded turn of the real CLI. Still rows by themselves: the calls
+of a tool whose reader does not group them into messages (Codex, until its cells are built) and every call a
+log already holds.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
