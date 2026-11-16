@@ -838,6 +838,13 @@ scenario's 41 steps were answered the same by both Hosts: every refusal of a set
 switch, the cadence before and after somebody spoke. The one difference of that run was the scenario's own:
 it read a snapshot that names a row of the conversation without having read the conversation.
 
+One rule is this Host's own, since its first heartbeat with a real model (17 Nov, 00:09, a Codex agent):
+**a heartbeat's turn counts by its last answer.** The agent remarked twice on its way and then answered that
+nothing was to be done, and by the Python Host's rule, which this Host had, the remarks made the turn count
+as activity: the agent would have been asked at the owner's interval for ever. Counted on the owner's Host,
+that is what happens to most heartbeat turns of the tools that narrate (reference defect R28, reported with
+the counts). Here what an agent remarks on its way to its answer is not what it found.
+
 **What the load still asks for, and the ids an app gives its messages** (16 Nov 2026). Counted again on the
 owner's Host on elitebook, its request log of three days: 175,200 requests over 395 routes, and 99.8 per cent
 of them go to a route this Host has. What is asked and not there, by use: the desk of the account seats
