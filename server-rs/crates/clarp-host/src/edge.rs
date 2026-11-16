@@ -26,6 +26,7 @@ use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::python;
+use clarp_kernel::trust::{self, FailureLimiter};
 use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
@@ -34,6 +35,7 @@ use clarp_protocol::responses::{SelectResponse, SendResponse, StopResponse};
 use clarp_protocol::server_info::{
     Capabilities, ClientCompatibility, Compatibility, Contract, LocalConnection, ServerInfo,
 };
+use futures_util::StreamExt as _;
 use futures_util::stream::{self, Stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -166,6 +168,84 @@ pub struct App {
     pub chip: Arc<crate::chip::Chip>,
     /// The prompts agents are sent at set times.
     pub schedules: Arc<crate::schedules::Desk>,
+    /// What the door keeps count of: who failed to say who they are, and whose right to
+    /// speak was taken away.
+    pub door: Arc<Door>,
+    /// The relay a phone reaches this Host through, when it has one.
+    pub connector: Arc<crate::connector::Connector>,
+}
+
+/// What the door keeps count of.
+pub struct Door {
+    failures: Mutex<FailureLimiter>,
+    since: std::time::Instant,
+    /// The devices whose right to speak was taken away, told to the streams they have open.
+    revoked: tokio::sync::broadcast::Sender<String>,
+}
+
+impl Default for Door {
+    fn default() -> Self {
+        Self {
+            failures: Mutex::default(),
+            since: std::time::Instant::now(),
+            revoked: tokio::sync::broadcast::channel(64).0,
+        }
+    }
+}
+
+impl Door {
+    /// One more failure of an asker. Answers how many seconds it is told to wait: nothing
+    /// while it is within what anybody may fail.
+    fn failed(&self, source: &str) -> u64 {
+        let now = self.since.elapsed().as_secs_f64();
+        let mut failures = self
+            .failures
+            .lock()
+            .unwrap_or_else(|held| held.into_inner());
+        failures.failure(source, now)
+    }
+
+    /// The answer to a caller that did not say who it is, or said it wrongly: that, or, to
+    /// one that fails too often, how long to wait.
+    fn refused(&self, source: &str, too_many: &str) -> Option<Response> {
+        let wait = self.failed(source);
+        (wait > 0).then(|| {
+            let mut refused =
+                ApiError::new(StatusCode::TOO_MANY_REQUESTS, too_many).into_response();
+            if let Ok(wait) = HeaderValue::from_str(&wait.to_string()) {
+                refused.headers_mut().insert(header::RETRY_AFTER, wait);
+            }
+            refused
+        })
+    }
+
+    /// An answer that goes on for as long as its asker listens, ended when the device that
+    /// asked loses its right to speak.
+    fn until_revoked(&self, device_id: String, answer: Response) -> Response {
+        let mut revoked = self.revoked.subscribe();
+        let gone = async move {
+            loop {
+                match revoked.recv().await {
+                    Ok(revoked) if revoked == device_id => return,
+                    Ok(_) => {}
+                    // What was missed may have been this device: the stream ends, and a
+                    // device that may still speak opens it again.
+                    Err(RecvError::Lagged(_)) => return,
+                    Err(RecvError::Closed) => std::future::pending::<()>().await,
+                }
+            }
+        };
+        let (head, body) = answer.into_parts();
+        let body = body.into_data_stream().take_until(Box::pin(gone));
+        Response::from_parts(head, axum::body::Body::from_stream(body))
+    }
+}
+
+/// Whose failure a request's failure is: put on every request, for a handler that counts
+/// failures of its own (a pairing code that is none).
+#[derive(Debug, Clone)]
+pub struct Asker {
+    pub source: String,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -271,6 +351,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::calls::routes())
         .merge(crate::chip::routes())
         .merge(crate::schedules::routes())
+        .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
         .merge(crate::files::routes())
@@ -292,25 +373,19 @@ async fn no_route() -> ApiError {
 
 // ---- who may ask ----------------------------------------------------------------------------
 
-/// The token a request carries: in its header, in its cookie, or in its address.
-fn presented(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
-    let header_text = |name| headers.get(name).and_then(|value| value.to_str().ok());
-    if let Some(bearer) = header_text(header::AUTHORIZATION).and_then(|v| v.strip_prefix("Bearer "))
-    {
-        return Some(bearer.trim().to_string());
-    }
-    let cookie = header_text(header::COOKIE).and_then(|cookies| {
-        cookies
-            .split(';')
-            .find_map(|cookie| cookie.trim().strip_prefix("claude_pwa_token="))
-    });
-    if let Some(cookie) = cookie {
-        return Some(cookie.to_string());
-    }
-    query?
-        .split('&')
-        .find_map(|pair| pair.strip_prefix("token="))
-        .map(str::to_string)
+/// The token in an `Authorization` header: what follows the word `Bearer`, in any case.
+fn bearer(given: &str) -> Option<&str> {
+    let given = python::strip(given);
+    let word = given.get(..7)?;
+    word.eq_ignore_ascii_case("bearer ")
+        .then(|| python::strip(&given[7..]))
+}
+
+/// The token in the cookie a page of this Host keeps it in.
+fn cookie(cookies: &str) -> Option<&str> {
+    let mut cookies = cookies.split(';');
+    let token = cookies.find_map(|cookie| cookie.trim().strip_prefix("claude_pwa_token="));
+    token.map(str::trim)
 }
 
 /// Whether two tokens are the same, in a time that does not depend on where they differ.
@@ -417,42 +492,92 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     !(method == Method::POST && LIMITED_POSTS.contains(&path))
 }
 
-fn who(app: &App, request: &Request) -> Option<Principal> {
+/// A request's headers as the rules of trust read them: each as it was sent, a value byte
+/// for byte.
+fn headers_of(headers: &HeaderMap) -> Vec<(String, String)> {
+    let headers = headers.iter().map(|(name, value)| {
+        let value = value.as_bytes().iter().map(|byte| char::from(*byte));
+        (name.as_str().to_string(), value.collect())
+    });
+    headers.collect()
+}
+
+/// Whether a request is local, and whose failure its failure is.
+///
+/// A request the relay's connector hands in has no socket of its own: it is never local,
+/// and the one it is counted for is the one the relay says it asks for.
+fn asked(request: &Request) -> (bool, String) {
+    let headers = headers_of(request.headers());
+    let peer = request.extensions().get::<ConnectInfo<SocketAddr>>();
+    let peer = peer.map(|peer| peer.0.ip().to_string());
+    let local = peer
+        .as_deref()
+        .is_some_and(|peer| trust::local_request(peer, &headers));
+    let source = trust::failure_source(peer.as_deref().unwrap_or("127.0.0.1"), &headers);
+    (local, source)
+}
+
+/// Who is asking, by the token the request carries: in its header, in its cookie, or, from
+/// this machine, in its address.
+fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
     let expected = &app.config.auth_token;
     if expected.is_empty() {
-        return Some(Principal::Administrator);
+        // A Host without a token is open to this machine, and to nobody else.
+        return local.then_some(Principal::Administrator);
     }
-    let token = presented(request.headers(), request.uri().query())?;
-    // The administrator's token opens the Host only from the machine it runs on. From
-    // anywhere else a device presents a token of its own, which can be taken away again.
-    let local = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .is_some_and(|peer| peer.0.ip().is_loopback());
-    if local && same_token(&token, expected) {
-        return Some(Principal::Administrator);
+    let known = |token: &str| -> Option<Principal> {
+        // The administrator's token opens the Host only from the machine it runs on, and so
+        // does what a turn was given for its agent's tools. From anywhere else a device
+        // presents a token of its own, which can be taken away again.
+        if local && same_token(token, expected) {
+            return Some(Principal::Administrator);
+        }
+        if local && same_token(token, &crate::tool_token(expected)) {
+            return Some(Principal::Tools);
+        }
+        let directory = app.fleet.directory();
+        let device = directory.device(token)?;
+        Some(Principal::Device {
+            device_id: device.device_id.clone(),
+            scope: device.scope,
+        })
+    };
+    let headers = request.headers();
+    let text = |name| headers.get(name).and_then(|value| value.to_str().ok());
+    if let Some(principal) = text(header::AUTHORIZATION).and_then(bearer).and_then(known) {
+        return Some(principal);
     }
-    // What a turn was given for its agent's tools, from this machine as well.
-    if local && same_token(&token, &crate::tool_token(expected)) {
-        return Some(Principal::Tools);
+    if let Some(principal) = text(header::COOKIE).and_then(cookie).and_then(known) {
+        return Some(principal);
     }
-    let directory = app.fleet.directory();
-    let device = directory.device(&token)?;
-    Some(Principal::Device {
-        device_id: device.device_id.clone(),
-        scope: device.scope,
-    })
+    // A token in an address is written into logs and histories on its way: it is taken
+    // only where there is no way.
+    if !local {
+        return None;
+    }
+    let mut pairs = request.uri().query()?.split('&');
+    pairs.find_map(|pair| known(pair.strip_prefix("token=")?.trim()))
 }
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let picture = path.starts_with(PICTURES) || path.starts_with(SIGNED_PICTURES);
     let open = path == EXCHANGE || (picture && request.method() == Method::GET);
+    let (local, source) = asked(&request);
+    let mut device = None;
     let mut response = if open {
+        request.extensions_mut().insert(Asker { source });
         next.run(request).await
     } else {
-        match who(&app, &request) {
-            None => ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response(),
+        match who(&app, &request, local) {
+            None => {
+                let too_many = app
+                    .door
+                    .refused(&source, "too many authentication failures");
+                too_many.unwrap_or_else(|| {
+                    ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response()
+                })
+            }
             Some(principal) if out_of_scope(&principal, request.method(), &path) => {
                 let why = if matches!(principal, Principal::Tools) {
                     "an agent's tools may ask for tools only"
@@ -462,11 +587,21 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 ApiError::new(StatusCode::FORBIDDEN, why).into_response()
             }
             Some(principal) => {
+                if let Principal::Device { device_id, .. } = &principal {
+                    device = Some(device_id.clone());
+                }
+                request.extensions_mut().insert(Asker { source });
                 request.extensions_mut().insert(principal);
                 next.run(request).await
             }
         }
     };
+    // A stream of events a device listens to ends when the device may no longer listen.
+    let streams = response.headers().get(header::CONTENT_TYPE);
+    let streams = streams.is_some_and(|kind| kind.as_bytes().starts_with(b"text/event-stream"));
+    if let Some(device_id) = device.filter(|_| streams) {
+        response = app.door.until_revoked(device_id, response);
+    }
     // What the Host answers is true now and may not be a moment later: nothing keeps it.
     response
         .headers_mut()
@@ -1811,6 +1946,7 @@ struct ExchangeRequest {
 /// the proof.
 async fn pairing_exchange(
     State(app): State<App>,
+    Extension(asker): Extension<Asker>,
     Json(request): Json<ExchangeRequest>,
 ) -> Result<Response, ApiError> {
     match app
@@ -1822,7 +1958,12 @@ async fn pairing_exchange(
             let body = json!({ "device": device, "server": identity(&app) });
             Ok((StatusCode::CREATED, Json(body)).into_response())
         }
-        Err(why) => Err(ApiError::new(StatusCode::CONFLICT, why)),
+        // A code that is none is a failure to say who one is, and counted as one: codes
+        // are not to be guessed at.
+        Err(why) => match app.door.refused(&asker.source, "too many pairing failures") {
+            Some(wait) => Ok(wait),
+            None => Err(ApiError::new(StatusCode::CONFLICT, why)),
+        },
     }
 }
 
@@ -1836,6 +1977,10 @@ struct IssueRequest {
     /// The address the device will reach this Host at. With it the answer carries the link
     /// that pairs a device when it is opened there.
     url: Option<String>,
+    /// The device will reach this Host through its relay: the address is the relay's for
+    /// this Host.
+    #[serde(default)]
+    relay: bool,
 }
 
 /// The administrator has a code made for a device.
@@ -1845,6 +1990,13 @@ async fn pairing_issue(
 ) -> Result<Json<Value>, ApiError> {
     let scope = Scope::parse(&request.scope)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "scope must be full or limited"))?;
+    let through_the_relay = if request.relay {
+        let none = "enable the managed relay before pairing through it";
+        let relay = app.connector.pairing_url();
+        Some(relay.ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, none))?)
+    } else {
+        None
+    };
     let ttl = request.ttl_seconds.unwrap_or(pairing::DEFAULT_TTL_SECONDS);
     let issued = app
         .fleet
@@ -1858,7 +2010,8 @@ async fn pairing_issue(
         "created_at": issued.created_at,
         "expires_at": issued.expires_at,
     });
-    if let Some(url) = request.url.filter(|url| !url.trim().is_empty()) {
+    let url = through_the_relay.or(request.url);
+    if let Some(url) = url.filter(|url| !url.trim().is_empty()) {
         let uri = format!(
             "clarp://pair?name={}&url={}&code={}",
             ids::in_a_link(&app.config.name),
@@ -1896,7 +2049,9 @@ async fn revoke_device(
     if device_id.is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "device_id required"));
     }
-    if app.fleet.revoke(device_id).await? {
+    if app.fleet.revoke(device_id.clone()).await? {
+        // What the device still listens to ends now, not when it next asks.
+        let _ = app.door.revoked.send(device_id);
         Ok(Json(json!({ "ok": true })))
     } else {
         Err(ApiError::new(StatusCode::NOT_FOUND, "device not found"))
@@ -2030,26 +2185,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_token_is_found_in_the_header_the_cookie_or_the_address() {
-        let mut headers = HeaderMap::new();
-        assert_eq!(presented(&headers, None), None);
+    fn a_token_is_read_from_the_header_and_from_the_cookie() {
+        assert_eq!(bearer("Bearer h-token"), Some("h-token"));
+        assert_eq!(bearer("  bearer   h-token  "), Some("h-token"));
+        assert_eq!(bearer("BEARER h-token"), Some("h-token"));
+        assert_eq!(bearer("Bearer"), None);
+        assert_eq!(bearer("Basic h-token"), None);
+        assert_eq!(bearer("Bearerh-token"), None);
+        assert_eq!(bearer(""), None);
+        assert_eq!(cookie("x=1; claude_pwa_token=c-token"), Some("c-token"));
+        assert_eq!(cookie("claude_pwa_token= c-token ; y=2"), Some("c-token"));
+        assert_eq!(cookie("x=1; y=2"), None);
+        assert_eq!(cookie(""), None);
+    }
+
+    #[test]
+    fn a_request_is_counted_for_whom_a_proxy_on_this_machine_says_it_asks() {
+        let from = |peer: Option<&str>, headers: &[(&str, &str)]| {
+            let mut request = Request::new(axum::body::Body::empty());
+            for (name, value) in headers {
+                let name = axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap();
+                request
+                    .headers_mut()
+                    .insert(name, HeaderValue::from_str(value).unwrap());
+            }
+            if let Some(peer) = peer {
+                let peer: SocketAddr = format!("{peer}:4711").parse().unwrap();
+                request.extensions_mut().insert(ConnectInfo(peer));
+            }
+            asked(&request)
+        };
+        // A program on this machine, and one elsewhere.
         assert_eq!(
-            presented(&headers, Some("a=1&token=q-token")).as_deref(),
-            Some("q-token")
+            from(Some("127.0.0.1"), &[]),
+            (true, "127.0.0.1".to_string())
         );
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_static("x=1; claude_pwa_token=c-token"),
-        );
+        assert_eq!(from(Some("10.0.0.5"), &[]), (false, "10.0.0.5".to_string()));
+        // A proxy on this machine hands on what somebody else asked.
+        let handed_on = [("x-forwarded-for", "203.0.113.7")];
         assert_eq!(
-            presented(&headers, Some("token=q-token")).as_deref(),
-            Some("c-token")
+            from(Some("127.0.0.1"), &handed_on),
+            (false, "203.0.113.7".to_string())
         );
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Bearer h-token"),
+        // A caller from elsewhere is not believed about whom it asks for.
+        assert_eq!(
+            from(Some("10.0.0.5"), &handed_on),
+            (false, "10.0.0.5".to_string())
         );
-        assert_eq!(presented(&headers, None).as_deref(), Some("h-token"));
+        // What the relay's connector hands in has no socket: it is never local, whatever
+        // it carries, and it is counted for whom the relay says it asks.
+        assert_eq!(from(None, &[]), (false, "127.0.0.1".to_string()));
+        assert_eq!(from(None, &handed_on), (false, "203.0.113.7".to_string()));
+        // A page loaded from elsewhere that asks this machine is not this machine.
+        assert!(!from(Some("127.0.0.1"), &[("origin", "https://evil.example")]).0);
+        assert!(from(Some("127.0.0.1"), &[("origin", "http://localhost:7690")]).0);
+    }
+
+    #[test]
+    fn the_door_tells_an_asker_that_fails_too_often_to_wait() {
+        let door = Door::default();
+        for _ in 0..20 {
+            assert!(door.refused("203.0.113.7", "too many").is_none());
+        }
+        let wait = door.refused("203.0.113.7", "too many").unwrap();
+        assert_eq!(wait.status(), StatusCode::TOO_MANY_REQUESTS);
+        let seconds = wait.headers()[header::RETRY_AFTER].to_str().unwrap();
+        assert!(matches!(seconds, "60" | "59"), "{seconds}");
+        // Another asker is not kept waiting for it.
+        assert!(door.refused("198.51.100.1", "too many").is_none());
     }
 
     #[test]

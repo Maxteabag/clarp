@@ -12968,3 +12968,656 @@ fn an_agents_portraits_are_the_picture_it_wears() {
     );
     assert_eq!(status, 501, "{why}");
 }
+
+// ---- the connection relay --------------------------------------------------------------------
+
+use clarp_kernel::connector as relay_rules;
+use tokio_tungstenite::tungstenite;
+
+/// A stand-in for the relay: what the Host's connector dials, and the side of the frames a
+/// phone's requests are written on. It speaks no TLS and listens on this machine only.
+struct StandInWorker {
+    listener: TcpListener,
+    /// Where the Host is told to dial.
+    address: String,
+}
+
+/// One session of a Host with the stand-in.
+struct Session {
+    socket: tungstenite::WebSocket<TcpStream>,
+    /// What the Host asked for when it dialled: the path with its name and its key.
+    dialled: String,
+    next: u32,
+}
+
+/// An answer that came up a session.
+struct Answered {
+    status: u16,
+    headers: Value,
+    body: Vec<u8>,
+    /// Whether the answer ended, or was given up.
+    ended: bool,
+}
+
+impl Answered {
+    fn json(&self) -> Value {
+        serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    }
+}
+
+impl StandInWorker {
+    fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = format!("ws://{}", listener.local_addr().unwrap());
+        Self { listener, address }
+    }
+
+    /// Waits for a Host to dial, for so long at most, and takes its session.
+    fn session_within(&self, seconds: u64) -> Option<Session> {
+        let deadline = Instant::now() + Duration::from_secs(seconds);
+        let stream = loop {
+            match self.listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(_) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => return None,
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        let dialled = Arc::new(Mutex::new(String::new()));
+        let asked = dialled.clone();
+        // The shape of the answer is the crate's own.
+        #[allow(clippy::result_large_err)]
+        let noted = move |request: &tungstenite::handshake::server::Request,
+                          response: tungstenite::handshake::server::Response| {
+            *asked.lock().unwrap() = request.uri().to_string();
+            Ok(response)
+        };
+        let socket = tungstenite::accept_hdr(stream, noted).ok()?;
+        let dialled = dialled.lock().unwrap().clone();
+        Some(Session {
+            socket,
+            dialled,
+            next: 1,
+        })
+    }
+
+    fn session(&self) -> Session {
+        self.session_within(20).expect("the Host dials its relay")
+    }
+}
+
+impl Session {
+    fn tell(&mut self, frame: Vec<u8>) {
+        self.socket
+            .send(tungstenite::Message::Binary(frame.into()))
+            .unwrap();
+    }
+
+    /// The next frame the Host says: its kind, its stream, and what it carries. What is no
+    /// frame (the Host asking whether the relay is there) is passed over.
+    fn frame(&mut self) -> (u8, u32, Vec<u8>) {
+        loop {
+            match self.socket.read().expect("the Host says something") {
+                tungstenite::Message::Binary(data) => {
+                    let (kind, sid, payload) = relay_rules::parsed(&data).unwrap();
+                    return (kind, sid, payload.to_vec());
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    /// A phone asks: the frames of its request go down, and the number of its stream is
+    /// answered.
+    fn ask(&mut self, method: &str, path: &str, headers: &[(&str, &str)], body: &[u8]) -> u32 {
+        let sid = self.next;
+        self.next += 1;
+        let mut named = serde_json::Map::new();
+        for (name, value) in headers {
+            named.insert((*name).to_string(), json!(value));
+        }
+        let meta = json!({ "method": method, "path": path, "headers": named });
+        self.tell(relay_rules::json_frame(relay_rules::REQ, sid, &meta));
+        for part in body.chunks(7) {
+            self.tell(relay_rules::frame(relay_rules::REQ_BODY, sid, part));
+        }
+        self.tell(relay_rules::frame(relay_rules::REQ_END, sid, &[]));
+        sid
+    }
+
+    /// The head of the answer on a stream.
+    fn head(&mut self, sid: u32) -> (u16, Value) {
+        let (kind, of, payload) = self.frame();
+        assert_eq!((kind, of), (relay_rules::RES_HEAD, sid));
+        let head: Value = serde_json::from_slice(&payload).unwrap();
+        let status = u16::try_from(head["status"].as_u64().unwrap()).unwrap();
+        (status, head["headers"].clone())
+    }
+
+    /// The whole answer on a stream: its head, its body, and its end.
+    fn answer(&mut self, sid: u32) -> Answered {
+        let (status, headers) = self.head(sid);
+        let mut body = Vec::new();
+        loop {
+            let (kind, of, payload) = self.frame();
+            assert_eq!(of, sid);
+            match kind {
+                relay_rules::RES_BODY => body.extend_from_slice(&payload),
+                relay_rules::RES_END | relay_rules::ABORT => {
+                    let ended = kind == relay_rules::RES_END;
+                    return Answered {
+                        status,
+                        headers,
+                        body,
+                        ended,
+                    };
+                }
+                other => panic!("a frame of kind {other:#x} in an answer"),
+            }
+        }
+    }
+
+    /// A phone asks and is answered.
+    fn asked(
+        &mut self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Answered {
+        let sid = self.ask(method, path, headers, body);
+        self.answer(sid)
+    }
+
+    /// A phone asks with the token of its pairing.
+    fn get_as(&mut self, token: &str, path: &str) -> Answered {
+        let bearer = format!("Bearer {token}");
+        self.asked("GET", path, &[("authorization", &bearer)], b"")
+    }
+}
+
+/// The owner's file that turns the relay on, and the relay's name for the Host beside it.
+fn relay_settings(place: &Place, mode: u32) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = place.root.join("conf");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("config.toml");
+    std::fs::write(&file, "[network]\nrelay_enabled = true\n").unwrap();
+    let key = "ab".repeat(32);
+    let said = json!({ "url": "https://relay.example", "host_id": "elitebook-test", "key": key });
+    let credential = dir.join("relay.json");
+    std::fs::write(&credential, said.to_string()).unwrap();
+    std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(mode)).unwrap();
+    file
+}
+
+#[test]
+fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("relayed");
+    let settings = relay_settings(&place, 0o600);
+    let worker = StandInWorker::new();
+    let host = place.start_in(
+        ADMIN,
+        &["--relay-config", settings.to_str().unwrap()],
+        &[("CLARP_RELAY_DIAL", &worker.address)],
+    );
+    // The Host dials by itself, under its name, with its key.
+    let mut session = worker.session();
+    let key = "ab".repeat(32);
+    assert_eq!(
+        session.dialled,
+        format!("/connect?host=elitebook-test&key={key}")
+    );
+    wait_for("the relay to be connected", || {
+        host.get("/network/relay")["state"] == "connected"
+    });
+    let status = host.get("/network/relay");
+    assert_eq!(
+        status,
+        json!({
+            "configured": true,
+            "url": "https://relay.example",
+            "host_id": "elitebook-test",
+            "pairing_url": "https://relay.example/h/elitebook-test",
+            "enabled": true,
+            "state": "connected",
+        })
+    );
+    assert!(!status.to_string().contains(&key));
+    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["network", "relay", "status", "--host", &host.address])
+        .env("CLARP_HOST_TOKEN", ADMIN)
+        .output()
+        .unwrap();
+    let shown: Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert_eq!(shown, status);
+
+    // A phone is paired through the relay: the link names the relay's address for this
+    // Host, and the phone hands its code in through the relay, with a body, without a token.
+    let issued = host.post(
+        "/pairing/issue",
+        json!({ "device_name": "Relayed phone", "scope": "full", "relay": true }),
+    );
+    assert_eq!(issued["url"], "https://relay.example/h/elitebook-test");
+    let link = issued["uri"].as_str().unwrap();
+    assert!(
+        link.starts_with("clarp://pair?name=")
+            && link.contains("&url=https%3A%2F%2Frelay.example%2Fh%2Felitebook-test&code="),
+        "{link}"
+    );
+    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["pair", "--relay", "--host", &host.address])
+        .env("CLARP_HOST_TOKEN", ADMIN)
+        .output()
+        .unwrap();
+    let shown = String::from_utf8_lossy(&shown.stdout).into_owned();
+    assert!(
+        shown.contains("&url=https%3A%2F%2Frelay.example%2Fh%2Felitebook-test&code="),
+        "{shown}"
+    );
+    let phone = [
+        ("content-type", "application/json"),
+        ("x-forwarded-for", "203.0.113.7"),
+        ("x-forwarded-proto", "https"),
+        ("x-forwarded-prefix", "/h/elitebook-test"),
+        ("x-clarp-client", "ios/141 contract=99"),
+    ];
+    let code = json!({ "code": issued["code"], "device_name": "" }).to_string();
+    let paired = session.asked("POST", "/pairing/exchange", &phone, code.as_bytes());
+    assert_eq!(
+        (paired.status, paired.ended),
+        (201, true),
+        "{}",
+        paired.json()
+    );
+    let paired = paired.json();
+    let token = paired["device"]["token"].as_str().unwrap().to_string();
+    let device_id = paired["device"]["device_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        paired["server"]["server_id"],
+        host.get("/server-info")["server_id"]
+    );
+
+    // With its own token the phone is answered, as from anywhere.
+    let info = session.get_as(&token, "/server-info");
+    assert_eq!(info.status, 200);
+    assert_eq!(info.headers["content-type"], "application/json");
+    assert_eq!(info.headers["cache-control"], "no-store");
+    assert_eq!(info.headers.get("content-length"), None, "{}", info.headers);
+    assert_eq!(info.json()["server_id"], paired["server"]["server_id"]);
+    assert_eq!(session.get_as(&token, "/agents/snapshot?x=1").status, 200);
+
+    // What came through the relay is from elsewhere, whoever sent it: the administrator's
+    // token opens nothing there, and neither does what a turn is given for its tools.
+    assert_eq!(host.ask("GET", "/agents/snapshot", None).0, 200);
+    let refused = session.get_as(ADMIN, "/agents/snapshot");
+    assert_eq!(
+        (refused.status, refused.json()),
+        (401, json!({ "error": "unauthorized" }))
+    );
+    let in_the_address = format!("/agents/snapshot?token={ADMIN}");
+    assert_eq!(session.asked("GET", &in_the_address, &[], b"").status, 401);
+    let cookie = format!("claude_pwa_token={ADMIN}");
+    assert_eq!(
+        session
+            .asked("GET", "/agents/snapshot", &[("cookie", &cookie)], b"")
+            .status,
+        401
+    );
+    assert_eq!(
+        session.asked("GET", "/agents/snapshot", &[], b"").status,
+        401
+    );
+    // A phone's token is taken in its header and in its cookie, and not in its address.
+    let cookie = format!("claude_pwa_token={token}");
+    assert_eq!(
+        session
+            .asked("GET", "/agents/snapshot", &[("cookie", &cookie)], b"")
+            .status,
+        200
+    );
+    let in_the_address = format!("/agents/snapshot?token={token}");
+    assert_eq!(session.asked("GET", &in_the_address, &[], b"").status, 401);
+
+    // The same holds at the door for whatever a proxy on this machine hands on: the socket
+    // is this machine's, and the request is not.
+    let direct = |token: &str, path: &str, headers: &[(&str, &str)]| {
+        fetch(&host, token, "GET", path, headers, b"").status
+    };
+    assert_eq!(direct(ADMIN, "/agents/snapshot", &[]), 200);
+    for sign in [
+        ("X-Forwarded-For", "203.0.113.7"),
+        ("Tailscale-User-Login", "owner@example.com"),
+        ("CF-Connecting-IP", "203.0.113.7"),
+        ("Forwarded", "for=203.0.113.7"),
+        ("X-Real-IP", "203.0.113.7"),
+        ("X-Clarp-Transport", "relay"),
+        ("Origin", "https://evil.example"),
+        ("Sec-Fetch-Site", "cross-site"),
+    ] {
+        assert_eq!(direct(ADMIN, "/agents/snapshot", &[sign]), 401, "{sign:?}");
+        assert_eq!(direct(&token, "/agents/snapshot", &[sign]), 200, "{sign:?}");
+    }
+    assert_eq!(
+        direct(
+            ADMIN,
+            "/agents/snapshot",
+            &[("Origin", "http://localhost:7690")]
+        ),
+        200
+    );
+    // From this machine itself a token may stand in the address; handed on, it may not.
+    assert_eq!(
+        direct("", &format!("/agents/snapshot?token={ADMIN}"), &[]),
+        200
+    );
+    assert_eq!(
+        direct("", &format!("/agents/snapshot?token={token}"), &[]),
+        200
+    );
+    let handed_on = [("X-Forwarded-For", "203.0.113.7")];
+    assert_eq!(
+        direct("", &format!("/agents/snapshot?token={token}"), &handed_on),
+        401
+    );
+
+    // What is no route is answered as at the door, and what is no request at all is the
+    // connector's to refuse.
+    let nowhere = session.get_as(&token, "/no/such/route");
+    assert_eq!(
+        (nowhere.status, nowhere.body.as_slice()),
+        (404, &b"not found"[..])
+    );
+    let meta = json!({ "method": 5, "path": "/server-info", "headers": {} });
+    session.tell(relay_rules::json_frame(relay_rules::REQ, 900, &meta));
+    session.tell(relay_rules::frame(relay_rules::REQ_END, 900, &[]));
+    let failed = session.answer(900);
+    assert_eq!(
+        (failed.status, failed.json()),
+        (502, json!({ "error": "Host request failed" }))
+    );
+
+    // The stream of events flows through the relay for as long as the phone listens.
+    let session_name = host.new_agent("Echo");
+    let bearer = format!("Bearer {token}");
+    let listening = session.ask(
+        "GET",
+        "/events",
+        &[("authorization", &bearer), ("accept", "text/event-stream")],
+        b"",
+    );
+    let (status, headers) = session.head(listening);
+    assert_eq!(status, 200);
+    assert!(
+        headers["content-type"]
+            .as_str()
+            .unwrap()
+            .starts_with("text/event-stream"),
+        "{headers}"
+    );
+    host.send(&session_name, "through the relay", "relayed-1");
+    let mut heard = String::new();
+    while !heard.contains("relayed-1") {
+        let (kind, of, payload) = session.frame();
+        assert_eq!((kind, of), (relay_rules::RES_BODY, listening), "{heard}");
+        heard.push_str(&String::from_utf8_lossy(&payload));
+    }
+    // Other requests are answered while it flows: the streams do not wait for each other.
+    let meanwhile = session.ask("GET", "/server-info", &[("authorization", &bearer)], b"");
+    let mut answered = false;
+    while !answered {
+        let (kind, of, _) = session.frame();
+        answered = of == meanwhile && kind == relay_rules::RES_END;
+    }
+
+    // A phone that asks for a WebSocket is told that this Host could not open it, and what
+    // the relay says of a stream this session never had is answered so that it lets go.
+    let socket = json!({ "path": "/terminal/echo", "headers": { "authorization": bearer } });
+    session.tell(relay_rules::json_frame(relay_rules::WS_OPEN, 901, &socket));
+    let mut closed = None;
+    while closed.is_none() {
+        let (kind, of, payload) = session.frame();
+        if of == 901 {
+            assert_eq!(kind, relay_rules::WS_CLOSE);
+            closed = Some(serde_json::from_slice::<Value>(&payload).unwrap());
+        }
+    }
+    assert_eq!(
+        closed,
+        Some(json!({ "code": 1011, "reason": "Host WebSocket failed" }))
+    );
+    session.tell(relay_rules::frame(relay_rules::WS_MSG, 902, b"\x01hello"));
+    session.tell(relay_rules::frame(relay_rules::REQ_END, 903, &[]));
+    let (mut gone, mut given_up) = (None, false);
+    while gone.is_none() || !given_up {
+        let (kind, of, payload) = session.frame();
+        match (kind, of) {
+            (relay_rules::WS_CLOSE, 902) => gone = serde_json::from_slice::<Value>(&payload).ok(),
+            (relay_rules::ABORT, 903) => given_up = true,
+            (relay_rules::RES_BODY, of) if of == listening => {}
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(
+        gone,
+        Some(json!({ "code": 1012, "reason": "Host stream gone" }))
+    );
+
+    // The phone's right to speak is taken away: what it listens to ends now, and its token
+    // opens nothing any more.
+    host.post("/paired-devices/revoke", json!({ "device_id": device_id }));
+    let mut ended = false;
+    while !ended {
+        let (kind, of, _) = session.frame();
+        assert_eq!(of, listening);
+        ended = kind == relay_rules::RES_END;
+        assert!(ended || kind == relay_rules::RES_BODY, "{kind:#x}");
+    }
+    assert_eq!(session.get_as(&token, "/server-info").status, 401);
+
+    // Whoever fails to say who it is too often is told to wait, each asker for itself: the
+    // relay says for whom it asks.
+    let stranger = [
+        ("authorization", "Bearer guessed"),
+        ("x-forwarded-for", "198.51.100.9"),
+    ];
+    let mut statuses = Vec::new();
+    for _ in 0..21 {
+        statuses.push(session.asked("GET", "/server-info", &stranger, b"").status);
+    }
+    assert_eq!(statuses[..20], [401; 20]);
+    let told = session.asked("GET", "/server-info", &stranger, b"");
+    assert_eq!(told.status, 429);
+    assert_eq!(
+        told.json(),
+        json!({ "error": "too many authentication failures" })
+    );
+    let wait: u64 = told.headers["retry-after"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&wait), "{wait}");
+    let another = [
+        ("authorization", "Bearer guessed"),
+        ("x-forwarded-for", "198.51.100.10"),
+    ];
+    assert_eq!(
+        session.asked("GET", "/server-info", &another, b"").status,
+        401
+    );
+    // And so is whoever guesses at pairing codes.
+    let guess = json!({ "code": "clp_nothing", "device_name": "" }).to_string();
+    let guesser = [
+        ("content-type", "application/json"),
+        ("x-forwarded-for", "198.51.100.11"),
+    ];
+    for _ in 0..20 {
+        let refused = session.asked("POST", "/pairing/exchange", &guesser, guess.as_bytes());
+        assert_eq!(refused.status, 409);
+    }
+    let told = session.asked("POST", "/pairing/exchange", &guesser, guess.as_bytes());
+    assert_eq!(
+        (told.status, told.json()),
+        (429, json!({ "error": "too many pairing failures" }))
+    );
+
+    // The socket is lost without a word: the Host dials again at once, by itself, and
+    // serves again. What it knew of the loss it says to whoever asks.
+    let listening = session.ask("GET", "/events", &[("authorization", "Bearer x")], b"");
+    assert_eq!(session.head(listening).0, 401);
+    drop(session);
+    let lost_at = Instant::now();
+    let mut session = worker.session();
+    assert!(
+        lost_at.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        lost_at.elapsed()
+    );
+    wait_for("the relay to be connected again", || {
+        host.get("/network/relay")["state"] == "connected"
+    });
+    let loss = host.get("/network/relay")["last_loss"].clone();
+    assert_eq!(loss["error_type"], "ConnectionClosedError");
+    assert_eq!(
+        (&loss["code"], &loss["rcvd_code"]),
+        (&json!(1006), &json!(null))
+    );
+    assert_eq!(loss["session"], 1);
+    assert!(loss["session_age_s"].as_f64().unwrap() > 0.0, "{loss}");
+    assert_eq!(session.asked("GET", "/server-info", &[], b"").status, 401);
+
+    // Another connector takes this Host's name: the relay says so as it closes, and the
+    // Host does not race it.
+    let replaced = tungstenite::protocol::CloseFrame {
+        code: tungstenite::protocol::frame::coding::CloseCode::from(1012),
+        reason: "replaced".into(),
+    };
+    session.socket.close(Some(replaced)).unwrap();
+    while session.socket.read().is_ok() {}
+    drop(session);
+    let replaced_at = Instant::now();
+    wait_for("the Host to wait before it dials again", || {
+        host.get("/network/relay")["state"] == "reconnecting"
+    });
+    let loss = host.get("/network/relay")["last_loss"].clone();
+    assert_eq!(
+        (&loss["rcvd_code"], &loss["rcvd_reason"], &loss["session"]),
+        (&json!(1012), &json!("replaced"), &json!(2)),
+        "{loss}"
+    );
+    let mut session = worker.session();
+    let waited = replaced_at.elapsed();
+    assert!(
+        waited > Duration::from_secs(4) && waited < Duration::from_secs(9),
+        "{waited:?}"
+    );
+    assert_eq!(session.asked("GET", "/server-info", &[], b"").status, 401);
+}
+
+#[test]
+fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
+    // A Host that is told of no relay has none, and pairs through none.
+    let place = Place::new("unrelayed");
+    let host = place.start_with_token("the-administrators-token");
+    assert_eq!(
+        host.get("/network/relay"),
+        json!({ "enabled": false, "state": "disabled" })
+    );
+    let (status, why) = host.ask(
+        "POST",
+        "/pairing/issue",
+        Some(&json!({ "device_name": "Phone", "scope": "full", "relay": true })),
+    );
+    assert_eq!(
+        (status, why["error"].as_str()),
+        (
+            400,
+            Some("enable the managed relay before pairing through it")
+        )
+    );
+    drop(host);
+
+    // The relay's key in a file others may read is not used, and the Host says why. It
+    // serves all the same: a relay that cannot be used keeps no agent from working.
+    let place = Place::new("relay-open-file");
+    let settings = relay_settings(&place, 0o644);
+    let worker = StandInWorker::new();
+    let host = place.start_in(
+        "the-administrators-token",
+        &["--relay-config", settings.to_str().unwrap()],
+        &[("CLARP_RELAY_DIAL", &worker.address)],
+    );
+    assert_eq!(
+        host.get("/network/relay"),
+        json!({
+            "configured": false,
+            "enabled": true,
+            "state": "invalid",
+            "error": "relay credential file must be private (chmod 600)",
+        })
+    );
+    assert!(worker.session_within(2).is_none(), "nothing is dialled");
+    host.new_agent("Echo");
+    drop(host);
+
+    // A Host anybody on this machine may speak to is not put where anybody can reach it.
+    let place = Place::new("relay-no-token");
+    let settings = relay_settings(&place, 0o600);
+    let host = place.start_in(
+        "",
+        &["--relay-config", settings.to_str().unwrap()],
+        &[("CLARP_RELAY_DIAL", &worker.address)],
+    );
+    let status = host.get("/network/relay");
+    assert_eq!(
+        (&status["state"], &status["error"]),
+        (
+            &json!("invalid"),
+            &json!("relay networking requires authentication")
+        )
+    );
+    assert!(worker.session_within(2).is_none(), "nothing is dialled");
+    // And such a Host is open to this machine only: what a proxy hands on is refused.
+    assert_eq!(
+        fetch(&host, "", "GET", "/agents/snapshot", &[], b"").status,
+        200
+    );
+    let handed_on = [("X-Forwarded-For", "203.0.113.7")];
+    assert_eq!(
+        fetch(&host, "", "GET", "/agents/snapshot", &handed_on, b"").status,
+        401
+    );
+    drop(host);
+
+    // The switch is the owner's file's: off, nothing is read and nothing dialled.
+    let place = Place::new("relay-off");
+    let settings = relay_settings(&place, 0o600);
+    std::fs::write(&settings, "[network]\nrelay_enabled = false\n").unwrap();
+    let host = place.start_in(
+        "the-administrators-token",
+        &["--relay-config", settings.to_str().unwrap()],
+        &[("CLARP_RELAY_DIAL", &worker.address)],
+    );
+    assert_eq!(
+        host.get("/network/relay"),
+        json!({ "enabled": false, "state": "disabled" })
+    );
+    assert!(worker.session_within(1).is_none(), "nothing is dialled");
+    // A stand-in for the relay is on this machine, or it is none.
+    let elsewhere = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args(["--data", place.root.join("other").to_str().unwrap()])
+        .env("CLARP_RELAY_DIAL", "ws://relay.example:80")
+        .output()
+        .unwrap();
+    assert!(!elsewhere.status.success());
+    let said = String::from_utf8_lossy(&elsewhere.stderr).into_owned();
+    assert!(said.contains("an address on this machine"), "{said}");
+}

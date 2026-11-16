@@ -20,6 +20,7 @@ pub mod artifact_tool;
 pub mod calls;
 pub mod chip;
 pub mod config;
+pub mod connector;
 pub mod edge;
 pub mod faces;
 pub mod files;

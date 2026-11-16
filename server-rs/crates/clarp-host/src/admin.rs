@@ -13,9 +13,14 @@ use serde_json::{Value, json};
 use crate::ids;
 
 pub const PAIR_USAGE: &str =
-    "usage: clarp-host pair --url URL [--name DEVICE] [--scope full|limited] \
+    "usage: clarp-host pair --url URL | --relay [--name DEVICE] [--scope full|limited] \
 [--ttl SECONDS] [--host ADDR:PORT]
-URL is the address the device will reach this Host at. The administrator's token is read from
+URL is the address the device will reach this Host at; with --relay it is the relay's address
+for this Host. The administrator's token is read from CLARP_HOST_TOKEN.";
+
+pub const NETWORK_USAGE: &str = "usage: clarp-host network relay status [--host ADDR:PORT]
+Says whether this Host is reached through the connection relay, how the connection stands, and
+the address a phone is paired with through it. The administrator's token is read from
 CLARP_HOST_TOKEN.";
 
 pub const PEER_USAGE: &str =
@@ -914,10 +919,12 @@ pub fn pair(mut args: impl Iterator<Item = String>, token: &str) -> Result<Strin
     let (mut url, mut name, mut scope, mut ttl) =
         (None, "iPhone".to_string(), "full".to_string(), 600i64);
     let mut host = "127.0.0.1:7690".to_string();
+    let mut relay = false;
     while let Some(arg) = args.next() {
         let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
         match arg.as_str() {
             "--url" => url = Some(value("an address")?),
+            "--relay" => relay = true,
             "--name" => name = value("a name")?,
             "--scope" => scope = value("full or limited")?,
             "--ttl" => {
@@ -929,8 +936,14 @@ pub fn pair(mut args: impl Iterator<Item = String>, token: &str) -> Result<Strin
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    let url = url.ok_or("pairing needs --url: the address the device will reach this Host at")?;
-    let asked = json!({ "device_name": name, "scope": scope, "ttl_seconds": ttl, "url": url });
+    let mut asked = json!({ "device_name": name, "scope": scope, "ttl_seconds": ttl });
+    if relay {
+        // The Host knows its relay's address for it: nothing is read here.
+        asked["relay"] = json!(true);
+    } else {
+        let none = "pairing needs --url: the address the device will reach this Host at";
+        asked["url"] = json!(url.ok_or(none)?);
+    }
     let (status, answer) = post(&host, "/pairing/issue", token, &asked)?;
     if status != 200 {
         let why = answer["error"].as_str().unwrap_or("no reason given");
@@ -942,6 +955,27 @@ pub fn pair(mut args: impl Iterator<Item = String>, token: &str) -> Result<Strin
     Ok(format!(
         "{uri}\nOpen this link on the device. It expires in {ttl} seconds and works once."
     ))
+}
+
+/// `clarp-host network relay status`: how the running Host stands with its relay, as the
+/// Python Host's own command shows it.
+pub fn network(mut args: impl Iterator<Item = String>, token: &str) -> Result<String, String> {
+    let asked = (args.next(), args.next());
+    if asked != (Some("relay".to_string()), Some("status".to_string())) {
+        return Err("say what to show: relay status".to_string());
+    }
+    let mut host = "127.0.0.1:7690".to_string();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--host" => host = args.next().ok_or("--host needs an address")?,
+            other => return Err(format!("unknown argument {other}")),
+        }
+    }
+    let mut status = get(&host, "/network/relay", token)?;
+    if status.is_object() && status.get("configured").is_none() {
+        status["configured"] = json!(false);
+    }
+    serde_json::to_string_pretty(&status).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -1179,6 +1213,24 @@ mod tests {
         );
         // Nothing listens on port 1.
         let nobody = pair(words("--url http://x --host 127.0.0.1:1"), "");
+        assert!(nobody.unwrap_err().contains("no Host answers"));
+    }
+
+    #[test]
+    fn the_relays_state_is_asked_of_a_host_that_answers() {
+        assert!(network(words(""), "").unwrap_err().contains("relay status"));
+        assert!(
+            network(words("relay"), "")
+                .unwrap_err()
+                .contains("relay status")
+        );
+        assert!(
+            network(words("relay status --what"), "")
+                .unwrap_err()
+                .contains("unknown argument")
+        );
+        // Nothing listens on port 1.
+        let nobody = network(words("relay status --host 127.0.0.1:1"), "");
         assert!(nobody.unwrap_err().contains("no Host answers"));
     }
 
