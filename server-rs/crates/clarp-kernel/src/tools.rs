@@ -572,6 +572,192 @@ pub fn headline(name: &str, category: &str, label: &str) -> String {
     format!("{verb} {label}").trim().to_string()
 }
 
+// ---- the card a conversation shows of a tool's use -----------------------------------------
+//
+// The Python Host makes a card of every use of a tool when it reads the tool's transcript
+// (`claude_transcript.summarise_tool`): the name, the words of `summarize`, and a few fields
+// of what the tool was given, by its name: an edit's old and new text, a command and what it
+// is for, a pattern. What the tool returned is put on the card when it comes
+// (`_apply_tool_result`). The apps draw a card from these fields. Held to the Python Host by
+// the `cards` and `results` of `tests/fixtures/tool-vectors.json`.
+
+/// A text of what a tool was given, cut to `most` signs with an ellipsis. What is no text
+/// is nothing.
+fn clipped(value: Option<&Value>, most: usize) -> String {
+    let Some(text) = value.and_then(Value::as_str) else {
+        return String::new();
+    };
+    if text.chars().count() <= most {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(most).collect();
+    format!("{cut}…")
+}
+
+/// A value as Python writes it into a text: a text as it is, anything else as it is shown.
+fn written(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => crate::python::repr(other),
+    }
+}
+
+/// Whether Python takes a value for a yes.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(truth)) => *truth,
+        Some(Value::Number(number)) => number.as_f64() != Some(0.0),
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(fields)) => !fields.is_empty(),
+    }
+}
+
+/// A whole number a tool was given, as a number or as a text that is one. The model can
+/// write anything where a number belongs, and an app reads a number or nothing there.
+fn whole(value: Option<&Value>) -> Value {
+    let parsed = match value {
+        Some(Value::Number(number)) if !number.is_f64() => number.as_i64(),
+        Some(Value::String(text)) => {
+            let text = text.trim();
+            let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+            // Digits, with single underscores between them, as Python reads a whole number.
+            let groups: Vec<&str> = digits.split('_').collect();
+            let plain =
+                |group: &&str| !group.is_empty() && group.bytes().all(|b| b.is_ascii_digit());
+            match groups.iter().all(plain) {
+                true => text.replace('_', "").parse::<i64>().ok(),
+                false => None,
+            }
+        }
+        _ => None,
+    };
+    parsed.map_or(Value::Null, Value::from)
+}
+
+/// The card a conversation shows of one use of a tool: `recorded` until the tool returns.
+/// `id` is the id the tool's use has; a use without one has none on its card.
+pub fn card(name: &str, input: &Value, id: &str) -> Value {
+    let nothing = serde_json::Map::new();
+    let given = input.as_object().unwrap_or(&nothing);
+    let asked = Value::Object(given.clone());
+    let words = summarize(name, &asked);
+    let raw = |field: &str, otherwise: Value| given.get(field).cloned().unwrap_or(otherwise);
+    let mut card = serde_json::json!({
+        "name": name, "summary": words.summary, "action": words.action,
+        "file_path": words.file_path, "status": "recorded",
+    });
+    if !id.is_empty() {
+        card["id"] = Value::from(id);
+    }
+    match name {
+        "Edit" => {
+            card["file_path"] = raw("file_path", Value::from(""));
+            card["old"] = Value::from(clipped(given.get("old_string"), 600));
+            card["new"] = Value::from(clipped(given.get("new_string"), 600));
+            card["replace_all"] = Value::from(truthy(given.get("replace_all")));
+        }
+        "MultiEdit" => {
+            let edits = given.get("edits").and_then(Value::as_array);
+            let edits = edits.map_or(&[][..], Vec::as_slice);
+            let shown: Vec<Value> = edits
+                .iter()
+                .take(10)
+                .map(|edit| {
+                    serde_json::json!({
+                        "old": clipped(edit.get("old_string"), 200),
+                        "new": clipped(edit.get("new_string"), 200),
+                    })
+                })
+                .collect();
+            card["file_path"] = raw("file_path", Value::from(""));
+            card["edits"] = Value::from(shown);
+            card["edit_count"] = Value::from(edits.len());
+        }
+        "Write" => {
+            card["file_path"] = raw("file_path", Value::from(""));
+            card["content"] = Value::from(clipped(given.get("content"), 600));
+        }
+        "Read" => {
+            card["file_path"] = raw("file_path", Value::from(""));
+            card["offset"] = whole(given.get("offset"));
+            card["limit"] = whole(given.get("limit"));
+        }
+        "Bash" => {
+            card["command"] = Value::from(clipped(given.get("command"), 400));
+            card["description"] = raw("description", Value::from(""));
+        }
+        "Glob" | "Grep" => {
+            for field in ["pattern", "path", "glob", "output_mode"] {
+                card[field] = raw(field, Value::Null);
+            }
+        }
+        "TodoWrite" => {
+            let todos = given.get("todos").and_then(Value::as_array);
+            let todos = todos.map_or(&[][..], Vec::as_slice);
+            let of =
+                |todo: &Value, field: &str| todo.get(field).cloned().unwrap_or(Value::from(""));
+            let shown: Vec<Value> = todos
+                .iter()
+                .map(|todo| serde_json::json!({ "content": of(todo, "content"), "status": of(todo, "status") }))
+                .collect();
+            card["todos"] = Value::from(shown);
+        }
+        // Any other tool: what it was given, as far as that is short and plain.
+        _ => {
+            let plain = given
+                .iter()
+                .filter(|(_, value)| !value.is_array() && !value.is_object())
+                .map(|(key, value)| {
+                    let text = Value::from(written(value));
+                    (key.clone(), Value::from(clipped(Some(&text), 200)))
+                });
+            card["input"] = Value::Object(plain.collect());
+        }
+    }
+    card
+}
+
+/// What is shown of what a tool returned: its text, or the texts of its parts one under the
+/// other, cut to 300 signs.
+pub fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(_) => clipped(Some(content), 300),
+        Value::Array(parts) => {
+            let said = |part: &Value| -> Option<String> {
+                match part {
+                    Value::String(text) => Some(text.clone()),
+                    Value::Object(fields) => {
+                        let first = [fields.get("text"), fields.get("content")]
+                            .into_iter()
+                            .find(|value| truthy(*value))
+                            .flatten();
+                        Some(first.map(written).unwrap_or_default())
+                    }
+                    _ => None,
+                }
+            };
+            let texts: Vec<String> = parts
+                .iter()
+                .filter_map(said)
+                .filter(|text| !text.is_empty())
+                .collect();
+            clipped(Some(&Value::from(texts.join("\n"))), 300)
+        }
+        _ => String::new(),
+    }
+}
+
+/// A card after its tool returned: `ok` or `error`, with what is shown of what came back.
+pub fn returned(card: &mut Value, content: &Value, failed: bool) {
+    card["status"] = Value::from(if failed { "error" } else { "ok" });
+    let text = result_text(content);
+    if !text.is_empty() {
+        card["result"] = Value::from(text);
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
