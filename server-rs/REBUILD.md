@@ -847,6 +847,13 @@ of them go to a route this Host has. What is asked and not there, by use: the de
 11), a fork of an agent (3). The sockets of voice (`/stt/stream`, `/oracle/realtime`), of the terminal and of
 a ring held as a call were asked not once in those three days, on elitebook or on laptopstudio, counted the
 same way there; they stay a gate before the switch, and they are not what the next days of use need first.
+Answered since, the same evening: the queue's routes (below); a crash an app reports (kept as a file each,
+the newest two hundred, `apps.rs`); and, as screens of what this Host has not, the account seats as the
+Python Host says them before anything was read, one janitor as one it has not, and a request to explain
+tools as a Host answers where explaining is off. What a fresh Python Host answers there was asked of it
+first, by a run of the one scenario (`-f scenarios=`, five minutes instead of twenty-two): it corrected one
+answer that reading its source had got wrong (a janitor that is not there is `Agent not found`). Still
+asked and not there: a fork of an agent.
 
 Reading for the queue's routes found what no run had: **the phone's ids for its messages begin with `u-`**,
 the mark a message's id has in a conversation (`"u-" + id` in the phone app's source, and so in the log:
