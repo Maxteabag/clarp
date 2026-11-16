@@ -748,7 +748,7 @@ by 4 scripts of 81 steps of making, changing, running and removing (`tools/sched
 schedules are kept whole with the fleet. A schedule is sent to the agent it was made for, by its id. The
 Python Host has no feature that stands for schedules, and neither has this one: the apps call the routes.
 Found on the way and reported: the Python scheduler counts through a range far larger than its field
-(reference defect R24).
+(reference defect R24; fixed there the same day, PR 381).
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
