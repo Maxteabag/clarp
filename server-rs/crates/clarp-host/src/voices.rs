@@ -83,6 +83,50 @@ pub fn told(
     voices::catalog(agents, current, &speech)
 }
 
+/// The engines that speak, as the old settings screen reads them, by the owner's file.
+pub fn engines(owners: &Table, has_key: &dyn Fn(&str) -> bool) -> Value {
+    let chosen = owner::voices(owners);
+    let fallback = match chosen.fallback.as_str() {
+        "" => "none",
+        fallback => fallback,
+    };
+    let speech = Speech {
+        provider: &chosen.provider,
+        fallback,
+        has_key,
+        google_error: owner::google_voice_error(owners),
+        voices: &chosen,
+        cartesia: &[],
+    };
+    let source = match owners.get("google_tts").and_then(|own| own.as_table()) {
+        Some(_) => "google_tts",
+        None => "google_stt",
+    };
+    voices::status(&speech, source)
+}
+
+/// `GET /tts/providers`: the engines that speak, for the old settings screen. An engine
+/// this Host has not built cannot be used here, as in the catalogue.
+async fn engines_told(State(app): State<App>) -> Json<Value> {
+    let owners = app.mouth.owners();
+    let has_key = |provider: &str| app.mouth.has_key(provider, &owners);
+    let mut told = engines(&owners, &has_key);
+    for row in told["providers"].as_array_mut().into_iter().flatten() {
+        let id = row["id"].as_str().unwrap_or("");
+        if id != "none" && !BUILT.contains(&id) {
+            row["available"] = json!(false);
+        }
+    }
+    Json(told)
+}
+
+/// `POST /tts/providers`: choosing the engine from an app. Who speaks is read from the
+/// owner's file here.
+async fn no_choice() -> ApiError {
+    let why = "Choosing the engine that speaks from an app is not built on this Host yet";
+    ApiError::new(StatusCode::NOT_IMPLEMENTED, why)
+}
+
 /// The same catalogue as this Host tells it: an engine it has not built cannot be used
 /// here, and whether there is a voice at all is counted again.
 fn here(mut catalogue: Value) -> Value {
@@ -284,6 +328,7 @@ async fn voice_events(State(app): State<App>, body: Bytes) -> Result<Json<Value>
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/voice-catalog", get(catalog))
+        .route("/tts/providers", get(engines_told).post(no_choice))
         .route("/voices", get(settings_voices))
         .route("/agent-voice", post(agent_voice))
         .route("/voice-preview", get(preview))
@@ -341,6 +386,13 @@ mod tests {
             let current = case["session"].as_str().unwrap();
             let ours = told(&owners, &agents, current, &has_key, live);
             assert_eq!(ours, case["answer"], "{}", case["name"]);
+            // And the engines as the old settings screen reads them.
+            assert_eq!(
+                engines(&owners, &has_key),
+                case["engines"],
+                "the engines of {}",
+                case["name"]
+            );
         }
     }
 

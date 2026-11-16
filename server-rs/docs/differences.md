@@ -76,8 +76,7 @@ Host's first day says there what this Host must not say of itself.
 | The sessions a tool had in a directory (`GET /past-sessions`) | none offered | taking one up or forking one when an agent is made is refused (`resume_unsupported`) |
 
 Not answered yet, each "no such route": how an engine is told what to listen for
-(`/transcription-guidance`), the orchestrator's settings, the list of engines that speak as the old
-settings screen reads it (`/tts/providers`), the budgets of the vocabulary, dreaming's settings and
+(`/transcription-guidance`), the orchestrator's settings, the budgets of the vocabulary, dreaming's settings and
 runs (an app asks for them only of a Host that lists `dreaming`), the providers of models
 (`/harness-providers`), the Oracle's voice, compacting
 a conversation (`POST /compact`), a tool's own servers (`POST /agent-mcp`), nudging a team.
@@ -197,7 +196,7 @@ it covers that exact difference and nothing else.
 | A picture that is no base64 for a new agent (`avatar_base64` of `POST /agents`) | refused, 400 `invalid avatar`, with the words of Python's decoder | refused, 400 `invalid avatar`, with `Avatar is not base64.` | As for a persona's picture |
 | Which model a tool runs when its agent names none, for the picture drawn for a family of model (`model_avatar_url`) | read from the Host's settings | not known here: an agent's own model, and the one family a tool names, choose the picture | This Host keeps no model of its own for a tool |
 | What a button of a controller can run (`POST /controller-actions` and under it: defining an action, mapping a gesture to one, running one) | defined, mapped, run and written down | not there: the list is empty and says so, and each of these is refused in words | Not built. Nothing was defined on the owner's Host when this was counted |
-| Choosing the engine that speaks from an app (`POST /tts/providers`), the old preview by text (`POST /preview`), Cartesia's own picker (`/cartesia-voices`, `/cartesia-voice-preview`) | there | not there: who speaks is read from the owner's file | Not built |
+| Choosing the engine that speaks from an app (`POST /tts/providers`), the old preview by text (`POST /preview`), Cartesia's own picker (`/cartesia-voices`, `/cartesia-voice-preview`) | there | refused as not built, or answered with nothing: who speaks is read from the owner's file. The engines themselves are listed (`GET /tts/providers`, held to the Python Host's own answers under seven made-up owner's files); one this Host has not built is told as not usable | Not built |
 | How a turn's tool is told what holds for the turn: to use the Host's own tools, whose turn it is and, for an answer that is read aloud, how to speak | Claude Code by a hook of the Host's plugin, with every prompt; the other tools in words before the user's (`[voice-mode] ... --- user message ---`) | Claude Code in the same message after the user's words, between the marks Claude Code puts around what a hook says (`<system-reminder>`); Codex before the user's words, as there | The words are the same, sign for sign (`tests/fixtures/told-vectors.json`). No hook runs here: what the tool is handed is what a test can read, and a turn costs no process more |
 | How much a Claude agent says while it works (`POST /agent-voice-verbosity`) | never told to Claude Code: the hook leaves the clause out (reference defect R21) | told, as every other tool is | The setting is for every agent |
 | Where a Codex agent is told who it is | in the words before the user's, with every prompt | as Codex's developer instructions for the turn | It holds for the whole turn and is no part of what the user wrote |
