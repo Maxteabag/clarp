@@ -9,6 +9,7 @@
 use clarp_speech::listen::strip;
 use serde_json::{Map, Value};
 
+use crate::media::Part;
 use crate::python;
 
 pub const ELEVENLABS: &str = "elevenlabs";
@@ -483,6 +484,64 @@ pub fn clip_named(name: &str) -> Option<(i64, Option<String>)> {
     Some((made.parse().ok()?, session.map(str::to_string)))
 }
 
+/// The part of a clip a player asks for, read as the Python Host reads it for a clip
+/// (`clip_stream.py`, `_parse_range_header`): from one byte on, to another or to the end.
+/// The last so many bytes, several parts at once and what cannot be read as a part are no
+/// part at all: the player is given the clip from its start.
+pub fn clip_range(header: &str) -> Option<(u64, Option<u64>)> {
+    let value = strip(header);
+    let unit = value.get(..6)?;
+    if !unit.eq_ignore_ascii_case("bytes=") {
+        return None;
+    }
+    let spec = strip(&value[6..]);
+    if spec.contains(',') {
+        return None;
+    }
+    let (first, last) = spec.split_once('-')?;
+    let (first, last) = (strip(first), strip(last));
+    if first.is_empty() {
+        return None;
+    }
+    let first = python::int(first)?;
+    let last = match last {
+        "" => None,
+        last => Some(python::int(last)?),
+    };
+    if first < 0 || last.is_some_and(|last| last < first) {
+        return None;
+    }
+    let byte = |number: i128| u64::try_from(number).unwrap_or(u64::MAX);
+    Some((byte(first), last.map(byte)))
+}
+
+/// Which bytes of a clip that has `there` bytes a player is given for the part it asked
+/// for: all of them when it asked for no part, the part as far as the clip goes, or
+/// nothing when the part begins where the clip has no byte.
+pub fn clip_part(range: Option<(u64, Option<u64>)>, there: u64) -> Part {
+    let Some((first, last)) = range else {
+        return Part::Whole;
+    };
+    if first >= there {
+        return Part::Missing;
+    }
+    let last = last.map_or(there - 1, |last| last.min(there - 1));
+    Part::Bytes { first, last }
+}
+
+/// What an app is told when an agent could not be heard: a few words for its user, by
+/// what went wrong (`tts_worker.py`, `_publish_tts_error`).
+pub fn failure_told(error: &str) -> &'static str {
+    let low = error.to_lowercase();
+    if low.contains("quota") || low.contains("401") {
+        "Voice paused: ElevenLabs quota exceeded."
+    } else if low.contains("api_key") || low.contains("not configured") {
+        "Voice unavailable: TTS not configured."
+    } else {
+        "Voice synthesis failed."
+    }
+}
+
 /// A piece of what an agent says aloud as it is handed to an engine. The first piece of
 /// an agent the user is not looking at begins with who speaks, unless it does already.
 pub fn announced(piece: &str, first: bool, persona: &str, looked_at: bool) -> String {
@@ -497,6 +556,62 @@ pub fn announced(piece: &str, first: bool, persona: &str, looked_at: bool) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_part_of_a_clip_a_player_asks_for() {
+        assert_eq!(clip_range("bytes=0-1"), Some((0, Some(1))));
+        assert_eq!(clip_range("  Bytes= 42 - "), Some((42, None)));
+        assert_eq!(clip_range("bytes=+5-1_0"), Some((5, Some(10))));
+        assert_eq!(clip_range("bytes=7-7"), Some((7, Some(7))));
+        let huge = format!("bytes={}-", "9".repeat(50));
+        assert_eq!(clip_range(&huge), Some((u64::MAX, None)));
+        for none in [
+            "",
+            "bytes",
+            "items=0-1",
+            "bytes=-5",
+            "bytes=0-1,4-5",
+            "bytes=5",
+            "bytes=9-3",
+            "bytes=a-3",
+            "bytes=3-b",
+            "bytes=5--3",
+            "bytes=1.5-3",
+        ] {
+            assert_eq!(clip_range(none), None, "{none:?}");
+        }
+        // No part asked for: the whole clip, also one that has nothing yet.
+        assert_eq!(clip_part(None, 100), Part::Whole);
+        assert_eq!(clip_part(None, 0), Part::Whole);
+        // A part is given as far as the clip goes.
+        let bytes = |first, last| Part::Bytes { first, last };
+        assert_eq!(clip_part(Some((0, Some(1))), 100), bytes(0, 1));
+        assert_eq!(clip_part(Some((42, None)), 100), bytes(42, 99));
+        assert_eq!(clip_part(Some((42, Some(500))), 100), bytes(42, 99));
+        assert_eq!(clip_part(Some((99, Some(99))), 100), bytes(99, 99));
+        // And is missing where the clip has no byte.
+        assert_eq!(clip_part(Some((100, None)), 100), Part::Missing);
+        assert_eq!(clip_part(Some((0, Some(1))), 0), Part::Missing);
+        assert_eq!(clip_part(Some((u64::MAX, None)), 100), Part::Missing);
+    }
+
+    #[test]
+    fn a_failure_is_told_in_a_few_words_by_what_went_wrong() {
+        assert_eq!(
+            failure_told("Cartesia key or voice is not configured"),
+            "Voice unavailable: TTS not configured."
+        );
+        assert_eq!(
+            failure_told("missing API_KEY"),
+            "Voice unavailable: TTS not configured."
+        );
+        assert_eq!(
+            failure_told("HTTP 401: Quota exceeded"),
+            "Voice paused: ElevenLabs quota exceeded."
+        );
+        assert_eq!(failure_told("gemini 503"), "Voice synthesis failed.");
+        assert_eq!(failure_told(""), "Voice synthesis failed.");
+    }
 
     #[test]
     fn an_agent_nobody_looks_at_says_who_speaks_once() {

@@ -42,7 +42,7 @@ use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
-use clarp_kernel::spoken::{Line as Spoken, SpeechBook, lines_of};
+use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::turn::{
     Activity, Admission, Origin, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
     silent_when_failed,
@@ -800,6 +800,8 @@ impl Actor {
         records(recorder.log(), kind::SPEECH, kind::LINE, |line: Spoken| {
             speech.apply(&line);
         })?;
+        // What was over long ago is in the log and nowhere else.
+        speech.forget_before(now_ms - KEPT_FOR_MS);
         let mut actor = Self {
             profile,
             backend,
@@ -816,7 +818,8 @@ impl Actor {
         };
         actor.remembered = actor.remembered_in_log()?;
         // A line an engine was speaking when the Host went: begun a moment ago, it waits
-        // again; begun long ago, it is over.
+        // again; begun long ago, it is over. And one that waited for a Host that was away
+        // too long is not spoken any more.
         let cut_off = actor.speech.after_a_restart(now_ms);
         actor.write_lines(&cut_off, now_ms)?;
         let mut out = Outputs::default();
@@ -1179,6 +1182,7 @@ impl Actor {
     /// An engine takes the line that is spoken next. `None`: nothing of this agent's is to
     /// be spoken now, because nothing waits or because a line of its is being spoken.
     pub fn claim_line(&mut self, now_ms: i64) -> Result<Option<Spoken>, ActorError> {
+        self.speech.forget_before(now_ms - KEPT_FOR_MS);
         let taken = self
             .speech
             .next()
@@ -1189,33 +1193,37 @@ impl Actor {
         Ok(taken)
     }
 
-    /// The line an engine took has a clip: its number on this Host, its file, and the
-    /// engine and the voice that speak it. `None`: the agent has no such line being spoken.
+    /// The line an engine took has a clip: its number on this Host and its file, the
+    /// engine and the voice that are asked first, and the number of the event the clip was
+    /// announced with. `None`: the agent has no such line being spoken without a clip.
     pub fn line_begun(
         &mut self,
         id: &str,
         clip: (u64, &str),
-        spoken_by: (&str, &str),
+        asked: (&str, &str),
+        event_id: Option<u64>,
         now_ms: i64,
     ) -> Result<Option<Spoken>, ActorError> {
         let line = self.speech.get(id);
-        let begun = line.and_then(|line| line.begun(clip.0, clip.1, spoken_by.0, spoken_by.1).ok());
+        let begun = line.and_then(|line| line.begun(clip, asked, event_id).ok());
         if let Some(line) = &begun {
             self.write_lines(std::slice::from_ref(line), now_ms)?;
         }
         Ok(begun)
     }
 
-    /// The engine is done with a line: its clip is whole and has so many bytes, or it failed
-    /// and says why. `None`: the agent has no such line being spoken.
+    /// The one who took a line is done with it: the clip it made of it is whole, or the
+    /// line was not spoken, or not all of it, and why. `clip` is the clip it made, or none.
+    /// `None`: the agent has no such line being spoken with that clip.
     pub fn line_ended(
         &mut self,
         id: &str,
-        outcome: Result<u64, &str>,
+        clip: Option<u64>,
+        outcome: Result<Said<'_>, &str>,
         now_ms: i64,
     ) -> Result<Option<Spoken>, ActorError> {
         let line = self.speech.get(id);
-        let ended = line.and_then(|line| line.ended(outcome, now_ms).ok());
+        let ended = line.and_then(|line| line.ended(clip, outcome, now_ms).ok());
         if let Some(line) = &ended {
             self.write_lines(std::slice::from_ref(line), now_ms)?;
         }
