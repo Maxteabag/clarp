@@ -655,9 +655,37 @@ pub fn import(
         1 => format!("{made}, its plan"),
         many => format!("{made}, its {many} plans"),
     };
+    // Who it is there comes with it. How it speaks: as the persona of its name speaks there
+    // (an agent's row does not say). And the picture it has of its own.
+    let mut agent = agent;
+    let called = agent["persona"].as_str().unwrap_or("").to_string();
+    let personas = snapshot["personas"].as_array().into_iter().flatten();
+    let way_of_speaking = personas
+        .filter(|persona| {
+            let name = persona["name"].as_str();
+            name.is_some_and(|name| name.eq_ignore_ascii_case(&called))
+        })
+        .find_map(|persona| persona["personality"].as_str())
+        .unwrap_or("");
+    if !way_of_speaking.is_empty() {
+        agent["personality"] = json!(way_of_speaking);
+    }
+    let own_face = agent["avatar_url"].as_str().unwrap_or("");
+    let picture = if own_face.starts_with("/avatars/") {
+        match exchange("GET", &from, own_face, source_token, &[], &[])? {
+            (200, _, bytes) => Some(clarp_kernel::python::b64encode(&bytes)),
+            (status, _, _) => {
+                return Err(format!(
+                    "the Host at {from} answered {status} for the picture {session} has of its own"
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let asked = json!({
         "agent": agent, "from": format!("http://{from}"), "turns": turns, "plans": plans,
-        "library": library,
+        "library": library, "picture": picture,
     });
     let (status, answer) = post(&host, "/agents/import", token, &asked)?;
     if status != 200 {

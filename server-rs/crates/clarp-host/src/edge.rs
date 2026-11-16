@@ -858,6 +858,9 @@ struct ImportRequest {
     /// with its versions as `GET /artifacts/<id>/revisions` gave them.
     #[serde(default)]
     library: Vec<MovedArtifact>,
+    /// The picture it has of its own there, in base64, as `GET /avatars/<agent>` gave it.
+    #[serde(default)]
+    picture: Option<String>,
 }
 
 /// An artifact that comes with an agent.
@@ -884,6 +887,10 @@ async fn import_agent(
 ) -> Result<Json<Value>, ApiError> {
     let field = |name: &str| request.agent[name].as_str().unwrap_or("").to_string();
     let backend_session = Some(field("backend_session_id")).filter(|session| !session.is_empty());
+    // A picture that cannot be read is refused before anything is written: an agent that
+    // arrives with another face than it was sent with is not what was asked for.
+    let picture = clarp_kernel::personas::picture(request.picture.as_deref().unwrap_or(""))
+        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
     let record = AgentRecord {
         agent_id: field("agent_id"),
         session: field("session"),
@@ -906,8 +913,19 @@ async fn import_agent(
             .unwrap_or_default(),
         parent_agent_id: Some(field("parent_agent_id")).filter(|parent| !parent.is_empty()),
         helper_state: Some(field("helper_state")).filter(|state| !state.is_empty()),
+        // Who it is there comes with it: its symbol, how it speaks (which the tool that
+        // moves it reads off the persona of its name there), and its own picture.
+        avatar_symbol: field("avatar_symbol"),
+        personality: field("personality").trim().to_string(),
+        avatar: picture.as_ref().map(|(_, digest)| digest.clone()),
         ..AgentRecord::default()
     };
+    // The picture is kept before the agent that names it.
+    if let Some((bytes, digest)) = &picture {
+        let name = crate::fleet::picture_name(digest);
+        let kept = app.blobs.put(&name, bytes);
+        kept.map_err(|error| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+    }
     let rows: Vec<ImportedRow> = request
         .turns
         .into_iter()
