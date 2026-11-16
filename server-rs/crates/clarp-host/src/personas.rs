@@ -215,6 +215,43 @@ async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: Heade
     media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
 }
 
+/// `GET /notification-avatars/<agent>?v=&exp=&sig=`: the picture an agent has of its own,
+/// for a phone that shows a notification. It needs no token and opens only by an address
+/// this Host signed: for this agent, for the picture it has now, and not yet run out.
+async fn pushed_face(
+    State(app): State<App>,
+    Path(agent): Path<String>,
+    axum::extract::Query(asked): axum::extract::Query<std::collections::HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let agent = agent.trim_matches('/');
+    let directory = app.fleet.directory();
+    let member = directory.named(agent);
+    let Some(digest) = member.and_then(|member| member.record.avatar.clone()) else {
+        return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let forbidden = || ApiError::plain(StatusCode::FORBIDDEN, "forbidden").into_response();
+    let said = |key: &str| asked.get(key).map_or("", String::as_str);
+    let Ok(expires_at) = said("exp").parse::<i64>() else {
+        return forbidden();
+    };
+    let version = rules::version(&digest);
+    let signed = (expires_at, said("sig"));
+    let now = app.clock.now_ms() / 1_000;
+    let good = said("v") == version
+        && clarp_kernel::portraits::notification_authorized(
+            &app.config.auth_token,
+            (agent, version),
+            signed,
+            now,
+        );
+    if !good {
+        return forbidden();
+    }
+    let range = media::header_text(&headers, "range");
+    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+}
+
 async fn no_portraits() -> ApiError {
     let why = "Choosing a portrait from what an agent published is not built on this Host yet";
     ApiError::new(StatusCode::NOT_IMPLEMENTED, why)
@@ -224,6 +261,7 @@ pub fn routes() -> Router<App> {
     Router::new()
         .route("/agent-portraits", get(portraits).post(no_portraits))
         .route("/agent-portraits/{id}/content", get(portrait))
+        .route("/notification-avatars/{agent}", get(pushed_face))
         .route("/personas", post(create))
         .route("/personas/update", post(update))
         .route("/personas/{name}", delete(remove))

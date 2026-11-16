@@ -117,6 +117,8 @@ async fn serve(config: Config) -> Result<(), String> {
         // Who speaks for an agent is in the owner's file, where the keys of speech are.
         telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
     };
+    // The pictures this Host ships: for the list of agents, and for the face a push shows.
+    let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
     let fleet = fleet::start(works, store)?;
     let desks = Arc::new(Mutex::new(Presence::new()));
     to_push.run(pusher::Works {
@@ -127,6 +129,8 @@ async fn serve(config: Config) -> Result<(), String> {
         desks: desks.clone(),
         clock: clock.clone(),
         server_id: server_id.clone(),
+        faces: faces.clone(),
+        secret: config.auth_token.clone(),
     })?;
     let mouth = to_speak.run(clarp_host::voice::Works {
         config: config.clone(),
@@ -140,7 +144,7 @@ async fn serve(config: Config) -> Result<(), String> {
         fleet,
         clock,
         mouth,
-        faces: Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone())),
+        faces,
         server_id,
         revisions,
         pusher,

@@ -368,7 +368,25 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
         (&stopped["terminated"], &stopped["queue_paused"]),
         (&json!(1), &json!(true))
     );
-    wait_for("the turn to end", || host.state(&session) == "interrupted");
+    // Said with what was seen instead when it does not come: this is the rule a Stop rests on.
+    let mut seen: Vec<(u128, String)> = Vec::new();
+    while began.elapsed() < Duration::from_secs(25) {
+        let state = host.state(&session);
+        if seen.last().is_none_or(|(_, last)| *last != state) {
+            seen.push((began.elapsed().as_millis(), state.clone()));
+        }
+        if state == "interrupted" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(
+        seen.last().map(|(_, state)| state.as_str()),
+        Some("interrupted"),
+        "the turn did not end after the stop: the states seen, with the milliseconds since the stop: \
+         {seen:?}; the answer to the stop: {stopped}; the queue: {}",
+        host.get(&format!("/turn-queue?session={session}"))
+    );
     assert!(
         began.elapsed() < Duration::from_secs(20),
         "the stop did not wait for the sleep"

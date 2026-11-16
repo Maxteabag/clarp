@@ -89,6 +89,11 @@ pub struct Works {
     pub clock: Arc<dyn Clock + Send + Sync>,
     /// Which Host this is, for an app that knows several.
     pub server_id: String,
+    /// The pictures this Host ships: the face a push shows of an agent with none of its own.
+    pub faces: Arc<crate::faces::Faces>,
+    /// What signs the address a phone fetches an agent's own picture by: the Host's own
+    /// token. Empty on a Host that asks no token of anybody.
+    pub secret: String,
 }
 
 impl Waiting {
@@ -109,17 +114,19 @@ impl Waiting {
     }
 }
 
-/// The payload of a job, and the name it goes by in what the Host says of it.
-fn payload<'a>(job: &'a Job, server_id: &str) -> (Value, &'a str) {
+/// The payload of a job, and the name it goes by in what the Host says of it. `face` is
+/// the face it shows of its agent, for the phone it goes to: an address, and whether it is
+/// a picture of the agent's own.
+fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a str) {
+    let (avatar_url, avatar_custom) = face;
     match job {
         Job::Turn(told) => (
             push::turn_done(&Told {
                 persona: &told.persona,
                 session: &told.session,
                 body: &told.preview,
-                // Portraits are not on this Host yet.
-                avatar_url: "",
-                avatar_custom: false,
+                avatar_url,
+                avatar_custom,
                 notification_id: &told.notification_id,
                 server_instance_id: server_id,
                 needs_response: told.needs_response,
@@ -138,8 +145,8 @@ fn payload<'a>(job: &'a Job, server_id: &str) -> (Value, &'a str) {
                 text_input: asked.text_input,
                 revision: asked.revision,
                 expires_at: asked.expires_at,
-                avatar_url: "",
-                avatar_custom: false,
+                avatar_url,
+                avatar_custom,
                 server_instance_id: server_id,
             }),
             &asked.decision_id,
@@ -151,7 +158,30 @@ fn payload<'a>(job: &'a Job, server_id: &str) -> (Value, &'a str) {
 fn deliver(relay: &Relay, works: &Works, job: &Job) {
     let directory = works.fleet.directory();
     let now = works.clock.now_ms();
-    let (payload, name) = payload(job, &works.server_id);
+    let (_, name) = payload(job, &works.server_id, ("", false));
+    // The agent it is about: what the address of its own picture carries, when it has one,
+    // and the picture this Host ships for it. A push for nobody by name shows no face.
+    let (session, persona) = match job {
+        Job::Turn(told) => (&told.session, &told.persona),
+        Job::Request(asked) => (&asked.session, &asked.persona),
+    };
+    let about = directory.by_session(session).map(|member| &member.record);
+    let own = about.and_then(|record| record.avatar.as_deref());
+    let own = own.map(clarp_kernel::personas::version);
+    let agent_id = about.map_or("", |record| record.agent_id.as_str());
+    let shipped = match about {
+        Some(record) if !persona.trim().is_empty() => {
+            works.faces.of(&record.persona, &record.backend)
+        }
+        _ => String::new(),
+    };
+    let face_for = |row: &PushRow| -> Option<(String, bool)> {
+        if persona.trim().is_empty() {
+            return None;
+        }
+        let signed_by = (works.secret.as_str(), now / 1_000);
+        clarp_kernel::portraits::face_for_push(&row.base_url, (agent_id, own), &shipped, signed_by)
+    };
     // A user who sits at a desk with the app open sees it there.
     let at_a_desk = works
         .desks
@@ -171,9 +201,15 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) {
     if rows.is_empty() {
         return;
     }
-    let collapse_id = push::collapse_id(&payload);
     let (mut sent, mut failed, mut disabled) = (0, 0, 0);
     for row in rows {
+        // The face is fetched from where this phone reaches the Host.
+        let face = face_for(row);
+        let face = face
+            .as_ref()
+            .map_or(("", false), |(address, own)| (address.as_str(), *own));
+        let (payload, _) = payload(job, &works.server_id, face);
+        let collapse_id = push::collapse_id(&payload);
         let delivery = relay.send(
             row,
             &Push {
