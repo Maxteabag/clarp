@@ -14038,3 +14038,298 @@ fn a_heartbeat_shows_an_agent_the_plan_it_has_standing_and_leaves_alone_one_its_
         (&json!(0), &json!(1800))
     );
 }
+
+// ---- the ids an app gives its messages -------------------------------------------------------
+
+#[test]
+fn a_message_is_filed_under_the_id_its_app_gave_it_whether_or_not_the_id_has_the_mark() {
+    let place = Place::new("ids");
+    let host = place.start();
+    let echo = host.new_agent("Echo");
+    let heard = host.listen();
+    let told = |kind: &str, id: &str| -> usize {
+        let heard = heard.lock().unwrap();
+        let ours = heard.iter().filter(|event| {
+            event["type"] == kind
+                && event["session"] == echo.as_str()
+                && event["client_msg_id"] == id
+        });
+        ours.count()
+    };
+    let rows_of = |id: &str| -> usize {
+        let rows = host.turns(&echo).into_iter();
+        rows.filter(|row| row["id"] == id && row["role"] == "user")
+            .count()
+    };
+    // The phone's ids come with the mark of a message, the desk's without. Each app paints
+    // its bubble under its own id and looks for the row the Host files: the phone under its
+    // id as it is, the desk under its id with the mark before it.
+    let phones = "u-6485F414-2894-4ABE-955D-55F4F289747C";
+    let later = "u-0779B91F-89FE-47F0-A641-7163A35E8FDD";
+    let sent = host.post(
+        "/send",
+        json!({ "session": echo, "text": "sleep 2", "client_msg_id": format!("  {phones} ") }),
+    );
+    assert_eq!(sent["queued"], false);
+    wait_for("the turn to be told", || told("agent-state", phones) == 1);
+    assert_eq!((rows_of(phones), rows_of(&format!("u-{phones}"))), (1, 0));
+
+    // Two are left for later behind it: the queue names each as its app named it, and so
+    // does the news of the queue.
+    for (id, text) in [(later, "second"), ("m3", "third")] {
+        let left = host.post(
+            "/send",
+            json!({ "session": echo, "text": text, "client_msg_id": id, "queue_if_busy": true }),
+        );
+        assert_eq!(left["queued"], true, "{left}");
+    }
+    let queue = host.get(&format!("/turn-queue?session={echo}"));
+    let waiting: Vec<&str> = queue["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(waiting, [later, "m3"]);
+    wait_for("the news of the queue", || {
+        told("queue-updated", later) >= 1 && told("queue-updated", "m3") >= 1
+    });
+
+    // Sent again under the same id, a message is the same message.
+    host.post(
+        "/send",
+        json!({ "session": echo, "text": "sleep 2", "client_msg_id": phones }),
+    );
+    wait_for("everything to be answered", || {
+        host.state(&echo) == "done" && host.conversation(&echo).len() == 6
+    });
+    assert_eq!(
+        (
+            rows_of(phones),
+            rows_of(later),
+            rows_of("u-m3"),
+            rows_of("m3")
+        ),
+        (1, 1, 1, 0)
+    );
+    assert_eq!(
+        (
+            told("agent-state", phones),
+            told("agent-state", later),
+            told("agent-state", "m3")
+        ),
+        (1, 1, 1)
+    );
+    // A message that names no id is named by its trace, as on the Python Host.
+    let plain = host.post(
+        "/send",
+        json!({ "session": echo, "text": "plain", "trace_id": "trace-nine" }),
+    );
+    assert_eq!(plain["trace_id"], "trace-nine");
+    wait_for("the last answer", || {
+        host.state(&echo) == "done" && host.conversation(&echo).len() == 8
+    });
+    assert_eq!(rows_of("u-trace-nine"), 1);
+    // And what the Host keeps outlives it: the same ids after a kill.
+    host.kill();
+    let host = place.start();
+    let ids: Vec<String> = host
+        .turns(&echo)
+        .iter()
+        .filter(|row| row["role"] == "user")
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, [phones, later, "u-m3", "u-trace-nine"]);
+}
+
+// ---- the queue, by its user's hand --------------------------------------------------------------
+
+#[test]
+fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_over() {
+    let place = Place::new("queue-by-hand");
+    let host = place.start();
+    let echo = host.new_agent("Echo");
+    let heard = host.listen();
+    let queue = || host.get(&format!("/turn-queue?session={echo}"));
+    let waiting = || -> Vec<String> {
+        let queue = queue();
+        let items = queue["items"].as_array().unwrap().iter();
+        items
+            .map(|item| item["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let leave = |text: &str, id: &str| {
+        let left = host.post(
+            "/send",
+            json!({ "session": echo, "text": text, "client_msg_id": id, "queue_if_busy": true }),
+        );
+        assert_eq!(left["queued"], true, "{left}");
+    };
+    let refused = |method: &str, path: &str| -> (u16, String) {
+        let (status, said) = host.ask(method, path, Some(&json!({})));
+        (
+            status,
+            said["error"].as_str().unwrap_or_default().to_string(),
+        )
+    };
+    // The news of the queue that names no message: it was held or let go, or one was taken back.
+    let plain_news = || -> Vec<(u64, bool, u64)> {
+        let heard = heard.lock().unwrap();
+        let ours = heard.iter().filter(|event| {
+            event["type"] == "queue-updated"
+                && event["session"] == echo.as_str()
+                && event.get("client_msg_id").is_none()
+        });
+        ours.map(|event| {
+            (
+                event["queue_depth"].as_u64().unwrap(),
+                event["queue_paused"].as_bool().unwrap(),
+                event["queue_revision"].as_u64().unwrap(),
+            )
+        })
+        .collect()
+    };
+
+    // A turn runs, and four messages are left for later behind it: one of the phone's, whose
+    // ids come with the mark, among them.
+    host.send(&echo, "sleep 60", "m1");
+    wait_for("the turn to run", || host.state(&echo) == "thinking");
+    let phones = "u-A5BED35B-C897-4152-844B-609BBFFDE4E0";
+    for (text, id) in [
+        ("second", "m2"),
+        ("third", phones),
+        ("fourth", "m4"),
+        ("fifth", "m5"),
+    ] {
+        leave(text, id);
+    }
+    assert_eq!(waiting(), ["m2", phones, "m4", "m5"]);
+
+    // While the turn runs, nothing is sent past it; what is not there is not there.
+    assert_eq!(
+        refused("POST", "/turn-queue/m4/send"),
+        (409, "agent is still working".to_string())
+    );
+    for (method, path) in [
+        ("POST", "/turn-queue/nothing/send"),
+        ("DELETE", "/turn-queue/nothing"),
+        ("DELETE", "/turn-queue/u-m2"),
+    ] {
+        assert_eq!(
+            refused(method, path),
+            (404, "queued message not found".to_string()),
+            "{method} {path}"
+        );
+    }
+    // One is taken back, by the id its app gave it: it never runs, and the apps are told
+    // how the queue stands.
+    let before = queue()["revision"].as_u64().unwrap();
+    let (status, taken) = host.ask("DELETE", &format!("/turn-queue/{phones}"), None);
+    assert_eq!((status, &taken), (200, &json!({ "ok": true })));
+    assert_eq!(waiting(), ["m2", "m4", "m5"]);
+    assert_eq!(queue()["revision"], before + 1);
+    wait_for("the news that one was taken back", || {
+        plain_news() == [(3, false, before + 1)]
+    });
+    assert_eq!(
+        refused("DELETE", &format!("/turn-queue/{phones}")),
+        (404, "queued message not found".to_string()),
+        "taken back once"
+    );
+
+    // The turn is stopped: what waits is held.
+    host.post("/stop", json!({ "session": echo }));
+    wait_for("the turn to end", || host.state(&echo) == "interrupted");
+    let held = queue();
+    assert_eq!((&held["paused"], waiting().len()), (&json!(true), 3));
+    // Its user sends one of them now, not the first: it runs although the queue is held,
+    // and the others stay held. It is answered as a send that did not have to wait.
+    let (status, sent) = host.ask("POST", "/turn-queue/m4/send", Some(&json!({})));
+    assert_eq!(
+        (status, &sent),
+        (
+            202,
+            &json!({ "ok": true, "session": echo, "queued": false, "queue_depth": 0, "queue_revision": 0 })
+        )
+    );
+    wait_for("the message sent by hand to be answered", || {
+        host.conversation(&echo)
+            .contains(&said("assistant", "fourth"))
+            && host.state(&echo) == "done"
+    });
+    let held = queue();
+    assert_eq!(
+        (&held["paused"], waiting()),
+        (&json!(true), vec!["m2".to_string(), "m5".to_string()])
+    );
+    assert!(!host.conversation(&echo).contains(&said("user", "second")));
+
+    // One more is taken back, and the last is sent by hand: nothing waits any more, and the
+    // hold is over without a resume. That is told with the turn that began, not by itself.
+    let told_before = plain_news().len();
+    host.ask("DELETE", "/turn-queue/m2", None);
+    wait_for("the news of the second one taken back", || {
+        plain_news().len() == told_before + 1
+    });
+    assert_eq!(
+        plain_news().last().map(|news| (news.0, news.1)),
+        Some((1, true))
+    );
+    let (status, _) = host.ask("POST", "/turn-queue/m5/send", Some(&json!({})));
+    assert_eq!(status, 202);
+    wait_for("the last message to be answered", || {
+        host.conversation(&echo)
+            .contains(&said("assistant", "fifth"))
+            && host.state(&echo) == "done"
+    });
+    let free = queue();
+    assert_eq!((&free["paused"], waiting().len()), (&json!(false), 0));
+    assert_eq!(plain_news().len(), told_before + 1, "{:?}", plain_news());
+    let began: Vec<Value> = {
+        let heard = heard.lock().unwrap();
+        let ours = heard.iter().filter(|event| {
+            event["type"] == "queue-updated"
+                && event["client_msg_id"] == "m5"
+                && event["queue_started"] == true
+        });
+        ours.cloned().collect()
+    };
+    assert_eq!(began.len(), 1, "{began:?}");
+    assert_eq!(
+        (&began[0]["queue_paused"], &began[0]["queue_depth"]),
+        (&json!(false), &json!(0))
+    );
+    // What was taken back is nowhere: not in the conversation, and it is not answered.
+    let all = host.conversation(&echo);
+    for gone in ["second", "third"] {
+        assert!(!all.iter().any(|(_, text)| text == gone), "{all:?}");
+    }
+
+    // A hold that holds one thing ends when that thing is taken back, and what is left for
+    // the agent afterwards runs.
+    host.send(&echo, "sleep 60", "m6");
+    wait_for("a turn to run again", || host.state(&echo) == "thinking");
+    leave("seventh", "m7");
+    host.post("/stop", json!({ "session": echo }));
+    wait_for("that turn to end", || host.state(&echo) == "interrupted");
+    assert_eq!(queue()["paused"], true);
+    host.ask("DELETE", "/turn-queue/m7", None);
+    let free = queue();
+    assert_eq!((&free["paused"], waiting().len()), (&json!(false), 0));
+    // And all of it outlives the Host: nothing that was taken back comes back.
+    host.kill();
+    let host = place.start();
+    let after = host.get(&format!("/turn-queue?session={echo}"));
+    assert_eq!(
+        (
+            &after["paused"],
+            after["items"].as_array().unwrap().len(),
+            &after["revision"]
+        ),
+        (&json!(false), 0, &free["revision"])
+    );
+    let all = host.conversation(&echo);
+    for gone in ["second", "third", "seventh"] {
+        assert!(!all.iter().any(|(_, text)| text == gone), "{all:?}");
+    }
+}

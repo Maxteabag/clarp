@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
-use clarp_kernel::agent::{Command, Effect, Rest};
+use clarp_kernel::agent::{Command, Effect, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
     Commentary, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
@@ -266,12 +266,25 @@ pub struct QueueState {
     pub revision: u64,
 }
 
+/// What became of a waiting message its user sent by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ByHand {
+    /// Its turn has begun.
+    Sent,
+    /// It does not wait: it ran, was taken back, or never was.
+    NotWaiting,
+    /// A turn of the agent runs: nothing is sent past it.
+    AtWork,
+}
+
 /// A message that waits its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
     pub turn: TurnId,
     /// The message's id in the conversation.
     pub message_id: String,
+    /// The id its app gave it.
+    pub client_id: String,
     pub text: String,
     pub accepted_at_ms: i64,
 }
@@ -327,8 +340,10 @@ fn follow_tool(running: &mut Vec<LiveTool>, calls: &mut Vec<ToolCall>, call: &To
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStatus {
     pub turn: TurnId,
-    /// The id of the message this turn answers, and the trace it travels under.
+    /// The id of the message this turn answers, the id its app gave it, and the trace it
+    /// travels under.
     pub message_id: String,
+    pub client_id: String,
     pub trace_id: Option<String>,
     /// Who asked for it.
     pub origin: Origin,
@@ -396,8 +411,9 @@ struct Written {
 /// The turn that holds the agent, as the actor follows it.
 struct LiveTurn {
     turn: TurnId,
-    /// The message this turn answers.
+    /// The message this turn answers, and the id its app gave it.
     message_id: String,
+    client_id: String,
     trace_id: Option<String>,
     /// Who asked for it: what every row of the turn is filed under.
     origin: Origin,
@@ -894,6 +910,7 @@ impl Actor {
                 interpreter: actor
                     .backend
                     .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
+                client_id: message.client_id().to_string(),
                 message_id: message.id,
                 trace_id: message.trace_id,
                 origin: message.origin,
@@ -1078,19 +1095,21 @@ impl Actor {
     pub fn status(&self) -> Status {
         let agent = self.recorder.agent();
         let stopping = agent.stopping().is_some();
-        let (message_id, trace_id, tools) = match &self.live {
+        let (message_id, client_id, trace_id, tools) = match &self.live {
             Some(live) => (
                 live.message_id.clone(),
+                live.client_id.clone(),
                 live.trace_id.clone(),
                 live.tools.clone(),
             ),
-            None => (String::new(), None, Vec::new()),
+            None => (String::new(), String::new(), None, Vec::new()),
         };
         let from_queue = agent.live_from_queue();
         let live = match agent.live() {
             Some(Turn::Starting(turn)) => Some(LiveStatus {
                 turn: turn.id,
                 message_id,
+                client_id,
                 trace_id,
                 origin: turn.origin.clone(),
                 from_queue,
@@ -1106,6 +1125,7 @@ impl Actor {
             Some(Turn::Running(turn)) => Some(LiveStatus {
                 turn: turn.id,
                 message_id,
+                client_id,
                 trace_id,
                 origin: turn.origin.clone(),
                 from_queue,
@@ -1122,6 +1142,7 @@ impl Actor {
             Some(Turn::Parked(turn)) => Some(LiveStatus {
                 turn: turn.id,
                 message_id,
+                client_id,
                 trace_id,
                 origin: turn.origin.clone(),
                 from_queue,
@@ -1222,6 +1243,7 @@ impl Actor {
             let message = self.message_at(queued.message_seq)?;
             waiting.push(Waiting {
                 turn: queued.id,
+                client_id: message.client_id().to_string(),
                 message_id: message.id,
                 text: message.text,
                 accepted_at_ms: queued.accepted_at_ms,
@@ -1812,6 +1834,39 @@ impl Actor {
         self.asked(command, now_ms)
     }
 
+    /// Sends one waiting message now, whatever holds the mailbox: its user sends it by hand.
+    /// The rest of what waits stays as it is, held where it was held.
+    pub fn send_now(
+        &mut self,
+        turn: TurnId,
+        by: &str,
+        now_ms: i64,
+    ) -> Result<(ByHand, Outputs), ActorError> {
+        let command = Command::SendNow {
+            turn,
+            by: by.to_string(),
+        };
+        let effects = match self.recorder.handle(command, now_ms) {
+            Ok(effects) => effects,
+            Err(JournalError::Refused(Refusal::AtWork)) => {
+                return Ok((ByHand::AtWork, Outputs::default()));
+            }
+            Err(JournalError::Refused(_)) => return Ok((ByHand::NotWaiting, Outputs::default())),
+            Err(error) => return Err(error.into()),
+        };
+        let mut out = Outputs {
+            changed: Changed {
+                conversation: false,
+                status: !effects.is_empty(),
+                queue: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        self.carry_out(effects, &mut out)?;
+        Ok((ByHand::Sent, out))
+    }
+
     /// A command a client asked for, which the agent may refuse. Returns whether it was done.
     fn asked(&mut self, command: Command, now_ms: i64) -> Result<(bool, Outputs), ActorError> {
         let effects = match self.recorder.handle(command, now_ms) {
@@ -2030,6 +2085,7 @@ impl Actor {
         out: &mut Outputs,
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
+        let client_id = message.client_id().to_string();
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
         let backend_session = self.recorder.agent().backend_session().map(str::to_string);
@@ -2088,6 +2144,7 @@ impl Actor {
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
             speak: message.speak,
+            client_id,
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
@@ -2241,6 +2298,7 @@ impl Actor {
         }
         self.live = Some(LiveTurn {
             turn,
+            client_id: message.client_id().to_string(),
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,

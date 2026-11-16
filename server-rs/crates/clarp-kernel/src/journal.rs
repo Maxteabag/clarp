@@ -190,7 +190,9 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     let body = serde_json::to_vec(event).map_err(|e| JournalError::Encode(e.to_string()))?;
     let mut item = NewItem::new(kind::AGENT_EVENT, ts_ms, body);
     item.turn = match event {
-        AgentEvent::Turn { turn, .. } | AgentEvent::StopRequested { turn, .. } => Some(turn.0),
+        AgentEvent::Turn { turn, .. }
+        | AgentEvent::StopRequested { turn, .. }
+        | AgentEvent::SentNow { turn, .. } => Some(turn.0),
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }

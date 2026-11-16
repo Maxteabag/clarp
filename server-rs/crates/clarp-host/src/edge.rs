@@ -17,8 +17,8 @@ use axum::response::sse::{Event as SseEvent, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use clarp_actor::ImportedRow;
 use clarp_actor::conversation::Which;
+use clarp_actor::{ByHand, ImportedRow};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
 use clarp_kernel::conversation::{Message, Sender};
@@ -27,7 +27,7 @@ use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::python;
 use clarp_kernel::trust::{self, FailureLimiter};
-use clarp_kernel::turn::{Admission, Origin};
+use clarp_kernel::turn::{Admission, Origin, TurnId};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
@@ -335,6 +335,8 @@ pub fn router(app: App) -> Router {
         .route("/turn-queue", get(queue))
         .route("/live", get(shown))
         .route("/turn-queue/resume", post(resume))
+        .route("/turn-queue/{id}", delete(take_back))
+        .route("/turn-queue/{id}/send", post(send_by_hand))
         .route("/pairing/exchange", post(pairing_exchange))
         .route("/pairing/issue", post(pairing_issue))
         .route("/paired-devices", get(paired_devices))
@@ -1414,7 +1416,11 @@ pub(crate) async fn send_message(
     if text.is_empty() {
         return Err(ApiError::plain(StatusCode::BAD_REQUEST, "empty text"));
     }
-    let trace_id = request.trace_id.clone().unwrap_or_else(|| ids::hex(8));
+    // The trace it travels under: the one it names, or one of the Host's.
+    let trace_id = match request.trace_id.as_deref().map(python::strip) {
+        Some(named) if !named.is_empty() => named.to_string(),
+        _ => ids::hex(8),
+    };
     // Whom it is for. What was typed, or dictated for the agent that is open, is for the
     // agent it names. What was dictated hands-free is for the agent whose name it begins
     // with, and without a name it stays with the agent that is open (`addressed`).
@@ -1527,7 +1533,12 @@ pub(crate) async fn send_message(
         (true, true) => Admission::Later,
         (true, false) => Admission::Background,
     };
-    let client_msg_id = request.client_msg_id.clone().unwrap_or_else(ids::uuid);
+    // The id the app minted for it; where it minted none, its trace is its id, as on the
+    // Python Host. It is filed under that id as it is where the id has the mark of a
+    // message, as the phone's ids have, and with the mark before it otherwise.
+    let minted = request.client_msg_id.as_deref().map(python::strip);
+    let minted = minted.filter(|minted| !minted.is_empty());
+    let (id, marked) = Message::filed(minted.unwrap_or(&trace_id));
     // The app names the sessions whose agents said something its user has not heard (the
     // first 64 names of a list; anything else names none).
     let unheard = match &request.unheard_audio_sessions {
@@ -1540,7 +1551,8 @@ pub(crate) async fn send_message(
         _ => false,
     };
     let message = Message {
-        id: format!("u-{client_msg_id}"),
+        id,
+        marked,
         text,
         origin,
         trace_id: Some(trace_id.clone()),
@@ -1892,7 +1904,7 @@ async fn queue(
         .map(|message| {
             json!({
                 // A waiting message is named as the client named it.
-                "id": message.message_id.strip_prefix("u-").unwrap_or(&message.message_id),
+                "id": message.client_id,
                 "text": message.text,
                 "enqueued_at": message.accepted_at_ms,
                 "synthesize_audio": false,
@@ -1942,6 +1954,72 @@ async fn resume(
         "paused": state.paused,
         "revision": state.revision,
     })))
+}
+
+/// The agent a waiting message waits for, and the message's turn there: by the id its app
+/// gave it, which is what the queue names it by.
+async fn waiting_named(app: &App, id: &str) -> Result<Option<(Arc<Member>, TurnId)>, ApiError> {
+    let directory = app.fleet.directory();
+    for member in &directory.members {
+        if member.agent.view().status.waiting.is_empty() {
+            continue;
+        }
+        let (waiting, _) = member.agent.queue().await?;
+        if let Some(found) = waiting.iter().find(|message| message.client_id == id) {
+            return Ok(Some((member.clone(), found.turn)));
+        }
+    }
+    Ok(None)
+}
+
+fn not_waiting() -> ApiError {
+    ApiError::new(StatusCode::NOT_FOUND, "queued message not found")
+}
+
+/// `DELETE /turn-queue/<id>`: its user takes a waiting message back. It never runs, and it
+/// was never in the conversation. A hold that held nothing else is over.
+async fn take_back(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let Some((member, turn)) = waiting_named(&app, &id).await? else {
+        return Err(not_waiting());
+    };
+    // It may have gone to run since it was looked for.
+    let (waited, _) = member.agent.withdraw(turn, "user".to_string()).await?;
+    if !waited {
+        return Err(not_waiting());
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// `POST /turn-queue/<id>/send`: its user sends one waiting message now. It runs although
+/// the queue is held, and what else waits stays held; while a turn runs nothing is sent
+/// past it. Answered as a send that did not have to wait.
+async fn send_by_hand(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let Some((member, turn)) = waiting_named(&app, &id).await? else {
+        return Err(not_waiting());
+    };
+    match member.agent.send_now(turn, "user".to_string()).await? {
+        ByHand::Sent => {
+            let answer = json!({
+                "ok": true,
+                "session": member.record.session,
+                "queued": false,
+                "queue_depth": 0,
+                "queue_revision": 0,
+            });
+            Ok((StatusCode::ACCEPTED, Json(answer)).into_response())
+        }
+        ByHand::NotWaiting => Err(not_waiting()),
+        ByHand::AtWork => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "agent is still working",
+        )),
+    }
 }
 
 // ---- devices ---------------------------------------------------------------------------------
