@@ -2053,6 +2053,637 @@
    "path": "/transcription-providers",
    "status": 200,
    "step": "who listens"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/transcription-results/utt-one",
+   "status": 200,
+   "step": "the answer is no longer wanted"
+  },
+  {
+   "body": {
+    "cached": false,
+    "ends_terminal": true,
+    "hands_free": true,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:9>",
+    "vocab_run_id": 6
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "the same name for what is said next"
+  },
+  {
+   "body": {
+    "error": "invalid transcription id"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/transcription-results/has%20space",
+   "status": 400,
+   "step": "forget under a name that is none"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/transcription-results/utt-one",
+   "status": 200,
+   "step": "forgotten once more"
+  },
+  {
+   "body": {
+    "error": "language must be an ISO 639-1 code such as 'en' or 'no'"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "a language that is none"
+  },
+  {
+   "body": {
+    "error": "agent language set accepts at most three language codes"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "four languages for one agent"
+  },
+  {
+   "body": {
+    "error": "unknown transcription engine: nothing:of-the-kind"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "an engine nobody knows"
+  },
+  {
+   "body": {
+    "error": "agent_engines keys must be agent names"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "engines for nobody"
+  },
+  {
+   "body": {
+    "error": "agent_engines must be an object of agent -> engine"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "engines that are a list"
+  },
+  {
+   "body": {
+    "error": "engine and turn_taking must be strings"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "an engine that is a number"
+  },
+  {
+   "body": {
+    "error": "unknown turn-taking strategy: sometimes"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "a way of taking turns that is none"
+  },
+  {
+   "body": {
+    "agent_engines": {
+     "claire": "elevenlabs:scribe_v2,google:chirp_3"
+    },
+    "agent_languages": {
+     "claire": "no,en"
+    },
+    "call_engines": "",
+    "call_languages": "",
+    "call_policy_error": "",
+    "engine": "local",
+    "language": "en",
+    "long_form_model": "",
+    "long_form_threshold_range": {
+     "max": 3600,
+     "min": 1
+    },
+    "long_form_threshold_sec": 30,
+    "models": [
+     {
+      "available": false,
+      "biasing": "keyterm",
+      "budget": {
+       "capacity": 50,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "DEEPGRAM_API_KEY",
+      "id": "deepgram:nova-3",
+      "model": "nova-3",
+      "name": "Deepgram Nova-3",
+      "provider": "deepgram",
+      "turn_detection": "own",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
+      "credential": "ELEVEN_API_KEY",
+      "id": "elevenlabs:scribe_v2",
+      "model": "scribe_v2",
+      "name": "ElevenLabs Scribe v2",
+      "provider": "elevenlabs",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia:ink-2",
+      "model": "ink-2",
+      "name": "Cartesia Ink-2",
+      "provider": "cartesia",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia:ink-whisper",
+      "model": "ink-whisper",
+      "name": "Cartesia Ink-Whisper",
+      "provider": "cartesia",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+      "id": "google:chirp_3",
+      "model": "chirp_3",
+      "name": "Google Chirp 3",
+      "provider": "google",
+      "turn_detection": "native",
+      "weight": "cloud"
+     }
+    ],
+    "ok": true,
+    "provider_turn_taking_available": false,
+    "providers": [
+     {
+      "available": false,
+      "credential": "DEEPGRAM_API_KEY",
+      "id": "deepgram",
+      "kind": "cloud",
+      "name": "Deepgram",
+      "turn_detection": "own"
+     },
+     {
+      "available": false,
+      "credential": "ELEVEN_API_KEY",
+      "id": "elevenlabs",
+      "kind": "cloud",
+      "name": "ElevenLabs Scribe",
+      "turn_detection": "native"
+     },
+     {
+      "available": false,
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia",
+      "kind": "cloud",
+      "name": "Cartesia Ink",
+      "turn_detection": "native"
+     },
+     {
+      "available": false,
+      "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+      "id": "google",
+      "kind": "cloud",
+      "name": "Google Chirp",
+      "turn_detection": "native"
+     }
+    ],
+    "retain_audio": false,
+    "stream_path": "/stt/stream",
+    "turn_taking": "native",
+    "turn_taking_options": [
+     {
+      "available": true,
+      "id": "native",
+      "name": "Native (on-device VAD + Smart Turn)"
+     },
+     {
+      "available": false,
+      "id": "provider",
+      "name": "Provider-owned end of turn"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "an agent gets a language and engines of its own"
+  },
+  {
+   "body": {
+    "agent_engines": {
+     "claire": "elevenlabs:scribe_v2,google:chirp_3"
+    },
+    "agent_languages": {
+     "claire": "no,en"
+    },
+    "call_engines": "",
+    "call_languages": "",
+    "call_policy_error": "",
+    "engine": "local",
+    "language": "en",
+    "long_form_model": "",
+    "long_form_threshold_range": {
+     "max": 3600,
+     "min": 1
+    },
+    "long_form_threshold_sec": 30,
+    "models": [
+     {
+      "available": false,
+      "biasing": "keyterm",
+      "budget": {
+       "capacity": 50,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "DEEPGRAM_API_KEY",
+      "id": "deepgram:nova-3",
+      "model": "nova-3",
+      "name": "Deepgram Nova-3",
+      "provider": "deepgram",
+      "turn_detection": "own",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
+      "credential": "ELEVEN_API_KEY",
+      "id": "elevenlabs:scribe_v2",
+      "model": "scribe_v2",
+      "name": "ElevenLabs Scribe v2",
+      "provider": "elevenlabs",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia:ink-2",
+      "model": "ink-2",
+      "name": "Cartesia Ink-2",
+      "provider": "cartesia",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia:ink-whisper",
+      "model": "ink-whisper",
+      "name": "Cartesia Ink-Whisper",
+      "provider": "cartesia",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+      "id": "google:chirp_3",
+      "model": "chirp_3",
+      "name": "Google Chirp 3",
+      "provider": "google",
+      "turn_detection": "native",
+      "weight": "cloud"
+     }
+    ],
+    "provider_turn_taking_available": false,
+    "providers": [
+     {
+      "available": false,
+      "credential": "DEEPGRAM_API_KEY",
+      "id": "deepgram",
+      "kind": "cloud",
+      "name": "Deepgram",
+      "turn_detection": "own"
+     },
+     {
+      "available": false,
+      "credential": "ELEVEN_API_KEY",
+      "id": "elevenlabs",
+      "kind": "cloud",
+      "name": "ElevenLabs Scribe",
+      "turn_detection": "native"
+     },
+     {
+      "available": false,
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia",
+      "kind": "cloud",
+      "name": "Cartesia Ink",
+      "turn_detection": "native"
+     },
+     {
+      "available": false,
+      "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+      "id": "google",
+      "kind": "cloud",
+      "name": "Google Chirp",
+      "turn_detection": "native"
+     }
+    ],
+    "retain_audio": false,
+    "stream_path": "/stt/stream",
+    "turn_taking": "native",
+    "turn_taking_options": [
+     {
+      "available": true,
+      "id": "native",
+      "name": "Native (on-device VAD + Smart Turn)"
+     },
+     {
+      "available": false,
+      "id": "provider",
+      "name": "Provider-owned end of turn"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "the settings with the agent in them"
+  },
+  {
+   "body": {
+    "agent_engines": {},
+    "agent_languages": {},
+    "call_engines": "",
+    "call_languages": "",
+    "call_policy_error": "",
+    "engine": "local",
+    "language": "en",
+    "long_form_model": "",
+    "long_form_threshold_range": {
+     "max": 3600,
+     "min": 1
+    },
+    "long_form_threshold_sec": 30,
+    "models": [
+     {
+      "available": false,
+      "biasing": "keyterm",
+      "budget": {
+       "capacity": 50,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "DEEPGRAM_API_KEY",
+      "id": "deepgram:nova-3",
+      "model": "nova-3",
+      "name": "Deepgram Nova-3",
+      "provider": "deepgram",
+      "turn_detection": "own",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
+      "credential": "ELEVEN_API_KEY",
+      "id": "elevenlabs:scribe_v2",
+      "model": "scribe_v2",
+      "name": "ElevenLabs Scribe v2",
+      "provider": "elevenlabs",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "keyterms",
+      "budget": {
+       "capacity": 100,
+       "max_term_chars": 49,
+       "unit": "terms"
+      },
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia:ink-2",
+      "model": "ink-2",
+      "name": "Cartesia Ink-2",
+      "provider": "cartesia",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia:ink-whisper",
+      "model": "ink-whisper",
+      "name": "Cartesia Ink-Whisper",
+      "provider": "cartesia",
+      "turn_detection": "native",
+      "weight": "cloud"
+     },
+     {
+      "available": false,
+      "biasing": "none",
+      "budget": {
+       "capacity": 0,
+       "max_term_chars": null,
+       "unit": "terms"
+      },
+      "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+      "id": "google:chirp_3",
+      "model": "chirp_3",
+      "name": "Google Chirp 3",
+      "provider": "google",
+      "turn_detection": "native",
+      "weight": "cloud"
+     }
+    ],
+    "ok": true,
+    "provider_turn_taking_available": false,
+    "providers": [
+     {
+      "available": false,
+      "credential": "DEEPGRAM_API_KEY",
+      "id": "deepgram",
+      "kind": "cloud",
+      "name": "Deepgram",
+      "turn_detection": "own"
+     },
+     {
+      "available": false,
+      "credential": "ELEVEN_API_KEY",
+      "id": "elevenlabs",
+      "kind": "cloud",
+      "name": "ElevenLabs Scribe",
+      "turn_detection": "native"
+     },
+     {
+      "available": false,
+      "credential": "CARTESIA_API_KEY",
+      "id": "cartesia",
+      "kind": "cloud",
+      "name": "Cartesia Ink",
+      "turn_detection": "native"
+     },
+     {
+      "available": false,
+      "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+      "id": "google",
+      "kind": "cloud",
+      "name": "Google Chirp",
+      "turn_detection": "native"
+     }
+    ],
+    "retain_audio": false,
+    "stream_path": "/stt/stream",
+    "turn_taking": "native",
+    "turn_taking_options": [
+     {
+      "available": true,
+      "id": "native",
+      "name": "Native (on-device VAD + Smart Turn)"
+     },
+     {
+      "available": false,
+      "id": "provider",
+      "name": "Provider-owned end of turn"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "the agent is heard like every agent again"
   }
  ],
  "live": {
@@ -2211,7 +2842,7 @@
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#1@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:9>",
+    "notification_id": "pn-<id:10>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: replay voice prompt",

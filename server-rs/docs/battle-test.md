@@ -143,11 +143,11 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 00:32 (16 Nov) | the Host updated by the installer, `d3b9193c` to `4eebf671` | 3 | every turn in its command (`sleep 40`) | held: the new build had all three |
 | 06:28 (16 Nov) | the Host updated by the installer, `4eebf671` to `14bb3f1c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 07:08 (16 Nov) | the Host updated by the installer, `14bb3f1c` to `3175ffcc`: the build that shows a message of the agent as one row with its tools' cards, taken over in the middle of three turns the build before had begun | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 66 ms, with all three. Each of the three turns shows its command twice: once as the build before wrote it (a row by itself, never closed: `recorded`), once as the new build wrote it when it took the turn over (on the row of its message, `ok`). A turn that begins on the new build shows it once |
-
 | 08:41 (16 Nov) | the Host updated by the installer, `3175ffcc` to `652c6d6a`: the build that hears (speech in) | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 10:53 (16 Nov) | the Host updated by the installer, `652c6d6a` to `5d74ac9d`: the build that speaks (speech out) and hears each agent by its own engines | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 2 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Sixty-eight turns in eighteen exercises,
+completed, answered with its word, and its command ran exactly once. Seventy-one turns in nineteen exercises,
 none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
@@ -207,6 +207,42 @@ are spoken to in Norwegian have engines of their own with a second one after Scr
 by that one. This Host had no engines per agent then; they were built the same day (an agent's own language
 and engines, and Chirp), which is where that observation led.
 
+## An agent is heard aloud
+
+On 16 Nov 2026 at 10:55, on the build of `5d74ac9d`, with the owner's file as it is (Gemini speaks, on his
+Google project; Cartesia after it). The Host says which engines listen (`GET /transcription-providers`):
+ElevenLabs and Google can be used, because the owner's file has a key for the one and names a project for the
+other; Deepgram and Cartesia cannot. No agent has engines of its own there.
+
+An agent made for this (`check`, the small model, a Gemini voice of its own) was asked, in a real Claude Code
+turn, to answer with one spoken line. The line became a clip: announced to the apps under its name
+(`1794822849329__check.mp3`), fetched whole (200; 25,121 bytes; MP3, 44.1 kHz, one channel, 1.57 s), fetched
+in part (`Range`, 206), acknowledged as played (`POST /clips/ack`, `updated: true`), and after that not
+offered again (`GET /clips/recoverable`).
+
+The clip was then handed back to this Host to be heard (`POST /transcribe`). Google Chirp, with the owner's
+account and project, answered in 0.88 s: "speech our works". The Host's own Whisper (`small.en`) answered in
+9.9, 16.1 and 10.8 s in three tries: "Speed Child Works." The line was "Speech out works."; neither engine
+heard a made voice exactly.
+
+Ten seconds for a clip of a second and a half is slow, so it was looked into the same morning:
+
+- The tone of 08:42 was no measure. A clip with no speech in it is dropped by the model's own filter for
+  silence before the model runs, which is why it took a third of a second.
+- The laptop stood at a load of 20 to 25 on its eight cores (many agents work on it). The same worker,
+  started by itself with the same interpreter and model, heard the same clip in 3.4 to 6.5 s at a load of 11.
+- The Python Host's own log has the same engine on the same machine between 0.8 and 1.7 s on the evening of
+  14 Nov and at 2.3 s and 260 s on the morning of 16 Nov. Its log does not say how long those clips were, so
+  that is the range the engine has there, not a comparison clip for clip.
+- One difference was found by reading and closed: the Python Host gives its model half the machine's cores
+  and four at most, so that hearing does not starve the server beside it; this Host left the count to the
+  library. From the next build on it gives the same. Measured at a load of 11, the two counts hear the
+  clip in the same time.
+
+So the time is the machine's, and the engine is the same one with the same settings on both Hosts. An agent
+that should be heard fast on a loaded machine is given an engine outside it, which is what its own engines
+are for.
+
 ## The soak so far
 
 Rounds 1 to 13 (15 Nov, 17:15 to 20:01): twelve completed and answered with their word; none lost, none
@@ -224,6 +260,13 @@ turn did not finish and follows a turn that waits to its end. It went on countin
 Rounds 17 to 28 (to 23:46) completed, across five more builds (`fedf357e`, `d0788034`, `6b06bb21`,
 `bcb9a916` and, from 23:59, `d3b9193c`). In all, 28 rounds over six and a half hours: 27 completed and
 answered with their word, the one of 19:31 as told above; none lost, none doubled.
+
+Rounds 29 to 73 (to 11:06 on 16 Nov) completed, across five more builds (`4eebf671`, `14bb3f1c`, `3175ffcc`,
+`652c6d6a` and, from 10:53, `5d74ac9d`): through the night and the morning. The account the agents share
+ran out six times that morning for the lead's own agent; no round failed for it. In all, 73 rounds over
+17.9 hours on fourteen builds: 72 completed and answered with their word, the one of 19:31 as told above;
+none lost, none doubled. Six audits of the whole conversation, the last over 72 messages: no message
+twice, no turn ended twice. A completed turn took 6.0 s at the median and 138 s at the longest.
 
 ## What a round does not prove
 
