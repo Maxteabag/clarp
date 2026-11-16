@@ -36,6 +36,7 @@ pub mod requests;
 pub mod rings;
 pub mod roster;
 pub mod said;
+pub mod schedules;
 pub mod spoken;
 pub mod told;
 pub mod tools;
