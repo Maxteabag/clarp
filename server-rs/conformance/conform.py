@@ -725,9 +725,21 @@ def by_session(value, sessions: dict):
         return [by_session(item, sessions) for item in value]
     if isinstance(value, dict):
         return {key: ([f'<agent:{sessions.get(item, "?")}>' if isinstance(item, str) else item for item in items]
-                      if key == 'archived_parents' and isinstance(items, list) else by_session(items, sessions))
+                      if key == 'archived_parents' and isinstance(items, list)
+                      else own_face(items, sessions) if key == 'avatar_url' and isinstance(items, str)
+                      else by_session(items, sessions))
                 for key, items in value.items()}
     return value
+
+
+def own_face(address: str, sessions: dict) -> str:
+    """Where an agent's own picture is fetched (`/avatars/<agent id>?v=...`), with the agent named
+    as who it is: the id is each Host's own draw. What the address carries of the picture is
+    compared."""
+    if not address.startswith('/avatars/'):
+        return address
+    agent_id = address[len('/avatars/'):].split('?')[0]
+    return address.replace(agent_id, f'<agent:{sessions[agent_id]}>', 1) if agent_id in sessions else address
 
 
 def published(value, found: dict) -> dict:
@@ -773,7 +785,9 @@ def seen_by_a_client(raw: dict) -> dict:
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
-    raw = {**raw, 'http': [{**exchange, 'body': by_session(settle(exchange['body'], sessions), known)}
+    # An agent's own picture is asked for under the agent's id: the path is named as the address is.
+    raw = {**raw, 'http': [{**exchange, 'body': by_session(settle(exchange['body'], sessions), known),
+                            'path': own_face(str(exchange.get('path') or ''), known)}
                            for exchange in raw['http']]}
     whole = normalize.normalize(raw, str(REPO))
     # The normalizer keeps the answers in the order they were given, one for one.
