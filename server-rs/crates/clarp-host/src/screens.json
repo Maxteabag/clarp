@@ -119,5 +119,91 @@
   "providers": [],
   "recent_decisions": [],
   "ignored_decisions": []
+ },
+ "/hotseat/status": {
+  "actions": [],
+  "providers": [
+   {
+    "accounts": [],
+    "cadence_s": null,
+    "error_code": "disabled",
+    "inventory": "unavailable",
+    "observed_at": null,
+    "partial": false,
+    "provider": "claude",
+    "read_state": "never",
+    "stale": true
+   },
+   {
+    "accounts": [],
+    "cadence_s": null,
+    "error_code": "disabled",
+    "inventory": "unavailable",
+    "observed_at": null,
+    "partial": false,
+    "provider": "codex",
+    "read_state": "never",
+    "stale": true
+   },
+   {
+    "accounts": [],
+    "cadence_s": null,
+    "error_code": null,
+    "inventory": "unavailable",
+    "observed_at": null,
+    "partial": false,
+    "provider": "muse",
+    "read_state": "never",
+    "stale": true
+   }
+  ],
+  "schema": "clarp.hotseat-status/1",
+  "served_at": 0,
+  "source": {
+   "cli_version": null,
+   "cost_note": "Numbers come from the Hotseat switcher's own scheduled reads, which may probe or refresh provider quota; opening this view adds no read."
+  },
+  "switcher": {
+   "enabled": false,
+   "kind": "deterministic",
+   "lanes": [],
+   "model": null
+  }
+ },
+ "/hotseat/desk": {
+  "accounts": [],
+  "clarp_agents": {
+   "by_backend": {},
+   "claude_backed": 0,
+   "live": 0,
+   "live_by_account": {},
+   "total": 0,
+   "would_use_by_account": {}
+  },
+  "error": null,
+  "errors": [],
+  "installed": false,
+  "live_read_at": null,
+  "next_refresh_at": 0,
+  "observed_at": null,
+  "partial": true,
+  "recent_work": [],
+  "refresh_throttled": false,
+  "refreshed": false,
+  "refreshing": false,
+  "schema": "clarp.hotseat-desk/1",
+  "served_at": 0,
+  "sessions": 0,
+  "sources": null,
+  "stale": true,
+  "stopped_work": [],
+  "switcher": {
+   "actions": [],
+   "enabled": false,
+   "kind": "deterministic",
+   "lanes": [],
+   "model": null
+  },
+  "switches": []
  }
 }

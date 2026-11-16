@@ -162,6 +162,38 @@ async fn no_janitors() -> ApiError {
     not_built("Janitors are")
 }
 
+/// `GET /janitors/<id>` and what is read of one janitor (its runs): this Host has no
+/// janitors, and says of each what the Python Host says of one it has not. That is its
+/// word for an agent it does not have: a janitor is an agent there.
+async fn no_such_janitor() -> (StatusCode, Json<Value>) {
+    let none = json!({ "error": "Agent not found", "code": "agent_not_found" });
+    (StatusCode::NOT_FOUND, Json(none))
+}
+
+/// What the Python Host answers of the machine's account seats before anything was read
+/// of them, said at this moment. This Host reads no seat and changes no login: on a
+/// machine with another Host, that Host's selector does (`docs/differences.md`).
+fn seats(app: &App, path: &str) -> Json<Value> {
+    let mut said = kept(path);
+    said["served_at"] = json!(app.clock.now_ms());
+    Json(said)
+}
+
+/// `GET /hotseat/status`: how the account seats stand, as they were last read.
+async fn hotseat_status(State(app): State<App>) -> Json<Value> {
+    seats(&app, "/hotseat/status")
+}
+
+/// `GET /hotseat/desk`: the desk of the account seats, whether or not a new reading is
+/// asked for (`refresh`): nothing here reads one.
+async fn hotseat_desk(State(app): State<App>) -> Json<Value> {
+    seats(&app, "/hotseat/desk")
+}
+
+async fn no_hotseat() -> ApiError {
+    not_built("Changing the account seats is")
+}
+
 /// `GET /cartesia-voices`: the old picker of Cartesia's voices. The catalogue of voices
 /// (`GET /voice-catalog`) has them; this list is not kept.
 async fn cartesia_voices() -> Json<Value> {
@@ -413,6 +445,11 @@ pub fn routes() -> Router<App> {
             get(diagnostics).post(no_diagnostics),
         )
         .route("/janitor-policy", get(janitor_policy).post(no_janitors))
+        .route("/janitors/{id}", get(no_such_janitor))
+        .route("/janitors/{id}/runs", get(no_such_janitor))
+        .route("/hotseat/status", get(hotseat_status))
+        .route("/hotseat/desk", get(hotseat_desk))
+        .route("/hotseat/{action}", post(no_hotseat))
         .route("/cartesia-voices", get(cartesia_voices))
         .route("/podcast-history", get(podcasts))
         .route("/podcast-history/sources", get(podcast_sources))

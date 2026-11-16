@@ -11231,6 +11231,48 @@ fn a_turn_is_shown_as_it_runs_to_those_who_asked_and_again_after_the_host_was_ki
         nothing["tool_explanations"],
         json!({"enabled": false, "detail_level": 2})
     );
+    // Asked to explain tools all the same, the Host says of each that nothing explains:
+    // of the first eight things asked about, and of what is no thing nothing at all.
+    let mut asked_about: Vec<Value> = (1..=9)
+        .map(|at| json!({ "id": format!("tool-{at}") }))
+        .collect();
+    asked_about[1] = json!("not a thing");
+    asked_about[2] = json!({ "name": "one without an id" });
+    let (status, explained) = host.ask(
+        "POST",
+        "/tool-explanations",
+        Some(&json!({ "session": agent, "detail_level": 3, "items": asked_about })),
+    );
+    let said: Vec<&Value> = explained["items"].as_array().unwrap().iter().collect();
+    assert_eq!(
+        (
+            status,
+            &explained["detail_level"],
+            &explained["model"],
+            said.len()
+        ),
+        (200, &json!(3), &json!(""), 7)
+    );
+    assert_eq!(said[0], &json!({ "id": "tool-1", "status": "disabled" }));
+    assert_eq!(said[1], &json!({ "id": null, "status": "disabled" }));
+    assert_eq!(said[6], &json!({ "id": "tool-8", "status": "disabled" }));
+    for (body, refused) in [
+        (
+            json!({ "session": "nobody", "items": [] }),
+            (404, json!({ "error": "agent not found" })),
+        ),
+        (
+            json!({ "items": [] }),
+            (404, json!({ "error": "agent not found" })),
+        ),
+        (json!([1]), (400, json!({ "error": "object required" }))),
+    ] {
+        assert_eq!(
+            host.ask("POST", "/tool-explanations", Some(&body)),
+            refused,
+            "{body}"
+        );
+    }
     let epoch = nothing["epoch"].as_str().unwrap().to_string();
     assert!(!epoch.is_empty());
     for nobody in ["/live?session=nobody", "/live", "/live?session="] {
@@ -12661,6 +12703,60 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     assert_eq!(read("/judgments/settings")["settings"]["enabled"], false);
     assert_eq!(read("/diagnostics/settings")["settings"]["enabled"], false);
     assert_eq!(read("/janitor-policy")["revision"], 0);
+    // A janitor an app asks for by its name is none this Host has, nor are its runs.
+    for of_one in [
+        "/janitors/hotseatswitcher-1",
+        "/janitors/hotseatswitcher-1/runs?limit=30",
+    ] {
+        assert_eq!(
+            host.ask("GET", of_one, None),
+            (
+                404,
+                json!({ "error": "Agent not found", "code": "agent_not_found" })
+            ),
+            "{of_one}"
+        );
+    }
+    // The account seats of the machine: nothing was read of them, and this Host says when
+    // it said so. It changes none.
+    let asked_at = now_ms();
+    let seats = read("/hotseat/status");
+    assert_eq!(
+        (
+            &seats["schema"],
+            &seats["switcher"]["enabled"],
+            seats["providers"].as_array().unwrap().len()
+        ),
+        (&json!("clarp.hotseat-status/1"), &json!(false), 3)
+    );
+    assert!(seats["served_at"].as_i64().unwrap() >= asked_at, "{seats}");
+    let desk = read("/hotseat/desk?refresh=1");
+    assert_eq!(
+        (
+            &desk["schema"],
+            &desk["installed"],
+            &desk["refreshed"],
+            &desk["accounts"]
+        ),
+        (
+            &json!("clarp.hotseat-desk/1"),
+            &json!(false),
+            &json!(false),
+            &json!([])
+        )
+    );
+    assert!(desk["served_at"].as_i64().unwrap() >= asked_at, "{desk}");
+    for change in ["/hotseat/switch", "/hotseat/resume"] {
+        let (status, said) = host.ask("POST", change, Some(&json!({ "provider": "claude" })));
+        assert_eq!(
+            (status, said["error"].as_str()),
+            (
+                501,
+                Some("Changing the account seats is not built on this Host yet")
+            ),
+            "{change}"
+        );
+    }
     assert_eq!(read("/location"), json!({}));
     assert_eq!(
         read("/cartesia-voices"),
