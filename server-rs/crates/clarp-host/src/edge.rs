@@ -693,6 +693,42 @@ pub(crate) async fn make_agent(
         Some(_) => Err(bad(&format!("{what} must be a string or null"))),
     };
     let plain = |key: &str| asked.get(key).and_then(Value::as_str).map(str::to_string);
+    // What this Host cannot do with a new agent yet is refused in words. Passed over, a
+    // request to start an agent again in place would be answered as a name that is taken,
+    // and one to take up a past session would start an agent that knows nothing of it.
+    let named = |key: &str| plain(key).is_some_and(|said| !said.trim().is_empty());
+    if named("replace_sid") {
+        let why = "Starting an agent again in place is not built on this Host yet. Its \
+                   model and effort are changed in its settings; anything else takes a \
+                   new agent.";
+        return Err(refused(
+            StatusCode::BAD_REQUEST,
+            "relaunch_unsupported",
+            why,
+        ));
+    }
+    if named("resume_session_id") || named("fork_session_id") {
+        let why = "Taking up or forking a past session of a tool is not built on this Host yet.";
+        return Err(refused(StatusCode::BAD_REQUEST, "resume_unsupported", why));
+    }
+    // No tool is given servers of its own here: every one that is named is one this Host
+    // does not know, and is refused in the Python Host's words for that.
+    match asked.get("mcp_servers") {
+        None => {}
+        Some(Value::Array(names)) if names.iter().all(Value::is_string) => {
+            let mut unknown: Vec<&str> = Vec::new();
+            for name in names.iter().filter_map(Value::as_str).map(str::trim) {
+                if !name.is_empty() && !unknown.contains(&name) {
+                    unknown.push(name);
+                }
+            }
+            if !unknown.is_empty() {
+                let why = format!("Unknown MCP server: {}", unknown.join(", "));
+                return Err(refused(StatusCode::BAD_REQUEST, "unknown mcp server", &why));
+            }
+        }
+        Some(_) => return Err(bad("mcp_servers must be a list of names")),
+    }
     let request = CreateAgentRequest {
         name: plain("name").unwrap_or_default(),
         backend: plain("backend"),
