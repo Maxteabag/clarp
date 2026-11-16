@@ -145,9 +145,10 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 07:08 (16 Nov) | the Host updated by the installer, `14bb3f1c` to `3175ffcc`: the build that shows a message of the agent as one row with its tools' cards, taken over in the middle of three turns the build before had begun | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 66 ms, with all three. Each of the three turns shows its command twice: once as the build before wrote it (a row by itself, never closed: `recorded`), once as the new build wrote it when it took the turn over (on the row of its message, `ok`). A turn that begins on the new build shows it once |
 | 08:41 (16 Nov) | the Host updated by the installer, `3175ffcc` to `652c6d6a`: the build that hears (speech in) | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 10:53 (16 Nov) | the Host updated by the installer, `652c6d6a` to `5d74ac9d`: the build that speaks (speech out) and hears each agent by its own engines | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 2 ms, with all three |
+| 11:35 (16 Nov) | the Host updated by the installer, `5d74ac9d` to `9781947b`: the build with the catalogue of voices | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 3 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Seventy-one turns in nineteen exercises,
+completed, answered with its word, and its command ran exactly once. Seventy-four turns in twenty exercises,
 none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
@@ -242,6 +243,22 @@ Ten seconds for a clip of a second and a half is slow, so it was looked into the
 So the time is the machine's, and the engine is the same one with the same settings on both Hosts. An agent
 that should be heard fast on a loaded machine is given an engine outside it, which is what its own engines
 are for.
+
+## The catalogue of voices
+
+On 16 Nov 2026 at 11:36, on the build of `9781947b`, with the owner's file as it is. The catalogue for the
+agent `check` (`GET /voice-catalog?for=check`) says what the owner's file says: Gemini speaks and can be used
+(111 voices, `Kore` this agent's), Cartesia after it (359 voices: Cartesia's own list, asked for with the
+owner's key), and ElevenLabs, Deepgram and Google listed as engines that cannot be used here, which is true
+of this Host: it has not built them. A Google voice that is none is refused (400, `unknown voice`), an agent
+that is not there is not found (404), a preview of a voice that is none is not made (404). No preview was
+made: one costs the owner's account a clip.
+
+One slip, repaired at once. The first probe sent a voice without naming its engine and expected a refusal.
+The route takes any text then, as the Python Host's does, and so the agent `check` had `no-such-voice` for a
+voice. It was given `{"gemini": "Kore"}` again and the catalogue showed `Kore` as its own. Only that agent,
+which exists for such checks, was touched. What it says of the route is in the corpus now by the scenario
+`voices`: a voice is checked against a list for Google alone.
 
 ## The soak so far
 

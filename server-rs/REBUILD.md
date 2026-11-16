@@ -553,6 +553,35 @@ One thing is this Host's: an engine it has not built is told as one that cannot 
 given a voice with `POST /agent-voice`, kept with the agent; a voice another agent has is refused. A preview
 of a voice is made once by its own engine and kept.
 
+**A turn is shown as it runs** (16 Nov 2026). Counted on the owner's Host over a day, `GET /live` was asked
+424 times and this Host had no answer: the apps build their status line, their tool rows and their thinking
+rows on the open turn as items that appear, grow and settle, sent as small operations (`docs/live-items.md`).
+`clarp-kernel` `live.rs` has the three things it takes, none with I/O or a clock: the reducer every client
+runs (`View`), one agent's hub (`Hub`: what is seen of a turn becomes events numbered one by one, growth of a
+text and of a tool's output held back for a moment, and every operation it sends applied to its own `View`,
+so that the snapshot is by construction what a client that saw every event holds), and what a backend saw
+of a turn in words every backend can say it in (`Glimpse`). The count of an edit's lines is Python's
+`difflib`, ported by hand (`difflib.rs`): another matching counts another diff. All of it is held to the
+Python Host by `tests/fixtures/live-vectors.json` (`tools/live-vectors.py`): the seven recorded streams of the
+contract, nineteen scripted turns through the Python hub with a clock and a timer moved by hand, six of them
+random walks, 668 events compared one by one, and the titles, previews, tails, edits and diffs beside them.
+A planted fault was caught before the vectors were trusted. Claude Code's stream becomes glimpses in
+`clarp-backend` (every block of a message an item of its own, a tool from the moment its name is known, what
+each tool returned), held to the Python Host's reader by four recorded streams and checked on two turns
+recorded from the real Claude Code. The agent's actor owns the hub, and what is shown follows the log: a turn
+that holds the agent is begun for those who watch, one that holds it no longer is ended as it ended, one that
+waits for an account says so. An item is stamped with the time of the record it came from. That is what a
+restart needs: a Host that comes back in the middle of a turn builds the same items again from the turn's own
+spool, under another `epoch`, which tells a client to ask for all of it anew. The Host sends the events to
+the connections that asked (`/events?live=`): whole to one that follows the agent, the status line and the
+turn alone to one that does not, nothing to one that did not ask; they have no number and are never kept.
+`GET /live?session=` answers the whole view. The corpus has the scenario `live-items`: its stand-in for
+Claude Code prints a turn piece by piece as the real one does (`[qa-stream]`), and the scenario is listened
+to as an app that follows the agent. Not there: an explanation of a tool's use in plain words (the setting
+answers off, and turning it on is refused in words); the items of a Codex turn, which shows its turn and its
+status line alone; plan and diff items; and the pushes that keep the phone's "agents working" activity
+current.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
