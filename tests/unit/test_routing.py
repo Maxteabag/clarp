@@ -69,3 +69,23 @@ def test_word_similarity_prefix_score_meets_threshold():
     assert word_similarity("Bell", "Bella") >= 0.78
     # Whole different word stays below.
     assert word_similarity("Coffee", "Bella") < 0.5
+
+
+@pytest.mark.parametrize("name,address,body", [
+    ("Zoë", "Zoë, ", "check the branch"),
+    ("Zoé", "hey Zoé: ", "check the branch"),
+    ("Rachél", "Rachél, ", "check the branch"),
+    ("Zoë", "Zoë", ""),
+    ("Zoe\u0308", "Zoe\u0308, ", "check the branch"),
+    ("Rache\u0301l", "hi Rache\u0301l! ", "check the branch"),
+    ("Zoë\u0301", "Zoë\u0301; ", "check the branch"),
+    ("Zoe\u0308\u0301", "Zoe\u0308\u0301? ", "check the branch"),
+    ("Zoë", "Zoë, ", "écris à Rachél"),
+    ("Zoë", "Zoë ", "\u0301keep this mark"),
+    ("Zoë", "Zoë", "2, check the branch"),
+    ("Zoë", "Zoë", "♥ check the branch"),
+    ("Rachel", "Rachel", ""),
+])
+def test_unicode_address_is_removed_without_eating_the_request(name, address, body):
+    assert resolve_agent_by_spoken_name(address + body, {"agent": {"name": name}}) == (
+        "agent", body)
