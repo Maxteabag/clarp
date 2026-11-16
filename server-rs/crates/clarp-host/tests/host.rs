@@ -7411,6 +7411,36 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         (answer.status, &after["cached"], &after["trace_id"]),
         (200, &json!(true), &json!(trace))
     );
+
+    // The app has sent what was said, and says it will not ask for the answer again: it is
+    // forgotten. The same name is then free for whatever is said under it next.
+    let kept = place.root.join("data").join("transcriptions");
+    let forget = |job: &str| {
+        let path = format!("/transcription-results/{job}");
+        host.ask_as(token, "DELETE", &path, None)
+    };
+    assert_eq!(forget("utt-1"), (200, json!({ "ok": true })));
+    assert_eq!(files_under(&kept), 0);
+    assert_eq!(
+        forget("utt-1"),
+        (200, json!({ "ok": true })),
+        "nothing to forget is no error"
+    );
+    assert_eq!(
+        forget("has%20space"),
+        (400, json!({ "error": "invalid transcription id" }))
+    );
+    wait_for("the engine to have loaded its model again", || {
+        fetch(&host, token, "POST", "/transcribe", &[], b"a clip").status == 200
+    });
+    let answer = fetch(&host, token, "POST", "/transcribe", &named, b"another clip");
+    let anew: Value = serde_json::from_slice(&answer.body).unwrap();
+    assert_eq!(
+        (answer.status, &anew["cached"]),
+        (200, &json!(false)),
+        "{anew}"
+    );
+    assert_ne!(anew["trace_id"], json!(trace));
 }
 
 /// A stand-in for ElevenLabs on the loopback: takes requests one after another, keeps what

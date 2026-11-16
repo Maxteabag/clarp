@@ -16,10 +16,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
-use axum::extract::{Request, State};
+use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS};
 use clarp_speech::listen::{Asked, Clip, Deaf, Listener};
@@ -303,6 +303,11 @@ impl Ears {
         std::fs::rename(&being_written, &file)
     }
 
+    /// Forgets the answer to a job: the app has what it asked for and will not ask again.
+    fn forget(&self, job: &str) {
+        let _ = std::fs::remove_file(self.file_of(job));
+    }
+
     /// Forgets the answers nobody will ask for again.
     pub fn forget_old(&self) {
         let Ok(files) = std::fs::read_dir(&self.kept) else {
@@ -453,6 +458,29 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     Ok(answer)
 }
 
+/// `DELETE /transcription-results/<job>`: the app has sent what was said and will not ask
+/// for this job's answer again. A job that is not kept is forgotten just the same.
+async fn forget(State(app): State<App>, Path(job): Path<String>) -> Response {
+    let job = match heard::job_id(Some(&job)) {
+        Ok(job) => job,
+        Err(why) => {
+            let (status, why) = refuse(StatusCode::BAD_REQUEST, why);
+            return (status, Json(why)).into_response();
+        }
+    };
+    let ears = app.ears.clone();
+    // Not in the middle of the job's own answer: after it.
+    let turn = ears.turn_for(&job);
+    let _held = match &turn {
+        Some(turn) => Some(turn.lock().await),
+        None => None,
+    };
+    if !job.is_empty() {
+        let _ = tokio::task::spawn_blocking(move || ears.forget(&job)).await;
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
 /// The engines of the contract's providers as an app lists them, each with whether it can
 /// be used on this Host.
 fn cloud_models(ears: &Ears) -> Vec<Value> {
@@ -539,6 +567,7 @@ async fn providers(State(app): State<App>) -> Json<Value> {
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/transcribe", post(transcribe))
+        .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
         .route("/transcription-providers", get(providers))
 }
