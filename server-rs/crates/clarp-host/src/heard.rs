@@ -33,7 +33,7 @@ use clarp_kernel::said::Who;
 use clarp_speech::chirp::Chirp;
 use clarp_speech::listen::{Asked, Clip, Deaf, Heard, Listener};
 use clarp_speech::scribe::Scribe;
-use clarp_speech::whisper::{Whisper, Worker};
+use clarp_speech::whisper::{self, Whisper, Worker};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -107,6 +107,10 @@ impl Ears {
             let worker = Worker {
                 args: vec![config.whisper_worker.to_string_lossy().to_string()],
                 compute_type: config.whisper_compute.clone(),
+                // Half the cores, as the Python Host gives its own: 4 where the count is not known.
+                cpu_threads: whisper::threads_for(
+                    std::thread::available_parallelism().map_or(4, std::num::NonZero::get),
+                ),
                 language: languages::own_language(&config.whisper_model).map(str::to_string),
                 scratch: config.run_dir.join("heard"),
                 ..Worker::new(&config.whisper_python, &config.whisper_source)
