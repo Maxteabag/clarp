@@ -44,7 +44,12 @@ LIVE = {"carry_live_rows": True}
 WORDS = {"carry_live_rows": True, "carry_live_rows_by_words": True}
 BY_WORDS = pytest.mark.parametrize("by_words", [True, False], ids=["by words", "by the trace alone"])
 OLD = "an old reply that nothing else resembles"
-REFUSED = ("full_carry_inputs_changed", ["live_row_of_old_reply"])
+# Two words in the journal for two reasons. By the trace alone: the row's turn
+# has replies before the boundary and no words were kept to compare (the
+# switch off, an older turn, too many words, a carry from before the switch).
+BY_TRACE = ("full_carry_inputs_changed", ["live_row_of_old_reply"])
+# By the words: the row shows what one of those replies said.
+SHOWS = ("full_carry_inputs_changed", ["live_row_shows_old_reply"])
 TAIL = ("tail_applied", [])
 COMPACTED = "This session is being continued from a previous conversation that ran out of context."
 
@@ -106,7 +111,7 @@ def test_a_live_row_is_refused_for_the_words_of_an_old_reply_of_its_turn(
         assert (_kept(world) is not None) is by_words
         world.live("leftover", text, at=FAR, trace="spanning")
         world.grow(_turn(backend, ordinal))
-        assert world.imported() == (REFUSED if related or not by_words else TAIL)
+        assert world.imported() == ((SHOWS if related else TAIL) if by_words else BY_TRACE)
         assert bool(_rows(world, "message_id='live-leftover'")) is not related
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == TAIL
@@ -151,7 +156,7 @@ def test_a_live_row_that_grows_through_the_beginning_of_an_old_reply(tmp_path, b
             # A full replay removes the related row; the next one is new.
             world.live(f"step{step}", showing, at=FAR + step, trace="spanning")
             world.grow(_turn(backend, ordinal + step))
-            assert world.imported() == (REFUSED if related else TAIL), showing
+            assert world.imported() == (SHOWS if related else TAIL), showing
             assert bool(_rows(world, "message_id=?", (f"live-step{step}",))) is not related
 
 
@@ -178,15 +183,15 @@ def test_a_compaction_inside_a_running_turn_and_the_turn_streams_on(tmp_path, ba
             assert OLD in _kept(world)["running"]
         world.live("stream", "The next thing", at=FAR, trace="running")
         world.grow(_turn(backend, ordinal + 2))
-        assert world.imported() == (TAIL if by_words else REFUSED)
+        assert world.imported() == (TAIL if by_words else BY_TRACE)
         for step, showing in enumerate(("The next thing I did", "The next thing I did was this.")):
             world.live_change("stream", "text=?", (showing,))
             world.grow(_turn(backend, ordinal + 3 + step))
-            assert world.imported() == (TAIL if by_words else REFUSED)
+            assert world.imported() == (TAIL if by_words else BY_TRACE)
         assert _rows(world, "message_id='live-stream'")[0][3] == "The next thing I did was this."
         world.live("again", OLD[:12], at=FAR + 9, trace="running")
         world.grow(_turn(backend, ordinal + 5))
-        assert world.imported() == REFUSED
+        assert world.imported() == (SHOWS if by_words else BY_TRACE)
         assert not _rows(world, "message_id='live-again'")
 
 
@@ -209,10 +214,10 @@ def test_the_last_reply_of_a_turn_that_is_given_the_next_turns_trace(tmp_path, b
         assert _rows(world, "role='assistant' AND text=? AND trace_id='next'", (OLD,))
         world.live("stream", "Something else entirely", at=FAR, trace="next")
         world.grow(_turn(backend, ordinal + 3))
-        assert world.imported() == (TAIL if by_words else REFUSED)
+        assert world.imported() == (TAIL if by_words else BY_TRACE)
         world.live_change("stream", "text=?", ("Something else entirely, and more",))
         world.grow(_turn(backend, ordinal + 4))
-        assert world.imported() == (TAIL if by_words else REFUSED)
+        assert world.imported() == (TAIL if by_words else BY_TRACE)
 
 
 # ---- what the carry keeps, and what it does not ------------------------------------------
@@ -229,7 +234,7 @@ def test_a_frontier_from_before_the_switch_is_refused_until_the_next_full_import
         world.faults["settings"] = WORDS
         world.live("first", "nothing like it", at=FAR, trace="spanning")
         world.grow(_turn(backend, ordinal))
-        assert world.imported() == REFUSED
+        assert world.imported() == BY_TRACE
         assert OLD in _kept(world)["spanning"]
         world.live_change("first", "text=?", ("nothing like it, at all",))
         world.grow(_turn(backend, ordinal + 1))
@@ -286,11 +291,11 @@ def test_a_reply_stored_under_other_words_than_it_said(tmp_path, backend):
         assert not _rows(world, "role='assistant' AND text='HEARTBEAT_OK'")
         world.live("leftover", "HEARTBEAT_OK", at=FAR, trace="spanning")
         world.grow(_turn(backend, ordinal))
-        assert world.imported() == REFUSED
+        assert world.imported() == SHOWS
         assert not _rows(world, "message_id='live-leftover'")
         world.live("notice", "Heartbeat check: no action needed.", at=FAR + 1, trace="spanning")
         world.grow(_turn(backend, ordinal + 1))
-        assert world.imported() == REFUSED
+        assert world.imported() == SHOWS
 
 
 @BACKENDS
@@ -312,8 +317,30 @@ def test_only_the_newest_turns_before_the_boundary_have_their_words_kept(tmp_pat
         assert sorted(kept) == ["turn2", "turn3", "turn4"]
         world.live("old", "nothing like it", at=FAR, trace="turn1")
         world.grow(_turn(backend, ordinal))
-        assert world.imported() == REFUSED
+        assert world.imported() == BY_TRACE
         world.live("newer", "nothing like it", at=FAR + 1, trace="turn3")
+        world.grow(_turn(backend, ordinal + 1))
+        assert world.imported() == TAIL
+
+
+@pytest.mark.parametrize("letter,fits", [("o", True), ("ø", False)], ids=["ASCII", "not ASCII"])
+@BACKENDS
+def test_the_words_that_fit_are_counted_as_the_checkpoint_stores_them(tmp_path, backend, letter, fits):
+    """A reply of 12,000 letters. The checkpoint stores its carry as JSON in
+    ASCII, where a letter that is not ASCII takes six bytes: 12 KB of words
+    in one case, 72 KB in the other, against a limit of 64 KB. The turn whose
+    words do not fit is not kept, and its live row is refused by the trace as
+    before; either way the import leaves what the full replay leaves."""
+    world = _spanned(tmp_path, backend, WORDS, answer2=letter * 12_000)
+    with world:
+        ordinal = world.started(6)
+        assert ("spanning" in _kept(world)) is fits
+        with sqlite3.connect(world.candidate) as stored:
+            [(carry,)] = stored.execute("SELECT store_carry_json FROM transcript_import_checkpoints")
+        assert carry.isascii() and len(carry) < 65536 + 1024      # what the limit promises
+        world.live("leftover", "nothing like it", at=FAR, trace="spanning")
+        world.grow(_turn(backend, ordinal))
+        assert world.imported() == (TAIL if fits else BY_TRACE)
         world.grow(_turn(backend, ordinal + 1))
         assert world.imported() == TAIL
 
