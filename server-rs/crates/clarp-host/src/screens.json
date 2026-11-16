@@ -1,0 +1,153 @@
+{
+ "/heartbeat/settings": {
+  "heartbeat_prompt": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
+  "ok": true,
+  "settings": {
+   "heartbeat_backoff_cap_sec": 3600,
+   "heartbeat_backoff_strategy": "exponential",
+   "heartbeat_dormant_after_noops": 5,
+   "heartbeat_interval_sec": 1800
+  }
+ },
+ "/herald/settings": {
+  "defaults": {
+   "short_reply_bypass_enabled": true,
+   "speak_if_short_chars": 120
+  },
+  "limits": {
+   "speak_if_short_chars": [
+    0,
+    2000
+   ]
+  },
+  "settings": {
+   "disabled": true,
+   "short_reply_bypass_enabled": true,
+   "speak_if_short_chars": 120
+  }
+ },
+ "/judgments/settings": {
+  "defaults": {
+   "enabled": false,
+   "timeout_ms": 900
+  },
+  "limits": {
+   "timeout_ms": [
+    100,
+    30000
+   ]
+  },
+  "settings": {
+   "breaker_open_seconds": 0.0,
+   "credential": "TYPESAFE_API_KEY",
+   "credential_present": false,
+   "enabled": false,
+   "sites": {
+    "errors": false,
+    "explanations": false,
+    "junk": false,
+    "labels": false,
+    "naming": false,
+    "router": false,
+    "watch": false
+   },
+   "timeout_ms": 900
+  },
+  "sites": [
+   "errors",
+   "junk",
+   "router",
+   "naming",
+   "watch",
+   "explanations",
+   "labels"
+  ]
+ },
+ "/diagnostics/settings": {
+  "ok": true,
+  "settings": {
+   "categories": [],
+   "enabled": false,
+   "retention_hours": 24,
+   "rollup_retention_days": 30
+  }
+ },
+ "/avatar-settings": {
+  "model_avatars": false
+ },
+ "/janitor-policy": {
+  "inherit_sessions": [],
+  "model_chain": [],
+  "revision": 0
+ },
+ "/agent-portrait-generation": {
+  "available": false,
+  "contract": "portrait-generation.v1",
+  "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+  "count": 2,
+  "job": null,
+  "model": "gpt-image-2",
+  "provider": "openai",
+  "reason": "Making pictures is not built on this Host yet"
+ },
+ "/calls/ring": {
+  "ring": null,
+  "settings": {
+   "enabled": false,
+   "show_reason": false
+  }
+ },
+ "/oracle/status": {
+  "available": false,
+  "model": "gpt-realtime-2.1",
+  "transport": "clarp-websocket-proxy",
+  "v2": {
+   "available": false,
+   "context_memory": false,
+   "context_reset": false,
+   "direct_contact": false,
+   "direct_contact_available": false,
+   "model": "gpt-live-1",
+   "podcast": false,
+   "podcast_history": false,
+   "voice": "marin",
+   "voice_provider": "openai",
+   "voice_providers": [
+    "openai"
+   ]
+  },
+  "v2_tinkered": {
+   "available": false,
+   "context_memory": false,
+   "context_reset": false,
+   "direct_contact": false,
+   "direct_contact_available": false,
+   "mode": "api",
+   "model": "gpt-live-1",
+   "podcast": false,
+   "podcast_history": false,
+   "router": "api",
+   "voice": "marin",
+   "webrtc": false
+  },
+  "voice": "cedar",
+  "webrtc": false
+ },
+ "/oracle/contact": {
+  "persona": "",
+  "session": "",
+  "stale": ""
+ },
+ "/agent-heartbeat/status": {
+  "history": [],
+  "ok": true,
+  "schedule": {
+   "dormant": false,
+   "effective_interval_sec": 1800,
+   "enabled": false,
+   "last_started_at": null,
+   "next_heartbeat_at": null,
+   "noop_streak": 0
+  }
+ }
+}
