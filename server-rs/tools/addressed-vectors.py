@@ -58,6 +58,15 @@ SAID = [
     'Anna Maria, please', 'ANNA MARIA please', 'anna  maria please', 'Anna Mariana please', 'anna maria',
     'hey anna maria: go', 'Anna Mar\u00eda please', 'anna-maria please', 'Rache\u0301l go', 'Anna Maria-go',
 ]
+# Names of two words and a name in letters English has not, and what may stand right after one:
+# the address ends with the name only where the name ends as a word.
+PAIRS = [['mary-ann', 'Mary Ann'], ['jean-luc', 'Jean Luc'], ['zoe', 'Zo\u00eb'], ['anna-maria', 'Anna Maria']]
+SAID_TO_PAIRS = [
+    'Mary Annette go', 'Jean Lucas go', 'mary ann go', 'Jean Luc, go', 'Jean Luc', 'jean luc\u2014go', 'Mary Ann\u2026 go',
+    'Zo\u00eb\U0001f642go', 'Zo\u00eb\u200dgo', 'Zo\u00eb\u2026go', 'Zo\u00eb\u2014go', 'Zo\u00eb_go', 'Zo\u00eb1 go',
+    'Zo\u00eb\u3000go', 'Zo\u00eb\u00a0go', 'Zo\u00eb\x1cgo', 'Zo\u00eb\u00bfgo', 'Zo\u00eb+go', 'Zo\u00eb$go', 'Zo\u00eb\u0301 go',
+    'Anna Maria\u00b7go', 'Anna Maria1 go', 'Anna Maria\u0301 go',
+]
 SAID_TO_TWINS = ['Mike go', 'mikey go', 'Bella go', 'Bell go', 'bella-2 go', 'short go', 'long go']
 SAID_TO_RHYMES = ['Cella go', 'ella go', 'Stela go', 'della go', 'Bela go', 'tella go']
 
@@ -110,7 +119,8 @@ def run() -> dict:
             rows.append({'text': text, 'session': session, 'rest': rest})
         return rows
 
-    rooms = [{'agents': MANY, 'said': named(MANY, SAID)}, {'agents': TWINS, 'said': named(TWINS, SAID_TO_TWINS)},
+    rooms = [{'agents': MANY, 'said': named(MANY, SAID)}, {'agents': PAIRS, 'said': named(PAIRS, SAID_TO_PAIRS)},
+             {'agents': TWINS, 'said': named(TWINS, SAID_TO_TWINS)},
              {'agents': RHYMES, 'said': named(RHYMES, SAID_TO_RHYMES)}, {'agents': [], 'said': named([], ['Rachel go'])}]
     alike = [{'a': a, 'b': b, 'alike': routing.word_similarity(a, b)} for a, b in ALIKE]
     # The table of agents is made up: the ones of the first room, and no other.

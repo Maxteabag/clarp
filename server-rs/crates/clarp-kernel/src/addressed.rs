@@ -14,14 +14,19 @@
 //! knew a word by the letters of English only and gave an agent called Zoë "ë go" for "Zoë
 //! go": reference defect R23, fixed there.)
 //!
-//! One thing is done otherwise, on purpose: a word is taken off whole or not at all. Where
-//! the message spells the name another way than the agent has it ("Rachél" for Rachel), the
-//! word it was found in goes whole; the Python Host leaves the agent "él go". And a name is
-//! not cut out of the middle of a longer word: of "Anna Mariana please" the agent Anna
-//! Maria is given "Mariana please", where the Python Host gives it "na please".
+//! A name is taken off through its end only where it ends as a word: of "Anna Mariana
+//! please" the agent Anna Maria is given "Mariana please".
+//!
+//! One thing is done otherwise, on purpose: the word a name was found in is taken off
+//! whole. Where the message spells the name another way than the agent has it ("Rachél"
+//! for Rachel), or goes on in more letters ("Zoëy" for Zoë), the Python Host leaves the
+//! agent the end of that word ("él go", "ëy go"); this Host gives it "go".
 //!
 //! Held to the Python Host's own answers by `tests/fixtures/addressed-vectors.json`.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::difflib;
@@ -116,10 +121,21 @@ fn of_a_word(sign: char) -> bool {
     sign.is_alphanumeric() || ('\u{300}'..='\u{36f}').contains(&sign)
 }
 
+/// A sign of punctuation, of any script (what Unicode files under `P`).
+fn punctuation(sign: char) -> bool {
+    static MARK: LazyLock<Regex> = LazyLock::new(|| {
+        // Written here, not read from anywhere: one that does not compile is a mistake in
+        // this file, which the tests of this module would not get past.
+        #[allow(clippy::expect_used)]
+        Regex::new(r"^\p{P}$").expect("a pattern of this module compiles")
+    });
+    MARK.is_match(sign.encode_utf8(&mut [0; 4]))
+}
+
 /// Where the name ends in a message that spells it out from the word that was found: after
-/// all of the name's words, however its letters are composed. Never before the word's own
-/// end, and nowhere else when the message does not spell the name out, or goes on with
-/// more of a word right after it.
+/// all of the name's words, however its letters are composed, when the name ends there as
+/// a word: at the end of the message, or before a blank or a sign of punctuation. Anywhere
+/// else, and when the message does not spell the name out, the word's own end stands.
 fn through_the_name(text: &str, word: &Word, name: &str) -> usize {
     let wanted = canonical(name);
     let most = wanted.chars().count();
@@ -128,8 +144,13 @@ fn through_the_name(text: &str, word: &Word, name: &str) -> usize {
         spelled.push(sign);
         if canonical(&spelled) == wanted {
             let end = word.start + at + sign.len_utf8();
-            let goes_on = text[end..].starts_with(of_a_word);
-            return if goes_on { word.end } else { word.end.max(end) };
+            let next = text[end..].chars().next();
+            let ends_there = next.is_none_or(|next| blank(next) || punctuation(next));
+            return if ends_there {
+                word.end.max(end)
+            } else {
+                word.end
+            };
         }
     }
     word.end
