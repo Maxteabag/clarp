@@ -46,6 +46,42 @@ and every field with its kind.
 | `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that listen there, the providers and their models | the engines that listen here: this Host's own Whisper, and each provider the owner's file has a key or a project for | Never the same list: each Host says what it listens with |
 | `GET /agent-model-options` | every backend with its models, what each supports and how it is signed in | no backends listed. An agent's model is set by name (`POST /agent-llm`) | The catalogue of models |
 
+## Screens of what this Host has not
+
+The phone app asks a Host about fourteen features and calls everything else when its user opens the
+screen (counted in its source on 16 Nov 2026: 149 paths, 83 of them not on this Host that morning).
+Where this Host has nothing of a kind, the reading is answered in the Python Host's fields with what
+is true here, and every change is refused, 501, as not built (`crates/clarp-host/src/screens.rs`;
+the Python Host's answers were written down from a fresh one by the conformance workflow). The
+scenario `app-screens` compares the readings; four of them as their fields alone, because the Python
+Host's first day says there what this Host must not say of itself.
+
+| What an app reads | On this Host | A change |
+|---|---|---|
+| An agent's heartbeat (`GET /agent-heartbeat/status`, `GET /heartbeat/settings`), dreaming, schedules (`GET /agent-schedules`) | off for every agent; the Python Host's defaults as how it would be set; no schedules | turning one off is done (it is off); turning one on, and every setting, is refused |
+| The goal an agent works toward in the old way (`GET /agent-goal`), a goal's ledger (`GET /goal-ledger`) | none; no events. An agent's goals are its plans here (`GET /task-plans`) | refused |
+| Whether a picture could be made (`GET /agent-portrait-generation`), how pictures are set (`GET /avatar-settings`) | not available, and the reason says that it is not built; no pictures by model | refused |
+| The herald (`GET /herald/settings`) | disabled: a reply of an agent the user is not looking at is spoken like any other | refused |
+| Judgments, diagnostics, the janitors' policy (`GET /judgments/settings`, `/diagnostics/settings`, `/janitor-policy`) | off, as on the Python Host's first day | refused |
+| Where the owner is (`GET /location`) | nothing | refused: no agent can ask a phone here |
+| Cartesia's old picker (`GET /cartesia-voices`) | none listed. The catalogue of voices (`GET /voice-catalog`) has Cartesia's voices | none |
+| Podcasts (`GET /podcast-history`, `/podcast-history/sources`) | none | none |
+| The vocabulary (`GET /vocab/packs`, `/vocab/terms`, `/vocab/profiles`, `/vocab/profile`, `/vocab/assignments`, `/vocab/runs`) | no packs, terms, profiles, assignments or runs | refused. `/vocab/budgets` is not answered yet |
+| Calls (`GET /calls`, `GET /calls/ring`) | no call, nobody rings, and ringing is told as off | refused, also a phone's token for being rung (`POST /calls/ring/voip-token`) |
+| The Oracle (`GET /oracle/status`, `/oracle/contact`, `/oracle/delegations`, `/oracle/calls/status`) | not available, and nothing it could do is claimed; nobody is put through; nothing was handed on | refused |
+| The tools' logins (`GET /backend-auth`) | whether each tool this Host runs (Claude Code, Codex) is installed and has a login, read off the file the tool keeps it in; a login that is there is told as not verified, because this Host asks no provider; no account's name | signing in or out from an app is refused: it is done with the tool itself |
+| How much of an account is used (`GET /backend-usage`) | unknown for each tool: this Host asks no provider and keeps no account of what its turns cost | none |
+| The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
+| The skills kept installed for the tools (`GET /managed-skills`) | none: this Host manages no skills | refused |
+| The sessions a tool had in a directory (`GET /past-sessions`) | none offered | taking one up or forking one when an agent is made is refused (`resume_unsupported`) |
+
+Not answered yet, each "no such route": how an engine is told what to listen for
+(`/transcription-guidance`), the orchestrator's settings, the list of engines that speak as the old
+settings screen reads it (`/tts/providers`), the budgets of the vocabulary, dreaming's settings and
+runs (an app asks for them only of a Host that lists `dreaming`), an agent's portraits
+(`/agent-portraits`), the providers of models (`/harness-providers`), the Oracle's voice, compacting
+a conversation (`POST /compact`), a tool's own servers (`POST /agent-mcp`), nudging a team.
+
 ## Compared as what a client may rely on
 
 | What | The Python Host | The Rust Host | Why it is compared this way |
