@@ -32,6 +32,10 @@ pub struct SendRequest {
     /// names. An agent among them is told so with this message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unheard_audio_sessions: Option<Value>,
+    /// The call this message is a part of: it goes to the agent of the call that can take
+    /// speech, whoever it names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
     /// Wait behind a running turn instead of taking its place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_if_busy: Option<bool>,

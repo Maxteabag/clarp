@@ -151,6 +151,7 @@ async fn serve(config: Config) -> Result<(), String> {
         desks,
         blobs,
         activity: Arc::default(),
+        calls: Arc::default(),
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
             // nobody will ask for again are forgotten on the side.
