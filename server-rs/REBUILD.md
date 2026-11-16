@@ -797,9 +797,43 @@ real Host process dials it, a phone is paired and served through it, the adminis
 there, a stream of events flows and ends at a revocation, and the Host dials again after a loss.
 Not built with it: no route of this Host is a WebSocket yet, so a phone that asks for one through the relay
 is told what the Python connector tells it of a Host that could not open one; each such route is built
-against one port that a socket at the door and the relay's tunnel both carry. Not done yet: a run through
-the relay itself, which needs a name of the battle test's own. Found on the way and reported: the Python
-connector dropped the apps' own headers (reference defect R25; fixed there within the hour, PR 383).
+against one port that a socket at the door and the relay's tunnel both carry. A run through the relay
+itself, under a name of the battle test's own, is in `docs/battle-test.md` (16 Nov). Found on the way and
+reported: the Python connector dropped the apps' own headers (reference defect R25; fixed there within the
+hour, PR 383).
+
+**The heartbeat** (16 Nov 2026). An agent that asked for it is given a turn when it has been idle for the
+owner's interval, so that it looks at what it has standing: the prompt, the plan it has (its title and at
+most twelve things that are open, each followed by its parts), and before them a word about a turn that was
+interrupted. The rules are the kernel's (`heartbeat.rs`), the Python Host's `server/lib/heartbeat.py` without
+a store or a clock: the owner's four settings and the words a change is refused in; when an agent is due (not
+while it works, waits for its user or was stopped by its user; not within its interval after somebody spoke
+with it; not sooner than thirty seconds after the last, and not a sixth time within a minute); how the
+interval grows after each heartbeat that found nothing to do, by the owner's strategy up to the owner's cap,
+and after how many of them the agent goes dormant until somebody speaks to it; what an answer is (the word
+`HEARTBEAT_OK` at an edge of an answer, with at most a short remark beside it, says that nothing is to be
+done: the conversation keeps one line that says so, and it is not shown while it is written; in a turn that
+is no heartbeat's only an answer that is nothing but the word); and what an agent's profile shows. Held to
+it by what that module answered (`tools/heartbeat-vectors.py`): 30 changes of the settings, 50 answers each
+read in a heartbeat's turn and in another, 13 prompts, and 1288 decisions of whether an agent is due.
+
+The Host's part is the book and the runner (`heartbeat.rs` in `clarp-host`). The book is kept whole with the
+fleet: the settings, what is remembered of each agent by its id, and the heartbeat's turn that was last
+counted for each, so that a turn counts once however often it is looked at, and all of it outlives the Host.
+The runner looks once a minute who is due, the first time a minute after the Host came up (a Host that has
+just come up wakes nobody), and sends the prompt as something the Host sends by itself: nobody is waited for,
+nothing is said aloud, the user's focus stays where it is. It leaves alone an agent whose durable goal wakes
+it (a goal enrolled for recovery that is active, paused or blocked), as the Python Host does, and one whose
+queue its user holds. The apps read and change the settings (`GET` and `POST /heartbeat/settings`), turn an
+agent's heartbeat on and off (`POST /agent-heartbeat`) and read its cadence and its last twenty answers
+(`GET /agent-heartbeat/status`), with the Python Host's statuses, fields and words; the scenario
+`the-heartbeat` compares them. A Host started with `CLARP_HEARTBEATS_DISABLED` wakes nobody and takes no
+heartbeat from outside, as the Python Host; the Hosts of the conformance run are started so. Not built with
+it: the hours of the day in which nobody is woken and the settings an environment gives
+(`CLAUDE_PWA_HEARTBEAT_*`: the rule for the hours is in the kernel, the Host reads none of the variables,
+and the owner's Host on elitebook sets none of them, looked on 16 Nov); a keeper that serves an agent
+instead (janitors); and the two other signs that wake an agent that has backed off, its team moving and a
+promotion in a leader's memory (teams and leaders).
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
@@ -921,7 +955,11 @@ connection relay under the name the phone is paired with. Each of these is true 
    token, its scope and its name, are in the Rust Host before it dials: a phone presents the token it has.
 5. **Pushes have an account.** The Rust Host has a credential of its own at the push relay, given by the
    owner; the Python Host's is never copied.
-6. **The owner has tested it himself**, after everything is implemented, voice included (his word of
+6. **What the owner set for all his agents is set here.** The settings a Host keeps for itself do not
+   come with an agent: the heartbeat's interval, strategy, cap and dormancy, the herald's, and what else an
+   app's settings screens write. They are read from the Python Host's own routes and set on this Host
+   before the switch, and read back from both and compared.
+7. **The owner has tested it himself**, after everything is implemented, voice included (his word of
    16 Nov 2026), on a name of the battle test's own (`elitebook-rust`), which takes no phone from anybody.
 
 ## 8. Roles

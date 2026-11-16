@@ -22,7 +22,7 @@ introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 16 Nov 2026 
 `durable_task_goals`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`,
 `artifact_pins`, `decision_lifecycle`, `text_input_requests`, `push_grants`, `push_unregister`,
 `desktop_send_quiet_push`, `snapshot_without_archived`, `helper_agents`, `media`, `html_reports`,
-`html_report_revisions`, `html_form_network`, `attention_index`, `group_calls`, `agent_rings`, and `live_activity_push` on a Host that has a relay and an account of its own there. Everything else in the Python Host's list is absent, also where a part
+`html_report_revisions`, `html_form_network`, `attention_index`, `group_calls`, `agent_rings`, `heartbeat`, and `live_activity_push` on a Host that has a relay and an account of its own there. Everything else in the Python Host's list is absent, also where a part
 of it is built (`goal_updater`: a criterion can be set aside, the Goal keeper is not there).
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
@@ -58,7 +58,7 @@ Host's first day says there what this Host must not say of itself.
 
 | What an app reads | On this Host | A change |
 |---|---|---|
-| An agent's heartbeat (`GET /agent-heartbeat/status`, `GET /heartbeat/settings`), dreaming, schedules (`GET /agent-schedules`) | off for every agent; the Python Host's defaults as how it would be set; no schedules | turning one off is done (it is off); turning one on, and every setting, is refused |
+| Whether an agent dreams (`dreaming_enabled` on its row) | off for every agent | turning it off is done (it is off); turning it on is refused (`POST /agent-dreaming`) |
 | The goal an agent works toward in the old way (`GET /agent-goal`), a goal's ledger (`GET /goal-ledger`) | none; no events. An agent's goals are its plans here (`GET /task-plans`) | refused |
 | Whether a picture could be made (`GET /agent-portrait-generation`), how pictures are set (`GET /avatar-settings`) | not available, and the reason says that it is not built; no pictures by model | refused |
 | Judgments, diagnostics, the janitors' policy (`GET /judgments/settings`, `/diagnostics/settings`, `/janitor-policy`) | off, as on the Python Host's first day | refused |
@@ -126,7 +126,9 @@ it covers that exact difference and nothing else.
 | A message from an agent the Host does not have (an agent of a peer Host) | filed as an agent's, without a sender | filed as an agent's, with the name the sender gave | The reader sees who wrote, and on which Host to answer |
 | A send that names its sender and an origin beside it (`user`, `oracle`, `schedule`) | taken as the origin it names (defect R18) | that agent's: `agent` | Who a message is from decides whether the focus moves and whether a Stop holds it. An agent is not a person because it says so |
 | A turn whose account is out, on a machine with an account selector | the Host runs the owner's selector: it stops every running turn of that tool, lets the selector put another login in place, and resumes them all | never changes a login and stops no turn: the turn waits and is taken up when the login has changed, or ends after half an hour (`--accounts follow`) | Two Hosts on one machine share the tools' logins. The one that has the selector changes them; the other follows. A selector of this Host's own comes when a machine has no other Host |
-| A send from outside with origin `heartbeat` | accepted when heartbeats are on | always refused with the words for heartbeats that are off | This Host has no heartbeats yet |
+| The hours of the day in which no agent is given a heartbeat, and the heartbeat's settings as an environment gives them (`CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS`, `..._INTERVAL_SEC`, `..._BACKOFF_CAP_SEC`, `..._DORMANT_AFTER_NOOPS`, `..._QUIET_PERIOD_SEC`) | read when the Host starts | not read: the settings are what the apps set (`POST /heartbeat/settings`), and an agent is left alone for its interval after somebody spoke with it | The rule for the hours is in the kernel. The owner's Host on elitebook sets none of the variables (looked on 16 Nov 2026) |
+| An agent a keeper serves (a janitor that keeps heartbeats for the agents in its scope) | not given the fixed heartbeat, and its profile shows no next one | given the heartbeat like every agent that asked | Janitors are not built |
+| What wakes an agent whose heartbeat has backed off or gone dormant | its user speaking to it, its team moving, a promotion in a leader's memory | its user speaking to it | Teams and leaders are not built |
 | The model an agent's row shows after a turn that was stopped | the model of the last answer in the tool's transcript | the model of the last completed turn | The same thing, read from what the Host has. A turn that was cut off may not have said its model yet |
 | A model an agent is set to that its tool does not have | refused for Codex when the Host has the list `codex debug models` gave it, and by `clarp-admin model` for every tool, from the catalogue the apps read | taken; the tool says so at the agent's next turn | This Host has no catalogue of models yet. It comes with accounts and usage |
 | Two names that differ only in letters that fold to others (`ß` and `ss`) | one name (`str.casefold`) | two names (small letters compared) | Names are compared without their case. The rest of the folding table is not carried for a case no fleet has |

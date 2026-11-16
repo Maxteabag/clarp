@@ -167,11 +167,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 19:38 (16 Nov) | the Host updated by the installer, `afbf6959` to `a9c9f41e`: the build with calls. The first exercise whose agents are Codex agents | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 20:45 (16 Nov) | the Host updated by the installer, `a9c9f41e` to `99fe37a7`: the build with rings, the chip on a phone's lock screen, and schedules | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 21:52 (16 Nov) | the Host updated by the installer, `99fe37a7` to `6390a692`: the build with the connection relay, the door that trusts only what nobody handed on, and this Host's tools first in every bash | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 22:30 (16 Nov) | the Host updated by the installer, `6390a692` to `a60c7839`: the build that keeps an answer to a heartbeat as one line, and takes a name off a spoken message as the Python Host does since its second fix of the evening. The first update with the connection relay on: the new Host was connected to it again 194 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and one turns in twenty-nine
-exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and nine of Codex
-in the three since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and four turns in thirty
+exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and twelve of Codex
+in the four since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
