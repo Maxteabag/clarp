@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import unicodedata
 
 LEADING_ADDRESS_FILLERS = frozenset({
     "also",
@@ -61,8 +62,15 @@ def _word_tokens(text: str) -> list[tuple[str, int, int]]:
     return tokens
 
 
-def _strip_address_prefix(text: str, end: int) -> str:
+def _strip_address_prefix(text: str, start: int, end: int, name: str) -> str:
     """Drop leading filler/name material through `end` and tidy punctuation."""
+    # Extend only through the selected name, never through adjacent request
+    # letters. Keep original offsets while comparing canonical spellings.
+    normalized_name = unicodedata.normalize("NFD", name.lower())
+    for name_end in range(start + 1, min(len(text), start + len(normalized_name)) + 1):
+        if unicodedata.normalize("NFD", text[start:name_end].lower()) == normalized_name:
+            end = max(end, name_end)  # Never shorten the existing ASCII token cut.
+            break
     rest = (text or "")[end:]
     return re.sub(r"^[\s,;:!?.-]+", "", rest).strip()
 
@@ -115,17 +123,18 @@ def resolve_agent_by_spoken_name(
         judged_session, _ = judged
         if judged_session is None:
             return None, text
-        judged_name = _clean_word((agents.get(judged_session) or {}).get("name", "")).lower()
+        persona = (agents.get(judged_session) or {}).get("name", "").strip()
+        judged_name = _clean_word(persona).lower()
         for token, _s, token_end in address_tokens:
             if token == judged_name:
-                return judged_session, _strip_address_prefix(text, token_end)
+                return judged_session, _strip_address_prefix(text, _s, token_end, persona)
         return judged_session, text
 
     # 1) Exact known-agent token in the first addressed words.
     for token, _start, end in address_tokens:
         for persona, session_id in candidates:
             if token == _clean_word(persona).lower():
-                return session_id, _strip_address_prefix(text, end)
+                return session_id, _strip_address_prefix(text, _start, end, persona)
 
     # 2) Fuzzy fallback against the first addressed word only, with a high bar
     # so we don't accidentally route ordinary sentences.
@@ -141,6 +150,6 @@ def resolve_agent_by_spoken_name(
             best_score = score
             best_match = (persona, session_id)
     if best_match and best_score >= 0.78:
-        return best_match[1], _strip_address_prefix(text, end)
+        return best_match[1], _strip_address_prefix(text, _start, end, best_match[0])
 
     return None, text
