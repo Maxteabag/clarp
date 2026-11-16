@@ -312,6 +312,43 @@ pub fn splitlines(text: &str) -> Vec<&str> {
     lines
 }
 
+/// The bytes a text of base64 stands for, as Python's `base64.b64decode(text, validate=True)`
+/// reads it: the standard alphabet and nothing else, in fours, padded with `=` at the end
+/// alone. `None`: Python says it is no base64.
+pub fn b64decode(text: &str) -> Option<Vec<u8>> {
+    let signs = text.as_bytes();
+    if !signs.len().is_multiple_of(4) {
+        return None;
+    }
+    let padded = signs.iter().rev().take_while(|sign| **sign == b'=').count();
+    if padded > 2 {
+        return None;
+    }
+    let value = |sign: u8| -> Option<u32> {
+        Some(u32::from(match sign {
+            b'A'..=b'Z' => sign - b'A',
+            b'a'..=b'z' => sign - b'a' + 26,
+            b'0'..=b'9' => sign - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        }))
+    };
+    let mut bytes = Vec::with_capacity(signs.len() / 4 * 3);
+    let last = signs.len() / 4;
+    for (place, four) in signs.chunks(4).enumerate() {
+        let mut bits = 0u32;
+        // Only the last four signs may end in padding.
+        let filled = if place + 1 == last { 4 - padded } else { 4 };
+        for (at, sign) in four.iter().enumerate() {
+            bits = (bits << 6) | if at < filled { value(*sign)? } else { 0 };
+        }
+        let whole = [(bits >> 16) as u8, (bits >> 8) as u8, bits as u8];
+        bytes.extend_from_slice(&whole[..filled - 1]);
+    }
+    Some(bytes)
+}
+
 /// The first `count` signs of a text, as Python's `text[:count]` cuts it.
 pub fn first(text: &str, count: usize) -> &str {
     match text.char_indices().nth(count) {
@@ -325,6 +362,24 @@ pub fn first(text: &str, count: usize) -> &str {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn base64_is_read_as_python_reads_it_strictly() {
+        assert_eq!(b64decode(""), Some(Vec::new()));
+        assert_eq!(b64decode("YQ=="), Some(b"a".to_vec()));
+        assert_eq!(b64decode("YWI="), Some(b"ab".to_vec()));
+        assert_eq!(b64decode("YWJj"), Some(b"abc".to_vec()));
+        assert_eq!(
+            b64decode("YSBtYWRlLXVwIHBpY3R1cmU="),
+            Some(b"a made-up picture".to_vec())
+        );
+        assert_eq!(b64decode("+/+/"), Some(vec![0xfb, 0xff, 0xbf]));
+        for no_base64 in [
+            "YQ", "YQ=", "Y===", "YQ==YQ==", "YW Jj", "YWJj\n", "YWJ-", "=YWJ", "YQ=a",
+        ] {
+            assert_eq!(b64decode(no_base64), None, "{no_base64:?}");
+        }
+    }
 
     #[test]
     fn a_text_is_cut_into_lines_where_python_cuts_it() {

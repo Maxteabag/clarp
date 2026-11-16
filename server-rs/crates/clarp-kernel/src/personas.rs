@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::{portraits, python, said};
 
@@ -307,4 +308,288 @@ pub fn candidate_voices(fetched: &[String], owner: &Owner<'_>) -> Vec<String> {
 /// The voice of Cartesia's a stored voice names, when it names one.
 pub fn cartesia_of(voice_id: &str) -> Option<String> {
     said::resolve_voice(Some(voice_id), "cartesia")
+}
+
+/// How a persona that is built in looks where its owner changed that: its symbol, and what
+/// is in its own picture. Nothing else of such a persona can be changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Look {
+    /// The built-in persona's id (`builtin-mike`).
+    pub persona_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub avatar_symbol: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+}
+
+/// What a maker says of a persona. `picture` is the picture it is given now, in base64;
+/// empty: none came with it, and the one it has stays.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Wanted<'a> {
+    pub name: &'a str,
+    pub voice_id: &'a str,
+    pub avatar_symbol: &'a str,
+    pub personality: &'a str,
+    pub picture: &'a str,
+}
+
+/// What a change left to keep: a persona of the owner's, or the look of a built-in one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kept {
+    Made(Made),
+    Look(Look),
+}
+
+/// A change that was made: what is to be kept for it, and the picture that came with it,
+/// to be kept under the persona's id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub kept: Kept,
+    pub picture: Option<Vec<u8>>,
+}
+
+/// What a picture that is no base64 is refused with. (The Python Host says what its decoder
+/// said, in that decoder's own words, which differ from fault to fault.)
+pub const NO_PICTURE: &str = "Avatar is not base64.";
+
+/// A picture as it is handed over, in base64, with what its address will carry: the first
+/// sixteen signs of its digest. `Ok(None)`: none was handed over.
+pub fn picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, &'static str> {
+    if base64.is_empty() {
+        return Ok(None);
+    }
+    let bytes = python::b64decode(base64).ok_or(NO_PICTURE)?;
+    if bytes.len() > AVATAR_MOST {
+        return Err(AVATAR_TOO_LARGE);
+    }
+    let digest = Sha256::digest(&bytes);
+    let version: String = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(Some((bytes, version)))
+}
+
+/// Two names that are one name in a table that folds the letters of ASCII alone, as the
+/// Python Host's does (SQLite's `NOCASE`): `zoë` is `Zoë`, and `ZOË` is another.
+fn one_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// The personas of one Host: the ones that are built in, as its owner made them look, and
+/// the ones its owner made.
+///
+/// A name is one persona's. A persona the owner made under a name his file later gives to a
+/// built-in one sleeps behind that one: it is not listed, changed or removed until the file
+/// lets the name go again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Book {
+    made: Vec<Made>,
+    looks: Vec<Look>,
+}
+
+impl Book {
+    pub fn new(mut made: Vec<Made>, looks: Vec<Look>) -> Self {
+        made.sort_by(|a, b| {
+            (a.created_at_ms, &a.persona_id).cmp(&(b.created_at_ms, &b.persona_id))
+        });
+        Self { made, looks }
+    }
+
+    /// A built-in persona as an app is told it, with the look its owner gave it.
+    fn dressed(&self, mut persona: Value) -> Value {
+        let id = persona["id"].as_str().unwrap_or("").to_string();
+        if let Some(look) = self.looks.iter().find(|look| look.persona_id == id) {
+            persona["avatar_symbol"] = json!(look.avatar_symbol);
+            if let Some(version) = &look.avatar {
+                persona["avatar_url"] = json!(portraits::address(AVATARS, &id, version));
+            }
+        }
+        persona
+    }
+
+    /// The built-in persona of this name, as an app is told it.
+    fn built_in(&self, built_in: &[Value], name: &str) -> Option<Value> {
+        let named = |persona: &&Value| {
+            persona["name"]
+                .as_str()
+                .is_some_and(|known| one_name(known, name))
+        };
+        built_in
+            .iter()
+            .find(named)
+            .map(|persona| self.dressed(persona.clone()))
+    }
+
+    /// The personas the owner made that are awake: no built-in persona has their name.
+    fn awake<'a>(&'a self, built_in: &'a [Value]) -> impl Iterator<Item = &'a Made> {
+        self.made
+            .iter()
+            .filter(|made| self.built_in(built_in, &made.name).is_none())
+    }
+
+    fn made_at(&self, built_in: &[Value], name: &str) -> Option<usize> {
+        let at = self
+            .made
+            .iter()
+            .position(|made| one_name(&made.name, name))?;
+        self.built_in(built_in, name).is_none().then_some(at)
+    }
+
+    /// Every persona, as an app is told them: the built-in ones in the roster's order, then
+    /// the owner's in the order he made them.
+    pub fn listed(&self, owner: &Owner<'_>) -> Vec<Value> {
+        let built_in = builtins(owner);
+        let own: Vec<Value> = self.awake(&built_in).map(told).collect();
+        let dressed = built_in.into_iter().map(|persona| self.dressed(persona));
+        dressed.chain(own).collect()
+    }
+
+    /// The persona of this name as it is kept, whoever made it: its voices, how it speaks,
+    /// its symbol and what is in its picture. What an agent made under the name takes on.
+    pub fn named(&self, owner: &Owner<'_>, name: &str) -> Option<Value> {
+        let name = clarp_speech::listen::strip(name);
+        let built_in = builtins(owner);
+        if let Some(persona) = self.built_in(&built_in, name) {
+            return Some(persona);
+        }
+        self.made_at(&built_in, name).map(|at| told(&self.made[at]))
+    }
+
+    /// The picture a persona has of its own, by the persona's id: what its address carries.
+    pub fn picture_of(&self, owner: &Owner<'_>, persona_id: &str) -> Option<String> {
+        let mut listed = self.listed(owner).into_iter();
+        let persona = listed.find(|persona| persona["id"] == persona_id)?;
+        let address = persona["avatar_url"].as_str()?;
+        address
+            .rsplit_once("?v=")
+            .map(|(_, version)| version.to_string())
+    }
+
+    /// The voices of Cartesia's that personas have: what a new persona is not given first.
+    pub fn voices(&self, owner: &Owner<'_>) -> HashSet<String> {
+        let built_in = builtins(owner);
+        let stored = built_in
+            .iter()
+            .filter_map(|persona| persona["voice_id"].as_str());
+        let of_made = self.awake(&built_in).map(|made| made.voice_id.as_str());
+        stored.chain(of_made).filter_map(cartesia_of).collect()
+    }
+
+    /// The owner makes a persona. `new` is the id it gets and the voice it is given when
+    /// its maker names none ([`picked_voice`]). Refused in the Python Host's words.
+    pub fn create(
+        &mut self,
+        owner: &Owner<'_>,
+        wanted: &Wanted<'_>,
+        new: (&str, &str),
+        now_ms: i64,
+    ) -> Result<Change, String> {
+        let (id, voice) = new;
+        let built_in = builtins(owner);
+        let name = named(wanted.name).ok_or(NAME_NEEDED)?;
+        let taken_by_made = self.made.iter().any(|made| one_name(&made.name, &name));
+        if self.built_in(&built_in, &name).is_some() || taken_by_made {
+            return Err(taken(&name));
+        }
+        let picture = picture(wanted.picture)?;
+        let made = Made {
+            persona_id: id.to_string(),
+            name,
+            voice_id: match wanted.voice_id {
+                "" => voice.to_string(),
+                named => named.to_string(),
+            },
+            avatar_symbol: python::first(wanted.avatar_symbol, SYMBOL_MOST).to_string(),
+            avatar: picture.as_ref().map(|(_, version)| version.clone()),
+            personality: python::first(wanted.personality, PERSONALITY_MOST).to_string(),
+            created_at_ms: now_ms,
+        };
+        self.made.push(made.clone());
+        Ok(Change {
+            kept: Kept::Made(made),
+            picture: picture.map(|(bytes, _)| bytes),
+        })
+    }
+
+    /// The owner changes a persona, named as it was. Of a built-in one only its look is
+    /// changed, whatever else is said. `voice` is the one a persona without any is given.
+    pub fn update(
+        &mut self,
+        owner: &Owner<'_>,
+        original: &str,
+        wanted: &Wanted<'_>,
+        voice: &str,
+    ) -> Result<Change, String> {
+        let original = clarp_speech::listen::strip(original);
+        let built_in = builtins(owner);
+        if let Some(persona) = self.built_in(&built_in, original) {
+            let id = persona["id"].as_str().unwrap_or("").to_string();
+            let picture = picture(wanted.picture)?;
+            let before = self.looks.iter().find(|look| look.persona_id == id);
+            let kept = before.and_then(|look| look.avatar.clone());
+            let look = Look {
+                avatar_symbol: python::first(wanted.avatar_symbol, SYMBOL_MOST).to_string(),
+                avatar: picture
+                    .as_ref()
+                    .map(|(_, version)| version.clone())
+                    .or(kept),
+                persona_id: id,
+            };
+            self.looks.retain(|held| held.persona_id != look.persona_id);
+            self.looks.push(look.clone());
+            return Ok(Change {
+                kept: Kept::Look(look),
+                picture: picture.map(|(bytes, _)| bytes),
+            });
+        }
+        let at = self.made_at(&built_in, original).ok_or(NOT_CHANGEABLE)?;
+        let name = named(wanted.name).ok_or(NAME_NEEDED_TO_CHANGE)?;
+        let other = self
+            .made
+            .iter()
+            .position(|made| one_name(&made.name, &name));
+        if other.is_some_and(|other| other != at) || self.built_in(&built_in, &name).is_some() {
+            return Err(taken(&name));
+        }
+        let picture = picture(wanted.picture)?;
+        let held = &mut self.made[at];
+        held.name = name;
+        held.voice_id = match (wanted.voice_id, held.voice_id.as_str()) {
+            ("", "") => voice.to_string(),
+            ("", kept) => kept.to_string(),
+            (named, _) => named.to_string(),
+        };
+        held.avatar_symbol = python::first(wanted.avatar_symbol, SYMBOL_MOST).to_string();
+        if let Some((_, version)) = &picture {
+            held.avatar = Some(version.clone());
+        }
+        held.personality = python::first(wanted.personality, PERSONALITY_MOST).to_string();
+        Ok(Change {
+            kept: Kept::Made(held.clone()),
+            picture: picture.map(|(bytes, _)| bytes),
+        })
+    }
+
+    /// The owner removes a persona of his own. `None`: there is none of that name, or it
+    /// is built in.
+    pub fn delete(&mut self, owner: &Owner<'_>, name: &str) -> Option<Made> {
+        let at = self.made_at(&builtins(owner), clarp_speech::listen::strip(name))?;
+        Some(self.made.remove(at))
+    }
+
+    /// A persona as an app is told it, by what a change left to keep.
+    pub fn told(&self, owner: &Owner<'_>, kept: &Kept) -> Value {
+        match kept {
+            Kept::Made(made) => told(made),
+            Kept::Look(look) => {
+                let all = builtins(owner).into_iter();
+                let mut found = all.filter(|persona| persona["id"] == look.persona_id.as_str());
+                found
+                    .next()
+                    .map_or(Value::Null, |persona| self.dressed(persona))
+            }
+        }
+    }
 }
