@@ -835,6 +835,44 @@ and the owner's Host on elitebook sets none of them, looked on 16 Nov); a keeper
 instead (janitors); and the two other signs that wake an agent that has backed off, its team moving and a
 promotion in a leader's memory (teams and leaders).
 
+**What the load still asks for, and the ids an app gives its messages** (16 Nov 2026). Counted again on the
+owner's Host on elitebook, its request log of three days: 175,200 requests over 395 routes, and 99.8 per cent
+of them go to a route this Host has. What is asked and not there, by use: the desk of the account seats
+(`GET /hotseat/desk`, 77, and `/hotseat/status`, 12), the explaining of a tool's use (`POST /tool-explanations`,
+48), one janitor and its runs (`GET /janitors/<id>`, 48 and 40), a waiting message taken back (`DELETE
+/turn-queue/<id>`, 14) or sent now (`POST /turn-queue/<id>/send`, 2), a crash an app reports (`POST /crash`,
+11), a fork of an agent (3). The sockets of voice (`/stt/stream`, `/oracle/realtime`), of the terminal and of
+a ring held as a call were asked not once in those three days, on elitebook or on laptopstudio, counted the
+same way there; they stay a gate before the switch, and they are not what the next days of use need first.
+
+Reading for the queue's routes found what no run had: **the phone's ids for its messages begin with `u-`**,
+the mark a message's id has in a conversation (`"u-" + id` in the phone app's source, and so in the log:
+`DELETE /turn-queue/u-6485F414-...`); the desk's come without. The Python Host files a message under its
+app's id as it is when the id has the mark, and with the mark before it otherwise
+(`message_import_common._client_message_id`), and names it back to its app as the app named it. This Host put
+the mark before every id and took one mark off on the way back: a phone's message was filed as `u-u-...`
+and named back without any, so on a phone every message would have stood twice in its chat (an app finds
+the row of its bubble by the id) and no waiting message could have been taken back. Every message of the
+conformance corpus is named without the mark, as the desk names them, so no run saw it. Now a message keeps
+whether its app's id came with the mark (`Message::filed`, `Message::client_id` in the kernel's
+`conversation.rs`), what waits and what runs carry the id its app gave it, and a message that names no id is
+named by its trace, as on the Python Host. Held by the kernel's own test, by a Host test with ids as the
+phone and the desk mint them, through a kill of the Host, and by the scenario `the-apps-own-ids`.
+
+**The queue, by its user's hand** (16 Nov 2026). A waiting message is taken back (`DELETE /turn-queue/<id>`)
+or sent now (`POST /turn-queue/<id>/send`), by the id its app gave it. Taken back, it never runs and was
+never in the conversation. Sent now, it runs although the queue is held, ahead of what else waits, which
+stays held; while a turn runs nothing is sent past it (409, the Python Host's words), and it is answered as
+a send that did not have to wait. The rules are the kernel's (`agent.rs`): the command `SendNow` with its
+event, and one rule this Host did not have: **a hold holds what waits, and when the last of it has left the
+queue, taken back or gone to run, the hold is over** without a resume, as the Python Host ends a pause
+(`turn_queue.remove`, `mark_started`). So a stop that held nothing ends with the first thing that goes
+through the queue. The apps are told how the queue stands when a message is taken back; a hold that ended
+because its last message went to run is told with the news of that turn. Held by the kernel's tests (the
+order of any 120 commands, sending by hand among them, loses nothing and runs nothing twice), a Host test
+through a kill, and the scenario `the-queue-by-hand`. Not built yet: changing the words of a waiting
+message (`PUT /turn-queue/<id>`; not asked once in the three days counted).
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
