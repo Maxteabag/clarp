@@ -210,11 +210,15 @@ def test_a_sweep_that_fails_part_way_still_says_rows_went(monkeypatch):
     assert agents.dashboard_states()[aid]["last_turn_end"] == 200
     monkeypatch.setattr(maintenance, "STATE_LOG_DELETE_BATCH", 1)
     plain = db._TrackedConnection.execute
-    deletes = []
+    deletes, during = [], []
 
     def execute(self, sql, parameters=(), /):
         if str(sql).lstrip().startswith("DELETE FROM state_log"):
             deletes.append(1)
+            if len(deletes) == 1:
+                # A request while the sweep runs: its clocks hold the rows
+                # about to go, kept under the number the sweep began with.
+                during.append(agents.dashboard_states()[aid]["last_turn_end"])
             if len(deletes) == 2:
                 raise sqlite3.OperationalError("database is locked")
         return plain(self, sql, parameters)
@@ -224,7 +228,7 @@ def test_a_sweep_that_fails_part_way_still_says_rows_went(monkeypatch):
     monkeypatch.setattr(db._TrackedConnection, "execute", plain)
 
     assert db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id=?", (aid,)).fetchone()[0] == 2
-    assert _pruned() >= 1
+    assert during == [200] and _pruned() == 2          # said before its first delete, and after it failed
     assert agents.dashboard_states() == _as_it_was()
 
 
@@ -295,20 +299,85 @@ def test_a_row_that_arrives_between_the_two_statements_is_kept_under_its_own_id(
     assert agents.dashboard_states() == _as_it_was()
 
 
-def test_state_rows_are_only_inserted_and_only_the_sweep_deletes_them():
-    """What is kept rests on these two facts. Read from the sources: no
-    statement updates a state row, and the only delete is the sweep's, which
-    adds to the count. Whoever adds another must add to the count too."""
-    import pathlib
+def _sql_strings(path):
+    """The string literals of a source file that are not docstrings: SQL is
+    written in them, and a comment or a docstring that names a statement is
+    not one."""
+    import ast
+    tree = ast.parse(path.read_text(), filename=str(path))
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                docstrings.add(id(first.value))
+    return [node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings]
+
+
+_STATE_TABLE = r"(?:main\s*\.\s*)?[\"`\[]?state_log\b"
+_CHANGES_A_ROW = (
+    r"\bUPDATE\s+(?:OR\s+\w+\s+)?" + _STATE_TABLE,
+    r"\bINSERT\s+OR\s+REPLACE\s+INTO\s+" + _STATE_TABLE,
+    r"\bREPLACE\s+INTO\s+" + _STATE_TABLE,
+    r"\bINSERT\s+(?:OR\s+\w+\s+)?INTO\s+" + _STATE_TABLE + r"[\s\S]*?\bON\s+CONFLICT\b[\s\S]*?\bDO\s+UPDATE\b",
+)
+_DELETES_A_ROW = r"\bDELETE\s+FROM\s+" + _STATE_TABLE
+
+
+def _state_statements(source_strings):
     import re
-    library = pathlib.Path(agents.__file__).resolve().parent
-    updates, deletes = [], []
-    for path in sorted(library.rglob("*.py")):
-        source = path.read_text()
-        updates += [path.name for _ in re.finditer(r"UPDATE\s+state_log\b", source)]
-        deletes += [path.name for _ in re.finditer(r"DELETE\s+FROM\s+state_log\b", source)]
-    assert updates == []
-    assert deletes == ["maintenance.py"]
+    text = "\n".join(source_strings)
+    changes = [pattern for pattern in _CHANGES_A_ROW if re.search(pattern, text, re.I)]
+    return changes, bool(re.search(_DELETES_A_ROW, text, re.I))
+
+
+def test_state_rows_are_only_inserted_and_only_the_sweep_deletes_them():
+    """What is kept rests on these two facts. Read from the sources of the
+    whole server, in the statements' string literals, whatever their case: no
+    statement changes a state row in place (UPDATE, with OR or without,
+    INSERT OR REPLACE, REPLACE INTO, an insert that updates on conflict), and
+    the only delete is the sweep's, which adds to the count. Whoever adds
+    another must add to the count too (agents.STATES_PRUNED_KEY).
+
+    tests/unit/test_table_writers.py is the wider net: it knows which module
+    may write which table at all. This one knows what kind of write."""
+    import pathlib
+    server = pathlib.Path(agents.__file__).resolve().parents[1]
+    changing, deleting = [], []
+    for path in sorted(server.rglob("*.py")):
+        changes, deletes = _state_statements(_sql_strings(path))
+        name = path.relative_to(server).as_posix()
+        changing += [name] * bool(changes)
+        deleting += [name] * deletes
+    assert changing == []
+    assert deleting == ["lib/maintenance.py"]
+
+
+@pytest.mark.parametrize("statement,found", [
+    ("UPDATE state_log SET kind='idle'", True), ("update state_log set kind='idle'", True),
+    ("UPDATE OR IGNORE state_log SET ts=1", True), ("UPDATE main.state_log SET ts=1", True),
+    ("INSERT OR REPLACE INTO state_log (agent_id) VALUES (?)", True),
+    ("REPLACE INTO state_log (agent_id) VALUES (?)", True),
+    ("INSERT INTO state_log (state_id, kind) VALUES (?, ?)\n ON CONFLICT(state_id) DO UPDATE SET kind=excluded.kind", True),
+    ("INSERT INTO state_log (agent_id, ts, kind, detail) VALUES (?,?,?,?)", False),
+    ("SELECT 1 FROM state_log WHERE agent_id=?", False),
+    ("UPDATE state_log_archive SET ts=1", False),
+])
+def test_the_reading_of_the_sources_knows_every_form_of_a_change(statement, found):
+    changes, deletes = _state_statements([statement])
+    assert bool(changes) is found and not deletes
+
+
+def test_the_reading_of_the_sources_skips_comments_and_docstrings(tmp_path):
+    source = tmp_path / "module.py"
+    source.write_text('''"""A module that says UPDATE state_log in its docstring."""
+# and DELETE FROM state_log in a comment
+def writer(c):
+    """Never does UPDATE state_log."""
+    c.execute("delete from main.state_log where ts < ?", (1,))
+''')
+    assert _state_statements(_sql_strings(source)) == ([], True)
 
 
 def test_clocks_read_while_the_sweep_runs_are_read_again_when_it_has_ended(monkeypatch):
