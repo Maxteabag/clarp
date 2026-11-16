@@ -119,6 +119,101 @@ pub struct Voices {
     pub cartesia_voices: Vec<(String, String)>,
     /// Gemini's voice for an agent that was moved to Gemini on purpose and has none.
     pub gemini_voice: String,
+    /// The same personas' voices as Google's other door knows them: a voice that was
+    /// designed exists only behind the door it was made at.
+    pub gemini_vertex_voices: Vec<(String, String)>,
+}
+
+/// Cartesia's voices for the personas the Python Host ships with. An owner's own list adds
+/// to them and never takes their place.
+pub const BUILT_IN_CARTESIA_VOICES: [(&str, &str); 74] = [
+    ("Rachel", "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"),
+    ("Josh", "630ed21c-2c5c-41cf-9d82-10a7fd668370"),
+    ("Domi", "2a12b36c-7f9b-4c3a-9f7a-72731b15323a"),
+    ("Mike", "a167e0f3-df7e-4d52-a9c3-f949145efdab"),
+    ("Sam", "a5136bf9-224c-4d76-b823-52bd5efcffcc"),
+    ("Antoni", "4bc3cb8c-adb9-4bb8-b5d5-cbbef950b991"),
+    ("Elli", "dc30854e-e398-4579-9dc8-16f6cb2c19b9"),
+    ("Arnold", "49743b08-0f5d-4741-839c-b12933853780"),
+    ("Bella", "d7bf7d75-64b7-4c1e-86c0-79d647366587"),
+    ("Adam", "f4a3a8e4-694c-4c45-9ca0-27caf97901b5"),
+    ("Marcus", "ed81fd13-2016-4a49-8fe3-c0d2761695fc"),
+    ("Caleb", "41468051-3a85-4b68-92ad-64add250d369"),
+    ("Nadia", "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"),
+    ("Priya", "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"),
+    ("Diego", "86e30c1d-714b-4074-a1f2-1cb6b552fb49"),
+    ("Lena", "5c42302c-194b-4d0c-ba1a-8cb485c84ab9"),
+    ("Theo", "1ec736fa-db96-4eea-9299-235ce2cb7a0e"),
+    ("Yuki", "263b9cc0-0d99-44e7-ae92-3d4ad5d2ad18"),
+    ("Omar", "729651dc-c6c3-4ee5-97fa-350da1f88600"),
+    ("Freya", "62ae83ad-4f6a-430b-af41-a9bede9286ca"),
+    ("Archie", "ef191366-f52f-447a-a398-ed8c0f2943a1"),
+    ("Tristan", "56c7989e-7a5f-4d12-838f-e0f910e7356e"),
+    ("Ronan", "d3e3d5d5-07b0-484f-9967-dbc8f15b60d5"),
+    ("Wyatt", "5fc5c797-12c5-4f2b-ac9b-d4e53c08098f"),
+    ("Jasper", "e98bd614-9b9d-4031-b930-ed72482af858"),
+    ("Siobhan", "d79d2b77-9192-4e10-9407-5d43ca034803"),
+    ("Bronte", "391f4c0a-f1a8-4c21-9aa2-7a07f0a4b0dc"),
+    ("Pearl", "d6c52d6f-6478-47a2-ad54-dbc8f3335a2b"),
+    ("Imogen", "5a93ae96-9e3e-4b9d-8575-5f62b7de6d0f"),
+    ("Kira", "57dcab65-68ac-45a6-8480-6c4c52ec1cd1"),
+    ("Claude", "f4a3a8e4-694c-4c45-9ca0-27caf97901b5"),
+    ("Codex", "ed81fd13-2016-4a49-8fe3-c0d2761695fc"),
+    ("Grok", "49743b08-0f5d-4741-839c-b12933853780"),
+    ("Gemini", "d7bf7d75-64b7-4c1e-86c0-79d647366587"),
+    ("Janitor", ""),
+    ("Clarp", "a167e0f3-df7e-4d52-a9c3-f949145efdab"),
+    ("Axel", "12e85709-099c-480a-ba3e-875c41a9611a"),
+    ("Iris", "f6ff7c0c-e396-40a9-a70b-f7607edb6937"),
+    ("Felix", "1fcd23d0-bf12-4896-8f60-4f21ef5c9b98"),
+    ("Gordon", "4b31d090-8d2d-4bcd-8a32-1c135301e26e"),
+    ("Marsy", "e8e5fffb-252c-436d-b842-8879b84445b6"),
+    ("Tigo", "f24ae0b7-a3d2-4dd1-89df-959bdc4ab179"),
+    ("Wren", "5a93ae96-9e3e-4b9d-8575-5f62b7de6d0f"),
+    ("Lezo", "30894953-bcce-41fe-892c-15ce19c843ff"),
+    ("Vesper", "cfce9402-0067-458b-95a7-95846f469406"),
+    ("Avana", "efddb3d2-4464-45e0-9f8a-fcd5fd4fc54f"),
+    ("Aura", "daf747c6-6bc2-4083-bd59-aa94dce23f5d"),
+    ("Orion", "42b39f37-515f-4eee-8546-73e841679c1d"),
+    ("Cipher", "565510e8-6b45-45de-8758-13588fbaec73"),
+    ("Spectra", "59cb0f89-5d66-49f8-b965-f72b252789e0"),
+    ("Solu", "8b233a59-b1f4-42f2-895a-c9417ae41df8"),
+    ("Lyra", "9329fbdb-e285-4fba-95ec-592e15f14476"),
+    ("Echo", "eb7d0d3b-e427-483b-bbca-1c009c33f8a7"),
+    ("Nova", "f0377496-2708-4cc9-b2f8-1b7fdb5e1a2a"),
+    ("Margrok", "79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e"),
+    ("Roxy", "c2ad7092-0447-47ea-948b-61fbb6faf153"),
+    ("Vance", "7e19344f-9f17-47d7-a13a-4366ad06ebf3"),
+    ("Fang", "db69127a-dbaf-4fa9-b425-2fe67680c348"),
+    ("Riot", "a01c369f-6d2d-4185-bc20-b32c225eab70"),
+    ("Raven", "ca566b43-944e-4474-b494-7d9f0695f307"),
+    ("Jax", "79d2cf27-444a-4c3a-9eed-2ad5cf795a3b"),
+    ("Dagger", "5319c0b1-3dd1-4c00-b721-bfd2ec88ef56"),
+    ("Blaze", "a33f7a4c-100f-41cf-a1fd-5822e8fc253f"),
+    ("Spike", "ef191366-f52f-447a-a398-ed8c0f2943a1"),
+    ("Pip", "d6905573-8e91-4e32-b103-fd4d1205cd87"),
+    ("Bloop", "73693e3c-11ef-40e9-b5b7-786d790d562b"),
+    ("Noodle", "c961b81c-a935-4c17-bfb3-ba2239de8c2f"),
+    ("Ziggy", "997b6be7-b4d6-419b-8647-7fd1b45eb3ef"),
+    ("Mochi", "694f9389-aac1-45b6-b726-9d9369183238"),
+    ("Fathom", "ed82c17b-4704-4d34-be43-5d19065acdf1"),
+    ("Coral", "58fbaf73-d7de-4e82-a6b3-118180e7057c"),
+    ("Nautilus", "3f04e815-3260-4f50-8fd9-af9c657be4c2"),
+    ("Luma", "1f575487-6f3d-40e0-862a-814f55b5fb15"),
+    ("Trench", "23112795-d54e-4560-9568-791a87c30201"),
+];
+
+/// The voices one clip can be spoken in, worked out once for the clip.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClipVoices {
+    /// Cartesia's: what the agent's entry names when it speaks with Cartesia, what the
+    /// agent has stored, what its persona has in the owner's list.
+    pub cartesia: Option<String>,
+    /// ElevenLabs': what the agent's entry names, what it has stored for ElevenLabs, or
+    /// what it has stored at all.
+    pub elevenlabs: Option<String>,
+    /// Gemini's, as the owner's lists have it: before it is said as a door knows it.
+    pub gemini: Option<String>,
 }
 
 /// A persona without the mark of an agent nobody named (`Claude-5628` is a `Claude`).
@@ -275,6 +370,84 @@ impl Voices {
             .find(|(key, _)| key == "provider")
             .is_some_and(|(_, provider)| provider == GEMINI);
         (moved && !self.gemini_voice.is_empty()).then(|| self.gemini_voice.clone())
+    }
+}
+
+/// The voice an agent has for one provider in this clip: what its own entry names for the
+/// engine it speaks with, else what it has stored.
+pub fn voice_for(stored: Option<&str>, route: &Route, provider: &str) -> Option<String> {
+    let named = route.voice.as_deref().filter(|voice| !voice.is_empty());
+    match named.filter(|_| provider == route.provider) {
+        Some(voice) => Some(voice.to_string()),
+        None => resolve_voice(stored, provider),
+    }
+}
+
+impl Voices {
+    /// The owner's own list of Cartesia's voices over the ones the Python Host ships with.
+    pub fn with_cartesia(mut self, own: &[(String, String)]) -> Self {
+        let mut voices: Vec<(String, String)> = BUILT_IN_CARTESIA_VOICES
+            .iter()
+            .map(|(persona, voice)| ((*persona).to_string(), (*voice).to_string()))
+            .collect();
+        for (persona, voice) in own {
+            match voices.iter_mut().find(|(known, _)| known == persona) {
+                Some(listed) => listed.1.clone_from(voice),
+                None => voices.push((persona.clone(), voice.clone())),
+            }
+        }
+        self.cartesia_voices = voices;
+        self
+    }
+
+    /// The voices one clip can be spoken in.
+    pub fn for_clip(&self, stored: Option<&str>, who: Who<'_>, route: &Route) -> ClipVoices {
+        let listed = || self.cartesia_voice_for(who.persona).map(str::to_string);
+        let cartesia = voice_for(stored, route, CARTESIA).or_else(listed);
+        let whole = stored
+            .filter(|stored| !stored.is_empty())
+            .map(str::to_string);
+        let elevenlabs = voice_for(stored, route, ELEVENLABS).or(whole);
+        let named = route.voice.as_deref().filter(|_| route.provider == GEMINI);
+        let gemini = self.gemini_voice(stored, who, named, cartesia.as_deref());
+        ClipVoices {
+            cartesia,
+            elevenlabs,
+            gemini,
+        }
+    }
+
+    /// A voice of Gemini's as the door a request goes through knows it. Behind Vertex, a
+    /// voice that was designed at the Gemini API is the same persona's voice at Vertex;
+    /// Google's own voices and what no persona has are the same behind both.
+    pub fn gemini_voice_at(&self, voice: &str, vertex: bool) -> String {
+        let at_vertex = |known: &&(String, String)| known.1 == voice;
+        if !vertex
+            || self
+                .gemini_vertex_voices
+                .iter()
+                .any(|known| at_vertex(&known))
+        {
+            return voice.to_string();
+        }
+        // Each persona once, as a list holds it: listed twice, the last stands.
+        let last = |voices: &[(String, String)], persona: &str| {
+            let found = voices.iter().rev().find(|(known, _)| known == persona);
+            found.map(|(_, voice)| voice.clone())
+        };
+        let mut seen: Vec<&str> = Vec::new();
+        for (persona, _) in &self.gemini_voices {
+            if seen.contains(&persona.as_str()) {
+                continue;
+            }
+            seen.push(persona);
+            let here = last(&self.gemini_voices, persona);
+            let there = last(&self.gemini_vertex_voices, persona).filter(|voice| !voice.is_empty());
+            if let (true, Some(there)) = (here.as_deref() == Some(voice), there) {
+                return there;
+            }
+        }
+        voice.to_string()
     }
 }
 

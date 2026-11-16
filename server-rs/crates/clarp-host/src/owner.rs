@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 
+use clarp_kernel::said::Voices;
 use toml::{Table, Value};
 
 /// Where the owner's file is, when this Host was told of one.
@@ -43,6 +44,93 @@ pub fn texts_at(root: &Table, path: &[&str]) -> Vec<(String, String)> {
         Some((name.clone(), text.to_string()))
     });
     texts.collect()
+}
+
+/// A value of the file as the text the Python Host makes of it: a text as it is, a number
+/// or a truth as it is written.
+fn as_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.trim().to_string()),
+        Value::Integer(number) => Some(number.to_string()),
+        Value::Float(number) => Some(number.to_string()),
+        Value::Boolean(truth) => Some(if *truth { "True" } else { "False" }.to_string()),
+        _ => None,
+    }
+}
+
+/// The owner's choices of speech out as his file has them: the engine every agent speaks
+/// with (`[tts] provider`, Cartesia unless he says otherwise) and the one that is tried
+/// after it (`fallback`), the entries of single agents (`[tts.agents.<name>]`), Gemini's
+/// voices for his personas behind each of Google's doors (`[gemini_tts] voices`,
+/// `vertex_voices`) and its voice for all (`voice`), and his own voices of Cartesia's over
+/// the ones the Python Host ships with (`[cartesia.voices]`).
+pub fn voices(file: &Table) -> Voices {
+    let text = |path: &[&str]| text_at(file, path);
+    let lower = |text: Option<String>, otherwise: &str| {
+        text.map_or_else(|| otherwise.to_string(), |text| text.to_lowercase())
+    };
+    let named = |path: &[&str]| -> Vec<(String, String)> {
+        let listed = texts_at(file, path).into_iter();
+        listed.filter(|(_, voice)| !voice.is_empty()).collect()
+    };
+    let agents = file
+        .get("tts")
+        .and_then(|tts| tts.get("agents"))
+        .and_then(Value::as_table);
+    let entries: Vec<(String, Vec<(String, String)>)> = agents
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, entry)| {
+            let set = entry.as_table()?.iter();
+            let set = set.filter_map(|(key, value)| Some((key.clone(), as_text(value)?)));
+            Some((name.clone(), set.collect()))
+        })
+        .collect();
+    let borrowed: Vec<(&str, Vec<(&str, &str)>)> = entries
+        .iter()
+        .map(|(name, entry)| {
+            let set = entry
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()));
+            (name.as_str(), set.collect())
+        })
+        .collect();
+    let given: Vec<(&str, &[(&str, &str)])> = borrowed
+        .iter()
+        .map(|(name, entry)| (*name, entry.as_slice()))
+        .collect();
+    Voices {
+        provider: lower(text(&["tts", "provider"]), "cartesia"),
+        fallback: lower(text(&["tts", "fallback"]), "none"),
+        gemini_voices: named(&["gemini_tts", "voices"]),
+        gemini_vertex_voices: named(&["gemini_tts", "vertex_voices"]),
+        gemini_voice: text(&["gemini_tts", "voice"]).unwrap_or_else(|| "Kore".to_string()),
+        ..Voices::default()
+    }
+    .with_agents(&given)
+    .with_cartesia(&named(&["cartesia", "voices"]))
+}
+
+/// Which of Gemini's models speaks, and through which of Google's doors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeminiChoice {
+    pub model: String,
+    /// Through Vertex AI, with its own key; otherwise through the Gemini API.
+    pub vertex: bool,
+}
+
+pub fn gemini(file: &Table) -> GeminiChoice {
+    let door = text_at(file, &["gemini_tts", "backend"]).unwrap_or_default();
+    GeminiChoice {
+        model: text_at(file, &["gemini_tts", "model"])
+            .unwrap_or_else(|| "gemini-3.8-flash-tts".to_string()),
+        vertex: door.to_lowercase() == "vertex",
+    }
+}
+
+/// Which of Cartesia's models speaks.
+pub fn cartesia_model(file: &Table) -> String {
+    text_at(file, &["cartesia", "model"]).unwrap_or_else(|| "sonic-3.5".to_string())
 }
 
 impl OwnerFile {
@@ -177,6 +265,83 @@ enabled = true
             [("Maximus".to_string(), "Charon-v".to_string())]
         );
         assert!(texts_at(&file, &["nowhere", "voices"]).is_empty());
+    }
+
+    #[test]
+    fn the_owners_choices_of_speech_out_are_read_as_the_python_host_reads_them() {
+        use clarp_kernel::said::Who;
+
+        let file: Table = FILE.parse().unwrap();
+        let chosen = voices(&file);
+        assert_eq!(
+            (chosen.provider.as_str(), chosen.fallback.as_str()),
+            ("gemini", "cartesia")
+        );
+        assert_eq!(
+            chosen.gemini_voice, "Kore",
+            "the voice for all, unless the owner names one"
+        );
+        // An agent's own entry, whatever letters its name is written in.
+        let ingrid = Who {
+            name: "",
+            persona: "INGRID",
+            session: "ingrid-1",
+        };
+        let route = chosen.route(ingrid);
+        assert_eq!(
+            (
+                route.provider.as_str(),
+                route.voice.as_deref(),
+                route.fallback.as_str()
+            ),
+            ("gemini", Some("Charon"), "cartesia")
+        );
+        let spaced = Who {
+            name: "Name With Space",
+            ..Who::default()
+        };
+        assert_eq!(
+            chosen.entry_for(spaced),
+            [("cartesia_voice".to_string(), "ca-1".to_string())]
+        );
+        // The voices of his personas behind each of Google's doors; what is no text is none.
+        assert_eq!(chosen.gemini_voice_for("maximus"), Some("Charon"));
+        assert_eq!(chosen.gemini_voice_for("odd"), None);
+        assert_eq!(chosen.gemini_voice_at("Charon", true), "Charon-v");
+        assert_eq!(chosen.gemini_voice_at("Charon", false), "Charon");
+        // Cartesia's voices the Python Host ships with are there without a word of his.
+        assert!(chosen.cartesia_voice_for("Rachel").is_some());
+        assert_eq!(
+            gemini(&file),
+            GeminiChoice {
+                model: "gemini-3.8-flash-tts".to_string(),
+                vertex: false
+            }
+        );
+        assert_eq!(cartesia_model(&file), "sonic-3.5");
+
+        // A file that says nothing of speech: Cartesia, and nobody after it.
+        let silent: Table = "[server]\nport = 1\n".parse().unwrap();
+        let chosen = voices(&silent);
+        assert_eq!(
+            (chosen.provider.as_str(), chosen.fallback.as_str()),
+            ("cartesia", "none")
+        );
+        assert!(chosen.agents.is_empty() && chosen.gemini_voices.is_empty());
+        let other: Table = "[gemini_tts]\nbackend = \" Vertex \"\nmodel = \"m2\"\nvoice = \"Puck\"\n[cartesia]\nmodel = \"sonic-9\"\n[cartesia.voices]\nMaximus = \"ca-max\"\n"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            gemini(&other),
+            GeminiChoice {
+                model: "m2".to_string(),
+                vertex: true
+            }
+        );
+        assert_eq!(cartesia_model(&other), "sonic-9");
+        let chosen = voices(&other);
+        assert_eq!(chosen.gemini_voice, "Puck");
+        assert_eq!(chosen.cartesia_voice_for("Maximus"), Some("ca-max"));
     }
 
     #[test]

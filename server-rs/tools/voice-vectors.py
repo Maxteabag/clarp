@@ -56,6 +56,9 @@ def taken(path: pathlib.Path, names: list[str], given: dict | None = None, insid
             wanted.append(node)
         elif isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in names for t in node.targets):
             wanted.append(node)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id in names:
+            # What a value is said to be is not needed to have the value.
+            wanted.append(ast.Assign(targets=[node.target], value=node.value))
     found = {node.name if hasattr(node, 'name') else node.targets[0].id for node in wanted}
     missing = set(names) - found
     assert not missing, f'{path.name} has no {sorted(missing)}'
@@ -65,16 +68,18 @@ def taken(path: pathlib.Path, names: list[str], given: dict | None = None, insid
 
 
 def settings(methods: dict, *, provider='cartesia', fallback='none', overrides=None, gemini_voices=None,
-             cartesia_voices=None, gemini_voice=''):
+             cartesia_voices=None, gemini_voice='', backend='gemini_api', vertex_voices=None):
     """The owner's settings as the Python Host holds them once read: made up, with the Host's
     own methods on them."""
     cfg = types.SimpleNamespace(
         tts_provider=provider, tts_fallback=fallback, gemini_voice=gemini_voice,
+        gemini_backend=backend, gemini_vertex_voices=dict(vertex_voices or {}),
         tts_agent_overrides={str(name).strip().lower(): {str(k).strip().lower(): str(v).strip()
                                                        for k, v in entry.items() if str(v).strip()}
                              for name, entry in (overrides or {}).items()},
         gemini_voices=dict(gemini_voices or {}), cartesia_voices=dict(cartesia_voices or {}))
-    for name in ('tts_override_for', 'gemini_voice_for', 'gemini_voice_for_cartesia', 'cartesia_voice_for'):
+    for name in ('tts_override_for', 'gemini_voice_for', 'gemini_voice_for_cartesia', 'cartesia_voice_for',
+                 'gemini_tts_voice'):
         setattr(cfg, name, types.MethodType(methods[name], cfg))
     return cfg
 
@@ -159,6 +164,39 @@ def persona_voices(methods: dict, registry: dict) -> dict:
     return out
 
 
+def clip_voices(methods: dict, registry: dict, mode: dict) -> dict:
+    """The voices one clip can be spoken in, by provider, as they are worked out once for the
+    clip: the agent's entry for the engine it speaks with, what the agent has stored, what its
+    persona has in the owner's lists. And a voice of Gemini's as each of Google's doors knows it."""
+    gemini = {'Maximus': 'voice_api_max', 'Ingrid': 'Kore', 'Claude': 'Puck'}
+    vertex = {'Maximus': 'voice_vertex_max', 'Ingrid': 'Kore-v', 'Lonely': 'Aoede'}
+    cartesia = {'Maximus': 'ca-max', 'Claude': 'ca-claude'}
+    overrides = {'Ingrid': {'provider': 'gemini', 'gemini_voice': 'Charon'},
+                 'Arnold': {'provider': 'cartesia', 'cartesia_voice': 'ca-arnold'},
+                 'Eleven': {'provider': 'elevenlabs', 'elevenlabs_voice': 'el-entry'}}
+    doors = []
+    for backend in ('gemini_api', 'vertex'):
+        cfg = settings(methods, gemini_voices=gemini, vertex_voices=vertex, backend=backend)
+        for voice in ('voice_api_max', 'voice_vertex_max', 'Kore', 'Kore-v', 'Puck', 'Aoede', 'Zephyr', ''):
+            doors.append({'backend': backend, 'voice': voice, 'as_known': cfg.gemini_tts_voice(voice)})
+    chosen = []
+    for provider in ('cartesia', 'gemini', 'elevenlabs'):
+        cfg = settings(methods, provider=provider, overrides=overrides, gemini_voices=gemini,
+                       cartesia_voices=cartesia, vertex_voices=vertex)
+        for raw in (None, 'el-plain', '{"cartesia": "ca-own", "gemini": "Fenrir"}', '{"elevenlabs": "el-own"}'):
+            for persona in ('Maximus', 'Ingrid', 'Arnold', 'Eleven', 'Nobody', 'Claude-5628'):
+                agent = {'persona': persona, 'session': persona.lower()}
+                route = mode['route'](cfg, agent)
+                made = registry['ProviderRegistry'](cfg, raw, agent, route)
+                chosen.append({'provider': provider, 'raw': raw, 'persona': persona,
+                               'route': {'provider': route.provider, 'voice': route.voice},
+                               'cartesia_voice': made.cartesia_voice, 'eleven_voice': made.eleven_voice,
+                               'by_provider': {name: made.voice_for(name)
+                                               for name in ('cartesia', 'gemini', 'elevenlabs', 'deepgram')}})
+    return {'gemini_voices': gemini, 'vertex_voices': vertex, 'cartesia_voices': cartesia, 'overrides': overrides,
+            'doors': doors, 'chosen': chosen}
+
+
 def clip_names(engine: dict) -> dict:
     sessions = [None, '', 'maximus-6c37', 'has space', 'ünï', 'a/b', '../etc', 'UPPER.case_1-2', '***', 'a' * 80, ' pad ']
     made = [{'session': session, 'now_ms': now,
@@ -179,10 +217,13 @@ def main() -> int:
     voice = whole(LIB / 'voice.py')
     mode = whole(LIB / 'tts_mode.py')
     methods = taken(LIB / 'config.py',
-                    ['tts_override_for', 'gemini_voice_for', 'gemini_voice_for_cartesia', 'cartesia_voice_for'],
+                    ['tts_override_for', 'gemini_voice_for', 'gemini_voice_for_cartesia', 'cartesia_voice_for',
+                     'gemini_tts_voice'],
                     taken(LIB / 'config.py', ['_ANONYMOUS_SUFFIX']), inside='Config')
-    registry = taken(LIB / 'tts_registry.py', ['_gemini_voice'],
-                     {'resolve_voice': voice['resolve_voice'], 'GEMINI': voice['GEMINI']})
+    registry = taken(LIB / 'tts_registry.py', ['_gemini_voice', 'ProviderRegistry'],
+                     {'resolve_voice': voice['resolve_voice'], 'GEMINI': voice['GEMINI'],
+                      'CARTESIA': voice['CARTESIA'], 'ELEVENLABS': voice['ELEVENLABS']})
+    built_in = taken(LIB / 'config.py', ['DEFAULT_CARTESIA_VOICES'])['DEFAULT_CARTESIA_VOICES']
     engine = taken(LIB / 'tts_engine.py', ['_FN_RE', 'make_clip_filename', 'parse_clip_filename'],
                    {'_now_ms': lambda: 0})
     vectors = {
@@ -190,6 +231,10 @@ def main() -> int:
         'stored_voices': stored_voices(voice),
         'routes': routes(mode, methods),
         'persona_voices': persona_voices(methods, registry),
+        'clip_voices': clip_voices(methods, registry, mode),
+        # The voices of Cartesia's the Python Host has for the personas it ships with: an owner's
+        # own list adds to them and never takes their place.
+        'built_in_cartesia_voices': [[persona, voice] for persona, voice in built_in.items()],
         'clip_names': clip_names(engine),
     }
     OUT.write_text(json.dumps(vectors, indent=1, ensure_ascii=False, sort_keys=True) + '\n')
