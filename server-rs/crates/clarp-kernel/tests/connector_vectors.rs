@@ -107,16 +107,28 @@ fn a_frame_is_written_as_the_python_connector_writes_it() {
 #[test]
 fn a_request_is_handed_on_with_the_headers_the_python_connector_hands_it_on_with() {
     let vectors = vectors();
-    let (mut handed_on, mut of_the_apps) = (0, 0);
+    let (mut handed_on, mut of_the_apps, mut not_carried) = (0, 0, 0);
     for row in rows(&vectors, "forwarded") {
-        let given = pairs(&row["headers"]);
         let mut meta = Map::new();
-        for (name, value) in &given {
-            meta.insert(name.clone(), json!(value));
+        for pair in row["headers"].as_array().unwrap() {
+            meta.insert(pair[0].as_str().unwrap().to_string(), pair[1].clone());
         }
         let body = usize::try_from(row["body"].as_u64().unwrap()).unwrap();
         let passthrough = row["passthrough"].as_bool().unwrap();
-        let mine = connector::handed_on(&meta, "127.0.0.1:7690", body, passthrough).unwrap();
+        let mine = connector::handed_on(&meta, "127.0.0.1:7690", body, passthrough);
+        // What is no header HTTP can carry is refused whole.
+        if let Some(refused) = row.get("refused") {
+            assert_eq!(words(refused).0, "UnforwardableHeader");
+            assert_eq!(mine, None, "{}", row["headers"]);
+            not_carried += 1;
+            continue;
+        }
+        let given = pairs(&row["headers"]);
+        let mine = mine.unwrap();
+        assert_eq!(
+            mine[0],
+            ("X-Clarp-Transport".to_string(), "relay".to_string())
+        );
         assert_eq!(mine, pairs(&row["handed"]), "{given:?}");
         // The headers the apps mark their own requests with go on. (Until 16 Nov 2026 the
         // Python connector dropped them with the rest of their family: reference defect
@@ -131,7 +143,7 @@ fn a_request_is_handed_on_with_the_headers_the_python_connector_hands_it_on_with
         of_the_apps += kept.len();
         handed_on += 1;
     }
-    assert_eq!(handed_on, 41);
+    assert_eq!((handed_on, not_carried), (45, 13));
     assert_eq!(of_the_apps, 4);
     // What is no text is no header.
     let mut odd = Map::new();

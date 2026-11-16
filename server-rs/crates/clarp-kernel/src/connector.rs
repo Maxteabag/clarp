@@ -179,12 +179,20 @@ pub fn answer_encoding(headers: &[(String, String)], passthrough: bool) -> &'sta
     if offered { "gzip" } else { "identity" }
 }
 
-/// The headers a relay's request is handed to the Host with. What belongs to a hop, what a
-/// header of the hop names, and what says how or for whom a request travelled is left out:
-/// then the Host is told the one thing the connector knows, that the request came through
-/// the relay, and for whom the relay says it asks, when that is an address.
+/// Whether a sign may stand in a header's name (a token of HTTP).
+fn in_a_name(sign: char) -> bool {
+    sign.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(sign)
+}
+
+/// The headers a relay's request is handed to the Host with. First the one thing the
+/// connector knows, that the request came through the relay: whatever follows, the Host has
+/// read that. Then the phone's own, without what belongs to a hop, what a header of the hop
+/// names, and what says how or for whom a request travelled; then where the Host is, how
+/// it may answer, and for whom the relay says it asks, when that is an address.
 ///
-/// `None`: a header is no text. The relay writes every header as text.
+/// `None`: something the relay handed over is no header HTTP can carry (a name that is no
+/// token, a value that is no text or has a control sign in it). The request is refused
+/// whole: such a name would not be caught by what is left out here.
 pub fn handed_on(
     meta: &Map<String, Value>,
     local: &str,
@@ -193,7 +201,12 @@ pub fn handed_on(
 ) -> Option<Vec<(String, String)>> {
     let mut given = Vec::with_capacity(meta.len());
     for (name, value) in meta {
-        given.push((name.clone(), value.as_str()?.to_string()));
+        let value = value.as_str()?;
+        let control = |sign: char| (sign < ' ' && sign != '\t') || sign == '\u{7f}';
+        if name.is_empty() || !name.chars().all(in_a_name) || value.chars().any(control) {
+            return None;
+        }
+        given.push((name.clone(), value.to_string()));
     }
     // A name written twice in different letters: what was written last counts.
     let last = |wanted: &str| {
@@ -216,15 +229,11 @@ pub fn handed_on(
                 .any(|begin| name.starts_with(begin))
             || family
     };
-    let mut handed: Vec<(String, String)> = given
-        .iter()
-        .filter(|(name, _)| !left_out(name))
-        .cloned()
-        .collect();
+    let mut handed = vec![("X-Clarp-Transport".to_string(), "relay".to_string())];
+    handed.extend(given.iter().filter(|(name, _)| !left_out(name)).cloned());
     let encoding = answer_encoding(&given, passthrough);
     handed.push(("Host".to_string(), local.to_string()));
     handed.push(("Accept-Encoding".to_string(), encoding.to_string()));
-    handed.push(("X-Clarp-Transport".to_string(), "relay".to_string()));
     if let Some(caller) = trust::ip_address(last("x-forwarded-for")) {
         handed.push(("X-Forwarded-For".to_string(), caller));
     }
