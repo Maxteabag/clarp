@@ -165,6 +165,7 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             trace_id: Some(ids::hex(8)),
             sender: None,
             client: None,
+            ..Message::default()
         };
         let told = [told];
         outs.push(actor.keep_with(&kept(&told), &message, admission, now)?.1);
@@ -184,6 +185,7 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             trace_id: Some(ids::hex(8)),
             sender: None,
             client: None,
+            ..Message::default()
         };
         let told = [form];
         let said = actor.keep_with(&kept(&told), &message, Admission::Later, now)?;

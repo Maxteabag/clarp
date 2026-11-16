@@ -1533,6 +1533,7 @@ mod tests {
                         trace_id: Some("t-1".to_string()),
                         sender: None,
                         client: None,
+                        ..Message::default()
                     }),
                     1 << 20,
                     None,
@@ -1741,6 +1742,7 @@ mod tests {
                 trace_id: None,
                 sender: None,
                 client: None,
+                ..Message::default()
             }),
             42,
             None,
@@ -2209,6 +2211,7 @@ mod tests {
                     trace_id: None,
                     sender: None,
                     client: None,
+                    ..Message::default()
                 }),
                 1,
                 None,

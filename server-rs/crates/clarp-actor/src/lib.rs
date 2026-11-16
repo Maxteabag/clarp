@@ -42,6 +42,7 @@ use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, kind};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
+use clarp_kernel::spoken::{Line as Spoken, SpeechBook, lines_of};
 use clarp_kernel::turn::{
     Activity, Admission, Origin, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
     silent_when_failed,
@@ -187,6 +188,8 @@ pub struct Changed {
     pub artifacts: bool,
     /// The agent published a file.
     pub media: bool,
+    /// A line the agent says aloud was written, or what became of one.
+    pub speech: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -396,6 +399,8 @@ struct LiveTurn {
     /// The replies of this turn that said something and that no tool work has followed yet,
     /// oldest first. Tool work that comes makes them commentary.
     said: Vec<String>,
+    /// What the turn's replies mark for the ear is said aloud.
+    speak: bool,
     /// What the tool has said of itself so far: its model, and what the turn cost.
     model: Option<String>,
     tokens: Option<(u64, u64)>,
@@ -438,6 +443,8 @@ pub struct Actor {
     artifacts: ArtifactBook,
     /// The files the agent published, as the log has them.
     media: MediaBook,
+    /// The lines the agent says aloud, as the log has them.
+    speech: SpeechBook,
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
@@ -789,6 +796,10 @@ impl Actor {
                 media.apply(&asset);
             },
         )?;
+        let mut speech = SpeechBook::new();
+        records(recorder.log(), kind::SPEECH, kind::LINE, |line: Spoken| {
+            speech.apply(&line);
+        })?;
         let mut actor = Self {
             profile,
             backend,
@@ -797,13 +808,19 @@ impl Actor {
             goals,
             artifacts,
             media,
+            speech,
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
             remembered: Remembered::default(),
         };
         actor.remembered = actor.remembered_in_log()?;
+        // A line an engine was speaking when the Host went: begun a moment ago, it waits
+        // again; begun long ago, it is over.
+        let cut_off = actor.speech.after_a_restart(now_ms);
+        actor.write_lines(&cut_off, now_ms)?;
         let mut out = Outputs::default();
+        out.changed.speech = actor.speech.next().is_some();
         let live = match actor.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
@@ -821,6 +838,7 @@ impl Actor {
                 last_row: message.id.clone(),
                 // The attempt that comes reads from the log what the turn has said.
                 said: Vec::new(),
+                speak: message.speak,
                 interpreter: actor
                     .backend
                     .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
@@ -1137,6 +1155,100 @@ impl Actor {
         &self.media
     }
 
+    /// The lines the agent says aloud.
+    pub fn speech(&self) -> &SpeechBook {
+        &self.speech
+    }
+
+    /// Writes lines as they stand now, and takes them into the book.
+    fn write_lines(&mut self, lines: &[Spoken], now_ms: i64) -> Result<(), ActorError> {
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let mut batch = self.recorder.batch();
+        for line in lines {
+            batch.item(record_item(kind::LINE, line.id.clone(), line, now_ms)?);
+        }
+        batch.commit()?;
+        for line in lines {
+            self.speech.apply(line);
+        }
+        Ok(())
+    }
+
+    /// An engine takes the line that is spoken next. `None`: nothing of this agent's is to
+    /// be spoken now, because nothing waits or because a line of its is being spoken.
+    pub fn claim_line(&mut self, now_ms: i64) -> Result<Option<Spoken>, ActorError> {
+        let taken = self
+            .speech
+            .next()
+            .and_then(|line| line.claimed(now_ms).ok());
+        if let Some(line) = &taken {
+            self.write_lines(std::slice::from_ref(line), now_ms)?;
+        }
+        Ok(taken)
+    }
+
+    /// The line an engine took has a clip: its number on this Host, its file, and the
+    /// engine and the voice that speak it. `None`: the agent has no such line being spoken.
+    pub fn line_begun(
+        &mut self,
+        id: &str,
+        clip: (u64, &str),
+        spoken_by: (&str, &str),
+        now_ms: i64,
+    ) -> Result<Option<Spoken>, ActorError> {
+        let line = self.speech.get(id);
+        let begun = line.and_then(|line| line.begun(clip.0, clip.1, spoken_by.0, spoken_by.1).ok());
+        if let Some(line) = &begun {
+            self.write_lines(std::slice::from_ref(line), now_ms)?;
+        }
+        Ok(begun)
+    }
+
+    /// The engine is done with a line: its clip is whole and has so many bytes, or it failed
+    /// and says why. `None`: the agent has no such line being spoken.
+    pub fn line_ended(
+        &mut self,
+        id: &str,
+        outcome: Result<u64, &str>,
+        now_ms: i64,
+    ) -> Result<Option<Spoken>, ActorError> {
+        let line = self.speech.get(id);
+        let ended = line.and_then(|line| line.ended(outcome, now_ms).ok());
+        if let Some(line) = &ended {
+            self.write_lines(std::slice::from_ref(line), now_ms)?;
+        }
+        Ok(ended)
+    }
+
+    /// What an app says of playing a clip. Answers whether the agent has that clip.
+    pub fn line_played(
+        &mut self,
+        clip_id: u64,
+        status: &str,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<bool, ActorError> {
+        let Some(line) = self.speech.by_clip(clip_id) else {
+            return Ok(false);
+        };
+        let played = line.played(status, error);
+        self.write_lines(std::slice::from_ref(&played), now_ms)?;
+        Ok(true)
+    }
+
+    /// The lines that still wait are taken back: nothing more of what was said is spoken.
+    /// Answers how many there were.
+    pub fn drop_lines(&mut self, now_ms: i64) -> Result<usize, ActorError> {
+        let waiting = self.speech.waiting();
+        let dropped: Vec<Spoken> = waiting
+            .filter_map(|line| line.dropped(now_ms).ok())
+            .collect();
+        self.write_lines(&dropped, now_ms)?;
+        Ok(dropped.len())
+    }
+
     /// Writes what was decided on the agent's books, all of it in one append, and takes it.
     pub fn keep(&mut self, kept: &Kept<'_>, now_ms: i64) -> Result<Outputs, ActorError> {
         let mut written = self.written(kept, now_ms)?;
@@ -1411,6 +1523,8 @@ impl Actor {
             ..Outputs::default()
         };
         self.carry_out(effects, &mut out)?;
+        // Whoever stops an agent does not want to hear the rest of what it had to say.
+        out.changed.speech = self.drop_lines(now_ms)? > 0;
         Ok((u32::try_from(told).unwrap_or(u32::MAX), out))
     }
 
@@ -1711,6 +1825,7 @@ impl Actor {
             turn,
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
+            speak: message.speak,
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
@@ -1851,6 +1966,7 @@ impl Actor {
             origin: message.origin,
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
+            speak: message.speak,
             model,
             tokens,
             interpreter,
@@ -1965,6 +2081,7 @@ impl Actor {
             let mut batch = self.recorder.batch();
             let mut signals = Vec::new();
             let mut shown: Vec<String> = Vec::new();
+            let mut aloud: Vec<Spoken> = Vec::new();
             for record in &read.records {
                 let t = record.t;
                 // What the shim says about the process means the same for every backend. A
@@ -2135,6 +2252,15 @@ impl Actor {
                             if !reply.text.trim().is_empty() {
                                 live.said.push(reply.id.clone());
                             }
+                            // What the reply marks for the ear waits to be spoken from the
+                            // moment the reply is in the conversation.
+                            if live.speak {
+                                let trace = live.trace_id.as_deref();
+                                for line in lines_of(&reply.id, turn.0, &reply.text, trace, t) {
+                                    batch.item(record_item(kind::LINE, line.id.clone(), &line, t)?);
+                                    aloud.push(line);
+                                }
+                            }
                             Entry::Reply(reply)
                         }
                         Signal::Tool(mut call) => {
@@ -2196,6 +2322,10 @@ impl Actor {
             }
             let committed = batch.commit()?;
             live.offset = read.next_offset;
+            for line in &aloud {
+                self.speech.apply(line);
+                out.changed.speech = true;
+            }
             if wrote {
                 self.unstored_changes = 0;
                 out.changed.conversation = true;

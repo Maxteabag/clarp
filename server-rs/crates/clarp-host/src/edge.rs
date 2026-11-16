@@ -1091,6 +1091,12 @@ pub(crate) async fn send_message(
         trace_id: Some(trace_id.clone()),
         sender,
         client: request.client.as_deref().and_then(client_name),
+        // What a person sends is answered aloud unless the app says otherwise; anything
+        // else only when it is asked for.
+        speak: match request.synthesize_audio {
+            Some(asked) => asked,
+            None => origin_is_user,
+        },
     };
     let writer = match &message.origin {
         Origin::Agent { agent_id } if !agent_id.is_empty() => Some(agent_id.clone()),
@@ -1386,6 +1392,7 @@ async fn cancel_background_job(
             trace_id: Some(ids::hex(8)),
             sender: None,
             client: None,
+            ..Message::default()
         };
         let _ = member.agent.send(message, Admission::Queue).await;
     }

@@ -59,6 +59,9 @@ pub mod kind {
     pub const ARTIFACT: u16 = 500;
     /// An [`Asset`](crate::media::Asset) as JSON: a file the agent published.
     pub const MEDIA: u16 = 600;
+    /// A [`Line`](crate::spoken::Line) as JSON: a line the agent says aloud, as a change
+    /// left it.
+    pub const LINE: u16 = 700;
 
     /// What an agent is rebuilt from.
     pub const MACHINERY: Kinds = Kinds::range(1, 99);
@@ -70,6 +73,8 @@ pub mod kind {
     pub const ARTIFACTS: Kinds = Kinds::range(500, 599);
     /// The files the agent published for its user to see.
     pub const PUBLISHED: Kinds = Kinds::range(600, 699);
+    /// What the agent says aloud.
+    pub const SPEECH: Kinds = Kinds::range(700, 799);
     /// What a conversation is read from.
     pub const CONVERSATION: Kinds = Kinds::range(100, 199);
     /// The rows of a conversation: what a page of a chat is counted in. An item of one of
