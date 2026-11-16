@@ -74,16 +74,30 @@ def test_completed_preview_survives_live_updates_for_unopened_chats():
     for number, source, text in ((1, 'transcript:one', 'Completed reply'),
                                  (2, 'live:ready', 'Unfinished reply')):
         db.conn().execute('''INSERT INTO messages
-            (message_id, agent_id, seq, role, text, tools_json, updated_at, origin, source_file)
-            VALUES(?,?,?,?,?,?,?,?,?)''',
-            (f'preview-{number}', aid, number, 'assistant', text, '[]', number, 'user', source))
+            (message_id, agent_id, backend_session_id, seq, role, text, tools_json, updated_at,
+             revision, origin, source_file)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)''',
+            (f'preview-{number}', aid, 's', number, 'assistant', text, '[]', number, number, 'user', source))
     row = next(row for row in build_agent_snapshot(None)['agents'] if row['agent_id'] == aid)
     assert row['last_message'] == 'Unfinished reply'
     assert row['last_completed_message'] == 'Completed reply'
-    # Real writers bump updated_at (and usually revision); the preview cache keys on both.
-    db.conn().execute("UPDATE messages SET text='Growing unfinished reply', updated_at=3 WHERE message_id='preview-2'")
+
+    def written(change, revision):
+        """As the writers do it: a live row's delta, and the reply that takes
+        the row over, each give the row the next revision and raise the
+        conversation's head to it in the same transaction. The preview cache
+        is keyed by the heads."""
+        db.conn().execute(f"UPDATE messages SET {change}, revision=?, updated_at=? WHERE message_id='preview-2'",
+                          (revision, revision))
+        db.conn().execute('''INSERT INTO conversation_heads (agent_id, backend_session_id, revision)
+                             VALUES (?, 's', ?) ON CONFLICT(agent_id, backend_session_id)
+                             DO UPDATE SET revision = MAX(conversation_heads.revision, excluded.revision)''',
+                          (aid, revision))
+
+    written("text='Growing unfinished reply'", 3)
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'Completed reply'
-    db.conn().execute("UPDATE messages SET source_file='transcript:two', text='New finished reply', updated_at=4 WHERE message_id='preview-2'")
+    assert message_store.dashboard_messages()[aid]['head']['preview'] == 'Growing unfinished reply'
+    written("source_file='transcript:two', text='New finished reply'", 4)
     assert message_store.dashboard_messages()[aid]['completed_head']['preview'] == 'New finished reply'
 
 
@@ -159,22 +173,66 @@ def test_dashboard_message_ranking_walks_the_activity_index():
     assert 'idx_messages_dashboard_activity' in plan, plan
 
 
-def test_dashboard_revision_map_reads_only_an_index():
-    """The revision map runs after every committed write. Reading message rows
-    for MAX(updated_at) took 4-40 s on a 270k-message store and timed the
-    whole snapshot out; it must stay an index-only scan."""
-    aid = agents.create_agent(persona='Covered', voice_id='', cwd='/tmp', session='covered')
-    message_store.record_user_message(agent_id=aid, backend_session_id='c', client_msg_id='m', text='hi')
+def _map_statements(run):
+    """The statements one projection issues for its revision map: everything
+    but the three a preview costs."""
     statements = []
     db.conn().set_trace_callback(statements.append)
     try:
-        message_store.dashboard_messages()
+        run()
     finally:
         db.conn().set_trace_callback(None)
-    revisions = next(s for s in statements if 'MAX(revision)' in s)
-    plan = [row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + revisions)]
+    return [sql for sql in statements if 'conversation_heads' in sql or 'MAX(revision)' in sql]
+
+
+def test_dashboard_revision_map_reads_the_heads_not_the_messages():
+    """The revision map runs after every committed write. As a grouped walk of
+    the messages index it read what there are messages: 173 MB a request on a
+    Host with 2.3 million of them (issue 371). It reads one row a
+    conversation; the messages are walked once for a database, for
+    conversations from before the heads were kept, and that walk stays
+    inside its index."""
+    aid = agents.create_agent(persona='Covered', voice_id='', cwd='/tmp', session='covered')
+    message_store.record_user_message(agent_id=aid, backend_session_id='c', client_msg_id='m', text='hi')
+    first = _map_statements(message_store.dashboard_messages)
+    walks = [sql for sql in first if 'FROM messages' in sql]
+    assert len(walks) == 1 and len(first) == 2
+    plan = [row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + walks[0])]
     scans = [step for step in plan if 'messages' in step.split(' USING')[0]]
     assert scans and all('COVERING INDEX' in step for step in scans), plan
+
+    for number in range(3):                             # every later map, whatever was written
+        message_store.record_user_message(agent_id=aid, backend_session_id='c',
+                                          client_msg_id=f'later-{number}', text='more')
+        later = _map_statements(message_store.dashboard_messages)
+        assert len(later) == 1 and 'FROM messages' not in later[0], later
+        plan = ' '.join(row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + later[0]))
+        assert 'messages' not in plan, plan
+
+
+def test_a_conversation_whose_messages_outrank_its_head_keeps_its_revision():
+    """Rows from before the heads were kept, or written by something that
+    left the head: the map still answers with the messages' revision, and a
+    write that raises the head takes over from there."""
+    aid = agents.create_agent(persona='Before', voice_id='', cwd='/tmp', session='before')
+    db.conn().execute("""INSERT INTO messages (message_id, agent_id, backend_session_id, seq, role, text, revision, updated_at)
+                         VALUES ('old-1', ?, 'no-head', 1, 'user', 'from before', 7, 1000)""", (aid,))
+    db.conn().execute("""INSERT INTO messages (message_id, agent_id, backend_session_id, seq, role, text, revision, updated_at)
+                         VALUES ('old-2', ?, 'low-head', 1, 'user', 'from before', 9, 1000)""", (aid,))
+    db.conn().execute("INSERT INTO conversation_heads (agent_id, backend_session_id, revision) VALUES (?, 'low-head', 4)", (aid,))
+    db.conn().commit()
+    assert message_store.dashboard_messages()[aid]['revisions'] == {'no-head': 7, 'low-head': 9}
+    message_store.record_user_message(agent_id=aid, backend_session_id='no-head', client_msg_id='now', text='now')
+    # These rows carry numbers the message clock never gave out, so the new
+    # row's revision is below them: the conversation's revision stays, and it
+    # is the head appearing that tells the cached preview is out of date.
+    assert message_store.latest_revision(agent_id=aid, backend_session_id='no-head') == 7
+    assert message_store.dashboard_messages()[aid]['revisions'] == {'no-head': 7, 'low-head': 9}
+    assert message_store.dashboard_messages()[aid]['head']['preview'].endswith('now')
+    # On a database the clock has numbered, a write goes above everything.
+    db.conn().execute("UPDATE message_clock SET revision = 20")
+    message_store.record_user_message(agent_id=aid, backend_session_id='low-head', client_msg_id='later', text='later')
+    assert message_store.dashboard_messages()[aid]['revisions'] == {'no-head': 7, 'low-head': 21}
 
 
 def test_no_drift_snapshot_makes_no_repair_writes_and_no_per_agent_queries(tmp_path, monkeypatch):
@@ -318,12 +376,111 @@ def test_dashboard_revision_map_is_reused_until_a_write():
     try:
         before = message_store.dashboard_messages()[aid]['revisions']['b']
         message_store.dashboard_messages()
-        walks = sum('MAX(revision) AS revision' in sql for sql in captured)
+        maps = sum('FROM conversation_heads' in sql or 'JOIN conversation_heads' in sql
+                   for sql in captured if 'INSERT' not in sql)
         message_store.record_user_message(agent_id=aid, backend_session_id='b',
                                           client_msg_id='second', text='second')
         after = message_store.dashboard_messages()[aid]['revisions']['b']
     finally:
         db.conn().set_trace_callback(None)
-    assert walks == 1
+    assert maps == 2            # the heads once and, once for a database, the floor beside them
     assert after > before
     assert after == message_store.latest_revision(agent_id=aid, backend_session_id='b')
+
+
+# --- every real writer moves what the cached preview is keyed by (issue 371) ---
+
+def _what_the_walk_saw(agent_id):
+    """The key the agent list used before: every conversation's highest
+    revision and highest updated_at, read from the messages themselves."""
+    return sorted(tuple(row) for row in db.conn().execute(
+        """SELECT COALESCE(backend_session_id, ''), MAX(revision), MAX(updated_at)
+             FROM messages WHERE agent_id = ? GROUP BY backend_session_id""", (agent_id,)))
+
+
+def _key(agent_id):
+    return message_previews._current_keys([agent_id])[agent_id]
+
+
+def _heads_cover_messages(agent_id):
+    """Every conversation's head is at or above its messages' revisions."""
+    return db.conn().execute(
+        """SELECT COUNT(*) FROM (SELECT backend_session_id AS s, MAX(revision) AS r FROM messages
+                                  WHERE agent_id = ? GROUP BY backend_session_id) m
+            LEFT JOIN conversation_heads h ON h.agent_id = ? AND h.backend_session_id IS m.s
+           WHERE h.revision IS NULL OR h.revision < m.r""", (agent_id, agent_id)).fetchone()[0] == 0
+
+
+def _transcript(*texts):
+    return [{"role": "assistant" if number % 2 else "user", "text": text,
+             "timestamp": f"2026-11-16T10:00:{number:02d}Z"} for number, text in enumerate(texts)]
+
+
+def _imported(aid, *texts):
+    message_store.store_transcript_turns(agent_id=aid, backend_session_id='bs', source_file='/t/one.jsonl',
+                                         turns=_transcript(*texts))
+
+
+WRITES = {
+    "an import adds a row": lambda aid: _imported(aid, 'a prompt', 'a reply', 'another prompt'),
+    # The property the old key's updated_at was there for: the same rows, one
+    # of them with new words. It is not the newest row that changes.
+    "an import rewrites an old row in place": lambda aid: _imported(aid, 'a prompt, reworded', 'a reply'),
+    "an import rewrites the newest row in place": lambda aid: _imported(aid, 'a prompt', 'a reply, reworded'),
+    "an import removes the last row": lambda aid: _imported(aid, 'a prompt'),
+    "a prompt is sent": lambda aid: message_store.record_user_message(
+        agent_id=aid, backend_session_id='bs', client_msg_id='sent', text='sent now'),
+    "a prompt is sent to a conversation of its own": lambda aid: message_store.record_user_message(
+        agent_id=aid, backend_session_id='another', client_msg_id='sent', text='sent there'),
+    "a reply streams in": lambda aid: message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id='bs', text='Streaming'),
+    "a notice is written": lambda aid: message_store.record_system_notice(
+        agent_id=aid, backend_session_id='bs', notice_id='n1', text='A notice'),
+}
+
+
+@pytest.mark.parametrize("write", list(WRITES))
+def test_a_write_by_a_real_writer_moves_the_key_and_refreshes_the_preview(write):
+    aid = agents.create_agent(persona='Written', voice_id='', cwd='/tmp', session='written')
+    _imported(aid, 'a prompt', 'a reply')
+    before, walked = _key(aid), _what_the_walk_saw(aid)
+    cached = message_store.dashboard_messages()[aid]
+    assert message_previews._PREVIEW_CACHE.peek(aid) is not None
+
+    WRITES[write](aid)
+
+    assert _what_the_walk_saw(aid) != walked            # the old key saw this write
+    assert _key(aid) != before                          # and so does the one read from the heads
+    assert _heads_cover_messages(aid)
+    fresh = message_store.dashboard_messages()[aid]
+    assert fresh != cached
+    routine = tuple(sorted(message_previews.origins.ROUTINE_AUTOMATION_ORIGINS))
+    computed = message_previews._agent_preview(aid, 80, routine)
+    assert {name: fresh[name] for name in computed} == computed
+
+
+def test_a_live_row_that_grows_and_ends_moves_the_key_every_time():
+    aid = agents.create_agent(persona='Streamed', voice_id='', cwd='/tmp', session='streamed')
+    _imported(aid, 'a prompt', 'a reply')
+    seen = [_key(aid)]
+    steps = (
+        lambda: message_store.upsert_live_assistant_message(agent_id=aid, backend_session_id='bs', text='One'),
+        lambda: message_store.upsert_live_assistant_message(agent_id=aid, backend_session_id='bs', text='One, two'),
+        lambda: message_store.mark_live_message_final(agent_id=aid, backend_session_id='bs'),
+        lambda: message_store.delete_live_assistant_message(agent_id=aid, backend_session_id='bs'),
+    )
+    for step in steps:
+        step()
+        seen.append(_key(aid))
+        assert _heads_cover_messages(aid)
+        message_store.dashboard_messages()
+    assert len(set(seen[:4])) == 4, seen                 # each write a key of its own
+
+
+def test_an_import_that_changes_nothing_moves_nothing_and_reads_no_message_for_the_map():
+    aid = agents.create_agent(persona='Quiet', voice_id='', cwd='/tmp', session='quiet')
+    _imported(aid, 'a prompt', 'a reply')
+    message_store.dashboard_messages()
+    before, walked = _key(aid), _what_the_walk_saw(aid)
+    _imported(aid, 'a prompt', 'a reply')
+    assert (_key(aid), _what_the_walk_saw(aid)) == (before, walked)

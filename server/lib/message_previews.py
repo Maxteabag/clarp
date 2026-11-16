@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from . import db as _db
 from .db import change_stamp, conn
 from . import origins, team_leader
 from . import log as cache_log
@@ -269,11 +270,15 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
 # than the old 1024-entry LRU evicted every entry before its next read.
 _PREVIEW_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
     "message_previews.dashboard", max_entries=4096)
-# The revision map below walks every message's index entry and row (~65 ms on
-# a 180k-message store) on each dashboard poll. It only moves on a committed
-# write, so polls between writes reuse the last map.
+# The revision map below is read from the conversation heads, one small row a
+# conversation. It only moves on a committed write, so polls between writes
+# reuse the last map.
 _REVISION_CACHE: RevisionedCache[str, tuple[dict, dict, list]] = RevisionedCache(
     "message_previews.dashboard_revisions", max_entries=1)
+# The conversations whose messages outrank their head, read once for a
+# database (``_floor``).
+_FLOOR_CACHE: RevisionedCache[str, dict] = RevisionedCache(
+    "message_previews.dashboard_floor", max_entries=1)
 
 
 def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dict[str, Any]:
@@ -320,63 +325,104 @@ _LIVE_AMONG = ("SELECT a.agent_id FROM agents a JOIN json_each(?) j ON j.value =
                " WHERE a.deleted_at IS NULL")
 
 
+def _read_floor() -> dict[tuple[str, str | None], int]:
+    """The conversations whose messages carry a higher revision than their
+    head, or that have no head: {(agent, conversation): that revision}.
+
+    Every writer raises its conversation's head to the revision it gives a
+    row, in the same transaction, so on a database written by this code the
+    answer is empty (both Hosts, 16 Nov 2026: 0 of 369 and 0 of 2,121
+    conversations). It is here for rows from before the heads were kept. This
+    is the walk of the whole index that the agent list used to make on every
+    request (issue 371); it is made once for a database."""
+    return {(row['agent_id'], row['backend_session_id']): int(row['revision'] or 0)
+            for row in conn().execute("""
+        SELECT m.agent_id, m.backend_session_id, m.revision
+          FROM (SELECT agent_id, backend_session_id, MAX(revision) AS revision
+                  FROM messages GROUP BY agent_id, backend_session_id) m
+          LEFT JOIN conversation_heads h
+            ON h.agent_id = m.agent_id AND h.backend_session_id IS m.backend_session_id
+         WHERE h.revision IS NULL OR h.revision < m.revision""")}
+
+
+def _floor() -> dict[tuple[str, str | None], int]:
+    """``_read_floor`` for this database, kept for the life of the process. A
+    conversation in it changes only by a write, and a write raises its head
+    above what is kept here. Inside a caller's transaction it is read without
+    being kept: uncommitted rows must not outlive it."""
+    database = str(_db.DB_PATH)
+    if conn().in_transaction:
+        hit, kept = _FLOOR_CACHE.get("all", database)
+        return kept if hit else _read_floor()
+    return _FLOOR_CACHE.get_or_compute("all", database, _read_floor)
+
+
 def _revision_maps(agents_sql: str, params: tuple = ()) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-    """Highest revision and highest updated_at per agent and conversation,
-    for the agents ``agents_sql`` selects (it appears twice in the statement)."""
+    """Highest revision per agent and conversation, for the agents
+    ``agents_sql`` selects, and beside it the heads as they are stored.
+
+    The revision is the conversation's head, which every writer raises to the
+    revision it gives a row (a new row, an edited one, one rewritten in place
+    by a transcript import, a delete), in the same transaction. Reading the
+    heads costs what there are conversations; the grouped walk of the
+    messages index it replaces cost what there are messages, 173 MB a request
+    on a Host with 2.3 million (issue 371). Where a conversation's messages
+    outrank its head (``_floor``) the revision is theirs; the head itself is
+    still what a write moves, so a cached preview is keyed by both."""
     revisions: dict[str, dict[str, int]] = {}
-    # updated_at rides along: a transcript import that rewrites a row in place
-    # (same revision, new text) must refresh the cached preview as well.
-    stamps: dict[str, dict[str, int]] = {}
+    heads: dict[str, dict[str, int]] = {}
+    wanted = set()
+    # One statement: the agents asked for, each with its heads if it has any.
     for row in conn().execute(f"""
-        SELECT agent_id, backend_session_id, MAX(revision) AS revision,
-               MAX(updated_at) AS updated_at
-          FROM messages
-         WHERE agent_id IN ({agents_sql})
-         GROUP BY agent_id, backend_session_id
-        UNION ALL
-        SELECT agent_id, backend_session_id, revision, 0 AS updated_at
-          FROM conversation_heads
-         WHERE agent_id IN ({agents_sql})
-    """, (*params, *params)):
-        aid = row['agent_id']
-        bsid = row['backend_session_id']
-        rev = int(row['revision'] or 0)
-        upd = int(row['updated_at'] or 0)
-        agent_revs = revisions.setdefault(aid, {})
-        if rev > agent_revs.get(bsid, 0) or bsid not in agent_revs:
-            agent_revs[bsid] = rev
-        agent_stamps = stamps.setdefault(aid, {})
-        if upd > agent_stamps.get(bsid, 0) or bsid not in agent_stamps:
-            agent_stamps[bsid] = upd
-    return revisions, stamps
+        SELECT a.agent_id, h.backend_session_id, h.revision
+          FROM ({agents_sql}) a
+          LEFT JOIN conversation_heads h ON h.agent_id = a.agent_id
+    """, params):
+        wanted.add(row['agent_id'])
+        if row['revision'] is not None:
+            revisions.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['revision'])
+            heads.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['revision'])
+    for (aid, bsid), rev in _floor().items():
+        if aid in wanted:
+            agent_revs = revisions.setdefault(aid, {})
+            if bsid not in agent_revs or rev > agent_revs[bsid]:
+                agent_revs[bsid] = rev
+    return revisions, heads
 
 
 def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], list[str]]:
-    revisions, stamps = _revision_maps(_LIVE_AGENTS)
+    revisions, heads = _revision_maps(_LIVE_AGENTS)
     live = [row['agent_id'] for row in conn().execute(_LIVE_AGENTS)]
-    return revisions, stamps, live
+    return revisions, heads, live
 
 
-def _preview_key(agent_id: str, revisions: dict, stamps: dict) -> tuple:
+def _preview_key(agent_id: str, revisions: dict, heads: dict) -> tuple:
     """What an agent's cached preview is valid for: every conversation of the
-    agent with its highest revision (of its messages or of its conversation
-    head, whichever is higher) and its messages' highest updated_at.
+    agent with its head's revision as it is stored (-1: it has none). Not the
+    conversation's revision in ``revisions``: for a conversation whose
+    messages outrank its head that is the messages' number, which a write
+    below it leaves where it was, while the head is what every write moves.
 
-    Every writer in this code base that changes what a preview shows moves
-    one of them: a new or edited row raises the revision or updated_at, and a
-    delete raises the conversation head's revision in the same transaction
-    (audited for #253 over 9,872 commits of real writes, no exception). That
-    is a property of those writers, not of the table: raw SQL that changes a
-    row without doing either moves nothing here and is not noticed."""
-    return tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))
-                        for session, rev in revisions.get(agent_id, {}).items()))
+    Every writer in this code base that changes what a preview shows raises
+    its conversation's head: a new, edited or rewritten row is given the next
+    number of the message clock and the head is raised to it, and a delete
+    raises the head, each in the row's own transaction. The key used to carry
+    the messages' highest updated_at as a second witness, for a transcript
+    import that rewrote a row in place under its old revision; an import
+    gives a row it changes a new revision (message_import_rows), and no
+    statement moves updated_at without one (pinned by
+    test_dashboard_cache_guards). That is a property of those writers, not of
+    the table: raw SQL that changes a row and leaves the head moves nothing
+    here and is not noticed."""
+    return tuple(sorted((str(session or ''), heads.get(agent_id, {}).get(session, -1))
+                        for session in revisions.get(agent_id, {})))
 
 
 def _current_keys(agent_ids: list[str]) -> dict[str, tuple]:
     """The keys those agents have now, in one grouped statement."""
     wanted = json.dumps(agent_ids)
-    revisions, stamps = _revision_maps(_LIVE_AMONG, (wanted,))
-    return {agent_id: _preview_key(agent_id, revisions, stamps) for agent_id in agent_ids}
+    revisions, heads = _revision_maps(_LIVE_AMONG, (wanted,))
+    return {agent_id: _preview_key(agent_id, revisions, heads) for agent_id in agent_ids}
 
 
 def _cache_stamp():
@@ -463,13 +509,13 @@ def dashboard_messages(max_len: int = 80, *, agent_ids=None) -> dict[str, dict[s
                           _cache_read(_REVISION_CACHE, "all", stamp, failed))
     if not map_hit:
         projection = _dashboard_revisions()
-    revisions, stamps, live = projection
+    revisions, heads, live = projection
     result: dict[str, dict[str, Any]] = {}
     pending = []
     for agent_id in live:
         if agent_ids is not None and agent_id not in agent_ids:
             continue
-        key = _preview_key(agent_id, revisions, stamps)
+        key = _preview_key(agent_id, revisions, heads)
         hit, cached = ((False, None) if stamp is None or max_len != 80 else
                        _cache_read(_PREVIEW_CACHE, agent_id, key, failed))
         entry = _preview_copy(cached) if hit else _agent_preview(agent_id, max_len, routine)
