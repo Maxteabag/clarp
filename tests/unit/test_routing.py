@@ -82,8 +82,6 @@ def test_word_similarity_prefix_score_meets_threshold():
     ("Zoe\u0308\u0301", "Zoe\u0308\u0301? ", "check the branch"),
     ("Zoë", "Zoë, ", "écris à Rachél"),
     ("Zoë", "Zoë ", "\u0301keep this mark"),
-    ("Zoë", "Zoë", "2, check the branch"),
-    ("Zoë", "Zoë", "♥ check the branch"),
     ("Rachel", "Rachel", ""),
 ])
 def test_unicode_address_is_removed_without_eating_the_request(name, address, body):
@@ -91,9 +89,9 @@ def test_unicode_address_is_removed_without_eating_the_request(name, address, bo
         "agent", body)
 
 
-# Each row records main's resolver result and the wanted body. Put preserved
+# Each row records the pre-387 resolver result and the wanted body. Put preserved
 # request tails first: the first PR loop lost them despite choosing the same agent.
-@pytest.mark.parametrize("names,text,on_main,wanted", [
+@pytest.mark.parametrize("names,text,before_387,wanted", [
     (("Koko",), "Koko请检查分支 now", ("target", "请检查分支 now"), "请检查分支 now"),
     (("Koko",), "Koko안녕 world", ("target", "안녕 world"), "안녕 world"),
     (("Koko",), "Koko请检查分支", ("target", "请检查分支"), "请检查分支"),
@@ -101,14 +99,14 @@ def test_unicode_address_is_removed_without_eating_the_request(name, address, bo
     (("Koko",), "Koko안녕", ("target", "안녕"), "안녕"),
     (("Koko",), "Kokoёлка", ("target", "ёлка"), "ёлка"),
     (("Koko",), "Kokoß", ("target", "ß"), "ß"),
-    (("Zoé",), "Zoécheck", ("target", "écheck"), "check"),
-    (("Zoé",), "Zoécheck now", ("target", "écheck now"), "check now"),
+    (("Zoé",), "Zoécheck", ("target", "écheck"), "écheck"),
+    (("Zoé",), "Zoécheck now", ("target", "écheck now"), "écheck now"),
     (("Koko",), "Koko—go", ("target", "—go"), "—go"),
     (("Koko",), "Koko’s branch", ("target", "’s branch"), "’s branch"),
     (("Zoe\u0308",), "Zoe\u0308, go", ("target", "\u0308, go"), "go"),
     (("Rachél",), "Rachél, go", ("target", "él, go"), "go"),
     (("Rache\u0301l",), "Rache\u0301l, go", ("target", "\u0301l, go"), "go"),
-    (("Zoë",), "Zoë2 go", ("target", "ë2 go"), "2 go"),
+    (("Zoë",), "Zoë2 go", ("target", "ë2 go"), "ë2 go"),
     (("Zoë",), "Zoë_Marie go", ("target", "ë_Marie go"), "_Marie go"),
     (("Zoë",), "Zoë-Marie go", ("target", "ë-Marie go"), "Marie go"),
     (("Zoë-Marie",), "Zoë-Marie go", (None, "Zoë-Marie go"), "Zoë-Marie go"),
@@ -128,23 +126,99 @@ def test_unicode_address_is_removed_without_eating_the_request(name, address, bo
     # keep main's body rather than guess how far a misspelling extends.
     (("Rachel",), "Rachél, go", ("target", "él, go"), "él, go"),
     (("Rachel",), "Rache\u0301l, go", ("target", "\u0301l, go"), "\u0301l, go"),
-    (("Zoế",), "Zoê\u0301check", ("target", "ê\u0301check"), "check"),
-    (("Zoê\u0301",), "Zoếcheck", ("target", "ếcheck"), "check"),
+    (("Zoế",), "Zoê\u0301check", ("target", "ê\u0301check"), "ê\u0301check"),
+    (("Zoê\u0301",), "Zoếcheck", ("target", "ếcheck"), "ếcheck"),
 ])
-def test_selected_name_bounds_the_cut(names, text, on_main, wanted):
+def test_selected_name_bounds_the_cut(names, text, before_387, wanted):
     agents = {key: {"name": name} for key, name in zip(("target", "other"), names)}
-    assert resolve_agent_by_spoken_name(text, agents) == (on_main[0], wanted), (
-        f"main returned {on_main!r}")
+    assert resolve_agent_by_spoken_name(text, agents) == (before_387[0], wanted), (
+        f"before PR 387 returned {before_387!r}")
 
 
 @pytest.mark.parametrize("name,text,wanted", [
-    ("Zoé", "hey Zoécheck now", "check now"),
+    ("Zoé", "hey Zoécheck now", "écheck now"),
     ("Zoë", "Koko請检查 now", "Koko請检查 now"),
     ("Zoë", "hey Zoé, go", "é, go"),
-    ("Zoế", "hey Zoê\u0301check", "check"),
+    ("Zoế", "hey Zoê\u0301check", "ê\u0301check"),
 ])
 def test_judged_cut_uses_the_selected_name(monkeypatch, name, text, wanted):
     from lib import judgment_sites
 
     monkeypatch.setattr(judgment_sites, "resolve_spoken_name", lambda *a: ("target", text))
     assert resolve_agent_by_spoken_name(text, {"target": {"name": name}}) == ("target", wanted)
+
+
+@pytest.mark.parametrize("name,text,before_387,wanted", [
+    ("Anna Maria", "Anna Mariana please", "Mariana please", "Mariana please"),
+    ("Mary Ann", "Mary Annette go", "Annette go", "Annette go"),
+    ("Jean Luc", "Jean Lucas go", "Lucas go", "Lucas go"),
+    ("Zoë", "Zoëy go", "ëy go", "ëy go"),
+    ("Anna Maria Rose", "Anna Maria Rosemary please", "Maria Rosemary please", "Maria Rosemary please"),
+    ("Anna Marí", "Anna Maríana please", "Maríana please", "Maríana please"),
+    ("Mary Anné", "Mary Annétta go", "Annétta go", "Annétta go"),
+    ("Jean Luc Renée", "Jean Luc Renées go", "Luc Renées go", "Luc Renées go"),
+    ("Anna Maria", "Anna Maria2 please", "Maria2 please", "Maria2 please"),
+    ("Zoë", "Zoë² go", "ë² go", "ë² go"),
+    ("Zoë", "Zoë\u0301 go", "ë\u0301 go", "ë\u0301 go"),
+    ("Koko", "Koko请检查分支 now", "请检查分支 now", "请检查分支 now"),
+    ("Anna Maria", "anna maria please", "maria please", "please"),
+    ("Anna Maria", "Anna Maria, please", "Maria, please", "please"),
+    ("Anna Maria", "Anna Maria", "Maria", ""),
+    ("Anna Maria Rose", "Anna Maria Rose please", "Maria Rose please", "please"),
+    ("Jean Luc Renée", "Jean Luc Renée, go", "Luc Renée, go", "go"),
+    ("Zoë", "Zoë go", "ë go", "go"),
+    ("Rachél", "Rachél, go", "él, go", "go"),
+    ("Zoế", "Zoê\u0301, go", "ê\u0301, go", "go"),
+    ("Zoé", "Zoécheck", "écheck", "écheck"),
+    ("Zoë", "Zoë2 go", "ë2 go", "ë2 go"),
+    ("Zoë", "Zoë_Marie go", "ë_Marie go", "_Marie go"),
+    ("Zoë", "Zoë-Marie go", "ë-Marie go", "Marie go"),
+])
+def test_name_extension_requires_a_word_end(name, text, before_387, wanted):
+    assert resolve_agent_by_spoken_name(text, {"agent": {"name": name}}) == ("agent", wanted), (
+        f"before PR 387 the body was {before_387!r}")
+
+
+@pytest.mark.parametrize("joiner", ["\u200d", "\u200c"])
+@pytest.mark.parametrize("name,tail,before_387", [
+    ("Anna Maria", "na please", "Maria"),
+    ("Mary Ann", "ette go", "Ann"),
+    ("Jean Luc", "as go", "Luc"),
+    ("Zoë", "y go", "ë"),
+])
+def test_joined_name_continuations_keep_the_pre_387_cut(name, tail, before_387, joiner):
+    assert resolve_agent_by_spoken_name(name + joiner + tail, {"agent": {"name": name}}) == (
+        "agent", before_387 + joiner + tail)
+
+
+@pytest.mark.parametrize("after,wanted", [
+    ("\u2060go", "ë\u2060go"),  # format: word joiner
+    ("\ufeffgo", "ë\ufeffgo"),  # format: zero-width no-break space
+    ("\x01go", "ë\x01go"),      # control, not whitespace
+    ("🙂go", "ë🙂go"),             # symbol, other
+    ("€go", "ë€go"),              # symbol, currency
+    ("+go", "ë+go"),              # symbol, math
+    ("^go", "ë^go"),              # symbol, modifier
+    ("♥ check the branch", "ë♥ check the branch"),
+    ("\u00a0go", "go"),          # no-break space
+    ("\tgo", "go"),
+    ("\ngo", "go"),
+    (",go", "go"),
+    (".go", "go"),
+    (":go", "go"),
+    ("-go", "go"),
+    ("—go", "—go"),
+    ("_go", "_go"),
+    ("'go", "'go"),
+    ("’go", "’go"),
+    ('"go', '"go'),
+    ("“go", "“go"),
+    ("”go", "”go"),
+    ("[go", "[go"),
+    ("]go", "]go"),
+])
+def test_only_whitespace_or_punctuation_allows_name_extension(after, wanted):
+    # Pre-387 always returned "ë" + after for these inputs. Only a positive
+    # separator admits the complete-name repair; symbols/formats stay as-is.
+    assert resolve_agent_by_spoken_name("Zoë" + after, {"agent": {"name": "Zoë"}}) == (
+        "agent", wanted)

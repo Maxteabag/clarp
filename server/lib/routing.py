@@ -69,7 +69,11 @@ def _strip_address_prefix(text: str, start: int, end: int, name: str) -> str:
     normalized_name = unicodedata.normalize("NFD", name.lower())
     for name_end in range(start + 1, min(len(text), start + len(normalized_name)) + 1):
         if unicodedata.normalize("NFD", text[start:name_end].lower()) == normalized_name:
-            end = max(end, name_end)  # Never shorten the existing ASCII token cut.
+            if name_end == len(text) or (
+                text[name_end].isspace()
+                or unicodedata.category(text[name_end]).startswith("P")
+            ):
+                end = max(end, name_end)  # Never shorten the existing ASCII token cut.
             break
     rest = (text or "")[end:]
     return re.sub(r"^[\s,;:!?.-]+", "", rest).strip()
