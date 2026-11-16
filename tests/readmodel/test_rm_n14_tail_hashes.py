@@ -122,7 +122,10 @@ def test_the_checkpoints_are_the_same_with_the_switch_as_without(tmp_path, backe
             for step in range(7):
                 world.grow(_turn(backend, ordinal + step))
                 if step == 3:
-                    world.faults["settings"] = _settings(hashing, audit_every=1)
+                    # The audit this test is about is the full one: with
+                    # audit_grown_by_digest a due audit of a grown file is a tail.
+                    world.faults["settings"] = _settings(
+                        hashing, audit_every=1, audit_grown_by_digest=False)
                 decision = world.imported()
                 world.faults["settings"] = _settings(hashing)
                 # The offsets are of this lane's own file, the hashes of its bytes.
