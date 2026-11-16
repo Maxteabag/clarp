@@ -2725,10 +2725,6 @@ fn a_call_is_the_hosts_record_of_who_is_in_it_and_its_messages_go_to_who_can_tak
     );
     let (code, _, err) = admin(&["dance", "theo"]);
     assert_eq!(code, 2, "{err}");
-    // Ringing the user is not on this Host yet, and says so.
-    let (code, _, err) = admin(&["ring", "--reason", "a leak", "--say", "Shall I look?"]);
-    assert_ne!(code, 0);
-    assert!(err.contains("not available on this Host yet"), "{err}");
 
     // A phone that may only read and send has no calls.
     let (limited, _) = pair(&host, "Watch", "limited");
@@ -3774,6 +3770,721 @@ fn a_push_shows_the_face_of_the_agent_it_is_about() {
     );
     // Only a fetch is open: nothing is sent to that address without the token.
     assert_eq!(fetch(&host, "", "POST", path, &[], b"").status, 401);
+}
+
+/// `clarp-admin call ...` as a command of the agent whose turn it is would call it, or of
+/// nobody's turn when `session` is empty: the owner at a shell.
+fn call_tool(
+    (address, token): (&str, &str),
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> (i32, Value, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+    command
+        .args(["tool", "clarp-admin", "call"])
+        .args(args)
+        .current_dir(dir)
+        .env("CLARP_HOST_ADDR", address)
+        .env("CLARP_HOST_TOKEN", token)
+        .env_remove("CLARP_BACKGROUND_WORKER_PID")
+        .env_remove("CLAUDE_PWA_SESSION");
+    if !session.is_empty() {
+        command.env("CLAUDE_PWA_SESSION", session);
+    }
+    let out = command.output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout);
+    (
+        out.status.code().unwrap_or(-1),
+        serde_json::from_str(&said).unwrap_or(Value::Null),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_first() {
+    let place = Place::new("rings");
+    let relay = StandInRelay::start();
+    let sound: Vec<u8> = (0..5_000_u32).map(|at| (at % 241) as u8).collect();
+    let voice = cartesia_stand_in(sound.clone());
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n[cartesia.voices]\n\
+         Theo = \"voice-of-theo\"\n",
+    )
+    .unwrap();
+    // A stand-in for Claude Code that writes down what it was handed, and answers.
+    let lines = place.root.join("lines");
+    let claude = place.root.join("claude");
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!("printf '%s\\n' \"$message\" >> \"{}\"\n", lines.display()),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    let relay_at = format!("http://{}", relay.address);
+    let args = [
+        "--speech-keys",
+        owners.to_str().unwrap(),
+        "--push-relay",
+        relay_at.as_str(),
+    ];
+    // No engine outside is reached, whatever keys the machine that runs this test has.
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+    ];
+    let host = place.start_in("secret", &args, &world);
+    let make = |name: &str| -> (String, String) {
+        let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
+        let session = made["session"].as_str().unwrap().to_string();
+        let snapshot = host.get("/agents/snapshot");
+        let mut agents = snapshot["agents"].as_array().unwrap().iter();
+        let row = agents
+            .find(|agent| agent["session"] == session.as_str())
+            .unwrap();
+        (session, row["agent_id"].as_str().unwrap().to_string())
+    };
+    let ((theo, theo_id), (mike, _)) = (make("Theo"), make("Mike"));
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let registered = host.ask_as(
+        &phone,
+        "POST",
+        "/devices",
+        Some(&json!({ "token": "a1".repeat(32), "session": theo, "push_grant": grant })),
+    );
+    assert_eq!(registered, (200, json!({ "ok": true })));
+    let events = host.listen_at("/events?token=secret");
+    let heard = |kind: &str| -> Vec<Value> {
+        let heard = events.lock().unwrap();
+        let of_kind = heard.iter().filter(|event| event["type"] == kind);
+        of_kind.cloned().collect()
+    };
+    let as_phone = |method: &str, path: &str, body: Option<Value>| {
+        host.ask_as(&phone, method, path, body.as_ref())
+    };
+    let pushed = || -> Vec<Value> {
+        let taken = relay.taken();
+        let sent = taken
+            .iter()
+            .map(|(_, _, body)| body["notifications"][0].clone());
+        sent.collect()
+    };
+    let notices = |session: &str| -> Vec<String> {
+        let rows = host.turns(session);
+        let quiet = rows.iter().filter(|row| row["origin"] == "system");
+        quiet
+            .map(|row| row["text"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let on = json!({ "enabled": true, "show_reason": false });
+
+    // Nobody rings, and rings are on: that is how a Host comes.
+    assert_eq!(
+        as_phone("GET", "/calls/ring", None),
+        (200, json!({ "ring": null, "settings": on }))
+    );
+
+    // The owner's own tools ring for the agent they name. The reason is put on one line;
+    // the opening line is voiced at once, in the agent's own voice.
+    let line = "Camera 2 shows a possible water leak. Shall I look?";
+    let (status, rung) = host.ask(
+        "POST",
+        "/calls/ring",
+        Some(
+            &json!({ "agent": "theo", "reason": "  Possible water\n leak ", "opening_line": line }),
+        ),
+    );
+    assert_eq!(status, 200, "{rung}");
+    let ring = rung["ring"].clone();
+    let ring_id = ring["ring_id"].as_str().unwrap().to_string();
+    assert!(
+        ring_id.starts_with("rng_") && ring_id.len() == 36,
+        "{ring_id}"
+    );
+    assert_eq!(
+        (
+            &ring["session"],
+            &ring["agent_id"],
+            &ring["persona"],
+            &ring["state"]
+        ),
+        (
+            &json!(theo),
+            &json!(theo_id),
+            &json!("Theo"),
+            &json!("ringing")
+        )
+    );
+    assert_eq!(
+        (
+            &ring["reason"],
+            &ring["opening_line"],
+            &ring["answered_by"],
+            &ring["call_id"]
+        ),
+        (
+            &json!("Possible water leak"),
+            &json!(line),
+            &json!(""),
+            &json!("")
+        )
+    );
+    assert_eq!(
+        ring["expires_at"].as_i64().unwrap() - ring["created_at"].as_i64().unwrap(),
+        45_000
+    );
+    assert_eq!(
+        rung["summary"],
+        "Calling the user. The call rings for 45 seconds."
+    );
+    // The phone was pushed, and the one who rang is told so. No phone takes a call through
+    // a key of this Host's own.
+    assert_eq!(
+        rung["delivery"],
+        json!({
+            "voip": { "enabled": false, "sent": 0, "failed": 0 },
+            "enabled": true, "sent": 1, "failed": 0, "disabled": 0,
+        })
+    );
+    let incoming = &pushed()[0];
+    assert_eq!(
+        (&incoming["pushType"], &incoming["collapseId"]),
+        (&json!("alert"), &json!(format!("ring-{ring_id}")))
+    );
+    let payload = &incoming["payload"];
+    assert_eq!(
+        (
+            &payload["kind"],
+            &payload["ring_state"],
+            &payload["ring_id"]
+        ),
+        (&json!("agent-ring"), &json!("ringing"), &json!(ring_id))
+    );
+    assert_eq!(
+        payload["aps"]["alert"],
+        json!({ "title": "Theo is calling", "body": "Incoming call" }),
+        "why an agent calls is not shown on a locked phone until the owner says so"
+    );
+    assert_eq!(
+        (
+            &payload["aps"]["category"],
+            &payload["aps"]["interruption-level"]
+        ),
+        (&json!("agent-call"), &json!("time-sensitive"))
+    );
+    assert_eq!(
+        (
+            &payload["reason"],
+            &payload["opening_line"],
+            &payload["expires_at"]
+        ),
+        (
+            &json!("Possible water leak"),
+            &json!(line),
+            &ring["expires_at"]
+        )
+    );
+    // The opening line is a clip the phone fetches when the user answers.
+    let clip = ring["opening_audio_url"].as_str().unwrap();
+    assert!(
+        clip.starts_with("/audio/") && clip.ends_with(&format!("__{theo}.mp3")),
+        "{clip}"
+    );
+    assert_eq!(payload["opening_audio_url"], clip);
+    let asked = voice.asked();
+    assert!(
+        asked.iter().any(|request| request["transcript"] == line),
+        "{asked:?}"
+    );
+    let fetched = fetch(&host, &phone, "GET", clip, &[], b"");
+    assert_eq!((fetched.status, &fetched.body), (200, &sound));
+    // The apps are told, and a phone that asks is shown the ring.
+    wait_for("the ring to be told", || heard("agent-ring").len() == 1);
+    let told = &heard("agent-ring")[0];
+    assert_eq!(
+        (&told["ring_id"], &told["state"], &told["agent_id"]),
+        (&json!(ring_id), &json!("ringing"), &json!(theo_id))
+    );
+    let (_, seen) = as_phone("GET", "/calls/ring", None);
+    assert_eq!(seen["ring"]["ring_id"], ring_id.as_str());
+    let (_, seen) = as_phone("GET", &format!("/calls/ring?ring_id={ring_id}"), None);
+    assert_eq!(seen["ring"]["state"], "ringing");
+
+    // One ring at a time, and what is no ring is refused in words.
+    let another = json!({ "agent": "mike", "reason": "another", "opening_line": "Hello?" });
+    assert_eq!(
+        host.ask("POST", "/calls/ring", Some(&another)),
+        (
+            409,
+            json!({ "ok": false, "error": "the user is already being called" })
+        )
+    );
+    for (said, status, why) in [
+        (json!({}), 400, "agent required"),
+        (json!({ "agent": "nobody" }), 404, "unknown agent"),
+        (
+            json!({ "agent": "theo", "opening_line": "o" }),
+            400,
+            "reason required",
+        ),
+        (
+            json!({ "agent": "theo", "reason": "r" }),
+            400,
+            "opening_line required",
+        ),
+        (
+            json!({ "agent": "theo", "reason": "r", "opening_line": "o", "opening_mode": "sing" }),
+            400,
+            "unknown opening_mode",
+        ),
+    ] {
+        let (code, refused) = host.ask("POST", "/calls/ring", Some(&said));
+        assert_eq!((code, &refused["error"]), (status, &json!(why)), "{said}");
+    }
+    assert_eq!(
+        host.ask("POST", "/calls/ring", Some(&json!(["theo"]))),
+        (400, json!({ "error": "bad json" }))
+    );
+    // What this Host does not hold is refused with the way to ring instead.
+    let mut live = another.clone();
+    live["conversation_mode"] = json!("agent_live_v1");
+    let (status, refused) = host.ask("POST", "/calls/ring", Some(&live));
+    assert_eq!(
+        (status, &refused["error"]),
+        (409, &json!("the user is already being called"))
+    );
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/calls/ring/device",
+            Some(&json!({ "receive_rings": false }))
+        )
+        .0,
+        501
+    );
+
+    // The phone answers: a call starts with the agent on the floor, and the answer hands
+    // back the opening line to play first.
+    let (status, taken) = as_phone(
+        "POST",
+        "/calls/ring/answer",
+        Some(json!({ "ring_id": ring_id })),
+    );
+    assert_eq!(status, 200, "{taken}");
+    let call_id = taken["call"]["call_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (
+            &taken["changed"],
+            &taken["ring"]["state"],
+            &taken["ring"]["answered_by"]
+        ),
+        (&json!(true), &json!("answered"), &json!(phone_id))
+    );
+    assert_eq!(taken["ring"]["call_id"], call_id.as_str());
+    assert_eq!(
+        (
+            &taken["call"]["floor"],
+            &taken["call"]["principal"],
+            &taken["call"]["state"]
+        ),
+        (&json!(theo), &json!(phone_id), &json!("live"))
+    );
+    assert_eq!(
+        taken["opening"],
+        json!({ "text": line, "audio_url": clip, "session": theo, "persona": "Theo" })
+    );
+    wait_for("the answer to be told", || heard("agent-ring").len() == 2);
+    assert_eq!(heard("agent-ring")[1]["state"], "answered");
+    let started = heard("group-call");
+    assert_eq!(
+        started[0]["change"],
+        json!({ "action": "start", "session": theo, "by": theo })
+    );
+    wait_for("the push of the answer", || pushed().len() == 2);
+    let answered = &pushed()[1];
+    assert_eq!(
+        (&answered["collapseId"], &answered["payload"]["ring_state"]),
+        (&json!(format!("ring-{ring_id}")), &json!("answered")),
+        "what became of the ring takes the place of the incoming call"
+    );
+    assert_eq!(
+        answered["payload"]["aps"]["alert"]["title"],
+        "Call with Theo"
+    );
+    // The agent finds a quiet word about both in its conversation.
+    wait_for("the notices", || notices(&theo).len() == 2);
+    assert_eq!(
+        notices(&theo),
+        [
+            "Group call: a call started with Theo.",
+            "Call: The user answered your call about: Possible water leak"
+        ]
+    );
+    // The same phone asking again is given the same call; another is told where it went.
+    let (status, again) = as_phone(
+        "POST",
+        "/calls/ring/answer",
+        Some(json!({ "ring_id": ring_id, "opening_mode": "say" })),
+    );
+    assert_eq!(
+        (
+            status,
+            &again["changed"],
+            &again["call"]["call_id"],
+            &again["opening"]["mode"]
+        ),
+        (200, &json!(false), &json!(call_id), &json!("say"))
+    );
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/calls/ring/answer",
+            Some(&json!({ "ring_id": ring_id }))
+        ),
+        (
+            409,
+            json!({ "ok": false, "error": "the call was answered elsewhere" })
+        )
+    );
+    let (status, over) = as_phone(
+        "POST",
+        "/calls/ring/decline",
+        Some(json!({ "ring_id": ring_id })),
+    );
+    assert_eq!(
+        (status, &over["error"], &over["ring"]["state"]),
+        (409, &json!("the call is over"), &json!("answered"))
+    );
+    assert_eq!(as_phone("GET", "/calls/ring", None).1["ring"], Value::Null);
+
+    // What the user says next in the call reaches the agent's tool with why it rang.
+    let (status, sent) = as_phone(
+        "POST",
+        "/send",
+        Some(json!({
+            "session": theo, "text": "Yes, have a look.", "client_msg_id": "r1", "call_id": call_id,
+            "hands_free": true, "force_session": true, "synthesize_audio": false,
+        })),
+    );
+    assert_eq!((status, &sent["session"]), (200, &json!(theo)));
+    wait_for("the turn of the call", || {
+        std::fs::read_to_string(&lines).is_ok_and(|handed| !handed.is_empty())
+            && host.state(&theo) == "done"
+    });
+    let handed = std::fs::read_to_string(&lines).unwrap();
+    let handed: Value = serde_json::from_str(handed.lines().last().unwrap()).unwrap();
+    let content = handed["message"]["content"].as_array().unwrap();
+    assert_eq!(content[0]["text"], "Yes, have a look.");
+    let told = content[1]["text"].as_str().unwrap();
+    assert!(
+        told.contains("[Group call] You are Theo, on a voice call with the user."),
+        "{told}"
+    );
+    let why = format!(
+        "You called the user about: Possible water leak. They answered and heard your opening \
+         line: \"{line}\""
+    );
+    assert!(told.contains(&why), "{told}");
+    as_phone("POST", "/calls/end", Some(json!({})));
+
+    // An agent rings as itself with its own tool, and waits to hear how the call went. The
+    // user declines.
+    let dir = place.root.clone();
+    let at = (host.address.clone(), host.token.clone());
+    let at = (at.0.as_str(), at.1.as_str());
+    let (code, refused, _) = call_tool(
+        at,
+        &dir,
+        &mike,
+        &["ring", "--agent", "Theo", "--reason", "r", "--say", "s"],
+    );
+    assert_eq!(
+        (code, refused),
+        (
+            1,
+            json!({ "ok": false, "error": "an agent can only ring as itself" })
+        )
+    );
+    let (code, _, err) = call_tool(at, &dir, &mike, &["ring", "--reason", "r"]);
+    assert_eq!(code, 2, "{err}");
+    assert!(
+        err.contains("the following arguments are required: --say"),
+        "{err}"
+    );
+    let (code, soon, _) = call_tool(at, &dir, &theo, &["ring", "--reason", "r", "--say", "s"]);
+    assert_eq!(
+        (code, &soon["error"]),
+        (1, &json!("wait before calling again"))
+    );
+    assert!(
+        soon["retry_after_s"]
+            .as_i64()
+            .is_some_and(|wait| (1..=60).contains(&wait))
+    );
+    let waits = {
+        let (address, token) = (host.address.clone(), host.token.clone());
+        let (dir, mike) = (dir.clone(), mike.clone());
+        std::thread::spawn(move || {
+            let rang = [
+                "ring",
+                "--reason",
+                "The build is red",
+                "--say",
+                "Shall I fix it?",
+                "--wait",
+            ];
+            call_tool((&address, &token), &dir, &mike, &rang)
+        })
+    };
+    wait_for("the second ring", || {
+        as_phone("GET", "/calls/ring", None).1["ring"]["session"] == mike.as_str()
+    });
+    let (_, second) = as_phone("GET", "/calls/ring", None);
+    let second_id = second["ring"]["ring_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (&second["ring"]["reason"], &second["ring"]["opening_line"]),
+        (&json!("The build is red"), &json!("Shall I fix it?"))
+    );
+    // Another agent cannot take it back; its own tool reads it.
+    let (code, not_mine, _) = call_tool(at, &dir, &theo, &["ring-cancel", &second_id]);
+    assert_eq!(
+        (code, not_mine),
+        (
+            1,
+            json!({ "ok": false, "error": "an agent can only cancel its own call" })
+        )
+    );
+    let (code, status, _) = call_tool(at, &dir, &mike, &["ring-status"]);
+    assert_eq!((code, &status["ring"]["ring_id"]), (0, &json!(second_id)));
+    let (status, declined) = as_phone(
+        "POST",
+        "/calls/ring/decline",
+        Some(json!({ "ring_id": second_id })),
+    );
+    assert_eq!(
+        (status, &declined["changed"], &declined["ring"]["state"]),
+        (200, &json!(true), &json!("declined"))
+    );
+    let (code, ended, err) = waits.join().unwrap();
+    assert_eq!(
+        (code, &ended["ring"]["state"], &ended["ring"]["ring_id"]),
+        (0, &json!("declined"), &json!(second_id)),
+        "{err}"
+    );
+    wait_for("the agent to be told", || !notices(&mike).is_empty());
+    assert_eq!(
+        notices(&mike),
+        ["Call: The user declined your call about: The build is red"]
+    );
+
+    // The owner's switch, by the tool and by the app; and the trail of everything asked.
+    let (code, off, _) = call_tool(at, &dir, "", &["rings", "off"]);
+    assert_eq!(
+        (code, &off["settings"]),
+        (0, &json!({ "enabled": false, "show_reason": false }))
+    );
+    let (status, refused) = host.ask("POST", "/calls/ring", Some(&another));
+    assert_eq!(
+        (status, &refused["error"]),
+        (403, &json!("agent calls are turned off"))
+    );
+    let (status, bad) = as_phone(
+        "POST",
+        "/calls/ring/settings",
+        Some(json!({ "enabled": "yes" })),
+    );
+    assert_eq!(
+        (status, bad),
+        (
+            400,
+            json!({ "ok": false, "error": "enabled must be true or false" })
+        )
+    );
+    let (status, shown) = as_phone(
+        "POST",
+        "/calls/ring/settings",
+        Some(json!({ "enabled": true, "show_reason": true })),
+    );
+    let both = json!({ "enabled": true, "show_reason": true });
+    assert_eq!((status, &shown["settings"]), (200, &both));
+    let trail = shown["audit"].as_array().unwrap();
+    let outcomes: Vec<&str> = trail
+        .iter()
+        .map(|entry| entry["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        &outcomes[..6],
+        [
+            "settings", "settings", "refused", "settings", "declined", "ringing"
+        ],
+        "the newest first"
+    );
+    assert!(
+        outcomes.contains(&"answered") && trail.len() >= 15,
+        "{outcomes:?}"
+    );
+    // A phone leaves the token an incoming call would be pushed to.
+    let (status, left) = as_phone(
+        "POST",
+        "/calls/ring/voip-token",
+        Some(json!({ "token": "AB".repeat(32), "environment": "sandbox" })),
+    );
+    assert_eq!(
+        (status, left),
+        (200, json!({ "ok": true, "registered": true }))
+    );
+    let (status, bad) = as_phone(
+        "POST",
+        "/calls/ring/voip-token",
+        Some(json!({ "token": "zz" })),
+    );
+    assert_eq!(
+        (status, bad),
+        (400, json!({ "ok": false, "error": "token must be hex" }))
+    );
+
+    // A phone that may only read and send has nothing to do with rings.
+    let (limited, _) = pair(&host, "Watch", "limited");
+    assert_eq!(host.ask_as(&limited, "GET", "/calls/ring", None).0, 403);
+
+    // The rings are the Host's to keep: a Host that was killed has them as they were.
+    let (_, before) = as_phone("GET", &format!("/calls/ring?ring_id={ring_id}"), None);
+    host.kill();
+    let host = place.start_in("secret", &args, &world);
+    let (_, mut after) = host.ask_as(
+        &phone,
+        "GET",
+        &format!("/calls/ring?ring_id={ring_id}"),
+        None,
+    );
+    let mut before = before;
+    for seen in [&mut before, &mut after] {
+        seen["ring"].as_object_mut().unwrap().remove("server_now");
+    }
+    assert_eq!(after, before);
+    assert_eq!(after["settings"], both);
+    assert_eq!(after["ring"]["state"], "answered");
+}
+
+#[test]
+fn a_ring_nobody_takes_is_missed_when_its_time_is_up_and_the_agent_is_told() {
+    let place = Place::new("rings-missed");
+    let host = place.start_with_token("secret");
+    let theo = host.new_agent("Theo");
+    let events = host.listen_at("/events?token=secret");
+    let states = || -> Vec<String> {
+        let heard = events.lock().unwrap();
+        let rings = heard.iter().filter(|event| event["type"] == "agent-ring");
+        rings
+            .map(|event| event["state"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let rung = host.post(
+        "/calls/ring",
+        json!({ "agent": theo, "reason": "Nobody is there", "opening_line": "Hello?" }),
+    );
+    let ring_id = rung["ring"]["ring_id"].as_str().unwrap().to_string();
+    // No phone is registered and nothing here speaks: the ring rings all the same.
+    assert_eq!(
+        (
+            &rung["ring"]["opening_audio_url"],
+            &rung["delivery"]["enabled"]
+        ),
+        (&json!(""), &json!(false))
+    );
+    // Nobody asks about it again. When its time is up the apps are told by the Host itself.
+    let began = Instant::now();
+    while states() != ["ringing", "missed"] {
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "the ring was not missed: {:?}",
+            states()
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(
+        began.elapsed() >= Duration::from_secs(44),
+        "{:?}",
+        began.elapsed()
+    );
+    let (_, seen) = host.ask("GET", &format!("/calls/ring?ring_id={ring_id}"), None);
+    assert_eq!(seen["ring"]["state"], "missed");
+    assert!(seen["ring"]["ended_at"].as_i64() >= seen["ring"]["expires_at"].as_i64());
+    let rows = host.turns(&theo);
+    let quiet: Vec<&str> = rows
+        .iter()
+        .filter(|row| row["origin"] == "system")
+        .map(|row| row["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        quiet,
+        ["Call: The user did not answer your call about: Nobody is there"]
+    );
+    let (_, trail) = host.ask("GET", "/calls/ring/settings", None);
+    assert_eq!(
+        (&trail["audit"][0]["outcome"], &trail["audit"][0]["by"]),
+        (&json!("missed"), &json!("timeout"))
+    );
+}
+
+#[test]
+fn a_ring_that_rang_when_the_host_was_killed_is_missed_on_time_by_the_host_that_comes_back() {
+    let place = Place::new("rings-kept");
+    let host = place.start_with_token("secret");
+    let theo = host.new_agent("Theo");
+    let began = Instant::now();
+    let rung = host.post(
+        "/calls/ring",
+        json!({ "agent": theo, "reason": "The Host goes down", "opening_line": "Still there?" }),
+    );
+    let ring_id = rung["ring"]["ring_id"].as_str().unwrap().to_string();
+    host.kill();
+    // The Host that comes back is asked nothing about rings: it is only listened to.
+    let host = place.start_with_token("secret");
+    let events = host.listen_at("/events?token=secret");
+    let missed = || -> Vec<Value> {
+        let heard = events.lock().unwrap();
+        let rings = heard.iter().filter(|event| event["type"] == "agent-ring");
+        rings.cloned().collect()
+    };
+    while missed().is_empty() {
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "the ring was not missed"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(
+        began.elapsed() >= Duration::from_secs(44),
+        "{:?}",
+        began.elapsed()
+    );
+    let told = &missed()[0];
+    assert_eq!(
+        (&told["ring_id"], &told["state"]),
+        (&json!(ring_id), &json!("missed"))
+    );
+    wait_for("the agent to be told", || {
+        host.turns(&theo).iter().any(|row| {
+            row["text"] == "Call: The user did not answer your call about: The Host goes down"
+        })
+    });
+    // And one that was overdue long before the Host came back is missed as soon as it is back.
+    let (_, seen) = host.ask("GET", &format!("/calls/ring?ring_id={ring_id}"), None);
+    assert_eq!(seen["ring"]["state"], "missed");
 }
 
 #[test]
@@ -8256,7 +8967,8 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         hear(&[("X-Transcription-ID", "has space")], b"a clip"),
         (400, json!({ "error": "invalid transcription id" }))
     );
-    // A clip that says it belongs to a call is a call's or nothing, and there are no calls.
+    // A clip that says it belongs to a call is heard by its call's rules or not at all, and
+    // this Host has no rules of a call's own for hearing yet.
     let (status, call) = hear(&[("X-Clarp-Call-Id", "call-1")], b"a clip");
     assert_eq!((status, &call["ok"]), (409, &json!(false)));
     // Without the token nothing is heard.
@@ -11454,9 +12166,9 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     let call = read("/calls");
     assert!(call["call"].is_null() && call["server_now"].as_i64().unwrap() > 1_500_000_000_000);
     assert_eq!(
-        read("/calls/ring")["settings"]["enabled"],
-        false,
-        "nobody rings from here"
+        read("/calls/ring"),
+        json!({ "ring": null, "settings": { "enabled": true, "show_reason": false } }),
+        "nobody rings now"
     );
     let oracle = read("/oracle/status");
     assert_eq!(
@@ -11606,8 +12318,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/diagnostics/settings", json!({ "enabled": true })),
         ("/vocab/packs", json!({ "name": "p" })),
         ("/vocab/run", json!({ "session": echo })),
-        ("/calls/ring/voip-token", json!({ "token": "t" })),
-        ("/calls/ring/answer", json!({ "ring_id": "r" })),
         ("/oracle/contact", json!({ "session": echo })),
         ("/oracle/handoff", json!({ "session": echo })),
         ("/oracle/v2/calls/control", json!({ "action": "end" })),

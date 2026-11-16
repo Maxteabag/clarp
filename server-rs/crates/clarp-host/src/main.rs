@@ -184,6 +184,9 @@ async fn serve(config: Config) -> Result<(), String> {
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+    // A ring that rang when the Host stopped has its time again, or is missed now: the apps
+    // and its agent are told without anybody having to ask first.
+    clarp_host::calls::resume(&app);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",

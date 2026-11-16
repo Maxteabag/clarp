@@ -437,9 +437,9 @@ def by_fiat(path, body):
 # with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
 NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options',
                       # Screens of what this Host has not, where the Python Host's first day says something
-                      # this Host must not: that an agent may ring, that a picture could be made with a
-                      # key, what the Oracle could do. Compared as their fields.
-                      '/calls/ring', '/agent-portrait-generation', '/oracle/status'})
+                      # this Host must not: that a picture could be made with a key, what the Oracle
+                      # could do. Compared as their fields.
+                      '/agent-portrait-generation', '/oracle/status'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
@@ -478,6 +478,10 @@ ASSET = re.compile(r'asset_[A-Za-z0-9_]{24}')
 # the notices in the agents' conversations. Named here in the order a client first learns of
 # them, as the files are.
 CALL = re.compile(r'gcl_[0-9a-f]{32}')
+# The id a Host gives a ring: `rng_` and thirty-two hex signs. It is in the ring's record, in every
+# event of the ring, in the path a client reads it by, in the trail, and in the id of the notice
+# in the agent's conversation. Named as the calls are.
+RING = re.compile(r'rng_[0-9a-f]{32}')
 
 
 def settle(value, sessions):
@@ -497,6 +501,8 @@ def settle(value, sessions):
             item = '<time>'  # a reading no TurnClock has told: there is none in a capture of this suite
         elif key in CLOCK_KEYS and isinstance(item, int) and not isinstance(item, bool) and item in EPOCH_MS:
             item = '<time>'
+        elif key == 'retry_after_s' and isinstance(item, int) and not isinstance(item, bool):
+            item = '<seconds>'  # how long an agent waits before it rings again: what is left of a minute
         elif key == 'agents' and isinstance(item, list):
             # Both Hosts have two codex agents (rachel, mike) that no scenario is about. Both
             # sides are cut to the scenario's own.
@@ -770,14 +776,18 @@ def published(value, found: dict) -> dict:
 
 
 def called(value, found: dict) -> dict:
-    """The ids of the calls a capture names, each with the name it is given here."""
+    """The ids of the calls and of the rings a capture names, each with the name it is given here."""
     if isinstance(value, list):
         for item in value:
             called(item, found)
     elif isinstance(value, dict):
         for key, item in value.items():
             if key == 'call_id' and isinstance(item, str) and CALL.fullmatch(item):
-                found.setdefault(item, f'<call:{len(found) + 1}>')
+                known = sum(1 for name in found.values() if name.startswith('<call:'))
+                found.setdefault(item, f'<call:{known + 1}>')
+            elif key == 'ring_id' and isinstance(item, str) and RING.fullmatch(item):
+                known = sum(1 for name in found.values() if name.startswith('<ring:'))
+                found.setdefault(item, f'<ring:{known + 1}>')
             else:
                 called(item, found)
     return found
@@ -822,8 +832,8 @@ def seen_by_a_client(raw: dict) -> dict:
     # What a call's event says of the call is the call's record: its moments and its Host are
     # settled as in an answer.
     raw = {**raw, 'sse': [{**frame, 'data': by_session(settle(frame['data'], sessions), known)}
-                          if isinstance(frame.get('data'), dict) and frame['data'].get('type') == 'group-call' else frame
-                          for frame in raw['sse']]}
+                          if isinstance(frame.get('data'), dict) and frame['data'].get('type') in ('group-call', 'agent-ring')
+                          else frame for frame in raw['sse']]}
     whole = normalize.normalize(raw, str(REPO))
     # The normalizer keeps the answers in the order they were given, one for one.
     names: dict = {}

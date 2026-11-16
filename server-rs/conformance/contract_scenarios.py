@@ -1578,4 +1578,87 @@ SCENARIOS.append({
     ],
 })
 
+def rings(agent, number):
+    return {'agent': agent, 'reason': f'  synthetic   reason {number} ', 'opening_line': f'synthetic opening {number}'}
+
+
+SCENARIOS.append({
+    'id': 'rings',
+    'what': 'a ring: an agent calls its owner. The owner\'s tools ring for an agent by its name, with why and '
+            'with the line it opens with; while it rings nobody else does; the answer starts a call with '
+            'the agent on the floor and hands back the line to play first, the same again for who answered '
+            'and a refusal for anybody else; a message of that call is answered. A ring is declined, and '
+            'one that is over is not answered. An agent waits before it rings again. The owner turns rings '
+            'off and on and reads the trail; a phone leaves its token for calls. What is no ring is refused '
+            "in words. Each change is told to the apps, and noted in the agent's conversation.",
+    'sessions': (AGENT, NOVA),
+    'steps': [
+        get('/calls/ring', 'nobody rings'),
+        get('/calls/ring/settings', "the owner's switches, and an empty trail"),
+        post('/calls/ring', {}, 'a ring that names nobody'),
+        post('/calls/ring', ['claire'], 'a ring that is no object'),
+        post('/calls/ring', rings('nobody-there', 'zero'), 'a ring for an agent the Host has not'),
+        post('/calls/ring', {'agent': AGENT, 'opening_line': 'synthetic opening'}, 'a ring without a reason'),
+        post('/calls/ring', {'agent': AGENT, 'reason': 'synthetic reason'}, 'a ring without an opening line'),
+        post('/calls/ring', {**rings(AGENT, 'zero'), 'opening_mode': 'sing'}, 'an opening nobody knows'),
+        post('/calls/ring', {**rings(AGENT, 'zero'), 'conversation_mode': 'telepathy'}, 'a way to talk nobody knows'),
+        post('/calls/ring', {**rings(AGENT, 'zero'), 'event_context': {'source': 'synthetic'}},
+             'what only a live voice call is told'),
+        post('/calls/ring/answer', {'ring_id': 'rng_nothing'}, 'an answer to no ring'),
+        post('/calls/ring/decline', {'ring_id': 'rng_nothing'}, 'no ring is declined'),
+        post('/calls/ring/cancel', {}, 'no ring is taken back'),
+        get('/calls/ring?ring_id=rng_nothing', 'a ring that is none'),
+        # Both agents have a conversation before they ring: a notice is written where one is.
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        send('synthetic word before the ring', 'ringzero'),
+        {'op': 'wait_reply', 'after': 'u-ringzero'},
+        {'op': 'quiesce'},
+        send('synthetic word before the ring', 'ringzeronova', session=NOVA),
+        {'op': 'wait_reply', 'after': 'u-ringzeronova', 'session': NOVA},
+        {'op': 'quiesce', 'session': NOVA},
+        {**post('/calls/ring', rings('Claire', 'one'), 'an agent rings'), 'save': {'ring': 'ring.ring_id'}},
+        get('/calls/ring', 'the ring that rings'),
+        get('/calls/ring?ring_id={ring}', 'the ring by its id'),
+        post('/calls/ring', rings('nova', 'two'), 'another rings meanwhile'),
+        post('/calls/ring/answer', {'ring_id': '{ring}', 'conversation_mode': 'telepathy'},
+             'answered in a way nobody knows'),
+        post('/calls/ring/answer', {'ring_id': '{ring}', 'conversation_mode': 'agent_live_v1'},
+             'answered as a live voice call, which it is not'),
+        post('/calls/ring/answer', {'ring_id': '{ring}'}, 'answered before any phone made a call'),
+        post('/calls', {'agents': ['nova'], 'principal': PHONE}, 'a phone makes a call'),
+        post('/calls/end', {'principal': PHONE}, 'and ends it'),
+        {**post('/calls/ring/answer', {'ring_id': '{ring}'}, 'the ring is answered'), 'save': {'call': 'call.call_id'}},
+        post('/calls/ring/answer', {'ring_id': '{ring}', 'opening_mode': 'say'}, 'answered again, by the same'),
+        get('/calls', 'the call the answer started'),
+        get('/calls/ring', 'nobody rings now'),
+        get('/calls/ring?ring_id={ring}', 'the ring that was answered'),
+        post('/calls/ring/decline', {'ring_id': '{ring}'}, 'declined after it was answered'),
+        post('/calls/ring/cancel', {'ring_id': '{ring}'}, 'taken back after it was answered'),
+        # What the user says in the call the ring became goes to the agent that rang.
+        *in_call('synthetic ring word alfa', 'ringalfa', AGENT),
+        post('/calls/end', {'principal': PHONE}, 'the call ends'),
+        post('/calls/ring', rings('claire', 'three'), 'the same agent rings again too soon'),
+        {**post('/calls/ring', rings('Nova', 'four'), 'another agent rings'), 'save': {'second': 'ring.ring_id'}},
+        post('/calls/ring/decline', {'ring_id': '{second}'}, 'the ring is declined'),
+        post('/calls/ring/decline', {'ring_id': '{second}'}, 'declined already'),
+        post('/calls/ring/answer', {'ring_id': '{second}'}, 'answered after it was declined'),
+        post('/calls/ring/cancel', {'ring_id': '{second}'}, 'taken back after it was declined'),
+        post('/calls/ring/settings', {'enabled': False}, 'the owner turns rings off'),
+        post('/calls/ring', rings('nova', 'five'), 'a ring while rings are off'),
+        post('/calls/ring/settings', {'enabled': 'yes'}, 'a switch that is no switch'),
+        post('/calls/ring/settings', ['enabled'], 'switches that are no object'),
+        post('/calls/ring/settings', {'enabled': True, 'show_reason': True}, 'on again, and the reason shown'),
+        get('/calls/ring/settings', 'the switches and the trail'),
+        post('/calls/ring/voip-token', {'token': 'zz'}, 'a token that is none'),
+        post('/calls/ring/voip-token', {'token': 'ab' * 32, 'environment': 'sandbox'}, 'a phone leaves its token'),
+        post('/calls/ring/voip-token', {'token': 'ab' * 32, 'supported_conversation_modes': ['telepathy']},
+             'with a way to talk nobody knows'),
+        post('/calls/ring/voip-token', {'token': ''}, 'and takes it back'),
+        get(f'/log?session={NOVA}', 'the conversation of the second agent'),
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

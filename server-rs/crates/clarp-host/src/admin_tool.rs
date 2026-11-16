@@ -23,12 +23,14 @@ use clarp_kernel::python;
 use clarp_protocol::requests::SendRequest;
 use serde_json::{Value, json};
 
+use crate::agent::Unavailable;
 use crate::artifact_tool::parse;
 use crate::edge::{self, App};
 use crate::ids;
 use crate::peers::{self, Failed};
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
 use crate::{request_tool, roster};
+use clarp_kernel::calls::Refused;
 
 /// What argparse says of a command line it cannot read, and exits 2 with.
 fn usage(why: &str) -> ToolAnswer {
@@ -405,7 +407,8 @@ async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
 async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
     use clarp_kernel::calls::{ADMINISTRATOR, Asker};
     let usage = |why: &str| {
-        let commands = "{status,start,end,add,remove,hold,resume,switch,transfer}";
+        let commands = "{status,start,end,add,remove,hold,resume,switch,transfer,ring,ring-status,\
+                        ring-cancel,rings}";
         ToolAnswer::said(
             2,
             format!("usage: clarp-admin call [-h] {commands} ...\nclarp-admin call: error: {why}"),
@@ -424,9 +427,8 @@ async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
         "status" | "end" => &[],
         "start" => &MANY,
         "add" | "remove" | "hold" | "resume" | "switch" | "transfer" => &MANY[..1],
-        // Ringing the user is not on this Host yet.
         "ring" | "ring-status" | "ring-cancel" | "rings" => {
-            return not_here(&format!("call {command}"));
+            return ring(app, tool, command, rest).await;
         }
         other => {
             let said = python::text(other);
@@ -477,6 +479,170 @@ async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
             Err(error) => ToolAnswer::said(1, format!("clarp-admin: {error}")),
         },
         Err(unavailable) => ToolAnswer::said(1, format!("clarp-admin call: {}", unavailable.0)),
+    }
+}
+
+/// What the Host answered a request about a ring, as the Python tool prints it: the answer
+/// or the refusal as JSON, and exit 1 for a refusal.
+fn ring_said(asked: Result<Result<Value, Refused>, Unavailable>) -> ToolAnswer {
+    match asked {
+        Ok(Ok(answer)) => shown(&answer),
+        Ok(Err(refused)) => match serde_json::to_string_pretty(&refused.body) {
+            Ok(body) => ToolAnswer::printed(1, body),
+            Err(error) => ToolAnswer::said(1, format!("clarp-admin: {error}")),
+        },
+        Err(unavailable) => ToolAnswer::said(1, format!("clarp-admin call: {}", unavailable.0)),
+    }
+}
+
+/// How often a tool that waits for its ring asks how it stands, and how long at most.
+const RING_ASKED_EVERY_MS: u64 = 2_000;
+const RING_WAITED_MS: i64 = 90_000;
+
+/// `clarp-admin call ring --reason WHY --say LINE [--agent A] [--wait]`: an agent calls its
+/// owner (the skill `clarp-calls`, `docs/agent-rings.md`): the phone rings with the reason,
+/// and when the user answers, the line is heard first, in the agent's own voice. The agent
+/// whose turn this is rings as itself; outside a turn, `--agent` names who rings. With
+/// `--wait` the tool answers when the call was answered, declined or missed.
+/// `ring-status [RING_ID]` reads a ring, `ring-cancel RING_ID` takes one back, and
+/// `rings on|off|status` is the owner's switch. Printed as the Python tool prints it.
+async fn ring(app: &App, tool: &ToolCall, command: &str, rest: &[String]) -> ToolAnswer {
+    let usage = |line: &str, why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin call {command} [-h] {line}\nclarp-admin call {command}: error: {why}"
+            ),
+        )
+    };
+    // The agent whose turn this is: it rings, and takes back, as itself only.
+    let own = tool
+        .env
+        .get(SESSION_ENV)
+        .map_or("", |session| session.trim());
+    let own = app
+        .member(own)
+        .map_or_else(String::new, |member| member.record.agent_id.clone());
+    let desk = app.calls.clone();
+    match command {
+        "ring" => {
+            let line = "--reason REASON --say SAY [--agent AGENT] [--wait] [--oracle] \
+                        [--context-file CONTEXT_FILE] [--listen-first]";
+            let valued = ["--reason", "--say", "--agent", "--context-file"];
+            let flags = ["--wait", "--oracle", "--listen-first"];
+            let parsed = match parse(rest, &valued, &flags, &[]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage(line, &why),
+            };
+            let missing: Vec<&str> = ["--reason", "--say"]
+                .into_iter()
+                .filter(|name| parsed.option(name).is_none())
+                .collect();
+            if !missing.is_empty() {
+                let why = format!(
+                    "the following arguments are required: {}",
+                    missing.join(", ")
+                );
+                return usage(line, &why);
+            }
+            let (live, context) = (
+                parsed.flags.contains("--oracle"),
+                parsed
+                    .option("--context-file")
+                    .is_some_and(|file| !file.is_empty()),
+            );
+            if context && !live {
+                return ToolAnswer::said(2, "clarp-admin call ring: --context-file needs --oracle");
+            }
+            if live && !context {
+                return ToolAnswer::said(2, "clarp-admin call ring: --oracle needs --context-file");
+            }
+            // A tool that waits asks again every moment with what it was called with: the
+            // ring it placed the first time is the one it reads from then on.
+            let waits = parsed.flags.contains("--wait") && tool.started_ms > 0;
+            let tool_call = format!("{}:{}", tool.ppid, tool.started_ms);
+            let placed = match desk.waited_for(&tool_call).filter(|_| waits) {
+                Some(ring_id) => ring_id,
+                None => {
+                    let mut body = json!({
+                        "reason": parsed.option("--reason"), "opening_line": parsed.option("--say"),
+                    });
+                    if let Some(agent) = parsed.option("--agent").filter(|agent| !agent.is_empty())
+                    {
+                        body["agent"] = json!(agent);
+                    }
+                    if live {
+                        // What a live voice call would be told stays where it is: this Host
+                        // holds none, and says so.
+                        body["conversation_mode"] = json!("agent_live_v1");
+                    }
+                    if parsed.flags.contains("--listen-first") {
+                        body["opening_mode"] = json!("listen_first");
+                    }
+                    let rung = desk.ring(app, &own, &body).await;
+                    let ring_id = match &rung {
+                        Ok(Ok(answer)) => answer["ring"]["ring_id"].as_str().unwrap_or(""),
+                        _ => "",
+                    };
+                    if !waits || ring_id.is_empty() {
+                        return ring_said(rung);
+                    }
+                    desk.wait_for(&tool_call, ring_id, app.clock.now_ms());
+                    ring_id.to_string()
+                }
+            };
+            let looked = desk.rings(app, |rings, _, with, (out, _)| {
+                rings.look(&placed, with.at.now_ms, out)
+            });
+            let looked = looked.await;
+            let rings = matches!(&looked, Ok(Ok(seen)) if seen["ring"]["state"] == "ringing");
+            if rings && app.clock.now_ms() < tool.started_ms + RING_WAITED_MS {
+                return ToolAnswer::again(RING_ASKED_EVERY_MS);
+            }
+            desk.waited(&tool_call);
+            ring_said(looked)
+        }
+        "ring-status" => {
+            let parsed = match parse(rest, &[], &[], &["[ring_id]"]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("[ring_id]", &why),
+            };
+            let ring_id = parsed.positional.first().cloned().unwrap_or_default();
+            let looked = desk.rings(app, |rings, _, with, (out, _)| {
+                rings.look(&ring_id, with.at.now_ms, out)
+            });
+            ring_said(looked.await)
+        }
+        "ring-cancel" => {
+            let parsed = match parse(rest, &[], &[], &["ring_id"]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("ring_id", &why),
+            };
+            let ring_id = &parsed.positional[0];
+            let cancelled = desk.rings(app, |rings, _, with, (out, _)| {
+                rings.cancel((&own, ring_id), with.at.now_ms, out)
+            });
+            ring_said(cancelled.await)
+        }
+        _ => {
+            let parsed = match parse(rest, &[], &[], &["switch"]) {
+                Ok(parsed) => parsed,
+                Err(why) => return usage("{on,off,status}", &why),
+            };
+            let switch = parsed.positional[0].as_str();
+            if !matches!(switch, "on" | "off" | "status") {
+                let said = python::text(switch);
+                let why = format!(
+                    "argument switch: invalid choice: {said} (choose from 'on', 'off', 'status')"
+                );
+                return usage("{on,off,status}", &why);
+            }
+            let changed = desk.rings(app, |rings, _, with, (out, _)| match switch {
+                "status" => Ok(rings.shown()),
+                switch => rings.change(&json!({ "enabled": switch == "on" }), with.at.now_ms, out),
+            });
+            ring_said(changed.await)
+        }
     }
 }
 

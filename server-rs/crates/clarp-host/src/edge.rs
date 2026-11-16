@@ -81,6 +81,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Calls: the Host's record of who is in a phone's call, on hold and on the floor
     // (`/calls`, the `group-call` event, `call_id` of a send; `docs/group-calls.md`).
     ("group_calls", 60),
+    // Rings: an agent calls its owner, and answering starts a call in which the agent's
+    // opening line is heard first (`/calls/ring`, the `agent-ring` event and push;
+    // `docs/agent-rings.md`). The ring whose line is said: not the live voice call
+    // (`agent_ring_live`), not the one that listens first, not a phone's own switch.
+    ("agent_rings", 64),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
     // A running turn as items that appear, grow and settle: `live` events on `/events?live=`
