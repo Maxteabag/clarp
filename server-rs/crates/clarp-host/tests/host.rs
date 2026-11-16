@@ -5413,6 +5413,25 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         paper["asset_id"].as_str().unwrap().to_string(),
         theirs["asset_id"].as_str().unwrap().to_string(),
     );
+    // It keeps the picture it published as a portrait, and wears it.
+    let portraits = |host: &Host| host.get(&format!("/agent-portraits?session={session}"));
+    let kept = old_host.post(
+        "/agent-portraits",
+        json!({ "session": session, "action": "add_media_asset", "asset_id": image_id }),
+    );
+    let worn = kept["portraits"][0]["portrait_id"].clone();
+    old_host.post(
+        "/agent-portraits",
+        json!({ "session": session, "action": "select_primary", "portrait_id": worn }),
+    );
+    let portraits_before = portraits(&old_host);
+    assert_eq!(
+        (
+            &portraits_before["primary_portrait_id"],
+            &portraits_before["portraits"][0]["media_asset_id"]
+        ),
+        (&worn, &json!(image_id))
+    );
     let naming = format!(
         "see {} and {} and /media/asset_gone_long_ago, kept under /media/disk",
         image["markdown"].as_str().unwrap(),
@@ -5557,6 +5576,19 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
             &its_own("elevenlabs:scribe_v2,google:chirp_3")
         )
     );
+
+    // Its portraits came with it: the one it wears is the same portrait, chosen from the
+    // same file of its gallery, and its face is that picture.
+    assert_eq!(portraits(&new_host), portraits_before);
+    let face = fetch(
+        &new_host,
+        "",
+        "GET",
+        &format!("/avatars/{session}"),
+        &[],
+        b"",
+    );
+    assert_eq!((face.status, face.body.as_slice()), (200, png.as_slice()));
 
     // Its goal came with it: the plan as it stood, at its revision, with its steps, its
     // history, its working notes, and the artifact it is shown as.
@@ -5724,8 +5756,10 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
     let gallery = new_host.get(&format!("/media?session={session}"));
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
-    // The image, the document, the other agent's image, and the report's two pages.
-    assert_eq!(files_under(&new_place.root.join("data").join("media")), 5);
+    // The image, the document, the other agent's image, the report's two pages, and the
+    // picture the agent wears: the image once more, under the name an agent's picture is
+    // kept by.
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 6);
     // The file its conversation names that the first Host does not have is on a third: a
     // conversation that came from another Host names files that stayed there. Asked for
     // there, it comes too, and is fetched here under the id that names it.
@@ -5767,7 +5801,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert!(came.body == long_ago);
     let gallery = new_host.get(&format!("/media?session={session}"));
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
-    assert_eq!(files_under(&new_place.root.join("data").join("media")), 6);
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 7);
     // Only the administrator says which id a file has, and an id is one file's.
     let taken = [
         ("X-Session", session.as_str()),
@@ -5846,7 +5880,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let gallery = new_host.get(&format!("/media?session={session}"));
     assert_eq!(gallery["assets"].as_array().unwrap().len(), 1);
     assert_eq!(gallery["assets"][0]["asset_id"], image_id.as_str());
-    assert_eq!(files_under(&new_place.root.join("data").join("media")), 6);
+    assert_eq!(files_under(&new_place.root.join("data").join("media")), 7);
     // After a restart of the second Host it is all still there.
     new_host.kill();
     let new_host = new_place.start();

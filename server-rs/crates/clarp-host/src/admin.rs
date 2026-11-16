@@ -688,9 +688,35 @@ pub fn import(
     } else {
         None
     };
+    // The portraits it keeps, each with its picture: the one it wears among them, so that
+    // it is the same portrait here, chosen from the same file of its gallery.
+    let kept = get(
+        &from,
+        &format!("/agent-portraits?session={}", ids::in_a_link(&session)),
+        source_token,
+    )?;
+    let mut portraits: Vec<Value> = Vec::new();
+    for portrait in kept["portraits"].as_array().into_iter().flatten() {
+        let address = portrait["url"].as_str().unwrap_or("");
+        if address.is_empty() {
+            continue;
+        }
+        match exchange("GET", &from, address, source_token, &[], &[])? {
+            (200, _, bytes) => portraits.push(json!({
+                "portrait_id": portrait["portrait_id"], "media_asset_id": portrait["media_asset_id"],
+                "created_by": portrait["created_by"], "created_at": portrait["created_at"],
+                "picture": clarp_kernel::python::b64encode(&bytes),
+            })),
+            (status, _, _) => {
+                return Err(format!(
+                    "the Host at {from} answered {status} for a portrait {session} keeps"
+                ));
+            }
+        }
+    }
     let asked = json!({
         "agent": agent, "from": format!("http://{from}"), "turns": turns, "plans": plans,
-        "library": library, "picture": picture,
+        "library": library, "picture": picture, "portraits": portraits,
     });
     let (status, answer) = post(&host, "/agents/import", token, &asked)?;
     if status != 200 {
