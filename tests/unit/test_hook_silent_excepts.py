@@ -1,10 +1,9 @@
 """HOOK-01: no hook swallows a failure silently, and none changes its output to say so.
 
-A hook catches broad exceptions so it never fails the user's turn; each such
-handler now reports through plugin/hooks/_hook_report.report: one event with
-the exception class (and SQLite's error name), no message text, or a line in
-the hook log when the event log is unavailable. Nothing goes to stdout or
-stderr, so no runner can show it to the model or the apps.
+A failure first appends its content-free private line, then optionally mirrors
+its exception class (and SQLite error name) into telemetry. Detailed capture
+never gates the mandatory line. Nothing is emitted on the hook's stdout/stderr,
+including deferred sink diagnostics at process exit.
 """
 from __future__ import annotations
 
@@ -44,10 +43,8 @@ def _locked() -> sqlite3.OperationalError:
 
 @pytest.fixture
 def emitted(monkeypatch):
-    from lib import diagnostics_settings
-    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
     calls: list[tuple] = []
-    monkeypatch.setattr(eventlog, "emit", lambda source, event, **kw: calls.append((source, event, kw)) or True)
+    monkeypatch.setattr(eventlog, "emit", lambda source, event, **kw: calls.append((source, event, kw)))
     return calls
 
 
@@ -85,8 +82,6 @@ def test_unreadable_stdin_is_reported_and_the_hook_still_exits_zero(monkeypatch,
 
 
 def test_when_the_event_log_fails_the_report_goes_to_the_hook_log(monkeypatch, tmp_path, capsys):
-    from lib import diagnostics_settings
-    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
     report = _load("_hook_report", monkeypatch)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
@@ -101,7 +96,6 @@ def test_when_the_event_log_fails_the_report_goes_to_the_hook_log(monkeypatch, t
     assert (out.out, out.err) == ("", "")
     line = RuntimePaths.from_home(tmp_path).hook_log.read_text()
     assert "toolstart_hook" in line and "recordFail OperationalError SQLITE_BUSY" in line
-    assert "event log unavailable: OperationalError" in line
     assert "SECRET" not in line and "disk I/O" not in line
 
 
@@ -158,7 +152,13 @@ def test_real_hook_report_storage_obeys_capture_without_losing_failure(
     before = diagnostics_settings.get()
     reporter = _load("_hook_report", monkeypatch)
     log = RuntimePaths.from_home(tmp_path).hook_log
+    at_insert = []
+    def observe_insert(sql):
+        if "INSERT INTO DIAGNOSTIC_EVENTS" in sql.upper():
+            at_insert.append(log.is_file() and len(log.read_text().splitlines()) == 1)
+    telemetry.conn().set_trace_callback(observe_insert)
     assert reporter.report("toolstart_hook", "recordFail", _locked()) is None
+    telemetry.conn().set_trace_callback(None)
     output = capsys.readouterr()
     assert (output.out, output.err) == ("", "")
     rows = telemetry.conn().execute(
@@ -167,13 +167,13 @@ def test_real_hook_report_storage_obeys_capture_without_losing_failure(
         assert len(rows) == 1
         assert tuple(rows[0][:3]) == ("toolstart_hook", "recordFail", "error")
         assert json.loads(rows[0]["detail"]) == {"error": "OperationalError", "code": "SQLITE_BUSY"}
-        assert not log.exists()
+        assert at_insert == [True]
     else:
         assert rows == []
-        lines = log.read_text().splitlines()
-        assert len(lines) == 1
-        assert "toolstart_hook" in lines[0] and "recordFail OperationalError SQLITE_BUSY" in lines[0]
-        assert "SECRET" not in lines[0] and "locked" not in lines[0]
+    lines = log.read_text().splitlines()
+    assert len(lines) == 1
+    assert "toolstart_hook" in lines[0] and "recordFail OperationalError SQLITE_BUSY" in lines[0]
+    assert "SECRET" not in lines[0] and "locked" not in lines[0]
     assert diagnostics_settings.get() == before
 
 
@@ -203,7 +203,7 @@ def test_real_hook_report_sink_import_failure_stays_private(
         lines = log.read_text().splitlines()
         assert len(lines) == 1
         assert "toolend_hook" in lines[0] and "resolveFail OperationalError SQLITE_BUSY" in lines[0]
-        assert "ImportError" in lines[0] and "SECRET" not in lines[0]
+        assert "SECRET" not in lines[0]
 
 
 def test_real_policy_cache_transition_cannot_drop_the_hook_report(monkeypatch, tmp_path, capsys):
@@ -228,5 +228,102 @@ def test_real_policy_cache_transition_cannot_drop_the_hook_report(monkeypatch, t
         "SELECT COUNT(*) FROM diagnostic_events WHERE source='toolstart_hook' AND event='recordFail'").fetchone()[0]
     log = RuntimePaths.from_home(tmp_path).hook_log
     lines = log.read_text().splitlines() if log.exists() else []
-    assert rows + len(lines) == 1
+    assert len(lines) == 1
+    assert rows == 1
     assert len(reads) == 1
+
+
+@pytest.mark.parametrize("log_unwritable", [False, True])
+def test_real_record_failure_keeps_trace_when_event_writers_both_fail(
+        monkeypatch, tmp_path, capsys, log_unwritable):
+    from lib import diagnostics_settings, telemetry
+
+    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
+    agent = agents_db.create_agent(persona="Hook test", voice_id="V", cwd=str(tmp_path), session="hook-test")
+    agents_db.bind_backend_session(agent, "hook-test-uuid")
+    hook = _load("tool_activity", monkeypatch)
+    def fail_transition(*args, **kwargs):
+        raise _locked()
+    monkeypatch.setattr(turn_lifecycle, "hook_transition", fail_transition)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+        "session_id": "hook-test-uuid", "tool_name": "Read", "tool_input": {"file_path": "/SECRET/project"}})))
+    log = RuntimePaths.from_home(tmp_path).hook_log
+    if log_unwritable:
+        log.mkdir(parents=True)
+    broken_jsonl = tmp_path / "not-a-jsonl-directory"
+    broken_jsonl.write_text("a file, not a directory")
+    monkeypatch.setattr(eventlog, "LOG_DIR", broken_jsonl)
+    connection = telemetry.conn()
+    connection.execute("PRAGMA busy_timeout=1")
+    blocker = sqlite3.connect(telemetry.TELEMETRY_PATH, isolation_level=None)
+    try:
+        blocker.execute("BEGIN IMMEDIATE")
+        assert hook.main() == 0
+    finally:
+        blocker.rollback()
+        blocker.close()
+    output = capsys.readouterr()
+    assert (output.out, output.err) == ("", "")
+    assert connection.execute(
+        "SELECT COUNT(*) FROM diagnostic_events WHERE source='toolstart_hook' AND event='recordFail'").fetchone()[0] == 0
+    if not log_unwritable:
+        lines = log.read_text().splitlines()
+        assert len(lines) == 1
+        assert "toolstart_hook" in lines[0] and "recordFail OperationalError SQLITE_BUSY" in lines[0]
+        assert "SECRET" not in lines[0] and "database is locked" not in lines[0]
+
+
+def test_real_report_with_unwritable_hook_log_still_writes_event(monkeypatch, tmp_path, capsys):
+    from lib import diagnostics_settings, telemetry
+
+    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
+    reporter = _load("_hook_report", monkeypatch)
+    log = RuntimePaths.from_home(tmp_path).hook_log
+    log.mkdir(parents=True)
+    assert reporter.report("toolend_hook", "resolveFail", _locked()) is None
+    output = capsys.readouterr()
+    assert (output.out, output.err) == ("", "")
+    assert telemetry.conn().execute(
+        "SELECT COUNT(*) FROM diagnostic_events WHERE source='toolend_hook' AND event='resolveFail'").fetchone()[0] == 1
+
+
+def test_real_writer_failure_stays_private_through_hook_exit(tmp_path):
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    child = textwrap.dedent('''
+        import io,json,pathlib,sqlite3,sys
+        root=pathlib.Path(sys.argv[1]);scratch=pathlib.Path(sys.argv[2])
+        sys.path[:0]=[str(root/'server'),str(root/'plugin/hooks')]
+        from lib import db,agents,diagnostics_settings,telemetry,eventlog,turn_lifecycle
+        import tool_activity
+        db.run_as_service('tests');db.conn()
+        diagnostics_settings.update({'enabled':True,'categories':['agents']})
+        agent=agents.create_agent(persona='Hook test',voice_id='V',cwd=str(scratch),session='exit-test')
+        agents.bind_backend_session(agent,'exit-test-uuid')
+        def failure(*a,**kw):
+            error=sqlite3.OperationalError('SECRET tool input')
+            error.sqlite_errorname='SQLITE_BUSY'
+            raise error
+        turn_lifecycle.hook_transition=failure
+        sys.stdin=io.StringIO(json.dumps({'session_id':'exit-test-uuid','tool_name':'Read','tool_input':{}}))
+        connection=telemetry.conn();connection.execute('PRAGMA busy_timeout=1')
+        invalid=scratch/'not-a-directory';invalid.write_text('x');eventlog.LOG_DIR=invalid
+        lock=sqlite3.connect(telemetry.TELEMETRY_PATH,isolation_level=None)
+        try:
+            lock.execute('BEGIN IMMEDIATE')
+            assert tool_activity.main()==0
+        finally:
+            lock.rollback();lock.close()
+        sys.stdout.write('caller-output')
+    ''')
+    result = subprocess.run([sys.executable, "-c", child, str(HOOKS.parents[1]), str(tmp_path)],
+                            env={**os.environ}, capture_output=True, timeout=10)
+    assert result.returncode == 0
+    assert result.stdout == b"caller-output"
+    assert result.stderr == b""
+    lines = RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()
+    assert len(lines) == 1 and "recordFail OperationalError SQLITE_BUSY" in lines[0]
+    assert "SECRET" not in lines[0]
