@@ -9991,7 +9991,11 @@ fn an_agent_whose_user_is_with_another_raises_its_hand_and_is_heard_when_its_tur
     wait_for("the short reply", || audio().len() == 4);
     let short = audio()[3].clone();
     assert!(short.get("herald").is_none(), "{short}");
-    assert!(said_to_engine("Mike here. Done."));
+    // The apps are told of a clip before its first byte is there: the engine is asked a
+    // moment after. (Asserted at once, this failed once on a loaded machine.)
+    wait_for("the engine to be asked for the short reply", || {
+        said_to_engine("Mike here. Done.")
+    });
 
     // With the herald off everybody is heard at once.
     let settings = host.get("/herald/settings");
