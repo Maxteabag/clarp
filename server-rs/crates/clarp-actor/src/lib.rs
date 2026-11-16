@@ -291,9 +291,12 @@ pub struct LiveTool {
 }
 
 /// Follows the tool calls that run: one that starts joins them, one that ends leaves.
-fn follow_tool(running: &mut Vec<LiveTool>, call: &ToolCall) {
+/// `calls` keeps each as it was told, for the turn that is cut off under it.
+fn follow_tool(running: &mut Vec<LiveTool>, calls: &mut Vec<ToolCall>, call: &ToolCall) {
     running.retain(|tool| tool.id != call.id);
+    calls.retain(|known| known.id != call.id);
     if call.status == ToolStatus::Running {
+        calls.push(call.clone());
         let described = clarp_kernel::tools::describe(&call.name, &call.input);
         let summed = clarp_kernel::tools::summarize(&call.name, &call.input);
         running.push(LiveTool {
@@ -403,6 +406,9 @@ struct LiveTurn {
     drafts: Vec<Draft>,
     /// The tool calls that run, oldest first.
     tools: Vec<LiveTool>,
+    /// The same calls as they were told: what is written once more when the turn is
+    /// interrupted and they never return.
+    calls: Vec<ToolCall>,
     /// The spool has said how the tool went. Nothing more will come.
     over: bool,
     /// Which attempt of the turn this is, from 1: whose spool is read.
@@ -538,13 +544,19 @@ fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), ActorError> {
 
 /// What the Host says in a conversation when a turn did not finish, so that whoever reads it
 /// knows why there is no answer. A turn that was stopped on purpose needs no telling.
-fn ending_notice(turn: TurnId, name: &str, code: &str, reason: &str) -> Entry {
+fn ending_notice(
+    turn: TurnId,
+    name: &str,
+    code: &str,
+    reason: &str,
+    trace_id: Option<String>,
+) -> Entry {
     Entry::Notice(Notice {
         id: format!("n-{name}-{code}"),
         turn: Some(turn.0),
         code: code.to_string(),
         text: reason.to_string(),
-        trace_id: None,
+        trace_id,
     })
 }
 
@@ -694,6 +706,27 @@ fn follow(
     Ok(())
 }
 
+/// A turn that was interrupted cut its tools off: a use that had not returned never will.
+/// Each is written once more, as interrupted, so that the row it is shown on says so and
+/// whoever follows the conversation is given that row again. A turn that ended any other
+/// way leaves its tools' uses as they are.
+fn cut_off(
+    batch: &mut Batch<'_>,
+    calls: &mut Vec<ToolCall>,
+    end: &Entry,
+    ts_ms: i64,
+) -> Result<(), ActorError> {
+    if !matches!(end, Entry::TurnEnd(end) if end.status == "interrupted") {
+        return Ok(());
+    }
+    for mut call in calls.drain(..) {
+        call.status = ToolStatus::Interrupted;
+        call.ended_at_ms = Some(ts_ms);
+        batch.item(written(&Entry::Tool(call), ts_ms)?);
+    }
+    Ok(())
+}
+
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
     match drafts.iter_mut().find(|draft| draft.id == live.id) {
         Some(draft) => draft.text = live.text,
@@ -799,6 +832,7 @@ impl Actor {
                 offset: 0,
                 drafts: Vec::new(),
                 tools: Vec::new(),
+                calls: Vec::new(),
                 over: true,
                 attempt,
             });
@@ -1517,6 +1551,11 @@ impl Actor {
             .as_ref()
             .map(|live| live.last_row.clone())
             .unwrap_or_default();
+        let mut calls = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.calls))
+            .unwrap_or_default();
         let mut batch = self.recorder.batch();
         for draft in unfinished {
             let piece = Entry::Reply(Reply {
@@ -1546,7 +1585,11 @@ impl Actor {
             Command::TurnEnded {
                 outcome: RunOutcome::Interrupted { reason },
                 ..
-            } => Some((ending_notice(turn, &name, "turn-interrupted", reason), true)),
+            } => {
+                let trace = facts.trace_id.clone();
+                let notice = ending_notice(turn, &name, "turn-interrupted", reason, trace);
+                Some((notice, true))
+            }
             _ => None,
         };
         if batch.command(command, now_ms).is_ok() {
@@ -1557,6 +1600,7 @@ impl Actor {
                 batch.item(written(notice, now_ms)?);
             }
             if let Some(end) = closing(&batch, turn, &closes, facts) {
+                cut_off(&mut batch, &mut calls, &end, now_ms)?;
                 batch.item(written(&end, now_ms)?);
             }
         }
@@ -1676,6 +1720,7 @@ impl Actor {
             offset: 0,
             drafts: Vec::new(),
             tools: Vec::new(),
+            calls: Vec::new(),
             over: false,
             attempt,
         });
@@ -1747,6 +1792,7 @@ impl Actor {
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
         let mut drafts = Vec::new();
         let mut tools = Vec::new();
+        let mut calls = Vec::new();
         let mut signals = Vec::new();
         let mut offset = 0;
         while offset < until {
@@ -1768,7 +1814,7 @@ impl Actor {
                             last_row = reply.id;
                         }
                         Signal::Tool(call) => {
-                            follow_tool(&mut tools, &call);
+                            follow_tool(&mut tools, &mut calls, &call);
                             // A use that is a part of a reply is no row: that reply is.
                             if call.reply.is_none() {
                                 last_row = call.id;
@@ -1811,6 +1857,7 @@ impl Actor {
             offset,
             drafts,
             tools,
+            calls,
             over: false,
             attempt,
         });
@@ -2010,6 +2057,7 @@ impl Actor {
                                         // not said: the next one says it.
                                         live.drafts.clear();
                                         live.tools.clear();
+                                        live.calls.clear();
                                         continue;
                                     }
                                 }
@@ -2033,10 +2081,9 @@ impl Actor {
                                 }),
                                 RunOutcome::Interrupted { reason } => {
                                     let name = turn_name(&live.message_id);
-                                    Some((
-                                        ending_notice(turn, name, "turn-interrupted", reason),
-                                        true,
-                                    ))
+                                    let trace = live.trace_id.clone();
+                                    let code = "turn-interrupted";
+                                    Some((ending_notice(turn, name, code, reason, trace), true))
                                 }
                                 RunOutcome::Completed | RunOutcome::Stopped { .. } => None,
                             };
@@ -2053,6 +2100,7 @@ impl Actor {
                                 && let Some(end) =
                                     closing(&batch, turn, &live.last_row, live.facts())
                             {
+                                cut_off(&mut batch, &mut live.calls, &end, t)?;
                                 batch.item(written(&end, t)?);
                             }
                             continue;
@@ -2091,6 +2139,7 @@ impl Actor {
                         }
                         Signal::Tool(mut call) => {
                             call.origin = live.origin.clone();
+                            call.trace_id = live.trace_id.clone();
                             // A call no message carries is a row, and work, when it begins.
                             let known = live.tools.iter().any(|tool| tool.id == call.id);
                             if call.reply.is_none()
@@ -2098,7 +2147,7 @@ impl Actor {
                             {
                                 follow(&mut batch, &mut live.said, turn, t)?;
                             }
-                            follow_tool(&mut live.tools, &call);
+                            follow_tool(&mut live.tools, &mut live.calls, &call);
                             Entry::Tool(call)
                         }
                         Signal::Notice(notice) => Entry::Notice(notice),
@@ -2131,11 +2180,13 @@ impl Actor {
                         turn_name(&live.message_id),
                         "turn-interrupted",
                         reason,
+                        live.trace_id.clone(),
                     );
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }
                 if ended && let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
+                    cut_off(&mut batch, &mut live.calls, &end, now_ms)?;
                     batch.item(written(&end, now_ms)?);
                 }
             }

@@ -71,6 +71,8 @@ pub enum ToolStatus {
     Running,
     Ok,
     Error,
+    /// Its turn was interrupted before it returned, and it never will.
+    Interrupted,
 }
 
 /// A tool call. One item when it starts and one when it ends, under the same key. It is a part
@@ -96,6 +98,10 @@ pub struct ToolCall {
     /// names none is a row by itself, as every call was before messages were rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply: Option<String>,
+    /// The trace of the turn that made the call: what its row is filed under when the
+    /// call is a row by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
 }
 
 /// Tool work came after a reply in the same turn: what the reply said was said along the way,
