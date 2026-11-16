@@ -416,14 +416,15 @@ mod tests {
 
     /// A worker that hears nothing and answers as the real one does: how many bytes the clip
     /// has, and a piece it is not sure was speech. What it is prompted with says how it
-    /// misbehaves.
+    /// misbehaves. (A line with a backslash in it is written with `printf`: what `echo`
+    /// makes of one differs from shell to shell.)
     const STAND_IN: &str = r#"#!/bin/sh
 while IFS= read -r line; do
   case "$line" in
     *'"op":"load"'*)
       case "$line" in
         *'"model_source":"broken"'*)
-          echo '{"event":"load_error","error":"no such model\n  File \"worker.py\", line 1"}'
+          printf '%s\n' '{"event":"load_error","error":"no such model\n  File \"worker.py\", line 1"}'
           exit 1 ;;
       esac
       echo 'a line that is no JSON'
