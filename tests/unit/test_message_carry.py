@@ -271,7 +271,9 @@ def test_a_live_row_of_an_old_turn_is_refused_for_related_words_only():
         rows = [*old, _live("more", text, trace=trace, revision=9)]
         return _changed(before, _inputs(rows=rows), rules=rules, **carried)
 
-    refused = "live_row_of_old_reply"
+    # Two words for two reasons: the row shows what an old reply said, or
+    # nothing was kept to compare it with and the trace alone decides.
+    refused, by_trace = "live_row_shows_old_reply", "live_row_of_old_reply"
     assert said("other words") == ""
     assert said("the old reply's words") == refused                     # the same
     assert said("the old reply's words, and more") == refused           # begin with them
@@ -283,10 +285,12 @@ def test_a_live_row_of_an_old_turn_is_refused_for_related_words_only():
     assert said("stored otherwise") == ""           # the row's text is not what is asked
     # Without the rule, without the words, or for a turn the carry did not
     # keep: by the trace alone, as before.
-    assert said("other words", rules=carry.RULES[:5]) == refused
-    assert said("other words", carried={**stored, "reply_words": None}) == refused
-    assert said("other words", carried={k: v for k, v in stored.items() if k != "reply_words"}) == refused
-    assert said("other words", carried={**stored, "reply_words": {"another": []}}) == refused
+    assert said("other words", rules=carry.RULES[:5]) == by_trace
+    assert said("other words", carried={**stored, "reply_words": None}) == by_trace
+    assert said("other words", carried={k: v for k, v in stored.items() if k != "reply_words"}) == by_trace
+    assert said("other words", carried={**stored, "reply_words": {"another": []}}) == by_trace
+    # By the trace alone it is that word whatever the row shows.
+    assert said("the old reply's words", rules=carry.RULES[:5]) == by_trace
     # A turn that is kept and said nothing is related to nothing.
     assert said("the old reply's words", carried={**stored, "reply_words": {"old-turn": []}}) == ""
     # The rule adds nothing where LIVE_ROWS already lets the row through.
@@ -303,14 +307,39 @@ def test_the_words_kept_are_those_of_the_newest_turns_while_they_fit(monkeypatch
     assert carry.reply_words(said) == {"b": ["two", "two more"]}
     monkeypatch.setattr(carry, "_WORDS_TRACES", 3)
     # A turn whose words do not fit is left out, and every older one with it.
-    monkeypatch.setattr(carry, "_WORDS_CHARS", 10)
+    # Each reply counts as it is stored: its characters and its two quotes.
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 14)
     assert carry.reply_words(said) == {}
-    monkeypatch.setattr(carry, "_WORDS_CHARS", 11)                      # "two" + "two more"
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 15)                      # "two" + "two more"
     assert carry.reply_words(said) == {"b": ["two", "two more"]}
-    monkeypatch.setattr(carry, "_WORDS_CHARS", 15)                      # and "four"
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 21)                      # and "four"
     assert carry.reply_words(said) == {"b": ["two", "two more"], "d": ["four"], "c": []}
-    monkeypatch.setattr(carry, "_WORDS_CHARS", 14)
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 20)
     assert carry.reply_words(said) == {"b": ["two", "two more"]}
+
+
+def test_the_limit_counts_the_words_as_the_checkpoint_stores_them(monkeypatch):
+    """The checkpoint stores its carry as JSON in ASCII: a letter that is not
+    ASCII takes six bytes there, an emoji twelve, a quote or a newline two.
+    Counted in characters, 60,152 of them became a carry of 360 KB under a
+    limit of 64 KB (review of #353)."""
+    import json
+    for text, size in (("abc", 5), ("å", 8), ("åäö", 20), ("\U0001F600", 14), ('say "x"', 11),
+                       ("a\nb", 6), ("", 2)):
+        assert carry.stored_size(text) == size == len(json.dumps(text)), text
+    words = "ø" * 100                                  # 100 characters, 602 bytes stored
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 601)
+    assert carry.reply_words([("a", words)]) == {}
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 602)
+    assert carry.reply_words([("a", words)]) == {"a": [words]}
+    # What is kept is never stored larger than the limit says, whatever it holds.
+    monkeypatch.setattr(carry, "_WORDS_BYTES", 65536)
+    for filler in ("x", "é", "\U0001F600", '"', "\n"):
+        said = [(f"t{turn}", filler * 9000 + str(reply)) for turn in range(3) for reply in range(3)]
+        kept = carry.reply_words(said)
+        assert sum(len(json.dumps(text)) for texts in kept.values() for text in texts) <= 65536, filler
+        assert len(json.dumps(kept, separators=(",", ":"))) <= 65536 + 64, filler
+    assert carry._WORDS_BYTES == 65536
 
 
 def test_related_is_one_function():

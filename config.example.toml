@@ -317,7 +317,8 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #                                   # only when a reply before the boundary with its trace has
 #                                   # words related to the row's (one begins with the other),
 #                                   # not for the trace alone. A full import then keeps those
-#                                   # words in its checkpoint. Off by default.
+#                                   # words in its checkpoint, up to 64 KB as stored. Off by
+#                                   # default.
 # carry_settled_turns = false       # true (with carry_later_turns): a turn that was running when
 #                                   # the frontier was published may have settled, and the
 #                                   # transcript rows from the boundary on may carry its stamps.
