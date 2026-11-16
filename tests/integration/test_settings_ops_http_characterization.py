@@ -235,3 +235,42 @@ def test_dirs_logs_a_host_home_failure(running_server, tmp_path, monkeypatch, in
         home_failure.setattr(pathlib.Path, "home", classmethod(no_home))
         assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
     assert logged == [("dirsPathRefused", failure)]
+
+
+@pytest.mark.parametrize("configured_root", [False, True], ids=["ordinary", "workspace"])
+@pytest.mark.parametrize("suffix", ["", "/", "/x"])
+def test_dirs_preserves_a_named_home_ending_in_space(
+        running_server, tmp_path, monkeypatch, configured_root, suffix):
+    pwd = pytest.importorskip("pwd")
+    base, _ctx, _srv = running_server
+    actual_home = tmp_path / "named home "
+    sibling = tmp_path / "named home"
+    (actual_home / "x-real-home").mkdir(parents=True)
+    (sibling / "x-trimmed-home").mkdir(parents=True)
+    original_lookup = pwd.getpwnam
+    def lookup(username):
+        if username == "clarp-space-home":
+            return SimpleNamespace(pw_dir=str(actual_home))
+        return original_lookup(username)
+    monkeypatch.setattr(pwd, "getpwnam", lookup)
+    if configured_root:
+        monkeypatch.setenv("CLARP_DEPLOYMENT_MODE", "container")
+        monkeypatch.setenv("CLARP_WORKSPACE_ROOT", str(tmp_path))
+    else:
+        monkeypatch.delenv("CLARP_DEPLOYMENT_MODE", raising=False)
+    path = "~clarp-space-home" + suffix
+    expected = ({"base": str(tmp_path), "matches": [str(actual_home)]} if suffix == "" else
+                {"base": str(actual_home), "matches": [str(actual_home / "x-real-home")]})
+    query = urllib.parse.urlencode({"path": path})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, expected)
+
+
+@pytest.mark.parametrize("path", ["~", "~/"])
+def test_dirs_classifier_bypasses_own_home_without_expanding(monkeypatch, path):
+    import pathlib
+    from lib.routes import settings as settings_routes
+
+    def unexpected_expansion(_path):
+        pytest.fail("The named-user classifier must not expand the Host's own home")
+    monkeypatch.setattr(pathlib.Path, "expanduser", unexpected_expansion)
+    assert settings_routes._named_user_miss(path) is False
