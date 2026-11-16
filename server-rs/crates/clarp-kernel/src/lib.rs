@@ -24,5 +24,6 @@ pub mod python;
 pub mod recovery;
 pub mod requests;
 pub mod roster;
+pub mod said;
 pub mod tools;
 pub mod turn;
