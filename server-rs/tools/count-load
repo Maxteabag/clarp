@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""What a Python Host's clients asked of it, counted from its own request log, and how much of that
+goes to a route the Rust Host has.
+
+    server-rs/tools/count-load [--days N] [--unit clarp.service] [--top N]
+
+Reads the journal of the Python Host's front unit on this machine (its request log: one line for each
+request), for the last N days (3), and the route patterns in the Rust Host's sources beside this
+script. Prints counts and routes: never a query, a body, an address or anything that was said. An id
+in a path (a file, a message, an agent's session) is printed as `<x>`.
+
+Two counts. By what was READ and DONE together: how many requests went to a route this Host has, and
+which routes it has not, by how often they were asked. And by what was DONE alone: the requests that
+change something (not GET) and were taken (answered 2xx), which is what a user did on that Host.
+
+The order in which the Rust Host is built follows these counts (REBUILD.md, "What the load still asks
+for"). A route this Host has may still answer that it has nothing of the kind: what is counted here is
+whether a client is answered, not whether everything behind the route is built.
+"""
+import argparse
+import collections
+import pathlib
+import re
+import subprocess
+import sys
+
+LINE = re.compile(r'"(GET|POST|PUT|DELETE|PATCH) (/[^ ?"]*)(?:\?[^ "]*)? HTTP/[0-9.]+" (\d{3})')
+METHOD = re.compile(r'\b(get|post|put|delete|patch|any)\(')
+# What names one thing in a path: a number, a digest, an id a Host or an app minted, a file.
+ONE_THING = re.compile(
+    r'[0-9a-f]{8,}|[0-9]+|[A-Za-z0-9_-]*[0-9a-f]{12,}[A-Za-z0-9_.-]*|u-[0-9A-Fa-f-]{20,}|asset_[A-Za-z0-9_]{20,}'
+    r'|[0-9A-Fa-f]{8}-[0-9A-Fa-f-]{27}'
+    r'|.*\.(?:mp3|wav|png|jpg|jpeg|webp|m4a|json|html|js|css|svg|ico|pdf|mp4|txt|woff2?)')
+
+
+def routes_of(sources: pathlib.Path):
+    """The route patterns the Rust Host's sources declare, each with the methods it takes."""
+    have = []
+    for source in sorted(sources.glob('*.rs')):
+        text = source.read_text()
+        for found in re.finditer(r'\.route\(\s*"([^"]+)"\s*,', text):
+            rest = text[found.end():found.end() + 600]
+            depth, end = 1, 0
+            for at, sign in enumerate(rest):
+                depth += sign == '('
+                depth -= sign == ')'
+                if depth == 0:
+                    end = at
+                    break
+            methods = {method.upper() for method in METHOD.findall(rest[:end])}
+            if 'ANY' in methods:
+                methods = {'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}
+            pattern = ''.join('.*' if part.startswith('{*') else '[^/]+' if part.startswith('{') else re.escape(part)
+                              for part in re.split(r'(\{[^}]*\})', found.group(1)))
+            have.append((re.compile('^' + pattern + '/?$'), methods))
+    return have
+
+
+def shape(path: str) -> str:
+    return '/'.join('<x>' if ONE_THING.fullmatch(part) else part for part in path.split('/'))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--days', type=int, default=3)
+    parser.add_argument('--unit', default='clarp.service')
+    parser.add_argument('--top', type=int, default=30)
+    args = parser.parse_args()
+    here = pathlib.Path(__file__).resolve().parent
+    have = routes_of(here.parent / 'crates' / 'clarp-host' / 'src')
+    journal = subprocess.Popen(
+        ['journalctl', '--user', '-u', args.unit, '--since', f'-{args.days} days', '--no-pager', '-o', 'cat'],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors='replace')
+    asked, there, done = collections.Counter(), collections.Counter(), collections.Counter()
+    for line in journal.stdout:
+        found = LINE.search(line)
+        if not found:
+            continue
+        method, path, status = found.groups()
+        key = (method, shape(path))
+        asked[key] += 1
+        if any(pattern.match(path) and method in methods for pattern, methods in have):
+            there[key] += 1
+        if method != 'GET' and status.startswith('2'):
+            done[key] += 1
+    journal.wait()
+    total, served = sum(asked.values()), sum(there.values())
+    if not total:
+        print(f'no requests in the journal of {args.unit} in {args.days} days', file=sys.stderr)
+        return 1
+    print(f'{args.days} days of {args.unit}: {total} requests over {len(asked)} routes; '
+          f'{served} of them ({100 * served / total:.1f} per cent) go to a route the Rust Host has '
+          f'({len(have)} route patterns in its sources)')
+    missing = sorted(((count - there[key], key) for key, count in asked.items() if count > there[key]), reverse=True)
+    print(f'asked and not there: {len(missing)} routes, {sum(count for count, _ in missing)} requests')
+    for count, (method, path) in missing[:args.top]:
+        print(f'{count:8d}  {method:6s} {path}')
+    print(f'what was done (not GET, answered 2xx): {sum(done.values())} requests over {len(done)} routes')
+    not_done = [(count, key) for key, count in done.most_common() if there[key] < asked[key]]
+    for (method, path), count in done.most_common(args.top):
+        mark = '' if there[(method, path)] == asked[(method, path)] else '   <- no route here'
+        print(f'{count:8d}  {method:6s} {path}{mark}')
+    print(f'done there and without a route here: {len(not_done)} routes, {sum(count for count, _ in not_done)} requests')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
