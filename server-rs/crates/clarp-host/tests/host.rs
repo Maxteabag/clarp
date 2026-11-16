@@ -10081,3 +10081,80 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         (200, "another picture")
     );
 }
+
+#[test]
+fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
+    let place = Place::new("not-yet");
+    let host = place.start();
+    let made = |body: Value| host.ask("POST", "/agents", Some(&body));
+    let agents = |host: &Host| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    host.new_agent("Echo");
+
+    // Starting an agent again in place, and taking up or forking a past session of a tool.
+    let (status, why) = made(json!({ "name": "Echo", "session": "echo", "replace_sid": "echo" }));
+    assert_eq!(
+        (status, why["error"].as_str()),
+        (400, Some("relaunch_unsupported")),
+        "{why}"
+    );
+    assert!(
+        why["message"]
+            .as_str()
+            .unwrap()
+            .contains("not built on this Host yet")
+    );
+    for key in ["resume_session_id", "fork_session_id"] {
+        let (status, why) = made(json!({ "name": "Zed", key: "0b6b2f4e-synthetic" }));
+        assert_eq!(
+            (status, why["error"].as_str()),
+            (400, Some("resume_unsupported")),
+            "{why}"
+        );
+    }
+    // A tool is given no servers of its own here: none is known.
+    let (status, why) =
+        made(json!({ "name": "Zed", "mcp_servers": [" teams ", "outlook", "teams", ""] }));
+    assert_eq!(
+        (status, why),
+        (
+            400,
+            json!({ "error": "unknown mcp server", "message": "Unknown MCP server: teams, outlook" })
+        )
+    );
+    for no_list in [json!("teams"), json!(null), json!(["teams", 3])] {
+        let (status, why) = made(json!({ "name": "Zed", "mcp_servers": no_list }));
+        assert_eq!(
+            (status, why["error"].as_str()),
+            (400, Some("mcp_servers must be a list of names"))
+        );
+    }
+    assert_eq!(agents(&host), 1, "none of these made an agent");
+    // An empty list, and no words at all for the rest, are what an app sends for a plain agent.
+    let (status, plain) = made(json!({
+        "name": "Zed", "backend": "scripted", "mcp_servers": [], "replace_sid": "", "resume_session_id": " ",
+    }));
+    assert_eq!(status, 200, "{plain}");
+    assert_eq!(agents(&host), 2);
+
+    // The sessions a tool had in a directory: none is offered, in the Python Host's shape.
+    let home = std::env::var("HOME").unwrap();
+    let past = host.get("/past-sessions?cwd=~&backend=claude");
+    assert_eq!(
+        past,
+        json!({ "cwd": home, "scope": "workspace", "sessions": [] })
+    );
+    let all = host.get("/past-sessions?scope=ALL");
+    assert_eq!(
+        (&all["scope"], &all["sessions"]),
+        (&json!("all"), &json!([]))
+    );
+    // The directories a path that is being typed can go on with.
+    let dirs = host.get("/dirs?path=/");
+    assert_eq!(dirs["base"], "/");
+    assert!(!dirs["matches"].as_array().unwrap().is_empty());
+}

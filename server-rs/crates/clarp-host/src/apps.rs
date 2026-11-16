@@ -590,6 +590,20 @@ async fn dirs(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
     Json(json!({ "base": base, "matches": matches }))
 }
 
+/// `GET /past-sessions?cwd=&backend=&scope=`: the sessions a tool had in a directory, for an
+/// app that offers to take one up. Taking one up is not built here, so none is offered:
+/// the answer is the Python Host's for a directory in which a tool never ran.
+async fn past_sessions(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
+    let asked = |key: &str| query.get(key).map_or("", |said| said.trim());
+    let cwd = crate::config::typed_path(asked("cwd"), &crate::config::home());
+    let all = asked("scope").eq_ignore_ascii_case("all");
+    Json(json!({
+        "cwd": cwd.display().to_string(),
+        "scope": if all { "all" } else { "workspace" },
+        "sessions": [],
+    }))
+}
+
 async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
@@ -616,6 +630,7 @@ pub fn routes() -> Router<App> {
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
         .route("/dirs", get(dirs))
+        .route("/past-sessions", get(past_sessions))
         .route(
             "/personalities/settings",
             get(personalities).post(set_personalities),
