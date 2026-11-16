@@ -239,6 +239,13 @@ impl Config {
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
         let google_token_endpoint = stand_in("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
         let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
+        // A token of the owner's real account is never handed to a stand-in, and a token a
+        // stand-in made up is never sent to Google: both are stood in for, or neither.
+        if google_token_endpoint.is_empty() != google_speech_endpoint.is_empty() {
+            let both =
+                "CLARP_GOOGLE_TOKEN_ENDPOINT and CLARP_GOOGLE_SPEECH_ENDPOINT are given together";
+            return Err(both.to_string());
+        }
         let chirp_decoder = std::env::var("CLARP_CHIRP_DECODER").unwrap_or_default();
         Ok(Self {
             run_dir,

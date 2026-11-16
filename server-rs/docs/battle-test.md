@@ -204,7 +204,8 @@ answered that the account has no credits left (`quota_exceeded`), which this Hos
 words, status 500. That is the owner's account as it stood that morning, not a defect of either Host; it was
 told to the Python Host's release owner. It showed something else: on the Python Host, the two agents that
 are spoken to in Norwegian have engines of their own with a second one after Scribe, and went on being heard
-by that one. This Host has no engines per agent yet (`differences.md`).
+by that one. This Host had no engines per agent then; they were built the same day (an agent's own language
+and engines, and Chirp), which is where that observation led.
 
 ## The soak so far
 

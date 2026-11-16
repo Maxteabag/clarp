@@ -10,6 +10,12 @@
 //! which engine a clip goes to on this Host, and what is kept so that a request that comes
 //! twice is answered once: an answer is kept under the name of its job for thirty days,
 //! beside the Host's data, and nothing of a clip is kept at all.
+//!
+//! A clip is for the agent its user is looking at. That agent can have a language and
+//! engines of its own ([`clarp_kernel::languages`]): its first engine hears the clip, and
+//! the next one only when the one before failed, so that one provider's outage does not
+//! lose what was said. Only the last one's failure is the answer. These are settings the
+//! owner makes from an app (`POST /transcription-providers`), kept with the fleet.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -22,17 +28,21 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_kernel::heard::{self, OWN_PROVIDER, PROVIDERS};
-use clarp_speech::listen::{Asked, Clip, Deaf, Listener};
+use clarp_kernel::languages;
+use clarp_kernel::said::Who;
+use clarp_speech::chirp::Chirp;
+use clarp_speech::listen::{Asked, Clip, Deaf, Heard, Listener};
 use clarp_speech::scribe::Scribe;
 use clarp_speech::whisper::{Whisper, Worker};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
-use crate::edge::App;
+use crate::edge::{ApiError, App};
+use crate::fleet::Directory;
 use crate::ids;
 use crate::media::header_text;
-use crate::owner::OwnerFile;
+use crate::owner::{self, OwnerFile};
 
 /// How long an answer is kept for a request that may come again.
 const KEPT_FOR: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -51,11 +61,15 @@ pub struct Ears {
     own: Option<(Arc<dyn Listener>, String)>,
     /// ElevenLabs Scribe, which is there when its key is.
     scribe: Arc<dyn Listener>,
+    /// Google's Chirp, which is there when the owner's file names a project and his
+    /// account's file can be read.
+    chirp: Arc<dyn Listener>,
     /// Where keys are read: the owner's own file, then this Host's environment.
     keys: OwnerFile,
-    /// The engine that hears a clip nobody named one for: `local`, or a cloud engine's name.
+    /// The engine that hears a clip nobody named one for, unless the owner set another
+    /// from an app: `local`, or a cloud engine's name.
     engine: String,
-    /// The language that is spoken to this Host's agents.
+    /// The language that is spoken to this Host's agents, unless the owner set another.
     language: String,
     /// Where answers are kept for requests that come again.
     kept: PathBuf,
@@ -63,8 +77,24 @@ pub struct Ears {
     jobs: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
-/// The name a client gives the one cloud engine this Host has.
+/// The names a client gives the engines over the network that this Host has.
 const SCRIBE: &str = "elevenlabs:scribe_v2";
+const CHIRP: &str = "google:chirp_3";
+
+/// Where the owner's choice of the engine that hears by default is kept, and how a turn of
+/// speech is found to end (the Python Host's keys).
+const ENGINE_KEY: &str = "transcription.engine";
+const TURN_TAKING_KEY: &str = "transcription.turn_taking";
+const LONG_FORM_THRESHOLD_KEY: &str = "transcription.long_form_threshold_sec";
+
+/// An engine that was chosen for a clip.
+struct Chosen {
+    engine: Arc<dyn Listener>,
+    /// What is said while it loads.
+    loading: String,
+    /// The provider of an engine over the network. `None`: the Host's own.
+    provider: Option<&'static str>,
+}
 
 /// Why a clip was not turned into text: the status and the words an app is given.
 type Refused = (StatusCode, String);
@@ -77,7 +107,7 @@ impl Ears {
             let worker = Worker {
                 args: vec![config.whisper_worker.to_string_lossy().to_string()],
                 compute_type: config.whisper_compute.clone(),
-                language: Some(config.speech_language.clone()).filter(|said| !said.is_empty()),
+                language: languages::own_language(&config.whisper_model).map(str::to_string),
                 scratch: config.run_dir.join("heard"),
                 ..Worker::new(&config.whisper_python, &config.whisper_source)
             };
@@ -92,9 +122,23 @@ impl Ears {
         if !config.scribe_endpoint.is_empty() {
             scribe = scribe.at(config.scribe_endpoint.clone());
         }
+        // The owner's account at Google is read where he keeps it, each time it is needed.
+        let read = keys.clone();
+        let account = move || read.read().and_then(|file| owner::google_speech(&file));
+        let mut chirp = Chirp::new("chirp_3", Box::new(account));
+        if !config.google_speech_endpoint.is_empty() {
+            chirp = chirp.at(
+                config.google_token_endpoint.clone(),
+                config.google_speech_endpoint.clone(),
+            );
+        }
+        if !config.chirp_decoder.is_empty() {
+            chirp = chirp.decoded_by(vec![config.chirp_decoder.clone()]);
+        }
         Self {
             own,
             scribe: Arc::new(scribe),
+            chirp: Arc::new(chirp),
             keys,
             engine: config.transcription_engine.clone(),
             language: config.speech_language.clone(),
@@ -110,52 +154,136 @@ impl Ears {
     }
 
     /// Whether a provider's engines can be used on this Host: it is built here and has
-    /// its key.
+    /// what it needs: its key, or for Google the owner's project and account.
     fn has(&self, provider: &str) -> bool {
-        provider == "elevenlabs" && self.keys.key(provider).is_some()
+        match provider {
+            "elevenlabs" => self.keys.key(provider).is_some(),
+            "google" => {
+                let file = self.keys.read();
+                file.is_some_and(|file| owner::google_speech(&file).is_some())
+            }
+            _ => false,
+        }
     }
 
-    /// Which engine hears a clip for which the app asked for `requested` (nothing: whatever
-    /// this Host hears with). With the engine comes what is said while it loads.
-    fn chosen(&self, requested: &str) -> Result<(Arc<dyn Listener>, String), Refused> {
-        if self.own.is_none() && !self.has("elevenlabs") {
-            return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
-        }
+    /// The engine that hears a clip nobody named one for: what the owner set from an app,
+    /// else what this Host was started with.
+    fn default_engine(&self, directory: &Directory) -> String {
+        let set = directory.setting(ENGINE_KEY).map(str::trim);
+        let set = set.filter(|engine| !engine.is_empty());
+        set.unwrap_or(&self.engine).to_string()
+    }
+
+    /// The engines a clip is tried on, in order: the first hears it, and each next one only
+    /// when the one before failed. `requested` is what the app asked for by name (nothing:
+    /// whatever this Host hears with), `own` are the engines of the agent the clip is for,
+    /// which come before what an app asks for.
+    fn order(&self, requested: &str, own: &[String], default_engine: &str) -> Vec<String> {
         // The cloud engine chosen for this Host stands in for its own; what an app asks
         // for by name still comes first.
         let stands_in =
-            heard::wants_cloud_engine(requested, &[], false) && heard::is_cloud(&self.engine);
-        let cloud = if stands_in { self.engine.as_str() } else { "" };
-        let model = heard::plan(requested, &[], cloud, "", false).model;
+            heard::wants_cloud_engine(requested, own, false) && heard::is_cloud(default_engine);
+        let cloud = if stands_in { default_engine } else { "" };
+        let plan = heard::plan(requested, own, cloud, "", false);
+        let mut order = vec![plan.model];
+        order.extend(plan.fallbacks);
+        order
+    }
+
+    /// The engine a name stands for on this Host. With the engine comes what is said while
+    /// it loads.
+    fn engine_of(&self, model: &str) -> Result<Chosen, Refused> {
+        if self.own.is_none() && !self.has("elevenlabs") && !self.has("google") {
+            return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
+        }
         let own_id = self.own_id();
-        let is_own = matches!(model.as_str(), "" | "local" | "server-default")
-            || own_id.as_deref() == Some(model.as_str());
+        let is_own =
+            matches!(model, "" | "local" | "server-default") || own_id.as_deref() == Some(model);
         if is_own {
             let Some((engine, _)) = &self.own else {
                 return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
             };
-            let loading = match model.as_str() {
+            let loading = match model {
                 "" => heard::LOADING.to_string(),
                 named => format!("transcription model loading: {named}"),
             };
-            return Ok((engine.clone(), loading));
+            return Ok(Chosen {
+                engine: engine.clone(),
+                loading,
+                provider: None,
+            });
         }
-        if !heard::is_cloud(&model) {
-            return Err((StatusCode::BAD_REQUEST, heard::not_installed(&model)));
+        if !heard::is_cloud(model) {
+            return Err((StatusCode::BAD_REQUEST, heard::not_installed(model)));
         }
-        let Some((provider, _)) = heard::cloud_model(&model) else {
+        let Some((provider, _)) = heard::cloud_model(model) else {
             let unknown = format!("unknown transcription engine: {model}");
             return Err((StatusCode::INTERNAL_SERVER_ERROR, unknown));
         };
-        if model != SCRIBE {
+        let engine = match model {
+            SCRIBE => &self.scribe,
+            CHIRP => &self.chirp,
             // An engine the contract lists and this Host does not have.
-            return Err((StatusCode::BAD_REQUEST, heard::not_installed(&model)));
-        }
-        if self.keys.key(provider.id).is_none() {
+            _ => return Err((StatusCode::BAD_REQUEST, heard::not_installed(model))),
+        };
+        if !self.has(provider.id) {
             let no_key = format!("{} API key is not configured", provider.id);
             return Err((StatusCode::INTERNAL_SERVER_ERROR, no_key));
         }
-        Ok((self.scribe.clone(), heard::LOADING.to_string()))
+        Ok(Chosen {
+            engine: engine.clone(),
+            loading: heard::LOADING.to_string(),
+            provider: Some(provider.id),
+        })
+    }
+
+    /// Has one engine hear a clip. `language` is the language of the agent the clip is
+    /// for: an engine over the network is handed it as that engine takes it, and the
+    /// Host's own is told what its model knows.
+    async fn heard_by(
+        self: &Arc<Self>,
+        model: &str,
+        language: &str,
+        listen_for: &str,
+        clip: (&axum::body::Bytes, &str),
+    ) -> Result<Heard, Told> {
+        let chosen = self
+            .engine_of(model)
+            .map_err(|(status, why)| refuse(status, why))?;
+        let handed = match chosen.provider {
+            Some(provider) => languages::handed(language, provider)
+                .map_err(|why| refuse(StatusCode::INTERNAL_SERVER_ERROR, why))?,
+            None => {
+                let own = self.own.as_ref().map(|(_, model)| model.as_str());
+                let knows = own.and_then(languages::own_language);
+                knows.map(str::to_string)
+            }
+        };
+        let (engine, listen_for) = (chosen.engine, listen_for.to_string());
+        let (audio, kind) = (clip.0.clone(), clip.1.to_string());
+        let said = tokio::task::spawn_blocking(move || {
+            let clip = Clip {
+                audio: &audio,
+                content_type: &kind,
+            };
+            let asked = Asked {
+                listen_for: &listen_for,
+                language: handed.as_deref(),
+                wait: WAITS,
+            };
+            engine.hear(clip, asked)
+        })
+        .await;
+        match said {
+            Ok(Ok(said)) => Ok(said),
+            Ok(Err(Deaf::Loading)) => Err(refuse(StatusCode::SERVICE_UNAVAILABLE, chosen.loading)),
+            Ok(Err(Deaf::Busy)) => Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY)),
+            Ok(Err(Deaf::Failed(why))) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why)),
+            Err(_) => {
+                let cut_off = "the clip could not be heard";
+                Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, cut_off))
+            }
+        }
     }
 
     /// The one who may answer this job now. A job without a name is nobody's twice.
@@ -307,39 +435,52 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         }
     }
 
-    let (engine, loading) = ears
-        .chosen(&requested)
-        .map_err(|(status, why)| refuse(status, why))?;
+    // The clip is for the agent its user is looking at: that agent's engines, when it has
+    // its own, and its language.
+    let directory = app.fleet.directory();
+    let (own, language) = spoken_to(&directory, &ears.language);
+    let order = ears.order(&requested, &own, &ears.default_engine(&directory));
     let listen_for = names(app);
-    let language = Some(ears.language.clone()).filter(|language| !language.is_empty());
-    let (clip, kind) = (audio.clone(), content_type.clone());
-    let said = tokio::task::spawn_blocking(move || {
-        let clip = Clip {
-            audio: &clip,
-            content_type: &kind,
-        };
-        let asked = Asked {
-            listen_for: &listen_for,
-            language: language.as_deref(),
-            wait: WAITS,
-        };
-        engine.hear(clip, asked)
-    })
-    .await;
-    let said = match said {
-        Ok(Ok(said)) => said,
-        Ok(Err(Deaf::Loading)) => return Err(refuse(StatusCode::SERVICE_UNAVAILABLE, loading)),
-        Ok(Err(Deaf::Busy)) => return Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY)),
-        Ok(Err(Deaf::Failed(why))) => {
-            // Why, and nothing of what was said: an engine's words hold none of it.
-            eprintln!("clarp-host: a clip was not turned into text: {why}");
-            return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why));
+    let mut said = None;
+    for (place, model) in order.iter().enumerate() {
+        let heard = ears
+            .heard_by(
+                model,
+                &language,
+                &listen_for,
+                (&audio, content_type.as_str()),
+            )
+            .await;
+        match heard {
+            Ok(heard) => {
+                said = Some(heard);
+                break;
+            }
+            Err((status, why)) => {
+                // Why, and nothing of what was said: an engine's words hold none of it.
+                let engine = if model.is_empty() {
+                    "the Host's own"
+                } else {
+                    model
+                };
+                let words = why["error"].as_str().unwrap_or("");
+                if place + 1 == order.len() {
+                    if status == StatusCode::INTERNAL_SERVER_ERROR {
+                        eprintln!(
+                            "clarp-host: a clip was not turned into text ({engine}): {words}"
+                        );
+                    }
+                    return Err((status, why));
+                }
+                eprintln!(
+                    "clarp-host: {engine} did not hear a clip, the next engine is asked: {words}"
+                );
+            }
         }
-        Err(error) => {
-            eprintln!("clarp-host: hearing a clip was cut off: {error}");
-            let cut_off = "the clip could not be heard";
-            return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, cut_off));
-        }
+    }
+    let Some(said) = said else {
+        let nobody = "no engine heard the clip";
+        return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, nobody));
     };
     // What the engine was sure was speech, unless it is something engines invent on silence.
     let text = heard::kept(&heard::joined(&said.segments));
@@ -399,6 +540,40 @@ fn cloud_models(ears: &Ears) -> Vec<Value> {
     rows
 }
 
+/// The engines and the language of the agent a clip is for: the agent its user is looking
+/// at. Its own engines, in the order they are tried (none: it is heard like every agent),
+/// and its own language, else the Host's: what the owner set from an app, else what the
+/// Host was started with.
+fn spoken_to(directory: &Directory, started_with: &str) -> (Vec<String>, String) {
+    let looked_at = directory.focus.as_deref().and_then(|agent_id| {
+        let mut members = directory.members.iter();
+        members.find(|member| member.record.agent_id == agent_id)
+    });
+    let who = looked_at.map(|member| Who {
+        name: &member.record.persona,
+        persona: &member.record.persona,
+        session: &member.record.session,
+    });
+    let engines = languages::stored(directory.setting(languages::AGENT_ENGINES_KEY));
+    let own = who.and_then(|who| languages::of_agent(&engines, who));
+    let spoken = languages::languages(directory.setting(languages::AGENT_LANGUAGES_KEY));
+    let language = match who.and_then(|who| languages::of_agent(&spoken, who)) {
+        Some(own) => own.to_string(),
+        None => languages::selected(directory.setting(languages::LANGUAGE_KEY), started_with),
+    };
+    (own.map(languages::engines).unwrap_or_default(), language)
+}
+
+/// A map of single agents as an app is told it: each name with its text.
+fn told_map(entries: Vec<(String, String)>) -> Value {
+    let fields = entries.into_iter();
+    Value::Object(
+        fields
+            .map(|(name, text)| (name, Value::String(text)))
+            .collect(),
+    )
+}
+
 /// `GET /transcription-capabilities`: which engines an app may ask for by name, and which
 /// one hears a clip nobody named one for.
 async fn capabilities(State(app): State<App>) -> Json<Value> {
@@ -415,7 +590,7 @@ async fn capabilities(State(app): State<App>) -> Json<Value> {
     Json(json!({
         "available": !models.is_empty(),
         "default_model": ears.own_id().unwrap_or_default(),
-        "engine": ears.engine,
+        "engine": ears.default_engine(&app.fleet.directory()),
         "turn_taking": "native",
         "models": models,
         "catalog": [],
@@ -426,7 +601,20 @@ async fn capabilities(State(app): State<App>) -> Json<Value> {
 /// `GET /transcription-providers`: what the settings of speech in are on this Host, and
 /// what could be chosen. Where a turn of speech ends is found on the phone itself.
 async fn providers(State(app): State<App>) -> Json<Value> {
+    Json(status(&app))
+}
+
+/// How long a recording is before it would go to a stronger engine, as it is kept: thirty
+/// seconds unless the owner set another.
+fn long_form_threshold(directory: &Directory) -> i64 {
+    let kept = directory.setting(LONG_FORM_THRESHOLD_KEY);
+    kept.and_then(|kept| kept.parse().ok()).unwrap_or(30)
+}
+
+/// The settings of speech in, as an app's screen draws them.
+fn status(app: &App) -> Value {
     let ears = &app.ears;
+    let directory = app.fleet.directory();
     let models = cloud_models(ears);
     let listed: Vec<Value> = PROVIDERS
         .iter()
@@ -438,18 +626,18 @@ async fn providers(State(app): State<App>) -> Json<Value> {
             })
         })
         .collect();
-    Json(json!({
-        "engine": ears.engine,
-        "language": ears.language,
-        "agent_languages": {},
-        "agent_engines": {},
+    json!({
+        "engine": ears.default_engine(&directory),
+        "language": languages::selected(directory.setting(languages::LANGUAGE_KEY), &ears.language),
+        "agent_languages": told_map(languages::languages(directory.setting(languages::AGENT_LANGUAGES_KEY))),
+        "agent_engines": told_map(languages::stored(directory.setting(languages::AGENT_ENGINES_KEY))),
         "call_languages": "",
         "call_engines": "",
         "call_policy_error": "",
         "turn_taking": "native",
         "retain_audio": false,
         "long_form_model": "",
-        "long_form_threshold_sec": 30,
+        "long_form_threshold_sec": long_form_threshold(&directory),
         "long_form_threshold_range": { "min": 1, "max": 3600 },
         "stream_path": "",
         "provider_turn_taking_available": false,
@@ -459,7 +647,136 @@ async fn providers(State(app): State<App>) -> Json<Value> {
         ],
         "providers": listed,
         "models": models,
-    }))
+    })
+}
+
+/// `POST /transcription-providers`: the owner changes the settings of speech in from an
+/// app. Only what a save names is changed. The rules, their order and the words a change
+/// is refused in are the Python Host's (`stt_providers.update_settings`); what that Host
+/// can be set to and this one has not built is refused, and says so.
+async fn set_providers(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let bad = |why: &str| ApiError::new(StatusCode::BAD_REQUEST, why);
+    // No body at all is an empty save.
+    let data = match body.is_empty() {
+        true => serde_json::Map::new(),
+        false => match serde_json::from_slice::<Value>(&body) {
+            Ok(Value::Object(data)) => data,
+            _ => return Err(bad("bad json")),
+        },
+    };
+    let named = |key: &str| data.get(key).filter(|value| !value.is_null());
+    let texts = ["engine", "turn_taking"].map(|key| data.get(key));
+    if texts.iter().flatten().any(|value| !value.is_string()) {
+        return Err(bad("engine and turn_taking must be strings"));
+    }
+    let directory = app.fleet.directory();
+    let mut settings: Vec<(String, String)> = Vec::new();
+    // An engine the contract lists is one that can be named, whether this Host can use it
+    // or not; a name with a colon that the contract does not list is a model of the
+    // Host's own kind, which nobody checks here.
+    let unknown = |engine: &str| {
+        heard::cloud_model(engine).is_none() && (heard::is_cloud(engine) || !engine.contains(':'))
+    };
+    let engine = data.get("engine").and_then(Value::as_str).map(|engine| {
+        let engine = engine.trim();
+        if engine.is_empty() { "local" } else { engine }.to_string()
+    });
+    if let Some(engine) = &engine {
+        if engine != "local" && unknown(engine) {
+            return Err(bad(&format!("unknown transcription engine: {engine}")));
+        }
+        settings.push((ENGINE_KEY.to_string(), engine.clone()));
+    }
+    let strategy = data
+        .get("turn_taking")
+        .and_then(Value::as_str)
+        .map(|strategy| {
+            let strategy = strategy.trim();
+            if strategy.is_empty() {
+                "native"
+            } else {
+                strategy
+            }
+            .to_string()
+        });
+    if let Some(strategy) = &strategy
+        && !matches!(strategy.as_str(), "native" | "provider")
+    {
+        return Err(bad(&format!("unknown turn-taking strategy: {strategy}")));
+    }
+    match named("retain_audio") {
+        Some(Value::Bool(false)) | None => {}
+        Some(Value::Bool(true)) => {
+            return Err(bad("clips are not kept on this Host yet (retain_audio)"));
+        }
+        Some(_) => return Err(bad("retain_audio must be boolean")),
+    }
+    match named("long_form_model") {
+        None => {}
+        Some(Value::String(model)) if model.trim().is_empty() => {}
+        Some(Value::String(model)) if unknown(model.trim()) => {
+            let model = model.trim();
+            return Err(bad(&format!("unknown transcription engine: {model}")));
+        }
+        Some(Value::String(_)) => {
+            return Err(bad(
+                "long recordings go to no other engine on this Host yet (long_form_model)",
+            ));
+        }
+        Some(_) => return Err(bad("long_form_model must be a string")),
+    }
+    match named("long_form_threshold_sec") {
+        None => {}
+        Some(Value::Number(seconds)) if seconds.is_i64() || seconds.is_u64() => {
+            let Some(seconds) = seconds
+                .as_i64()
+                .filter(|seconds| (1..=3600).contains(seconds))
+            else {
+                return Err(bad("long_form_threshold_sec must be between 1 and 3600"));
+            };
+            settings.push((LONG_FORM_THRESHOLD_KEY.to_string(), seconds.to_string()));
+        }
+        Some(_) => return Err(bad("long_form_threshold_sec must be an integer")),
+    }
+    if let Some(language) = named("language") {
+        let language = languages::code(language).map_err(bad)?;
+        settings.push((languages::LANGUAGE_KEY.to_string(), language));
+    }
+    if let Some(change) = named("agent_engines") {
+        let known = |engine: &str| heard::cloud_model(engine).is_some();
+        let kept = directory.setting(languages::AGENT_ENGINES_KEY);
+        let changed = languages::engines_changed(kept, change, &known).map_err(|why| bad(&why))?;
+        settings.push((languages::AGENT_ENGINES_KEY.to_string(), changed));
+    }
+    if let Some(change) = named("agent_languages") {
+        let kept = directory.setting(languages::AGENT_LANGUAGES_KEY);
+        let changed = languages::languages_changed(kept, change).map_err(|why| bad(&why))?;
+        settings.push((languages::AGENT_LANGUAGES_KEY.to_string(), changed));
+    }
+    // Where a turn of speech ends is found on the phone: no engine of this Host finds it.
+    let now = engine.unwrap_or_else(|| app.ears.default_engine(&directory));
+    let finds_turns =
+        heard::cloud_model(&now).is_some_and(|(provider, _)| provider.turn_detection == "own");
+    if strategy.as_deref() == Some("provider") {
+        return Err(bad(if finds_turns {
+            "an engine does not find the end of a turn on this Host yet (turn_taking)"
+        } else {
+            "provider-owned turn taking needs an engine that detects turns"
+        }));
+    }
+    if let Some(strategy) = strategy {
+        settings.push((TURN_TAKING_KEY.to_string(), strategy));
+    }
+    if named("call_languages").is_some() || named("call_engines").is_some() {
+        return Err(bad("calls are not available on this Host yet"));
+    }
+    app.fleet.set(settings).await?;
+    let mut told = status(&app);
+    told["ok"] = json!(true);
+    Ok(Json(told))
 }
 
 pub fn routes() -> Router<App> {
@@ -467,5 +784,8 @@ pub fn routes() -> Router<App> {
         .route("/transcribe", post(transcribe))
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
-        .route("/transcription-providers", get(providers))
+        .route(
+            "/transcription-providers",
+            get(providers).post(set_providers),
+        )
 }

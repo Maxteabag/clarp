@@ -8169,3 +8169,323 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     };
     assert!(newest > lost, "{newest} {lost}");
 }
+
+/// A stand-in on this machine that answers every request with one status and one body, and
+/// keeps what it was asked. `paths` are answered in turn by what they begin with.
+fn answers(routes: Vec<(&'static str, &'static str, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let taken: Arc<Mutex<Vec<String>>> = Arc::default();
+    let keeps = taken.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let request = whole_request(&mut stream);
+            let path = request.split(' ').nth(1).unwrap_or("").to_string();
+            keeps.lock().unwrap().push(request);
+            let found = routes
+                .iter()
+                .find(|(begins, _, _)| path.starts_with(begins));
+            let (status, body) = match found {
+                Some((_, status, body)) => (*status, body.as_str()),
+                None => ("404 Not Found", "nothing here"),
+            };
+            let reply = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    (address, taken)
+}
+
+#[test]
+fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_when_the_first_fails()
+{
+    let place = Place::new("speech-own-engines");
+    // ElevenLabs has run out of credits; Google answers.
+    let quota = r#"{"detail":{"code":"quota_exceeded","message":"0 credits remaining"}}"#;
+    let (eleven, to_eleven) = answers(vec![("/", "401 Unauthorized", quota.to_string())]);
+    let token = json!({ "access_token": "a-token", "expires_in": 3600 }).to_string();
+    let heard = json!({ "results": [{ "alternatives": [{ "transcript": " Åpne døra. " }] }] });
+    let (google, to_google) = answers(vec![
+        ("/token", "200 OK", token),
+        ("/v2/", "200 OK", heard.to_string()),
+    ]);
+    // The owner's file: a key for ElevenLabs, and his project and account at Google.
+    let account = place.root.join("google-account.json");
+    let renews = json!({
+        "type": "authorized_user", "refresh_token": "renews", "client_id": "c", "client_secret": "s",
+    });
+    std::fs::write(&account, renews.to_string()).unwrap();
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        format!(
+            "[elevenlabs]\napi_key = \"key-in-the-owners-file\"\n\n[google_stt]\nproject = \"owners-project\"\n\
+             credentials = \"{}\"\n",
+            account.display()
+        ),
+    )
+    .unwrap();
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let (eleven_at, token_at) = (
+        format!("{eleven}/v1/speech-to-text"),
+        format!("{google}/token"),
+    );
+    // No engine outside is reached, whatever the machine that runs this test has.
+    let world = [
+        ("CLARP_SCRIBE_ENDPOINT", eleven_at.as_str()),
+        ("CLARP_GOOGLE_TOKEN_ENDPOINT", token_at.as_str()),
+        ("CLARP_GOOGLE_SPEECH_ENDPOINT", google.as_str()),
+        // The "clip" is plain sound already: the decoder passes it through.
+        ("CLARP_CHIRP_DECODER", "cat"),
+        ("ELEVEN_API_KEY", ""),
+        ("GOOGLE_APPLICATION_CREDENTIALS", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let (koko, echo) = (host.new_agent("Koko"), host.new_agent("Echo"));
+    let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, "", "POST", "/transcribe", headers, clip);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+    let look_at = |session: &str| {
+        let (status, _) = host.ask("POST", "/select", Some(&json!({ "session": session })));
+        assert_eq!(status, 200);
+    };
+    let set = |change: Value| host.ask("POST", "/transcription-providers", Some(&change));
+
+    // Both engines are there for an app to name, and nobody has one of its own yet.
+    let told = host.get("/transcription-providers");
+    assert_eq!(
+        (
+            &told["agent_engines"],
+            &told["agent_languages"],
+            &told["language"]
+        ),
+        (&json!({}), &json!({}), &json!("en"))
+    );
+    let there = |provider: &str| -> Value {
+        let providers = told["providers"].as_array().unwrap().iter();
+        providers.clone().find(|row| row["id"] == provider).unwrap()["available"].clone()
+    };
+    assert_eq!(
+        (there("elevenlabs"), there("google"), there("deepgram")),
+        (json!(true), json!(true), json!(false))
+    );
+
+    // The owner gives one agent two engines, in the order they are tried, and two languages
+    // its speaker moves between. Names are kept in small letters.
+    let (status, told) = set(json!({
+        "agent_engines": { "Koko": " elevenlabs:scribe_v2 , google:chirp_3 " },
+        "agent_languages": { "Koko": "NO,en" },
+    }));
+    assert_eq!(status, 200, "{told}");
+    assert_eq!(
+        (
+            &told["ok"],
+            &told["agent_engines"],
+            &told["agent_languages"]
+        ),
+        (
+            &json!(true),
+            &json!({ "koko": "elevenlabs:scribe_v2,google:chirp_3" }),
+            &json!({ "koko": "no,en" })
+        )
+    );
+
+    // Its user looks at it and speaks. The first engine fails: the second hears the clip,
+    // in the agent's languages, and the app is answered as if nothing had happened.
+    look_at(&koko);
+    let (status, said) = hear(&[("Content-Type", "audio/mp4")], b"made-up sound");
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["text"], "Åpne døra.");
+    let asked_eleven = to_eleven.lock().unwrap().clone();
+    assert_eq!(asked_eleven.len(), 1);
+    assert!(
+        !asked_eleven[0].contains("language_code"),
+        "a set of languages is not handed to an engine that finds the language itself"
+    );
+    let asked_google = to_google.lock().unwrap().clone();
+    assert_eq!(asked_google.len(), 2, "a token, then the clip");
+    assert!(
+        asked_google[1]
+            .starts_with("POST /v2/projects/owners-project/locations/eu/recognizers/_:recognize ")
+    );
+    let asked: Value =
+        serde_json::from_str(asked_google[1].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(asked["config"]["languageCodes"], json!(["nb-NO", "en-US"]));
+    assert_eq!(asked["config"]["model"], "chirp_3");
+    // What an app asks for by name does not come before the agent's own engines.
+    let (status, said) = hear(
+        &[("X-Transcription-Model", "server-default")],
+        b"more sound",
+    );
+    assert_eq!(
+        (status, &said["text"]),
+        (200, &json!("Åpne døra.")),
+        "{said}"
+    );
+
+    // Another agent is looked at: it has no engines of its own. A clip an app names the
+    // failing engine for is answered with that engine's failure: there is no next one.
+    look_at(&echo);
+    let (status, said) = hear(
+        &[("X-Transcription-Model", "elevenlabs:scribe_v2")],
+        b"sound",
+    );
+    assert_eq!(status, 500, "{said}");
+    assert!(
+        said["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("ElevenLabs HTTP 401: "),
+        "{said}"
+    );
+    // And one it names the working engine for is heard in the Host's language.
+    let (status, said) = hear(&[("X-Transcription-Model", "google:chirp_3")], b"sound");
+    assert_eq!(
+        (status, &said["text"]),
+        (200, &json!("Åpne døra.")),
+        "{said}"
+    );
+    let last = to_google.lock().unwrap().last().cloned().unwrap();
+    let asked: Value = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(asked["config"]["languageCodes"], json!(["en-US"]));
+
+    // The Host's own language, and the engine that hears what nobody named one for.
+    let (status, told) = set(json!({ "language": " NO ", "engine": "google:chirp_3" }));
+    assert_eq!(
+        (status, &told["language"], &told["engine"]),
+        (200, &json!("no"), &json!("google:chirp_3"))
+    );
+    let (status, said) = hear(&[], b"sound");
+    assert_eq!(
+        (status, &said["text"]),
+        (200, &json!("Åpne døra.")),
+        "{said}"
+    );
+    let last = to_google.lock().unwrap().last().cloned().unwrap();
+    let asked: Value = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(asked["config"]["languageCodes"], json!(["nb-NO"]));
+    assert_eq!(
+        host.get("/transcription-capabilities")["engine"],
+        "google:chirp_3"
+    );
+
+    // What is no setting is refused in the Python Host's words, and changes nothing.
+    for (change, why) in [
+        (
+            json!({ "language": "english" }),
+            "language must be an ISO 639-1 code such as 'en' or 'no'",
+        ),
+        (
+            json!({ "agent_languages": { "koko": "no,en,pt,sv" } }),
+            "agent language set accepts at most three language codes",
+        ),
+        (
+            json!({ "agent_engines": { "koko": "nothing:of-the-kind" } }),
+            "unknown transcription engine: nothing:of-the-kind",
+        ),
+        (
+            json!({ "agent_engines": { "": "google:chirp_3" } }),
+            "agent_engines keys must be agent names",
+        ),
+        (
+            json!({ "agent_engines": ["koko"] }),
+            "agent_engines must be an object of agent -> engine",
+        ),
+        (
+            json!({ "engine": 3 }),
+            "engine and turn_taking must be strings",
+        ),
+        (
+            json!({ "engine": "nothing" }),
+            "unknown transcription engine: nothing",
+        ),
+        (
+            json!({ "turn_taking": "sometimes" }),
+            "unknown turn-taking strategy: sometimes",
+        ),
+        (
+            json!({ "turn_taking": "provider" }),
+            "provider-owned turn taking needs an engine that detects turns",
+        ),
+        (
+            json!({ "retain_audio": "yes" }),
+            "retain_audio must be boolean",
+        ),
+        (
+            json!({ "long_form_threshold_sec": 0 }),
+            "long_form_threshold_sec must be between 1 and 3600",
+        ),
+        (
+            json!({ "long_form_threshold_sec": 2.5 }),
+            "long_form_threshold_sec must be an integer",
+        ),
+        (
+            json!({ "long_form_model": 1 }),
+            "long_form_model must be a string",
+        ),
+    ] {
+        assert_eq!(
+            set(change.clone()),
+            (400, json!({ "error": why })),
+            "{change}"
+        );
+    }
+    assert_eq!(set(json!([1])), (400, json!({ "error": "bad json" })));
+    // What this Host has not built is refused, and says so.
+    for change in [
+        json!({ "retain_audio": true }),
+        json!({ "long_form_model": "elevenlabs:scribe_v2" }),
+        json!({ "call_engines": "google:chirp_3" }),
+    ] {
+        let (status, why) = set(change.clone());
+        assert_eq!(status, 400, "{change}");
+        assert!(
+            why["error"].as_str().unwrap().contains("on this Host yet"),
+            "{why}"
+        );
+    }
+    // A save that names what is as it is, and one that takes an agent's entries away.
+    let (status, _) =
+        set(json!({ "turn_taking": "native", "retain_audio": false, "long_form_model": "" }));
+    assert_eq!(status, 200);
+    let unchanged = host.get("/transcription-providers");
+    assert_eq!(
+        unchanged["agent_engines"],
+        json!({ "koko": "elevenlabs:scribe_v2,google:chirp_3" })
+    );
+
+    // The Host is killed and started again: the settings are as the owner left them.
+    host.kill();
+    let host = place.start_in("", &args, &world);
+    let kept = host.get("/transcription-providers");
+    assert_eq!(
+        (
+            &kept["agent_engines"],
+            &kept["agent_languages"],
+            &kept["language"],
+            &kept["engine"]
+        ),
+        (
+            &json!({ "koko": "elevenlabs:scribe_v2,google:chirp_3" }),
+            &json!({ "koko": "no,en" }),
+            &json!("no"),
+            &json!("google:chirp_3")
+        )
+    );
+    let (status, told) = host.ask(
+        "POST",
+        "/transcription-providers",
+        Some(&json!({ "agent_engines": { "KOKO": null }, "agent_languages": { "koko": "" } })),
+    );
+    assert_eq!(
+        (status, &told["agent_engines"], &told["agent_languages"]),
+        (200, &json!({}), &json!({}))
+    );
+}

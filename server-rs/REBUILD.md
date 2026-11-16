@@ -489,11 +489,22 @@ time a clip is to be heard (`--speech-keys`), so a key that is changed there is 
 is copied into this Host or kept by it. The apps are told which engines there are and which one hears a clip
 nobody named one for (`/transcription-capabilities`, `/transcription-providers`). Held end to end with a
 stand-in worker and a stand-in for ElevenLabs on the loopback (`tests/host.rs`: no test reaches an engine
-outside), by the scenario `speech-in`, and once by hand with the real model on a made-up clip. Not there:
+outside), by the scenario `speech-in`, and once by hand with the real model on a made-up clip. **A clip is
+for the agent its user is looking at, and that agent can have a language and engines of its own**
+(`clarp-kernel` `languages.rs`, the Python Host's `stt_language.py` by its recorded answers): one language or
+up to three the speaker moves between, and engines in the order they are tried. The first engine hears the
+clip; the next one only when the one before failed, and only the last one's failure is the answer, so one
+provider's outage does not lose what was said. This is in use: on the owner's elitebook two agents are spoken
+to in Norwegian through ElevenLabs Scribe with Google's Chirp after it, and when Scribe's account ran out of
+credits on 15 Nov 2026 the Python Host went on with Chirp without a word. So Chirp is the third engine behind
+the port (`chirp.rs`): it speaks as the owner's own account at Google, from the file `gcloud` wrote, read
+where it is; a short-lived token is bought with it and kept in memory while it lasts; a clip is decoded once
+and a long one sent in pieces. The owner makes these settings from an app (`POST /transcription-providers`,
+by that Host's rules and in its words), and they are kept with the fleet (`Directory.settings`). Not there:
 the vocabulary an engine is asked to listen for beyond what this Host's agents are called, the judge that
 tells an invented "Okay." from one that was said (the list throws both away), a stronger engine for long
-recordings, an agent's own language or engine, the record of each thing said (`/voice-events`), changing
-these settings from an app, and calls.
+recordings, Deepgram and Cartesia as engines that listen, the record of each thing said (`/voice-events`),
+and calls.
 
 **An agent says something aloud, and the Host makes a clip of it** (16 Nov 2026). A reply marks what is for
 the ear (`<speak>`), and only that is spoken, when the message it answers asked for it: what a person sends
