@@ -5,7 +5,8 @@
 #
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
-#                                [--transcription-engine NAME] [--relay-config FILE|off] [--start] [--files-only]
+#                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
+#                                [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
 #   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
@@ -40,21 +41,27 @@
 #                  environment (ELEVEN_API_KEY in ~/.config/clarp-host/env) is asked
 #   --transcription-engine   the engine that hears a clip no app named one for: `local` (the
 #                  Host's own, the default) or a cloud engine's name (elevenlabs:scribe_v2)
-#   --relay-config the file that says whether phones reach this Host through the connection relay:
-#                  a config of the Python Host's kind with [network] relay_enabled in it, and the
-#                  relay's name for the Host and its key beside it, in relay.json (mode 600).
-#                  Default: this Host's own ~/.config/clarp-host/config.toml when there is one,
-#                  else `off`: the Host dials no relay. Never the Python Host's file by default,
-#                  though the keys of speech are read there: the relay gives a name's phones to
-#                  whoever dialled last, so two Hosts must never dial with one name. On the day
-#                  this Host takes the Python Host's place, stop that Host and name its file here
-#                  (--relay-config ~/.config/clarp/config.toml): the phones keep their pairing
+#   --relay        whether phones reach this Host through the connection relay: `on` or `off` (the
+#                  default). On, the Host dials the relay under the name that is in
+#                  ~/.config/clarp-host/relay.json (the relay's address, this Host's name there and
+#                  its key; for its owner only, mode 600; whoever keeps the relay writes it, and
+#                  this script never copies one from another Host). The switch is written into
+#                  this Host's own config, as [network] relay_enabled
+#   --relay-config another file that says so instead: a config of the Python Host's kind with
+#                  [network] relay_enabled in it and relay.json beside it. For the day this Host
+#                  takes the Python Host's place: stop that Host, disable its unit, and name its
+#                  file here (--relay-config ~/.config/clarp/config.toml): the phones keep their
+#                  pairing. The relay gives a name's phones to whoever dialled last, so two Hosts
+#                  must never dial with one name: this script refuses a file that names this Host
+#                  as the Python Host is named while that Host runs or can come back by itself.
+#                  `off`: the Host is told of no file at all. Never the Python Host's file by
+#                  default, though the keys of speech are read there
 #   --start        enable the unit and start it, or restart it when it runs (turns that are running
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
 # What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
-# --speech-keys, --transcription-engine, --relay-config) is kept with
+# --speech-keys, --transcription-engine, --relay, --relay-config) is kept with
 # it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
 # --start: a relay that was turned off stays off. What is said now replaces what was kept, and
 # `default` forgets it (--push-relay default).
@@ -77,10 +84,10 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay-config) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--accounts follow|none] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--accounts follow|none] [--relay on|off] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -95,7 +102,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|push-relay|accounts|whisper|speech-keys|transcription-engine|relay-config) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|push-relay|accounts|whisper|speech-keys|transcription-engine|relay|relay-config) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -193,20 +200,59 @@ if on and isinstance(name, str):
     print(name)
 PY
 }
-relay_config="${chosen[relay-config]:-}"
-if [ -z "$relay_config" ]; then
-    if [ -f "$config/config.toml" ]; then relay_config="$config/config.toml"; else relay_config=off; fi
-fi
+# The name a relay.json gives a Host, when it is its owner's alone.
+relay_id() {
+    [ -f "$1" ] || return 0
+    python3 - "$1" <<'PY' 2>/dev/null || true
+import json, os, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+try:
+    private = not (path.stat().st_mode & 0o077)
+    name = json.loads(path.read_text()).get('host_id', '')
+except Exception:
+    sys.exit(0)
+if private and isinstance(name, str):
+    print(name)
+PY
+}
+own_config="$config/config.toml"
+relay_switch="${chosen[relay]:-off}"
+case "$relay_switch" in on|off) ;; *) echo "install-host: --relay $relay_switch: on or off" >&2; exit 2 ;; esac
+# This Host's own file is written below, at every run: unless it is told of another, it is told
+# of that one, and the switch in it is the installation's.
+relay_config="${chosen[relay-config]:-$own_config}"
 [ "$relay_config" = off ] && relay_config=""
 relayed=""; relay_as=""
 if [ -n "$relay_config" ]; then
     relayed=" --relay-config \"$relay_config\""
-    relay_as="$(relay_name "$relay_config")"
-    # Two Hosts never dial with one name: the relay gives a name's phones to whoever dialled last.
-    if [ -n "$relay_as" ] && [ "$relay_as" = "$(relay_name "$python_config")" ] \
-            && [ "$(systemctl --user is-active clarp-runtime.service 2>/dev/null)" = active ]; then
-        echo "install-host: $relay_config names this Host \"$relay_as\" at the relay, and the Python Host on this machine runs under that name. Stop that Host first, or give this one a relay.json of its own." >&2
-        exit 2
+    if [ "$relay_config" = "$own_config" ]; then
+        if [ "$relay_switch" = on ]; then
+            relay_as="$(relay_id "$config/relay.json")"
+            if [ -z "$relay_as" ]; then
+                echo "install-host: --relay on needs $config/relay.json, for its owner only (mode 600): the relay's address, this Host's name there and its key. Whoever keeps the relay writes it." >&2
+                exit 2
+            fi
+        fi
+    else
+        if [ -n "${chosen[relay]:-}" ]; then
+            echo "install-host: --relay is the switch in this Host's own config; $relay_config has its own. Say --relay default, or leave --relay-config out." >&2
+            exit 2
+        fi
+        relay_as="$(relay_name "$relay_config")"
+    fi
+    # Two Hosts never dial with one name: the relay gives a name's phones to whoever dialled
+    # last, and neither would report an error, only lose its connection again and again. A name
+    # the Python Host on this machine dials with is taken only when that Host is stopped and
+    # cannot come back by itself.
+    if [ -n "$relay_as" ] && [ "$relay_as" = "$(relay_name "$python_config")" ]; then
+        runs="$(systemctl --user is-active clarp-runtime.service 2>/dev/null || true)"
+        comes_back="$(systemctl --user is-enabled clarp-runtime.service 2>/dev/null || true)"
+        case "$runs" in inactive|failed|'') stopped=1 ;; *) stopped=0 ;; esac
+        case "$comes_back" in disabled|masked|masked-runtime|not-found|'') gone=1 ;; *) gone=0 ;; esac
+        if [ "$stopped" != 1 ] || [ "$gone" != 1 ]; then
+            echo "install-host: this Host would dial the relay as \"$relay_as\", the name the Python Host on this machine dials with, and that Host's unit is ${runs:-unknown} and ${comes_back:-unknown}. Stop it and disable it first (it must not come back by itself), or give this Host a relay.json of its own." >&2
+            exit 2
+        fi
     fi
 fi
 # The faces agents are shown with: the pictures the repository ships (static/avatars and the
@@ -381,6 +427,10 @@ bind_addr = "$address"
 port = $port
 auth_token = "$token"
 EOF
+    # Whether phones reach this Host through the connection relay: the Host reads it here.
+    if [ "$relay_config" = "$own_config" ] && [ "$relay_switch" = on ]; then
+        printf '\n[network]\nrelay_enabled = true\n' >> "$config/config.toml"
+    fi
 )
 
 cat > "$units/clarp-host.service" <<EOF
@@ -439,9 +489,9 @@ echo "a clip no app names an engine for is heard by: $transcription_engine"
 if [ -n "$relay_as" ]; then
     echo "phones reach it through the connection relay as \"$relay_as\" (by $relay_config)"
 elif [ -n "$relay_config" ]; then
-    echo "the connection relay is turned off in $relay_config: this Host dials no relay for the phones"
+    echo "the connection relay is off (--relay on turns it on): this Host dials no relay for the phones"
 else
-    echo "the connection relay: none (this Host is told of no file that turns it on)"
+    echo "the connection relay: none (this Host is told of no file that could turn it on)"
 fi
 [ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
