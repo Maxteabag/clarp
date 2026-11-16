@@ -30,7 +30,8 @@ Parts of the contract that no feature stands for, which the Rust Host sends empt
 
 | Part | What is empty | Planned |
 |---|---|---|
-| Portraits and the persona catalogue | `avatar_url` and `model_avatar_url` of an agent; `personas` in the snapshot | Stage 3. An agent that moves keeps its portrait from then on |
+| The vocabulary an engine is asked to listen for | `vocab_run_id` in the answer to `POST /transcribe`: this Host asks an engine to listen for what its agents are called and keeps no runs of a vocabulary | With the vocabulary |
+| The explaining of a tool's use | `tool_explanations` in the snapshot and in `GET /live`: off here, where nothing explains. What the setting's own route answers is compared | With the janitor that explains |
 | The probes of the Python Host | `delivery_admission` in `GET /status`: the budgets, the gate and the counts of the Python Host's own way of telling whether a turn's process is still its own | Never: this Host has no such machinery, and no client reads the block |
 
 The lists an app's screens are made of, for what the Rust Host keeps nothing of yet (`NOT_KEPT` in
@@ -42,7 +43,7 @@ and every field with its kind.
 | Route | What the Python Host has there | What the Rust Host answers | Planned |
 |---|---|---|---|
 | `GET /janitors` | its seven janitors, their templates, triggers and providers | no janitors, `runtime_available: false` | When janitors are built |
-| `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that transcribe, the providers and their models | nothing that transcribes (`available: false`, no engine, no models); where a turn of speech ends is still found on the phone | Speech in |
+| `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that listen there, the providers and their models | the engines that listen here: this Host's own Whisper, and each provider the owner's file has a key or a project for | Never the same list: each Host says what it listens with |
 | `GET /agent-model-options` | every backend with its models, what each supports and how it is signed in | no backends listed. An agent's model is set by name (`POST /agent-llm`) | The catalogue of models |
 
 ## Compared as what a client may rely on
@@ -154,8 +155,11 @@ it covers that exact difference and nothing else.
 | A picture an agent chose itself (`/avatars/<agent>`, `GET` and `POST /agent-portraits`), the janitors' pictures, and the making of pictures | kept, served and made | not there: an agent has the picture this Host ships for its name, else the one for its tool | Not built. No agent of this Host can choose one yet |
 | Which model a tool runs when its agent names none, for the picture drawn for a family of model (`model_avatar_url`) | read from the Host's settings | not known here: an agent's own model, and the one family a tool names, choose the picture | This Host keeps no model of its own for a tool |
 | What a button of a controller can run (`POST /controller-actions` and under it: defining an action, mapping a gesture to one, running one) | defined, mapped, run and written down | not there: the list is empty and says so, and each of these is refused in words | Not built. Nothing was defined on the owner's Host when this was counted |
-| `bio` in `GET /voices` | what the agent's persona is like | empty | Personas are not built |
-| Choosing the engine that speaks from an app (`POST /tts/providers`), the old preview by text (`POST /preview`), Cartesia's own picker (`/cartesia-voices`, `/cartesia-voice-preview`), how much an agent says while it works and how human it sounds (`/agent-voice-verbosity`, `/voice-humanness`) | there | not there: who speaks is read from the owner's file | Not built |
+| Choosing the engine that speaks from an app (`POST /tts/providers`), the old preview by text (`POST /preview`), Cartesia's own picker (`/cartesia-voices`, `/cartesia-voice-preview`) | there | not there: who speaks is read from the owner's file | Not built |
+| How a turn's tool is told what holds for the turn: to use the Host's own tools, whose turn it is and, for an answer that is read aloud, how to speak | Claude Code by a hook of the Host's plugin, with every prompt; the other tools in words before the user's (`[voice-mode] ... --- user message ---`) | Claude Code in the same message after the user's words, between the marks Claude Code puts around what a hook says (`<system-reminder>`); Codex before the user's words, as there | The words are the same, sign for sign (`tests/fixtures/told-vectors.json`). No hook runs here: what the tool is handed is what a test can read, and a turn costs no process more |
+| How much a Claude agent says while it works (`POST /agent-voice-verbosity`) | never told to Claude Code: the hook leaves the clause out (reference defect R21) | told, as every other tool is | The setting is for every agent |
+| Where a Codex agent is told who it is | in the words before the user's, with every prompt | as Codex's developer instructions for the turn | It holds for the whole turn and is no part of what the user wrote |
+| What an agent in a group call is told of the call with every prompt | who else is there and what they said | nothing | Calls are not built |
 | A clip that says it belongs to a call (`X-Clarp-Call-Id`) | heard by the call's rules | refused, 409 | Calls are not built. A clip of a call is never taken as said in a chat |
 | Changing the settings of speech in from an app (`POST /transcription-providers`) | every setting | the Host's language, the engine that hears what nobody named one for, and the languages and engines of single agents, by the Python Host's rules and in its words. Keeping clips (`retain_audio`), another engine for long recordings (`long_form_model`), an engine that finds the end of a turn (`turn_taking: provider`) and the settings of calls are refused, each saying that it is not there on this Host yet. Installing and removing models is not there | What is built is what the owner's Host has set |
 | The calls of a tool whose reader does not group them into messages (Codex) | cells on the rows of the agent's messages (`display_cells`) | a row for each call (`kind: tool`), with the card of the call | Codex's cells are not built yet. Its calls are shown, each by its card, and carry the turn's trace |

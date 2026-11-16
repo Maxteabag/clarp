@@ -8,7 +8,10 @@ The Python Host builds a Claude agent's conversation from that file, so without
 it the reference has no conversation to compare. The Rust Host does not read it.
 
 It reads one stream-json user message from stdin and answers with system/init,
-an assistant message and a result. Markers in the prompt:
+an assistant message and a result. The prompt is the user's words: a text block that
+begins with ``<system-reminder>`` is what a Host says with them (the Rust Host says after
+the user's words what the Python Host says by a hook this stand-in does not run), and is
+no part of it. Markers in the prompt:
 
 - ``[qa-slow]``: wait up to 3 s before answering (a turn that is still running);
 - ``[replay-linger]``: on SIGTERM, keep running for 1.5 s before exiting;
@@ -26,6 +29,8 @@ an assistant message and a result. Markers in the prompt:
   assistant message with a ``tool_use`` in it, then a user message with the ``tool_result``.
   A command, two tools at once (a file read and a search), an edit, a command that fails, and
   a tool no Host knows by name. Nothing is run: what a tool "returned" is written here.
+- ``[qa-who]``: the answer ends with who the Host said the agent is: what this process was
+  started with as ``--append-system-prompt``, or ``nobody`` when it was started without.
 - ``[qa-stream]``: the turn is printed piece by piece, as the real CLI prints one when it is
   asked for partial messages: a message begins, each of its blocks begins, grows and ends
   (what the agent thinks, what it says, a tool call whose input arrives in parts), and each
@@ -255,7 +260,8 @@ def main() -> int:
     line = sys.stdin.readline()
     try:
         message = json.loads(line)
-        text = ''.join(part.get('text', '') for part in message['message']['content'])
+        parts = [str(part.get('text', '')) for part in message['message']['content']]
+        text = ''.join(part for part in parts if not part.startswith('<system-reminder>'))
     except (ValueError, KeyError, TypeError):
         text = ''
     linger = '[replay-linger]' in text
@@ -300,6 +306,9 @@ def main() -> int:
         log('exit', how='crash')
         return 1
     reply = 'Claude replay reply: ' + text
+    if '[qa-who]' in text:
+        told = args[args.index('--append-system-prompt') + 1] if '--append-system-prompt' in args else 'nobody'
+        reply += ' | I was told who I am: ' + told
     said = {'id': 'msg_' + PROC, 'role': 'assistant', 'model': 'replay-fake',
             'content': [{'type': 'text', 'text': reply}],
             'usage': {'input_tokens': 5, 'output_tokens': 7}}

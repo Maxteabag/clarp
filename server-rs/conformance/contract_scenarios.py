@@ -1143,6 +1143,80 @@ SCENARIOS.append({
     ],
 })
 
+# Two agents made for it: one named as a persona every Host has built in, with the way of
+# speaking that persona has, and one with a way of speaking of its own.
+NOVA, DRY = 'nova', 'dry-one'
+MAKE_TOLD = {'backend': 'claude', 'cwd': '{workspace}', 'synthesize_audio': False, 'voice_id': '{}'}
+WHO = '[qa-who] '
+SPEAKING, HUMAN, NARRATION = '/personalities/settings', '/voice-humanness', '/agent-voice-verbosity'
+
+
+def who(text, msg_id, session):
+    """A message the stand-in answers with who it was told the agent is, and the wait for it."""
+    return [send(WHO + text, msg_id, session=session),
+            {'op': 'wait_reply', 'after': f'u-{msg_id}', 'session': session},
+            {'op': 'quiesce', 'session': session}]
+
+
+SCENARIOS.append({
+    'id': 'agent-is-told',
+    'what': "who an agent's tool is told the agent is (its name, and how it speaks), under another name and "
+            "with the ways of speaking turned off; and the owner's settings of how agents speak: whether they "
+            'are told a way of speaking, how human a voice sounds, how much an agent says while it works',
+    'sessions': (AGENT, NOVA, DRY),
+    'steps': [
+        *who('synthetic told alfa', 'whoalfa', AGENT),
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make an agent named as a persona'),
+        *who('synthetic told bravo', 'whobravo', NOVA),
+        get(f'/voices?for={NOVA}', 'what the persona of an agent is like, for the old settings screen'),
+        post('/agents', {**MAKE_TOLD, 'name': 'Dry One', 'session': DRY,
+                         'personality': '  Personality: synthetic and dry.  '},
+             'make an agent with a way of speaking of its own'),
+        *who('synthetic told charlie', 'whocharlie', DRY),
+        # Under another name it speaks as it did.
+        post('/agent-rename', {'session': NOVA, 'name': 'Novalis'}, 'another name for the agent'),
+        *who('synthetic told delta', 'whodelta', NOVA),
+        # Whether agents are told how they speak at all.
+        get(SPEAKING, 'whether agents are told how they speak'),
+        post(SPEAKING, [True], 'a change that is no object'),
+        post(SPEAKING, {}, 'a change of nothing'),
+        post(SPEAKING, {'enabled': 0}, 'the ways of speaking turned off'),
+        get(SPEAKING, 'turned off'),
+        *who('synthetic told echo', 'whoecho', NOVA),
+        *who('synthetic told foxtrot', 'whofoxtrot', DRY),
+        post(SPEAKING, {'enabled': 'yes'}, 'turned on by a word'),
+        *who('synthetic told golf', 'whogolf', DRY),
+        # How human a voice sounds: the Host's level, and levels of single agents.
+        get(HUMAN, 'how human voices sound'),
+        post(HUMAN, {'default': 7, 'agents': {' CLAIRE ': 2, 'nova': 10}}, 'a level for the Host and for two agents'),
+        post(HUMAN, {'default': 11}, 'a level there is not'),
+        post(HUMAN, {'default': '7'}, 'a level that is a text'),
+        post(HUMAN, {'default': True}, 'a level that is a truth'),
+        post(HUMAN, {'agents': {'': 4}}, 'a level for nobody'),
+        post(HUMAN, {'agents': {'dry-one': 12}}, 'a level an agent cannot have'),
+        post(HUMAN, {'agents': ['claire']}, 'agents that are no table'),
+        post(HUMAN, ['seven'], 'a change that is no object'),
+        post(HUMAN, {'agents': {'claire': None, 'nova': ''}}, 'two agents follow the Host again'),
+        post(HUMAN, {}, 'a change of nothing'),
+        get(HUMAN, 'how human voices sound afterwards'),
+        # How much an agent says while it works.
+        post(NARRATION, {'voice_verbosity': 1}, 'a level for nobody'),
+        post(NARRATION, {'session': AGENT}, 'no level'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': '2'}, 'a level that is a text'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': True}, 'a level that is a truth'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': 2.5}, 'a level that is no whole number'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': 4}, 'a level there is not'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': -1}, 'a level below the least'),
+        post(NARRATION, {'session': 'nobody-there', 'voice_verbosity': 1}, 'an agent that is not there'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': 3}, 'an agent says all it does'),
+        post(NARRATION, {'session': AGENT, 'voice_verbosity': 0}, 'and is quiet again'),
+        get(f'/log?session={NOVA}', 'the conversation of the agent named as a persona'),
+        get(f'/log?session={DRY}', 'the conversation of the agent with its own way of speaking'),
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
 EXPLAINED = '/tool-explanations/settings'
 
 SCENARIOS.append({
