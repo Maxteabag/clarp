@@ -2054,6 +2054,7 @@ impl Actor {
             told: told.map(|told| told::Turn {
                 persona: told.persona.clone(),
                 spoken: message.speak.then_some(told.sound),
+                call: message.call.clone(),
             }),
         });
         let stdin_file = self.profile.stdin_path_of(turn, attempt);

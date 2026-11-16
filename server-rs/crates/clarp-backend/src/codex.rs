@@ -111,6 +111,7 @@ impl Backend for Codex {
         let prompt = match &spec.told {
             Some(told) => {
                 let head = told::at_head(&told.persona, &spec.session, told.spoken);
+                let head = told::in_call(head, told.call.as_deref());
                 told::headed(&head, None, &spec.prompt)
             }
             None => spec.prompt.clone(),
@@ -594,6 +595,9 @@ mod tests {
             told: Some(told::Turn {
                 persona: "Rachel".to_string(),
                 spoken: Some(told::Sound::default()),
+                call: Some(
+                    "[Group call] You are Rachel, on a voice call with the user.".to_string(),
+                ),
             }),
             ..spec()
         });
@@ -601,7 +605,11 @@ mod tests {
         assert!(prompt.starts_with("[voice-mode] You are running inside Clarp."));
         assert!(prompt.contains("This turn belongs to Rachel (Clarp session rachel)."));
         assert!(prompt.contains("<speak>") && prompt.contains("Humanness: 5/10."));
-        assert!(prompt.ends_with("\n\n--- user message ---\nWhat is in here?"));
+        // The header of a call the turn is a part of comes after everything else the Host
+        // says, before the user's words.
+        assert!(prompt.ends_with(
+            "\n\n[Group call] You are Rachel, on a voice call with the user.\n\n--- user message ---\nWhat is in here?"
+        ));
         assert_eq!(told::unheaded(&prompt), "What is in here?");
         assert_eq!(
             headed.args, fresh.args,

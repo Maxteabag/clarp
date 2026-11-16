@@ -246,6 +246,19 @@ pub struct Turn {
     pub persona: String,
     /// How the answer is to sound, when it is read aloud.
     pub spoken: Option<Sound>,
+    /// The header of the call the turn is a part of: who else is in it, and what was said
+    /// since this agent last spoke (`clarp_kernel::calls`).
+    pub call: Option<String>,
+}
+
+/// What a turn is told, with the header of its call after everything else: where the
+/// Python Host puts it, for a tool that is told beside its prompt and for one that is told
+/// before it.
+pub fn in_call(told: String, call: Option<&str>) -> String {
+    match call.filter(|header| !header.is_empty()) {
+        Some(header) => format!("{told}\n\n{header}"),
+        None => told,
+    }
 }
 
 /// How human voices sound on a Host: its own level, and the levels of single agents, each
