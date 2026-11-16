@@ -89,3 +89,62 @@ def test_word_similarity_prefix_score_meets_threshold():
 def test_unicode_address_is_removed_without_eating_the_request(name, address, body):
     assert resolve_agent_by_spoken_name(address + body, {"agent": {"name": name}}) == (
         "agent", body)
+
+
+# Each row records main's resolver result and the wanted body. Put preserved
+# request tails first: the first PR loop lost them despite choosing the same agent.
+@pytest.mark.parametrize("names,text,on_main,wanted", [
+    (("Koko",), "Koko请检查分支 now", ("target", "请检查分支 now"), "请检查分支 now"),
+    (("Koko",), "Koko안녕 world", ("target", "안녕 world"), "안녕 world"),
+    (("Koko",), "Koko请检查分支", ("target", "请检查分支"), "请检查分支"),
+    (("Koko",), "Kokoさん、確認して", ("target", "さん、確認して"), "さん、確認して"),
+    (("Koko",), "Koko안녕", ("target", "안녕"), "안녕"),
+    (("Koko",), "Kokoёлка", ("target", "ёлка"), "ёлка"),
+    (("Koko",), "Kokoß", ("target", "ß"), "ß"),
+    (("Zoé",), "Zoécheck", ("target", "écheck"), "check"),
+    (("Zoé",), "Zoécheck now", ("target", "écheck now"), "check now"),
+    (("Koko",), "Koko—go", ("target", "—go"), "—go"),
+    (("Koko",), "Koko’s branch", ("target", "’s branch"), "’s branch"),
+    (("Zoe\u0308",), "Zoe\u0308, go", ("target", "\u0308, go"), "go"),
+    (("Rachél",), "Rachél, go", ("target", "él, go"), "go"),
+    (("Rache\u0301l",), "Rache\u0301l, go", ("target", "\u0301l, go"), "go"),
+    (("Zoë",), "Zoë2 go", ("target", "ë2 go"), "2 go"),
+    (("Zoë",), "Zoë_Marie go", ("target", "ë_Marie go"), "_Marie go"),
+    (("Zoë",), "Zoë-Marie go", ("target", "ë-Marie go"), "Marie go"),
+    (("Zoë-Marie",), "Zoë-Marie go", (None, "Zoë-Marie go"), "Zoë-Marie go"),
+    (("Koko",), "Koko2 go", ("target", "go"), "go"),
+    (("Koko",), "Koko_Marie go", ("target", "go"), "go"),
+    (("Koko",), "Koko-Marie go", ("target", "go"), "go"),
+    (("Koko",), "Koko, ask Zoë later", ("target", "ask Zoë later"), "ask Zoë later"),
+    (("Zoë",), "Zoë go", ("target", "ë go"), "go"),
+    (("Zoë",), "I will tell them about Zoë, go", (None, "I will tell them about Zoë, go"),
+     "I will tell them about Zoë, go"),
+    (("Zoë",), "Ask Zoë, go", ("target", "ë, go"), "go"),
+    (("Zoë", "Zo"), "Zoë, go", ("target", "ë, go"), "go"),
+    (("Zoë", "Zo"), "Zo, go", ("target", "go"), "go"),
+    (("Zoë", "Zo"), "Zoé, go", ("target", "é, go"), "é, go"),
+    (("Zoë", "Zo"), "hey Zoë, go", ("target", "ë, go"), "go"),
+    # Accent insertions/substitutions are not the selected agent's exact name:
+    # keep main's body rather than guess how far a misspelling extends.
+    (("Rachel",), "Rachél, go", ("target", "él, go"), "él, go"),
+    (("Rachel",), "Rache\u0301l, go", ("target", "\u0301l, go"), "\u0301l, go"),
+    (("Zoế",), "Zoê\u0301check", ("target", "ê\u0301check"), "check"),
+    (("Zoê\u0301",), "Zoếcheck", ("target", "ếcheck"), "check"),
+])
+def test_selected_name_bounds_the_cut(names, text, on_main, wanted):
+    agents = {key: {"name": name} for key, name in zip(("target", "other"), names)}
+    assert resolve_agent_by_spoken_name(text, agents) == (on_main[0], wanted), (
+        f"main returned {on_main!r}")
+
+
+@pytest.mark.parametrize("name,text,wanted", [
+    ("Zoé", "hey Zoécheck now", "check now"),
+    ("Zoë", "Koko請检查 now", "Koko請检查 now"),
+    ("Zoë", "hey Zoé, go", "é, go"),
+    ("Zoế", "hey Zoê\u0301check", "check"),
+])
+def test_judged_cut_uses_the_selected_name(monkeypatch, name, text, wanted):
+    from lib import judgment_sites
+
+    monkeypatch.setattr(judgment_sites, "resolve_spoken_name", lambda *a: ("target", text))
+    assert resolve_agent_by_spoken_name(text, {"target": {"name": name}}) == ("target", wanted)
