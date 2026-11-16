@@ -366,6 +366,7 @@ mod tests {
             model: None,
             effort: None,
             identity: None,
+            told: None,
         });
         assert_eq!(launch.program, "sh");
         assert_eq!(launch.stdin, b"hello there\n");

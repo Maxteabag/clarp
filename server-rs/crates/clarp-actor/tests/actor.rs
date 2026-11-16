@@ -56,7 +56,7 @@ impl World {
             cwd: root.join("work"),
             model: None,
             effort: None,
-            identity: None,
+            told: None,
             tool_env: vec![("CLARP_HOST_ADDR".to_string(), "127.0.0.1:1".to_string())],
             stop_grace_ms: 3_000,
             keep_spools: false,

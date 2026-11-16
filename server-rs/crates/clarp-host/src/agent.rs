@@ -296,6 +296,8 @@ pub struct Setup {
     pub blobs: Arc<dyn Blobs>,
     /// The way to the one that speaks: told when the agent has something to say.
     pub speaks: Speaks,
+    /// What the agent's tool is told, by what holds when it is asked.
+    pub telling: crate::telling::Telling,
 }
 
 /// The way to an agent's thread.
@@ -914,13 +916,17 @@ impl Worker {
     }
 
     /// Takes the agent as the fleet now has it. Its next turn runs with the model and the
-    /// effort it now has; a turn that runs keeps what it was started with.
+    /// effort it now has, and its tool is told who the agent now is; a turn that runs keeps
+    /// what it was started with.
     fn amended(&mut self, record: AgentRecord) {
         let (model, effort) = (non_empty(&record.model), non_empty(&record.effort));
+        let told = Some(self.setup.telling.of(&record));
         self.setup.profile.model.clone_from(&model);
         self.setup.profile.effort.clone_from(&effort);
+        self.setup.profile.told.clone_from(&told);
         if let Some(actor) = self.actor.as_mut() {
             actor.retune(model, effort);
+            actor.retell(told);
         }
         self.setup.record = record;
     }
@@ -1327,6 +1333,11 @@ impl Worker {
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
+        // A message may start a turn, and a turn's tool is told what holds when it starts:
+        // the owner's settings and file are read now.
+        if matches!(ask, Ask::Send { .. }) {
+            actor.retell(Some(self.setup.telling.of(&self.setup.record)));
+        }
         let (out, owed) = match ask {
             Ask::Send {
                 message,

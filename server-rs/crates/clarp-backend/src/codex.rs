@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
+use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
@@ -104,11 +105,21 @@ impl Backend for Codex {
         }
         // The message is read from standard input: it never has to fit a command line.
         args.push("-".to_string());
+        // What the Host says with the prompt comes before it, between the marks the Python
+        // Host puts around it for this tool, so that whoever reads Codex's own record of the
+        // conversation finds the user's words again (`told::unheaded`).
+        let prompt = match &spec.told {
+            Some(told) => {
+                let head = told::at_head(&told.persona, &spec.session, told.spoken);
+                told::headed(&head, None, &spec.prompt)
+            }
+            None => spec.prompt.clone(),
+        };
         Launch {
             program: self.program.clone(),
             args,
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
-            stdin: spec.prompt.clone().into_bytes(),
+            stdin: prompt.into_bytes(),
         }
     }
 
@@ -522,6 +533,7 @@ mod tests {
             model: None,
             effort: None,
             identity: None,
+            told: None,
         }
     }
 
@@ -574,6 +586,26 @@ mod tests {
         assert_eq!(
             Codex::with_program("/opt/codex").launch(&spec()).program,
             "/opt/codex"
+        );
+
+        // What the Host says with the prompt comes before the user's words, and can be
+        // taken off again.
+        let headed = codex.launch(&TurnSpec {
+            told: Some(told::Turn {
+                persona: "Rachel".to_string(),
+                spoken: Some(told::Sound::default()),
+            }),
+            ..spec()
+        });
+        let prompt = String::from_utf8(headed.stdin).unwrap();
+        assert!(prompt.starts_with("[voice-mode] You are running inside Clarp."));
+        assert!(prompt.contains("This turn belongs to Rachel (Clarp session rachel)."));
+        assert!(prompt.contains("<speak>") && prompt.contains("Humanness: 5/10."));
+        assert!(prompt.ends_with("\n\n--- user message ---\nWhat is in here?"));
+        assert_eq!(told::unheaded(&prompt), "What is in here?");
+        assert_eq!(
+            headed.args, fresh.args,
+            "nothing of it is on the command line"
         );
     }
 

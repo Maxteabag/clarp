@@ -2,7 +2,8 @@
 //!
 //! What the user changes about an agent after it is made: its name (`POST /agent-rename`),
 //! whether what it says pages the user (`/agent-mute`), whether it is put away
-//! (`/agent-archive`), and which model it runs with how much effort (`/agent-llm`). And the
+//! (`/agent-archive`), which model it runs with how much effort (`/agent-llm`), and how
+//! much it says while it works on an answer that is read aloud (`/agent-voice-verbosity`). And the
 //! agents that are put away, a page at a time (`GET /agents/archived`), for the apps that
 //! read the snapshot without them.
 //!
@@ -21,6 +22,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_kernel::python;
 use clarp_kernel::roster as rules;
+use clarp_kernel::told;
 use serde_json::{Map, Value, json};
 
 use crate::edge::{self, ApiError, App};
@@ -179,6 +181,45 @@ async fn archive(State(app): State<App>, body: Bytes) -> Answered {
     Ok(Json(
         json!({ "ok": true, "session": session, "archived": archived }),
     ))
+}
+
+/// `POST /agent-voice-verbosity` with `{session, voice_verbosity}`: how much the agent says
+/// while it works, when its answer is read aloud. Its next turn is told the new level; no
+/// turn has to be started again for it.
+async fn narration(State(app): State<App>, body: Bytes) -> Answered {
+    let asked = object(&body)?;
+    let session = text(&asked, "session");
+    if session.is_empty() {
+        return Err(bad("session required"));
+    }
+    let Some(level) = asked.get("voice_verbosity") else {
+        return Err(bad("voice_verbosity required"));
+    };
+    // A whole number, and nothing that only reads like one.
+    let whole = match level {
+        Value::Number(number) if !number.is_f64() => Some(number.as_i64()),
+        _ => None,
+    };
+    let Some(level) = whole else {
+        return Err(bad("voice_verbosity must be an integer"));
+    };
+    let Some(level) = level.filter(|level| (0..=told::NARRATION_MOST).contains(level)) else {
+        return Err(Refusal::Told(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "error": "voice_verbosity out of range",
+                "min": 0,
+                "max": told::NARRATION_MOST,
+            }),
+        ));
+    };
+    let record = amend(&app, &session, Amend::Narration(level)).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "session": session,
+        "voice_verbosity": record.narration,
+        "options": told::narration_options(),
+    })))
 }
 
 /// A field that is a text or says nothing: `Ok(None)` when the request does not have it.
@@ -351,5 +392,6 @@ pub fn routes() -> Router<App> {
         .route("/agent-rename", post(rename))
         .route("/agent-archive", post(archive))
         .route("/agent-llm", post(llm))
+        .route("/agent-voice-verbosity", post(narration))
         .route("/agents/archived", get(archived))
 }

@@ -18,6 +18,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_kernel::media;
+use clarp_kernel::told::{self, Humanness};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -497,6 +498,87 @@ async fn set_explanations(
     Ok(Json(explanations_told(&app)))
 }
 
+/// Whether agents are told how they speak, as an app is told it.
+fn personalities_told(app: &App) -> Value {
+    let directory = app.fleet.directory();
+    let enabled = crate::telling::personalities(directory.setting(told::PERSONALITIES_KEY));
+    json!({ "enabled": enabled })
+}
+
+/// `GET /personalities/settings`: whether an agent's tool is told how the agent speaks, or
+/// its name alone.
+async fn personalities(State(app): State<App>) -> Json<Value> {
+    Json(json!({ "settings": personalities_told(&app) }))
+}
+
+/// `POST /personalities/settings` with `{enabled}`: turns it on or off, for every agent's
+/// next turn. Anything that counts as true in Python turns it on, as there.
+async fn set_personalities(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let given = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null)
+    };
+    let Value::Object(changes) = given else {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
+    };
+    if let Some(enabled) = changes.get("enabled") {
+        let kept = if clarp_kernel::live::truthy(enabled) {
+            "1"
+        } else {
+            "0"
+        };
+        let kept = vec![(told::PERSONALITIES_KEY.to_string(), kept.to_string())];
+        app.fleet.set(kept).await?;
+    }
+    Ok(Json(
+        json!({ "ok": true, "settings": personalities_told(&app) }),
+    ))
+}
+
+/// How human voices sound on this Host, as the owner's settings keep it.
+fn humanness_kept(app: &App) -> Humanness {
+    let directory = app.fleet.directory();
+    Humanness::stored(
+        directory.setting(told::HUMANNESS_KEY),
+        directory.setting(told::HUMANNESS_OF_AGENTS_KEY),
+    )
+}
+
+/// `GET /voice-humanness`: how human spoken answers sound, from 0 to 10: the Host's level
+/// and the levels single agents have of their own.
+async fn humanness(State(app): State<App>) -> Json<Value> {
+    Json(humanness_kept(&app).told())
+}
+
+/// `POST /voice-humanness` with `{default?, agents?: {name: level or nothing}}`: a change
+/// of it, for every spoken turn that starts afterwards. The rules and the words a change
+/// is refused in are the Python Host's.
+async fn set_humanness(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    // No body is an empty change; what is no JSON is refused as what is no object.
+    let given = if body.is_empty() {
+        json!({})
+    } else {
+        serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null)
+    };
+    let after = humanness_kept(&app)
+        .changed(&given)
+        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    let (usual, of_agents) = after.kept();
+    let kept = vec![
+        (told::HUMANNESS_KEY.to_string(), usual),
+        (told::HUMANNESS_OF_AGENTS_KEY.to_string(), of_agents),
+    ];
+    app.fleet.set(kept).await?;
+    Ok(Json(humanness_kept(&app).told()))
+}
+
 async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
@@ -522,6 +604,11 @@ pub fn routes() -> Router<App> {
         .route("/teams", get(teams))
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
+        .route(
+            "/personalities/settings",
+            get(personalities).post(set_personalities),
+        )
+        .route("/voice-humanness", get(humanness).post(set_humanness))
         .route("/agent-model-options", get(model_options))
         .route(
             "/tool-explanations/settings",

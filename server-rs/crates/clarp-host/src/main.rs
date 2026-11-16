@@ -13,9 +13,11 @@ use clarp_host::fleet::{self, Works};
 use clarp_host::hub::Hub;
 use clarp_host::ids;
 use clarp_host::launcher::Launcher;
+use clarp_host::owner::OwnerFile;
 use clarp_host::pusher;
 use clarp_host::relay::Relay;
 use clarp_host::revisions::Revisions;
+use clarp_host::telling::Telling;
 use clarp_kernel::presence::Presence;
 use clarp_ports::blobs::BlobEngine;
 use clarp_ports::clock::{Clock, SystemClock};
@@ -112,6 +114,8 @@ async fn serve(config: Config) -> Result<(), String> {
         pusher: pusher.clone(),
         blobs: blobs.clone(),
         speaks,
+        // Who speaks for an agent is in the owner's file, where the keys of speech are.
+        telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
     };
     let fleet = fleet::start(works, store)?;
     let desks = Arc::new(Mutex::new(Presence::new()));

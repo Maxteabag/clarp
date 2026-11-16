@@ -41,6 +41,7 @@ pub mod relay;
 pub mod request_tool;
 pub mod revisions;
 pub mod roster;
+pub mod telling;
 pub mod tools;
 pub mod voice;
 pub mod voices;

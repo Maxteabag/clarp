@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
+use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
@@ -99,9 +100,18 @@ impl Backend for Claude {
         } else {
             option("--session-id", &spec.new_session);
         }
+        let mut content = vec![json!({"type": "text", "text": spec.prompt})];
+        // What the Host says with the prompt: after the user's own words, and marked as
+        // not theirs. On the Python Host a hook of Claude Code's says it, and Claude Code
+        // hands the model what a hook says between the same marks.
+        if let Some(told) = &spec.told {
+            let said = told::beside(&told.persona, &spec.session, told.spoken);
+            let (opens, ends) = REMINDER;
+            content.push(json!({"type": "text", "text": format!("{opens}\n{said}\n{ends}")}));
+        }
         let message = json!({
             "type": "user",
-            "message": {"role": "user", "content": [{"type": "text", "text": spec.prompt}]},
+            "message": {"role": "user", "content": content},
         });
         let mut stdin = message.to_string().into_bytes();
         stdin.push(b'\n');
@@ -160,6 +170,9 @@ struct ResultFacts {
 
 /// What the ids of Claude Code's live items begin with.
 const SHOWN: &str = "cl";
+
+/// The marks between which Claude Code hands the model what is not the user's own words.
+const REMINDER: (&str, &str) = ("<system-reminder>", "</system-reminder>");
 
 /// What kind of item a block of a message is shown as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1371,6 +1384,7 @@ mod tests {
             model: Some("opus".to_string()),
             effort: Some(String::new()),
             identity: None,
+            told: None,
         };
         let fresh = Claude::new().launch(&spec);
         assert_eq!(fresh.program, "claude");
@@ -1399,6 +1413,60 @@ mod tests {
         );
         let sent: Value = serde_json::from_slice(&fresh.stdin).unwrap();
         assert_eq!(sent["message"]["content"][0]["text"], "say \"hi\"\nplease");
+        assert_eq!(
+            sent["message"]["content"].as_array().unwrap().len(),
+            1,
+            "a Host that tells nothing sends the user's words and no more"
+        );
+        assert!(!fresh.args.iter().any(|arg| arg == "--append-system-prompt"));
+
+        // Who the agent is goes where it holds for the whole conversation; what holds for
+        // this turn goes after the user's words, marked as the Host's.
+        let told = Claude::new().launch(&TurnSpec {
+            identity: Some("You are Maximus. Personality: exact.".to_string()),
+            told: Some(told::Turn {
+                persona: "Maximus".to_string(),
+                spoken: Some(told::Sound {
+                    humanness: 0,
+                    tags: false,
+                    narration: 1,
+                }),
+            }),
+            ..spec.clone()
+        });
+        let identity = [
+            "--append-system-prompt",
+            "You are Maximus. Personality: exact.",
+        ];
+        assert!(told.args.windows(2).any(|pair| pair == identity));
+        assert_eq!(
+            told.stdin.iter().filter(|byte| **byte == b'\n').count(),
+            1,
+            "still one line"
+        );
+        let sent: Value = serde_json::from_slice(&told.stdin).unwrap();
+        let content = sent["message"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(
+            content[0]["text"], "say \"hi\"\nplease",
+            "the user's words first"
+        );
+        let said = content[1]["text"].as_str().unwrap();
+        assert!(said.starts_with("<system-reminder>\nYou are running inside Clarp."));
+        assert!(said.ends_with("\n</system-reminder>"));
+        assert!(said.contains("This turn belongs to Maximus (Clarp session maximus)."));
+        assert!(said.contains("<speak>") && said.contains("Humanness: 0/10."));
+        assert!(said.contains("Narration level: milestones."));
+        let silent = Claude::new().launch(&TurnSpec {
+            told: Some(told::Turn {
+                persona: "Maximus".to_string(),
+                spoken: None,
+            }),
+            ..spec.clone()
+        });
+        let sent: Value = serde_json::from_slice(&silent.stdin).unwrap();
+        let said = sent["message"]["content"][1]["text"].as_str().unwrap();
+        assert!(said.contains("This turn belongs to Maximus") && !said.contains("<speak>"));
 
         let named = Claude::new().launch(&TurnSpec {
             new_session: Some("conv-1".to_string()),

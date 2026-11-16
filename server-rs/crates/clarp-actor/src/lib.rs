@@ -44,6 +44,7 @@ use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
+use clarp_kernel::told::{self, Told};
 use clarp_kernel::turn::{
     Activity, Admission, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
     silent_when_failed,
@@ -75,7 +76,10 @@ pub struct Profile {
     pub cwd: PathBuf,
     pub model: Option<String>,
     pub effort: Option<String>,
-    pub identity: Option<String>,
+    /// What the agent's tool is told beside the user's words: who the agent is, and how
+    /// its spoken answers sound. `None`: nothing. This is the one part of a profile that
+    /// follows the agent as it is changed ([`Actor::retell`]).
+    pub told: Option<Told>,
     /// How long a tool gets to end by itself when it is told to stop.
     /// What every turn's tool is told on top of what its backend sets: where the agent's own
     /// tools find the Host.
@@ -1037,6 +1041,12 @@ impl Actor {
         self.profile.effort = effort;
     }
 
+    /// Sets what the agent's tool is told from its next turn on: who the agent is now, and
+    /// how its spoken answers sound. A turn that runs was told when it started.
+    pub fn retell(&mut self, told: Option<Told>) {
+        self.profile.told = told;
+    }
+
     /// The name of the backend that runs this agent's turns.
     pub fn backend_id(&self) -> &'static str {
         self.backend.id()
@@ -1971,6 +1981,7 @@ impl Actor {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,
         };
+        let told = self.profile.told.as_ref();
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
@@ -1983,7 +1994,12 @@ impl Actor {
             backend_session,
             model: self.profile.model.clone(),
             effort: self.profile.effort.clone(),
-            identity: self.profile.identity.clone(),
+            identity: told.and_then(|told| told.identity.clone()),
+            // How to speak is told to a turn whose answer is read aloud, and to no other.
+            told: told.map(|told| told::Turn {
+                persona: told.persona.clone(),
+                spoken: message.speak.then_some(told.sound),
+            }),
         });
         let stdin_file = self.profile.stdin_path_of(turn, attempt);
         write_whole(&stdin_file, &launch.stdin)?;

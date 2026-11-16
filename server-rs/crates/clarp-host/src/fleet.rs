@@ -12,13 +12,15 @@ use std::time::{Duration, Instant};
 
 use clarp_actor::Profile;
 use clarp_kernel::devices::{self, PushBook, PushRow};
-use clarp_kernel::{helpers, roster};
+use clarp_kernel::personas::{self, PERSONALITY_MOST};
+use clarp_kernel::{helpers, python, roster};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::kv::KeyValue;
 use clarp_ports::log::LogEngine;
 use clarp_protocol::requests::CreateAgentRequest;
+use clarp_speech::listen::strip;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
 
@@ -93,6 +95,15 @@ pub struct AgentRecord {
     /// `{}` is the Python Host's word for none of its own.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub voice_id: String,
+    /// How it speaks: the clause its tool is told with its name. It is the agent's from
+    /// the day it is made, and stays when the agent is given another name. Empty: as the
+    /// persona of its name speaks.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub personality: String,
+    /// How much it says while it works, when its answer is read aloud: from 0, a line when
+    /// it begins and one when it is done, to 3, all along.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub narration: i64,
 }
 
 impl AgentRecord {
@@ -115,6 +126,11 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(value: &i64) -> bool {
+    *value == 0
+}
+
 /// What the user changes about an agent after it is made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Amend {
@@ -133,6 +149,8 @@ pub enum Amend {
     },
     /// The voices it was given, as they are stored: one for each engine it has one for.
     Voice(String),
+    /// How much it says while it works, from 0 to 3.
+    Narration(i64),
 }
 
 /// Why an agent was not changed.
@@ -315,6 +333,8 @@ pub struct Works {
     pub blobs: Arc<dyn Blobs>,
     /// The way to the one that speaks.
     pub speaks: crate::voice::Speaks,
+    /// What the tools of this Host's agents are told, by what holds when one is asked.
+    pub telling: crate::telling::Telling,
 }
 
 enum Ask {
@@ -693,7 +713,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         cwd: PathBuf::from(&record.cwd),
         model: non_empty(&record.model),
         effort: non_empty(&record.effort),
-        identity: None,
+        told: Some(works.telling.of(record)),
         tool_env: works.tool_env.clone(),
         stop_grace_ms: STOP_GRACE_MS,
         keep_spools: works.config.keep_spools,
@@ -714,12 +734,23 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         pusher: works.pusher.clone(),
         blobs: works.blobs.clone(),
         speaks: works.speaks.clone(),
+        telling: works.telling.clone(),
     })
 }
 
 /// Opens the fleet from its store, starts a thread for every agent in it, and returns the way
 /// to the fleet's own thread.
 pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
+    // The owner's settings have a dot in their key (`transcription.language`); what the
+    // Host keeps for itself in the same table (its id, the focus) has none. They are read
+    // first: what an agent's tool is told is worked out from them.
+    let mut settings = BTreeMap::new();
+    for (key, stored) in store.list(SETTINGS).map_err(|error| error.to_string())? {
+        if key.contains('.') {
+            settings.insert(key, String::from_utf8_lossy(&stored).into_owned());
+        }
+    }
+    works.telling.settings_are(Arc::new(settings.clone()));
     let mut members = Vec::new();
     for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
         let record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
@@ -771,14 +802,6 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         let peer: Peer = serde_json::from_slice(&stored)
             .map_err(|error| format!("the entry for the peer {name} cannot be read: {error}"))?;
         peers.insert(name, peer);
-    }
-    // The owner's settings have a dot in their key (`transcription.language`); what the
-    // Host keeps for itself in the same table (its id, the focus) has none.
-    let mut settings = BTreeMap::new();
-    for (key, stored) in store.list(SETTINGS).map_err(|error| error.to_string())? {
-        if key.contains('.') {
-            settings.insert(key, String::from_utf8_lossy(&stored).into_owned());
-        }
     }
     let (directory, read) = watch::channel(Arc::new(Directory {
         members: members.clone(),
@@ -955,13 +978,16 @@ impl Fleet {
     }
 
     fn publish(&self) {
+        let settings = Arc::new(self.settings.clone());
+        // The one that works out what agents' tools are told reads the same settings.
+        self.works.telling.settings_are(settings.clone());
         self.directory.send_replace(Arc::new(Directory {
             members: self.members.clone(),
             focus: self.focus.clone(),
             devices: self.devices.clone(),
             push: Arc::new(self.push.clone()),
             peers: Arc::new(self.peers.clone()),
-            settings: Arc::new(self.settings.clone()),
+            settings,
         }));
     }
 
@@ -1176,6 +1202,13 @@ impl Fleet {
             let why = "A helper needs a parent session.";
             return Err(Told::new(400, "helper_requires_parent", why).into());
         }
+        // How it speaks: as was asked for it, else as the persona of its name does. It is
+        // written down with the agent, so that it keeps it under another name.
+        let asked = request.personality.as_deref().map_or("", strip);
+        let personality = match python::first(asked, PERSONALITY_MOST) {
+            "" => personas::personality(&persona).to_string(),
+            asked => asked.to_string(),
+        };
         let record = AgentRecord {
             agent_id: ids::hex(8),
             session,
@@ -1194,6 +1227,7 @@ impl Fleet {
             },
             helper_state: helpers::initial_state(role).map(str::to_string),
             voice_id: request.voice_id.unwrap_or_default().trim().to_string(),
+            personality,
             ..AgentRecord::default()
         };
         // Refused before anything is written: an agent whose backend this Host lacks.
@@ -1246,6 +1280,7 @@ impl Fleet {
                 }
             }
             Amend::Voice(voices) => record.voice_id = voices,
+            Amend::Narration(level) => record.narration = level,
         }
         let (took, taken) = oneshot::channel();
         if record == *before {

@@ -43,6 +43,9 @@ pub struct TurnSpec {
     pub effort: Option<String>,
     /// What the agent is told about who it is, on top of the tool's own instructions.
     pub identity: Option<String>,
+    /// What the Host tells the tool with this prompt: to use the Host's own tools, whose
+    /// turn this is and, for an answer that is read aloud, how to speak. `None`: nothing.
+    pub told: Option<clarp_kernel::told::Turn>,
 }
 
 /// How to start the tool for one turn.
