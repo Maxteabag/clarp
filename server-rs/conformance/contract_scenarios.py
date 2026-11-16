@@ -1012,4 +1012,44 @@ SCENARIOS.append({
     ],
 })
 
+# What the reference Host's stand-in for an engine that listens hears in every clip
+# (`StubSTT` in tests/replay/host.py). The Rust Host's worker is told to hear the same.
+HEARD = 'replay voice prompt'
+
+
+def spoken(name, clip='synthetic-audio-bytes-one', **headers):
+    """A clip of speech handed to the Host: made-up bytes, with what the app says of them."""
+    return {'op': 'post', 'path': '/transcribe', 'name': name,
+            'raw': {'content_type': 'audio/webm', 'bytes': clip}, 'headers': headers}
+
+
+UTTERANCE = {'X-Transcription-ID': 'utt-one', 'X-Utterance-ID': 'utt-one', 'X-Transcription-Session': AGENT,
+             'X-Hands-Free': '1'}
+
+SCENARIOS.append({
+    'id': 'speech-in',
+    'what': 'a person speaks: a clip becomes text and the text is sent as their message under the trace the clip '
+            'was given; the same request again, another clip under the same name, a clip nobody named, a name '
+            'that is none, an engine nobody installed, and what the Host says it listens with',
+    'steps': [
+        spoken('a clip becomes text', **UTTERANCE),
+        {**send(HEARD, 'spoken-1', utterance_id='utt-one'), 'name': 'what was said is sent',
+         'body_from_last': {'trace_id': 'trace_id'}},
+        {'op': 'wait_reply', 'after': 'u-spoken-1'},
+        {'op': 'quiesce'},
+        LOG,
+        SNAPSHOT,
+        spoken('the same request again', **UTTERANCE),
+        spoken('another clip under the same name', clip='synthetic-audio-bytes-two', **UTTERANCE),
+        spoken('the same clip, not said hands-free', **{**UTTERANCE, 'X-Hands-Free': '0'}),
+        spoken('a clip nobody named'),
+        spoken('a clip under another name', **{**UTTERANCE, 'X-Transcription-ID': 'utt-two'}),
+        spoken('a name that is none', **{'X-Transcription-ID': 'has space'}),
+        spoken('an engine nobody installed', **{'X-Transcription-Model': 'nothing-of-the-kind'}),
+        spoken('the engine of the Host by its plain name', **{'X-Transcription-Model': 'server-default'}),
+        get('/transcription-capabilities', 'what the Host listens with'),
+        get('/transcription-providers', 'who listens'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
