@@ -3805,6 +3805,32 @@
    "path": "/upload",
    "status": 400,
    "step": "a file of nothing"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/crash",
+   "status": 200,
+   "step": "what a phone's system told an app of itself"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/crash",
+   "status": 400,
+   "step": "a report that is no object"
   }
  ],
  "live": {
