@@ -2,8 +2,10 @@
 //!
 //! `fixtures/addressed-vectors.json` is written by `server-rs/tools/addressed-vectors.py`:
 //! what the Python Host's functions say of messages and agents made up for it. The same must
-//! be said here, with one difference made on purpose: a name's word is taken off whole
-//! (reference defect R23), and the test says where that shows.
+//! be said here, with one difference made on purpose: a word is taken off whole or not at
+//! all, and the test names the messages where that shows. (The Python Host's defect with a
+//! name in letters English has not, R23, is fixed there since 16 Nov 2026, and its vectors
+//! were written again.)
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -77,34 +79,35 @@ fn a_message_is_for_the_agent_the_python_host_finds_named_in_it() {
                 continue;
             };
             for_an_agent += 1;
-            if rest == theirs {
-                continue;
+            // The messages this Host answers otherwise, on purpose: a word is taken off
+            // whole or not at all.
+            match WHOLE_WORDS.iter().find(|(said, _, _)| *said == text) {
+                Some((_, here, there)) => {
+                    whole_words += 1;
+                    assert_eq!((rest.as_str(), theirs), (*here, *there), "{text:?}");
+                }
+                None => assert_eq!(rest, theirs, "{text:?}"),
             }
-            // The one difference: the Python Host left the end of the name's word, in
-            // letters it does not know, at the head of what the agent is given.
-            whole_words += 1;
-            let tail: String = theirs
-                .chars()
-                .take_while(|sign| !sign.is_ascii() && sign.is_alphanumeric())
-                .collect();
-            assert!(
-                !tail.is_empty(),
-                "{text:?}: {rest:?} here, {theirs:?} there"
-            );
-            let without =
-                theirs[tail.len()..].trim_start_matches(|sign: char| sign.is_alphanumeric());
-            assert_eq!(rest, without.trim(), "{text:?}");
         }
     }
     assert!(
-        messages >= 90 && for_an_agent >= 60,
+        messages >= 110 && for_an_agent >= 80,
         "{messages}, {for_an_agent}"
     );
-    assert_eq!(
-        whole_words, 3,
-        "the messages whose name ends in a letter English has not"
-    );
+    assert_eq!(whole_words, WHOLE_WORDS.len());
 }
+
+/// What is said, what this Host gives the agent of it, and what the Python Host gives it.
+/// The first four: the name is spelled another way than the agent has it, or goes on in
+/// more letters, and the Python Host leaves the end of the word. The last: the name is
+/// found in the middle of a longer word, and the Python Host cuts the word there.
+const WHOLE_WORDS: [(&str, &str, &str); 5] = [
+    ("Rach\u{e9}l go", "go", "\u{e9}l go"),
+    ("Zo\u{e9} go", "go", "\u{e9} go"),
+    ("Zo\u{eb}y go", "go", "y go"),
+    ("Rache\u{301}l go", "go", "\u{301}l go"),
+    ("Anna Mariana please", "Mariana please", "na please"),
+];
 
 #[test]
 fn a_message_goes_where_the_python_host_sends_it() {

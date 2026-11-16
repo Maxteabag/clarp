@@ -52,6 +52,11 @@ SAID = [
     'rächel go', 'Rachél go', 'Ｒachel go', 'Rachel　， go', 'rachel;:!?.,- - go', 'rachel\n\ngo\n',
     '  rachel  ', 'x' * 300 + ' rachel', 'ra' + 'chel ' * 40, 'digits go', '1234 go', 'nameless go', 'Zoë go',
     'Zoé go', 'zo-e go', 'dr. Mike', 'a b c d', 'ab cd ef', 'abc def ghi', 'Claire?', '?Claire', '...claire...',
+    # A name spelled out whole, in more words than one or in letters English has not, however
+    # they are composed: the address ends where the name does.
+    'Zoe\u0308 go', 'ZO\u00cb, go', 'zo\u00eb go', 'Zo\u00eby go', 'Zo\u00eb-go', 'Zo\u00eb', 'hey zo\u00eb: go',
+    'Anna Maria, please', 'ANNA MARIA please', 'anna  maria please', 'Anna Mariana please', 'anna maria',
+    'hey anna maria: go', 'Anna Mar\u00eda please', 'anna-maria please', 'Rache\u0301l go', 'Anna Maria-go',
 ]
 SAID_TO_TWINS = ['Mike go', 'mikey go', 'Bella go', 'Bell go', 'bella-2 go', 'short go', 'long go']
 SAID_TO_RHYMES = ['Cella go', 'ella go', 'Stela go', 'della go', 'Bela go', 'tella go']

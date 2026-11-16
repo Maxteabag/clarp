@@ -9,11 +9,20 @@
 //! Host does with its router of spoken messages off, which is how it comes
 //! (`server/lib/routing.py`, `server/lib/send_service.py`).
 //!
-//! One thing is done otherwise, on purpose: a name's word is taken off whole. The Python
-//! Host knows a word by the letters of English, so for an agent called Zoë it gives the
-//! agent "ë go" for "Zoë go" (reference defect R23).
+//! A name that the message spells out is taken off whole: all of its words ("Anna Maria"),
+//! and its letters however they are composed ("Zoë"). (Until 16 Nov 2026 the Python Host
+//! knew a word by the letters of English only and gave an agent called Zoë "ë go" for "Zoë
+//! go": reference defect R23, fixed there.)
+//!
+//! One thing is done otherwise, on purpose: a word is taken off whole or not at all. Where
+//! the message spells the name another way than the agent has it ("Rachél" for Rachel), the
+//! word it was found in goes whole; the Python Host leaves the agent "él go". And a name is
+//! not cut out of the middle of a longer word: of "Anna Mariana please" the agent Anna
+//! Maria is given "Mariana please", where the Python Host gives it "na please".
 //!
 //! Held to the Python Host's own answers by `tests/fixtures/addressed-vectors.json`.
+
+use unicode_normalization::UnicodeNormalization;
 
 use crate::difflib;
 use crate::python::{blank, strip as stripped};
@@ -63,9 +72,10 @@ fn letters(word: &str) -> String {
         .collect()
 }
 
-/// A word of a message: its letters, and where it ends.
+/// A word of a message: its letters, and where it begins and ends.
 struct Word {
     letters: String,
+    start: usize,
     end: usize,
 }
 
@@ -88,18 +98,48 @@ fn words(text: &str) -> Vec<Word> {
         }
         found.push(Word {
             letters: letters(&text[start..at]),
+            start,
             end: at,
         });
     }
     found
 }
 
+/// A text in small letters with every letter taken apart into its base and its marks, so
+/// that two spellings of one name are one.
+fn canonical(text: &str) -> String {
+    text.to_lowercase().nfd().collect()
+}
+
+/// A sign a word goes on with: a letter or a digit of any alphabet, or a mark on one.
+fn of_a_word(sign: char) -> bool {
+    sign.is_alphanumeric() || ('\u{300}'..='\u{36f}').contains(&sign)
+}
+
+/// Where the name ends in a message that spells it out from the word that was found: after
+/// all of the name's words, however its letters are composed. Never before the word's own
+/// end, and nowhere else when the message does not spell the name out, or goes on with
+/// more of a word right after it.
+fn through_the_name(text: &str, word: &Word, name: &str) -> usize {
+    let wanted = canonical(name);
+    let most = wanted.chars().count();
+    let mut spelled = String::new();
+    for (at, sign) in text[word.start..].char_indices().take(most) {
+        spelled.push(sign);
+        if canonical(&spelled) == wanted {
+            let end = word.start + at + sign.len_utf8();
+            let goes_on = text[end..].starts_with(of_a_word);
+            return if goes_on { word.end } else { word.end.max(end) };
+        }
+    }
+    word.end
+}
+
 /// What a message says after the name that ends at `end`: without the rest of the name's
 /// word, and without the blanks and marks that follow an address.
 fn after(text: &str, end: usize) -> String {
     // The rest of the word: letters the Python Host does not know as letters.
-    let whole = |sign: char| sign.is_alphanumeric() || ('\u{300}'..='\u{36f}').contains(&sign);
-    let rest = text[end..].trim_start_matches(whole);
+    let rest = text[end..].trim_start_matches(of_a_word);
     let mark = |sign: char| blank(sign) || matches!(sign, ',' | ';' | ':' | '!' | '?' | '.' | '-');
     stripped(rest.trim_start_matches(mark)).to_string()
 }
@@ -125,7 +165,7 @@ pub fn named<'a>(text: &str, agents: &[(&'a str, &str)]) -> Option<(&'a str, Str
     for word in address {
         for (name, session) in &candidates {
             if word.letters == letters(name) {
-                return Some((session, after(text, word.end)));
+                return Some((session, after(text, through_the_name(text, word, name))));
             }
         }
     }
@@ -133,15 +173,15 @@ pub fn named<'a>(text: &str, agents: &[(&'a str, &str)]) -> Option<(&'a str, Str
     if opening.letters.len() < 3 {
         return None;
     }
-    let mut best: Option<(f64, &'a str)> = None;
+    let mut best: Option<(f64, &str, &'a str)> = None;
     for (name, session) in &candidates {
         let score = alike(&opening.letters, name);
-        if score > best.map_or(0.0, |(score, _)| score) {
-            best = Some((score, session));
+        if score > best.map_or(0.0, |(score, _, _)| score) {
+            best = Some((score, name, session));
         }
     }
-    let (score, session) = best?;
-    (score >= ALIKE_ENOUGH).then(|| (session, after(text, opening.end)))
+    let (score, name, session) = best?;
+    (score >= ALIKE_ENOUGH).then(|| (session, after(text, through_the_name(text, opening, name))))
 }
 
 /// Where a message goes, and what of it.
