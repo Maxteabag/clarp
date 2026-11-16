@@ -543,9 +543,15 @@ both Hosts answer when nothing was said (no clip missed, what an app may not say
 what a clip is and how it is fetched is this Host's reading of `clip_stream.py`, not a recorded answer. Not
 there:
 ElevenLabs, Google's Chirp voices, a local voice and custom adapters as engines that speak; the raw and HLS
-ways of delivering a clip; the herald that decides which of several agents' clips is played first; what the
-apps read and set of voices (`/voice-catalog`, `/voices`, `/agent-voice`, `/voice-preview`); the record of
-each thing said (`/voice-events`); and calls.
+ways of delivering a clip; the herald that decides which of several agents' clips is played first; the record
+of each thing said (`/voice-events` is taken and not kept); and calls. **What an app's voice picker reads is
+the Python Host's catalogue** (`GET /voice-catalog`; `clarp-kernel` `voices.rs`, held by seven answers of that
+Host's own function, recorded in rooms of their own by `tools/catalog-vectors.py`): the engines that speak,
+whether each can be used, each voice with who has it and whether it is this agent's. Its lists of voices are
+carried as data; Cartesia's is Cartesia's own, asked for with the owner's key and kept a quarter of an hour.
+One thing is this Host's: an engine it has not built is told as one that cannot be used here. An agent is
+given a voice with `POST /agent-voice`, kept with the agent; a voice another agent has is refused. A preview
+of a voice is made once by its own engine and kept.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can

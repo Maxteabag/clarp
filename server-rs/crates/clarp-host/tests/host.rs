@@ -7089,11 +7089,13 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
         (&providers["engine"], &providers["language"]),
         (&json!("local"), &json!("en"))
     );
+    // A Host nobody told who speaks: Cartesia would, as on the Python Host, and it has no key.
     let voices = host.get("/voice-catalog");
     assert_eq!(
         (&voices["provider"], &voices["voice_available"]),
-        (&json!("none"), &json!(false))
+        (&json!("cartesia"), &json!(false))
     );
+    assert_eq!(voices["providers"].as_array().unwrap().len(), 5);
     let models = host.get("/agent-model-options");
     assert_eq!(
         (&models["schema_version"], &models["providers"]),
@@ -8510,4 +8512,283 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
         (status, &told["agent_engines"], &told["agent_languages"]),
         (200, &json!({}), &json!({}))
     );
+}
+
+#[test]
+fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
+    let place = Place::new("voices");
+    // Cartesia on this machine: its list of voices, and its sound for a preview.
+    let list = json!({
+        "data": [
+            { "id": "c-voice-one", "name": "One", "description": "A made-up voice" },
+            { "id": "c-voice-two", "name": "Two", "tagline": "Only a tagline" },
+            { "id": "c-voice-three", "name": "Three" },
+        ],
+        "has_more": false,
+    });
+    let (cartesia, asked) = answers(vec![
+        ("/voices", "200 OK", list.to_string()),
+        (
+            "/tts/bytes",
+            "200 OK",
+            "made-up sound of a voice".to_string(),
+        ),
+    ]);
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"key-in-the-owners-file\"\n\n\
+         [cartesia.voices]\nMaximus = \"c-voice-two\"\n",
+    )
+    .unwrap();
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let speaks_at = format!("{cartesia}/tts/bytes");
+    let world = [
+        ("CLARP_CARTESIA_ENDPOINT", speaks_at.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+        ("GOOGLE_APPLICATION_CREDENTIALS", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let (maximus, echo) = (host.new_agent("Maximus"), host.new_agent("Echo"));
+    let provider = |catalogue: &Value, id: &str| -> Value {
+        let rows = catalogue["providers"].as_array().unwrap().iter();
+        rows.clone().find(|row| row["id"] == id).unwrap().clone()
+    };
+    let voice = |row: &Value, id: &str| -> Value {
+        let voices = row["voices"].as_array().unwrap().iter();
+        voices
+            .clone()
+            .find(|voice| voice["id"] == id)
+            .unwrap()
+            .clone()
+    };
+
+    // The catalogue for one agent: which engine speaks, whether it can, and its voices, with
+    // the one this agent speaks in.
+    let catalogue = host.get(&format!("/voice-catalog?for={maximus}"));
+    assert_eq!(
+        (
+            &catalogue["provider"],
+            &catalogue["fallback"],
+            &catalogue["voice_available"]
+        ),
+        (&json!("cartesia"), &json!("none"), &json!(true))
+    );
+    let ids: Vec<&str> = catalogue["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        ["cartesia", "elevenlabs", "gemini", "deepgram", "google"]
+    );
+    let speaks = provider(&catalogue, "cartesia");
+    assert_eq!(
+        (
+            &speaks["available"],
+            &speaks["selected"],
+            speaks["voices"].as_array().unwrap().len()
+        ),
+        (&json!(true), &json!(true), 3)
+    );
+    assert_eq!(
+        voice(&speaks, "c-voice-two"),
+        json!({
+            "id": "c-voice-two", "name": "Two", "description": "Only a tagline", "provider": "cartesia",
+            "taken_by": null, "current": true,
+            "preview_url": "/voice-preview?provider=cartesia&id=c-voice-two",
+        })
+    );
+    // Cartesia was asked for its list with the owner's key, once: the list is kept a while.
+    host.get(&format!("/voice-catalog?for={echo}"));
+    let listed = asked.lock().unwrap().clone();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert!(
+        listed[0].starts_with("GET /voices?limit=100&language=en"),
+        "{}",
+        listed[0]
+    );
+    assert!(
+        listed[0]
+            .to_lowercase()
+            .contains("authorization: bearer key-in-the-owners-file")
+    );
+    // An engine this Host has not built is told as one that cannot be used here, with its voices.
+    let not_here = provider(&catalogue, "elevenlabs");
+    assert_eq!(
+        (
+            &not_here["available"],
+            not_here["voices"].as_array().unwrap().len()
+        ),
+        (&json!(false), 29)
+    );
+    assert_eq!(
+        provider(&catalogue, "gemini")["voices"]
+            .as_array()
+            .unwrap()
+            .len(),
+        30
+    );
+
+    // An agent is given a voice for one engine. Another agent cannot have the same.
+    let give = |change: Value| host.ask("POST", "/agent-voice", Some(&change));
+    assert_eq!(
+        give(json!({ "session": echo, "provider": "Cartesia", "voice_id": "c-voice-one" })),
+        (200, json!({ "ok": true }))
+    );
+    let catalogue = host.get(&format!("/voice-catalog?for={maximus}"));
+    assert_eq!(
+        voice(&provider(&catalogue, "cartesia"), "c-voice-one")["taken_by"],
+        "Echo"
+    );
+    let its_own = host.get(&format!("/voice-catalog?for={echo}"));
+    let own = voice(&provider(&its_own, "cartesia"), "c-voice-one");
+    assert_eq!(
+        (&own["current"], &own["taken_by"]),
+        (&json!(true), &json!(null))
+    );
+    assert_eq!(
+        give(json!({ "session": maximus, "provider": "cartesia", "voice_id": "c-voice-one" })),
+        (409, json!({ "error": "voice taken", "by": "Echo" }))
+    );
+    for (change, status, why) in [
+        (
+            json!({ "session": maximus }),
+            400,
+            "session and voice_id required",
+        ),
+        (
+            json!({ "voice_id": "c-voice-three" }),
+            400,
+            "session and voice_id required",
+        ),
+        (
+            json!({ "session": "nobody", "voice_id": "c-voice-three" }),
+            404,
+            "no such agent",
+        ),
+        (
+            json!({ "session": maximus, "provider": "google", "voice_id": "Kore" }),
+            400,
+            "unknown voice",
+        ),
+        (json!([1]), 400, "bad json"),
+    ] {
+        assert_eq!(
+            give(change.clone()),
+            (status, json!({ "error": why })),
+            "{change}"
+        );
+    }
+
+    // The old settings screen's list, with what the agent is called.
+    let old = host.get(&format!("/voices?for={echo}"));
+    assert_eq!(
+        (
+            old["voices"].as_array().unwrap().len(),
+            &old["persona"],
+            &old["bio"]
+        ),
+        (29, &json!("Echo"), &json!(""))
+    );
+
+    // A preview of a voice is made once and kept: the second asking costs nothing.
+    let hear = |voice: &str, engine: &str| {
+        let path = format!("/voice-preview?provider={engine}&id={voice}");
+        fetch(&host, "", "GET", &path, &[], b"")
+    };
+    let first = hear("c-voice-three", "cartesia");
+    assert_eq!(
+        (
+            first.status,
+            first.header("content-type"),
+            first.text().as_str()
+        ),
+        (200, "audio/mpeg", "made-up sound of a voice")
+    );
+    let said: Vec<String> = asked.lock().unwrap().iter().skip(1).cloned().collect();
+    assert_eq!(said.len(), 1);
+    let body: Value = serde_json::from_str(said[0].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        (&body["transcript"], &body["voice"]["id"]),
+        (
+            &json!("Hello, I'm Three. This is how I'll sound in Clarp."),
+            &json!("c-voice-three")
+        )
+    );
+    assert_eq!(
+        hear("c-voice-three", "cartesia").text(),
+        "made-up sound of a voice"
+    );
+    assert_eq!(
+        asked.lock().unwrap().len(),
+        2,
+        "kept: Cartesia was not asked again"
+    );
+    for (voice, engine) in [
+        ("c-voice-nine", "cartesia"),
+        ("Kore", "gemini"),
+        ("nPczCjzI2devNBz1zQrb", "elevenlabs"),
+    ] {
+        let none = hear(voice, engine);
+        assert_eq!(
+            (none.status, none.text().as_str()),
+            (404, "voice unavailable"),
+            "{engine}"
+        );
+    }
+
+    // An app's record of what its microphone and player did: taken, read as the Python Host
+    // reads it, and not kept on this Host yet.
+    let report = |said: Value| host.ask("POST", "/voice-events", Some(&said));
+    let (status, told) = report(json!({
+        "source": "ios", "sent_at": now_ms(),
+        "events": [{ "event": "capture_start", "ts": now_ms() }],
+    }));
+    assert_eq!(
+        (status, &told["ok"], &told["stored"]),
+        (200, &json!(true), &json!(0))
+    );
+    assert!(
+        told["clock_offset_ms"]
+            .as_i64()
+            .is_some_and(|apart| apart.abs() < 60_000),
+        "{told}"
+    );
+    assert!(told["server_now"].as_i64().is_some());
+    let (_, told) = report(json!({ "events": [], "sent_at": 5 }));
+    assert_eq!(
+        told["clock_offset_ms"],
+        json!(null),
+        "a clock that is hours off is no clock"
+    );
+    assert_eq!(
+        report(json!({ "events": "none" })),
+        (400, json!({ "error": "events must be a list" }))
+    );
+    let many: Vec<Value> = (0..501)
+        .map(|at| json!({ "event": "tick", "ts": at }))
+        .collect();
+    assert_eq!(
+        report(json!({ "events": many })),
+        (413, json!({ "error": "batch too large" }))
+    );
+
+    // The Host is killed and started again: the agent has the voice it was given.
+    host.kill();
+    let host = place.start_in("", &args, &world);
+    let catalogue = host.get(&format!("/voice-catalog?for={maximus}"));
+    let rows = catalogue["providers"].as_array().unwrap().iter();
+    let speaks = rows.clone().find(|row| row["id"] == "cartesia").unwrap();
+    let voices = speaks["voices"].as_array().unwrap().iter();
+    let given = voices
+        .clone()
+        .find(|voice| voice["id"] == "c-voice-one")
+        .unwrap();
+    assert_eq!(given["taken_by"], "Echo");
 }

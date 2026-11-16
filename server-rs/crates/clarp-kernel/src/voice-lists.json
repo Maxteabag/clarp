@@ -1,0 +1,734 @@
+{
+ "providers": [
+  {
+   "id": "cartesia",
+   "name": "Cartesia Sonic",
+   "kind": "cloud",
+   "streaming": true,
+   "credential": "CARTESIA_API_KEY",
+   "can_fallback": true,
+   "supports_preview": true,
+   "allows_custom_voice": false,
+   "custom": false
+  },
+  {
+   "id": "elevenlabs",
+   "name": "ElevenLabs",
+   "kind": "cloud",
+   "streaming": true,
+   "credential": "ELEVEN_API_KEY",
+   "can_fallback": true,
+   "supports_preview": true,
+   "allows_custom_voice": false,
+   "custom": false
+  },
+  {
+   "id": "gemini",
+   "name": "Gemini TTS",
+   "kind": "cloud",
+   "streaming": true,
+   "credential": "GEMINI_API_KEY",
+   "can_fallback": true,
+   "supports_preview": true,
+   "allows_custom_voice": false,
+   "custom": false
+  },
+  {
+   "id": "deepgram",
+   "name": "Deepgram",
+   "kind": "cloud",
+   "streaming": true,
+   "credential": "DEEPGRAM_API_KEY",
+   "can_fallback": true,
+   "supports_preview": true,
+   "allows_custom_voice": false,
+   "custom": false
+  },
+  {
+   "id": "google",
+   "name": "Google Chirp 3 HD",
+   "kind": "cloud",
+   "streaming": false,
+   "credential": "google",
+   "can_fallback": true,
+   "supports_preview": true,
+   "allows_custom_voice": false,
+   "custom": false,
+   "capabilities": {
+    "batch_ssml_breaks": true,
+    "streaming": false
+   }
+  },
+  {
+   "id": "none",
+   "name": "No voice output",
+   "kind": "disabled",
+   "streaming": false,
+   "can_fallback": false,
+   "supports_preview": false,
+   "allows_custom_voice": false,
+   "custom": false
+  }
+ ],
+ "gemini": [
+  [
+   "Zephyr",
+   "Bright"
+  ],
+  [
+   "Puck",
+   "Upbeat"
+  ],
+  [
+   "Charon",
+   "Informative"
+  ],
+  [
+   "Kore",
+   "Firm"
+  ],
+  [
+   "Fenrir",
+   "Excitable"
+  ],
+  [
+   "Leda",
+   "Youthful"
+  ],
+  [
+   "Orus",
+   "Firm"
+  ],
+  [
+   "Aoede",
+   "Breezy"
+  ],
+  [
+   "Callirrhoe",
+   "Easy-going"
+  ],
+  [
+   "Autonoe",
+   "Bright"
+  ],
+  [
+   "Enceladus",
+   "Breathy"
+  ],
+  [
+   "Iapetus",
+   "Clear"
+  ],
+  [
+   "Umbriel",
+   "Easy-going"
+  ],
+  [
+   "Algieba",
+   "Smooth"
+  ],
+  [
+   "Despina",
+   "Smooth"
+  ],
+  [
+   "Erinome",
+   "Clear"
+  ],
+  [
+   "Algenib",
+   "Gravelly"
+  ],
+  [
+   "Rasalgethi",
+   "Informative"
+  ],
+  [
+   "Laomedeia",
+   "Upbeat"
+  ],
+  [
+   "Achernar",
+   "Soft"
+  ],
+  [
+   "Alnilam",
+   "Firm"
+  ],
+  [
+   "Schedar",
+   "Even"
+  ],
+  [
+   "Gacrux",
+   "Mature"
+  ],
+  [
+   "Pulcherrima",
+   "Forward"
+  ],
+  [
+   "Achird",
+   "Friendly"
+  ],
+  [
+   "Zubenelgenubi",
+   "Casual"
+  ],
+  [
+   "Vindemiatrix",
+   "Gentle"
+  ],
+  [
+   "Sadachbia",
+   "Lively"
+  ],
+  [
+   "Sadaltager",
+   "Knowledgeable"
+  ],
+  [
+   "Sulafat",
+   "Warm"
+  ]
+ ],
+ "flux": [
+  [
+   "flux-alexis-en",
+   "Alexis",
+   "American; clear, professional, calm"
+  ],
+  [
+   "flux-bree-en",
+   "Bree",
+   "American; friendly, sweet, confused"
+  ],
+  [
+   "flux-brittany-en",
+   "Brittany",
+   "American; confident, robotic, kind"
+  ],
+  [
+   "flux-brooke-en",
+   "Brooke",
+   "American; friendly, intelligent, fast"
+  ],
+  [
+   "flux-bruce-en",
+   "Bruce",
+   "American; friendly, kind, natural"
+  ],
+  [
+   "flux-cliff-en",
+   "Cliff",
+   "American; deep, confident, calm"
+  ],
+  [
+   "flux-cole-en",
+   "Cole",
+   "American; friendly, clear, interesting"
+  ],
+  [
+   "flux-colin-en",
+   "Colin",
+   "British; warm, friendly, trustworthy"
+  ],
+  [
+   "flux-conor-en",
+   "Conor",
+   "Irish; confident, deep, friendly"
+  ],
+  [
+   "flux-donovan-en",
+   "Donovan",
+   "American; professional, angry, calm"
+  ],
+  [
+   "flux-drew-en",
+   "Drew",
+   "American; confident, relaxed, soft"
+  ],
+  [
+   "flux-elise-en",
+   "Elise",
+   "American; clear, professional, calm"
+  ],
+  [
+   "flux-gemma-en",
+   "Gemma",
+   "British; friendly, kind, approachable"
+  ],
+  [
+   "flux-haley-en",
+   "Haley",
+   "American; clear, professional, caring"
+  ],
+  [
+   "flux-hannah-en",
+   "Hannah",
+   "American; clear, confident, thoughtful"
+  ],
+  [
+   "flux-heather-en",
+   "Heather",
+   "American; clear, engaging, energetic"
+  ],
+  [
+   "flux-jack-en",
+   "Jack",
+   "British; confident, thoughtful, friendly"
+  ],
+  [
+   "flux-kai-en",
+   "Kai",
+   "Singaporean; clear, calm, professional"
+  ],
+  [
+   "flux-kelsey-en",
+   "Kelsey",
+   "American; clear, professional, caring"
+  ],
+  [
+   "flux-kit-en",
+   "Kit",
+   "British; friendly, energetic, thoughtful"
+  ],
+  [
+   "flux-maeve-en",
+   "Maeve",
+   "Irish; friendly, energetic, confident"
+  ],
+  [
+   "flux-marcelo-en",
+   "Marcelo",
+   "Filipino; clear, calm, professional"
+  ],
+  [
+   "flux-marcus-en",
+   "Marcus",
+   "American; friendly, helpful, smooth"
+  ],
+  [
+   "flux-meena-en",
+   "Meena",
+   "Indian; empathetic, professional, calm"
+  ],
+  [
+   "flux-meghan-en",
+   "Meghan",
+   "American; friendly, nice, energetic"
+  ],
+  [
+   "flux-miles-en",
+   "Miles",
+   "American; clear, calm, professional"
+  ],
+  [
+   "flux-naveen-en",
+   "Naveen",
+   "Indian; clear, professional, knowledgeable"
+  ],
+  [
+   "flux-paige-en",
+   "Paige",
+   "American; clear, professional, calm"
+  ],
+  [
+   "flux-priya-en",
+   "Priya",
+   "Indian; confident, empathetic, professional"
+  ],
+  [
+   "flux-rufus-en",
+   "Rufus",
+   "British; friendly, confident, intelligent"
+  ],
+  [
+   "flux-sean-en",
+   "Sean",
+   "British; friendly, demanding, kind"
+  ],
+  [
+   "flux-sharon-en",
+   "Sharon",
+   "Australian; formal, calm, relaxed"
+  ],
+  [
+   "flux-sienna-en",
+   "Sienna",
+   "American; clear, professional, calm"
+  ],
+  [
+   "flux-tanner-en",
+   "Tanner",
+   "British; professional, bored, tired"
+  ],
+  [
+   "flux-wade-en",
+   "Wade",
+   "American; warm, confident, clear"
+  ],
+  [
+   "flux-wes-en",
+   "Wes",
+   "American; thoughtful, friendly, warm"
+  ]
+ ],
+ "aura2": [
+  [
+   "aura-2-amalthea-en",
+   "Amalthea",
+   "Filipino; engaging, natural, cheerful"
+  ],
+  [
+   "aura-2-andromeda-en",
+   "Andromeda",
+   "American; casual, expressive, comfortable"
+  ],
+  [
+   "aura-2-apollo-en",
+   "Apollo",
+   "American; confident, comfortable, casual"
+  ],
+  [
+   "aura-2-arcas-en",
+   "Arcas",
+   "American; natural, smooth, clear"
+  ],
+  [
+   "aura-2-aries-en",
+   "Aries",
+   "American; warm, energetic, caring"
+  ],
+  [
+   "aura-2-asteria-en",
+   "Asteria",
+   "American; clear, confident, knowledgeable"
+  ],
+  [
+   "aura-2-athena-en",
+   "Athena",
+   "American; calm, smooth, professional"
+  ],
+  [
+   "aura-2-atlas-en",
+   "Atlas",
+   "American; enthusiastic, confident, approachable"
+  ],
+  [
+   "aura-2-aurora-en",
+   "Aurora",
+   "American; cheerful, expressive, energetic"
+  ],
+  [
+   "aura-2-callista-en",
+   "Callista",
+   "American; clear, energetic, professional"
+  ],
+  [
+   "aura-2-cora-en",
+   "Cora",
+   "American; smooth, melodic, caring"
+  ],
+  [
+   "aura-2-cordelia-en",
+   "Cordelia",
+   "American; approachable, warm, polite"
+  ],
+  [
+   "aura-2-delia-en",
+   "Delia",
+   "American; casual, friendly, cheerful"
+  ],
+  [
+   "aura-2-draco-en",
+   "Draco",
+   "British; warm, approachable, trustworthy"
+  ],
+  [
+   "aura-2-electra-en",
+   "Electra",
+   "American; professional, engaging, knowledgeable"
+  ],
+  [
+   "aura-2-harmonia-en",
+   "Harmonia",
+   "American; empathetic, clear, calm"
+  ],
+  [
+   "aura-2-helena-en",
+   "Helena",
+   "American; caring, natural, positive"
+  ],
+  [
+   "aura-2-hera-en",
+   "Hera",
+   "American; smooth, warm, professional"
+  ],
+  [
+   "aura-2-hermes-en",
+   "Hermes",
+   "American; expressive, engaging, professional"
+  ],
+  [
+   "aura-2-hyperion-en",
+   "Hyperion",
+   "Australian; caring, warm, empathetic"
+  ],
+  [
+   "aura-2-iris-en",
+   "Iris",
+   "American; cheerful, positive, approachable"
+  ],
+  [
+   "aura-2-janus-en",
+   "Janus",
+   "American; southern, smooth, trustworthy"
+  ],
+  [
+   "aura-2-juno-en",
+   "Juno",
+   "American; natural, engaging, melodic"
+  ],
+  [
+   "aura-2-jupiter-en",
+   "Jupiter",
+   "American; expressive, knowledgeable, baritone"
+  ],
+  [
+   "aura-2-luna-en",
+   "Luna",
+   "American; friendly, natural, engaging"
+  ],
+  [
+   "aura-2-mars-en",
+   "Mars",
+   "American; smooth, patient, trustworthy"
+  ],
+  [
+   "aura-2-minerva-en",
+   "Minerva",
+   "American; positive, friendly, natural"
+  ],
+  [
+   "aura-2-neptune-en",
+   "Neptune",
+   "American; professional, patient, polite"
+  ],
+  [
+   "aura-2-odysseus-en",
+   "Odysseus",
+   "American; calm, smooth, comfortable"
+  ],
+  [
+   "aura-2-ophelia-en",
+   "Ophelia",
+   "American; expressive, enthusiastic, cheerful"
+  ],
+  [
+   "aura-2-orion-en",
+   "Orion",
+   "American; approachable, comfortable, calm"
+  ],
+  [
+   "aura-2-orpheus-en",
+   "Orpheus",
+   "American; professional, clear, confident"
+  ],
+  [
+   "aura-2-pandora-en",
+   "Pandora",
+   "British; smooth, calm, melodic"
+  ],
+  [
+   "aura-2-phoebe-en",
+   "Phoebe",
+   "American; energetic, warm, casual"
+  ],
+  [
+   "aura-2-pluto-en",
+   "Pluto",
+   "American; smooth, calm, empathetic"
+  ],
+  [
+   "aura-2-saturn-en",
+   "Saturn",
+   "American; knowledgeable, confident, baritone"
+  ],
+  [
+   "aura-2-selene-en",
+   "Selene",
+   "American; expressive, engaging, energetic"
+  ],
+  [
+   "aura-2-thalia-en",
+   "Thalia",
+   "American; clear, confident, energetic"
+  ],
+  [
+   "aura-2-theia-en",
+   "Theia",
+   "Australian; expressive, polite, sincere"
+  ],
+  [
+   "aura-2-vesta-en",
+   "Vesta",
+   "American; natural, expressive, patient"
+  ],
+  [
+   "aura-2-zeus-en",
+   "Zeus",
+   "American; deep, trustworthy, smooth"
+  ]
+ ],
+ "elevenlabs": [
+  {
+   "id": "nPczCjzI2devNBz1zQrb",
+   "label": "Brian — warm male"
+  },
+  {
+   "id": "21m00Tcm4TlvDq8ikWAM",
+   "label": "Rachel — calm female"
+  },
+  {
+   "id": "AZnzlk1XvdvUeBnXmlld",
+   "label": "Domi — strong female"
+  },
+  {
+   "id": "EXAVITQu4vr4xnSDxMaL",
+   "label": "Bella — soft female"
+  },
+  {
+   "id": "ErXwobaYiN019PkySvjV",
+   "label": "Antoni — well-rounded male"
+  },
+  {
+   "id": "MF3mGyEYCl7XYWbV9V6O",
+   "label": "Elli — emotional female"
+  },
+  {
+   "id": "TxGEqnHWrfWFTfGW9XjX",
+   "label": "Josh — deep male"
+  },
+  {
+   "id": "VR6AewLTigWG4xSOukaG",
+   "label": "Arnold — crisp male"
+  },
+  {
+   "id": "pNInz6obpgDQGcFmaJgB",
+   "label": "Adam — narrator male"
+  },
+  {
+   "id": "yoZ06aMxZJJ28mfd3POQ",
+   "label": "Sam — raspy male"
+  },
+  {
+   "id": "ThT5KcBeYPX3keUQqHPh",
+   "label": "Dorothy — pleasant British female"
+  },
+  {
+   "id": "g5CIjZEefAph4nQFvHAz",
+   "label": "Ethan — soft male"
+  },
+  {
+   "id": "GBv7mTt0atIp3Br8iCZE",
+   "label": "Thomas — calm British male"
+  },
+  {
+   "id": "IKne3meq5aSn9XLyUdCD",
+   "label": "Charlie — natural male"
+  },
+  {
+   "id": "JBFqnCBsd6RMkjVDRZzb",
+   "label": "George — mature male"
+  },
+  {
+   "id": "N2lVS1w4EtoT3dr4eOWO",
+   "label": "Callum — middle aged male"
+  },
+  {
+   "id": "ODq5zmih8GrVes37Dizd",
+   "label": "Patrick — deep male"
+  },
+  {
+   "id": "SOYHLrjzK2X1ezoPC6cr",
+   "label": "Harry — anxious male"
+  },
+  {
+   "id": "XB0fDUnXU5powFXDhCwa",
+   "label": "Charlotte — seductive female"
+  },
+  {
+   "id": "XrExE9yKIg1WjnnlVkGX",
+   "label": "Matilda — friendly female"
+  },
+  {
+   "id": "Xb7hH8MSUJpSbSDYk0k2",
+   "label": "Alice — confident British female"
+  },
+  {
+   "id": "ZQe5CZNOzWyzPSCn5a3c",
+   "label": "James — calm older male"
+  },
+  {
+   "id": "bIHbv24MWmeRgasZH58o",
+   "label": "Will — friendly male"
+  },
+  {
+   "id": "cgSgspJ2msm6clMCkdW9",
+   "label": "Jessica — expressive female"
+  },
+  {
+   "id": "cjVigY5qzO86Huf0OWal",
+   "label": "Eric — friendly older male"
+  },
+  {
+   "id": "iP95p4xoKVk53GoZ742B",
+   "label": "Chris — natural male"
+  },
+  {
+   "id": "onwK4e9ZLuTAKqWW03F9",
+   "label": "Daniel — authoritative British male"
+  },
+  {
+   "id": "pFZP5JQG7iQjIQuC4Bku",
+   "label": "Lily — warm British female"
+  },
+  {
+   "id": "pqHfZKP75CvOlQylNhV4",
+   "label": "Bill — strong older male"
+  }
+ ],
+ "google": [
+  "nb-NO-Chirp3-HD-Achernar",
+  "nb-NO-Chirp3-HD-Achird",
+  "nb-NO-Chirp3-HD-Algenib",
+  "nb-NO-Chirp3-HD-Algieba",
+  "nb-NO-Chirp3-HD-Alnilam",
+  "nb-NO-Chirp3-HD-Aoede",
+  "nb-NO-Chirp3-HD-Autonoe",
+  "nb-NO-Chirp3-HD-Callirrhoe",
+  "nb-NO-Chirp3-HD-Charon",
+  "nb-NO-Chirp3-HD-Despina",
+  "nb-NO-Chirp3-HD-Enceladus",
+  "nb-NO-Chirp3-HD-Erinome",
+  "nb-NO-Chirp3-HD-Fenrir",
+  "nb-NO-Chirp3-HD-Gacrux",
+  "nb-NO-Chirp3-HD-Iapetus",
+  "nb-NO-Chirp3-HD-Kore",
+  "nb-NO-Chirp3-HD-Laomedeia",
+  "nb-NO-Chirp3-HD-Leda",
+  "nb-NO-Chirp3-HD-Orus",
+  "nb-NO-Chirp3-HD-Puck",
+  "nb-NO-Chirp3-HD-Pulcherrima",
+  "nb-NO-Chirp3-HD-Rasalgethi",
+  "nb-NO-Chirp3-HD-Sadachbia",
+  "nb-NO-Chirp3-HD-Sadaltager",
+  "nb-NO-Chirp3-HD-Schedar",
+  "nb-NO-Chirp3-HD-Sulafat",
+  "nb-NO-Chirp3-HD-Umbriel",
+  "nb-NO-Chirp3-HD-Vindemiatrix",
+  "nb-NO-Chirp3-HD-Zephyr",
+  "nb-NO-Chirp3-HD-Zubenelgenubi"
+ ]
+}

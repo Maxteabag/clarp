@@ -405,12 +405,6 @@ async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
 
-async fn voice_catalog() -> Json<Value> {
-    Json(
-        json!({ "fallback": "none", "provider": "none", "providers": [], "voice_available": false }),
-    )
-}
-
 async fn model_options(State(app): State<App>) -> Json<Value> {
     Json(json!({
         "schema_version": 2,
@@ -432,6 +426,5 @@ pub fn routes() -> Router<App> {
         .route("/teams", get(teams))
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
-        .route("/voice-catalog", get(voice_catalog))
         .route("/agent-model-options", get(model_options))
 }

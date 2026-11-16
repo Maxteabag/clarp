@@ -231,6 +231,7 @@ pub fn router(app: App) -> Router {
         .merge(peers::routes())
         .merge(roster::routes())
         .merge(crate::voice::routes())
+        .merge(crate::voices::routes())
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }
@@ -293,6 +294,7 @@ const LIMITED_POSTS: &[&str] = &[
     "/upload",
     "/clog",
     "/clips/ack",
+    "/voice-events",
 ];
 
 /// Whether this caller is kept from this request by its scope.
