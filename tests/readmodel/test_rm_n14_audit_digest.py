@@ -27,7 +27,11 @@ SWITCH = pytest.mark.parametrize("switch", [True, False], ids=["by digest", "as 
 
 
 def _how(switch, **more):
-    return {"settings": {"audit_grown_by_digest": switch, **more}}
+    """What a full import reads is counted as the defaults read: the file a
+    second time for its digest. Said, not left to the default
+    (``full_digest_while_parsing`` is on in the Hosts' configuration)."""
+    return {"settings": {"audit_grown_by_digest": switch, "full_digest_while_parsing": False,
+                         **more}}
 
 
 def _clock(database):

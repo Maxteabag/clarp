@@ -67,7 +67,10 @@ def _audited(world):
     """One import whose audit is due: a full import, which moves the boundary
     up to the last user turn."""
     kept = world.faults.get("settings")
-    world.faults["settings"] = {**(kept or {}), "audit_every": 1}
+    # A full import, said and not left to the default: with
+    # ``audit_grown_by_digest``, on in the Hosts' configuration, a due audit
+    # of a grown file is a tail and the boundary stays.
+    world.faults["settings"] = {**(kept or {}), "audit_every": 1, "audit_grown_by_digest": False}
     try:
         return world.imported()
     finally:

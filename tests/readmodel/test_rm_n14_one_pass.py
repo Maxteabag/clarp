@@ -33,7 +33,11 @@ BACKENDS = pytest.mark.parametrize("backend", harness.BACKENDS)
 
 
 def _settings(switch, **more):
-    return {"settings": {"full_digest_while_parsing": switch, **more}}
+    """The audit these tests force is a full import: said, not left to the
+    default (``audit_grown_by_digest`` is on in the Hosts' configuration,
+    and there a due audit of a grown file is a tail)."""
+    return {"settings": {"full_digest_while_parsing": switch, "audit_grown_by_digest": False,
+                         **more}}
 
 
 def _stored_digest(database):
