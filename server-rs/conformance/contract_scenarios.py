@@ -1057,4 +1057,67 @@ SCENARIOS.append({
     ],
 })
 
+# The owner's settings of a Host whose agents are heard: Cartesia speaks, with a key and a
+# voice for the scenarios' agent. On the reference Host the adapter's transport is replaced by
+# a fixed synthetic answer (tests/replay/host.py); the Rust Host is given a stand-in's address.
+SPEAKS = ('[tts]\nprovider = "cartesia"\nfallback = "none"\n'
+          '[audio]\ndelivery = "chunked-file"\n[network]\nadvertise_lan = false\n'
+          '[cartesia]\napi_key = "replay-synthetic-key"\n'
+          f'[cartesia.voices]\n{AGENT.title()} = "replay-voice-{AGENT}"\n')
+CLIP = '/clips/{clip}'
+
+
+def ack(name, **said):
+    return post('/clips/ack', said, name)
+
+
+def part(path, wanted, name):
+    return {**get(path, name), 'headers': {'Range': wanted}}
+
+
+SCENARIOS.append({
+    'id': 'speech-out',
+    'what': 'an agent says a part of its answer aloud: the clip is announced, fetched whole, as a stream and in '
+            'parts, by its number and by the name of its file; an app says what became of it and is offered '
+            'it again until it played it; what is no clip, and what an app may not say',
+    'config': SPEAKS,
+    'steps': [
+        # The fake answers with the message, so the reply marks the same part for the ear.
+        send('synthetic question <speak>synthetic spoken answer</speak>', 'aloud', synthesize_audio=True),
+        {'op': 'wait_reply', 'after': 'u-aloud'},
+        {'op': 'wait_clips', 'count': 1},
+        {'op': 'quiesce'},
+        LOG,
+        {**get(f'/clips/recoverable?session={AGENT}', 'what an app missed'),
+         'save': {'clip': 'events.0.clip_id', 'file': 'events.0.name'}},
+        get(CLIP + '/complete.mp3', 'the whole clip'),
+        get(CLIP + '/stream', 'the clip by its number'),
+        part(CLIP + '/stream', 'bytes=0-1', 'its first two bytes'),
+        part(CLIP + '/stream', 'bytes=41000-', 'from a byte on to its end'),
+        part(CLIP + '/stream', 'bytes=41700-', 'a part past its end'),
+        part(CLIP + '/stream', 'bytes=-4', 'its last bytes, which a clip is not asked for'),
+        get('/audio/{file}', 'the clip by the name of its file'),
+        part('/audio/{file}', 'bytes=-4', 'the last bytes of its file'),
+        part('/audio/{file}', 'bytes=41700-', 'a part past the end of its file'),
+        ack('an app has it', clip_id='{clip}', status='queued'),
+        ack('an app begins to play it', clip_id='{clip}', status='play-start'),
+        get(f'/clips/recoverable?session={AGENT}', 'offered again while it plays'),
+        ack('an app played it', clip_id='{clip}', status='play-ok'),
+        get(f'/clips/recoverable?session={AGENT}', 'not offered again'),
+        get('/clips/recoverable?session=nobody', 'the clips of an agent nobody has'),
+        ack('a status that is none', clip_id='{clip}', status='played'),
+        ack('a number that is none', clip_id='x', status='play-ok'),
+        ack('a clip nobody has', clip_id=999999, status='play-ok'),
+        ack('a clip by its address', url='http://synthetic/audio/{file}', status='play-start'),
+        ack('nothing named', status='play-start'),
+        get('/clips/abc/stream', 'a number that is none, as a stream'),
+        get('/clips/abc/complete.mp3', 'a number that is none, whole'),
+        get('/clips/999999/stream', 'a stream nobody has'),
+        get('/clips/999999/complete.mp3', 'a clip nobody has, whole'),
+        get('/audio/nothing.mp3', 'a file that is not there'),
+        get(f'/clips/message?session={AGENT}', 'the clips of a reply nobody names'),
+        get(f'/clips/message?session={AGENT}&message_id=nothing-of-the-kind', 'the clips of a reply nobody has'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

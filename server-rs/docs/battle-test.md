@@ -144,8 +144,10 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 06:28 (16 Nov) | the Host updated by the installer, `4eebf671` to `14bb3f1c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 07:08 (16 Nov) | the Host updated by the installer, `14bb3f1c` to `3175ffcc`: the build that shows a message of the agent as one row with its tools' cards, taken over in the middle of three turns the build before had begun | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 66 ms, with all three. Each of the three turns shows its command twice: once as the build before wrote it (a row by itself, never closed: `recorded`), once as the new build wrote it when it took the turn over (on the row of its message, `ok`). A turn that begins on the new build shows it once |
 
+| 08:41 (16 Nov) | the Host updated by the installer, `3175ffcc` to `652c6d6a`: the build that hears (speech in) | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Sixty-five turns in seventeen exercises,
+completed, answered with its word, and its command ran exactly once. Sixty-eight turns in eighteen exercises,
 none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
@@ -183,6 +185,26 @@ not one of ['now', 'later']`. Answers that fit were answered with a receipt (`pe
 them as what its user said, with the form's title, its version, the submission and the answers, and replied
 in a real turn that it took them as a preference and had started nothing, which is what the message asks of
 it. The same answers sent again under their id were answered `delivered`, and the agent was not told twice.
+
+## A clip is heard
+
+On 16 Nov 2026 at 08:42, on the build of `652c6d6a`. The installer had found the Python Host's interpreter
+(faster-whisper), the model `small.en` in the machine's own cache and the owner's file of keys, and the
+Host says what it listens with: its own `faster-whisper:small.en`, which hears a clip nobody named an engine
+for, and `elevenlabs:scribe_v2`, there because the owner's file has a key (`GET /transcription-capabilities`).
+
+A two-second tone, which is no speech, was handed to `POST /transcribe`: answered 200 after 0.33 s with an
+empty text. The model had been loaded since the Host started. The same clip under a name
+(`X-Transcription-ID`): heard once, and the second request answered with what was kept (`cached: true`);
+another clip under the same name refused (409, `transcription id reused for different audio`); one answer
+kept on disk, none after `DELETE /transcription-results/<name>`, and the name free again.
+
+The same tone, once, to ElevenLabs Scribe through this Host: ElevenLabs took the request and the key and
+answered that the account has no credits left (`quota_exceeded`), which this Host passed on as the engine's
+words, status 500. That is the owner's account as it stood that morning, not a defect of either Host; it was
+told to the Python Host's release owner. It showed something else: on the Python Host, the two agents that
+are spoken to in Norwegian have engines of their own with a second one after Scribe, and went on being heard
+by that one. This Host has no engines per agent yet (`differences.md`).
 
 ## The soak so far
 
