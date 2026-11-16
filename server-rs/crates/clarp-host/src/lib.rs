@@ -20,6 +20,7 @@ pub mod artifact_tool;
 pub mod config;
 pub mod edge;
 pub mod faces;
+pub mod files;
 pub mod fleet;
 pub mod goaltool;
 pub mod heard;
