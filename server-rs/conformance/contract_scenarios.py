@@ -977,6 +977,9 @@ SCENARIOS.append({
         get('/transcription-providers', 'who transcribes'),
         get('/voice-catalog', 'the voices'),
         get('/agent-model-options', 'the models an agent can be given'),
+        get('/controller-actions', 'what a button of a controller can run'),
+        get('/controller-actions/audit', 'what was defined and run'),
+        get('/controller-actions/audit?limit=many', 'an audit of no number of rows'),
         # What a user attaches: kept once under the id the app gave it, and answered with where.
         attached('synthetic attachment one', 'the user attaches a file'),
         attached('synthetic attachment one', 'the same file again'),
