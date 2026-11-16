@@ -34,7 +34,7 @@ use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
-    Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
+    Commentary, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
 };
 use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -390,6 +390,9 @@ struct LiveTurn {
     /// The last row this turn put into the conversation: the message itself until the turn
     /// says something. It is the row that is told how the turn ended.
     last_row: String,
+    /// The replies of this turn that said something and that no tool work has followed yet,
+    /// oldest first. Tool work that comes makes them commentary.
+    said: Vec<String>,
     /// What the tool has said of itself so far: its model, and what the turn cost.
     model: Option<String>,
     tokens: Option<(u64, u64)>,
@@ -635,6 +638,62 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     Some(Entry::TurnEnd(end))
 }
 
+/// The replies at the end of what a turn has put into the conversation that said something
+/// and that no tool work has followed, oldest first, as the log has them. An attempt before
+/// the one that runs may have said them, and an actor before this one.
+fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<Vec<String>, ActorError> {
+    const AT_A_TIME: usize = 32;
+    let corrupt = |error: serde_json::Error| {
+        ActorError::Corrupt(format!("a row of turn {} cannot be read: {error}", turn.0))
+    };
+    let mut said = Vec::new();
+    let mut before = Seq::MAX;
+    'reading: loop {
+        let chunk = log.read_before(before, kind::ROWS, AT_A_TIME)?;
+        let Some(oldest) = chunk.first() else {
+            break;
+        };
+        before = oldest.seq;
+        for item in chunk.iter().rev() {
+            match Entry::from_item(item).map_err(corrupt)? {
+                Some(Entry::Reply(reply)) if reply.turn == turn.0 => {
+                    let worked = !reply.tools.is_empty();
+                    if !reply.text.trim().is_empty() {
+                        said.push(reply.id);
+                    }
+                    if worked {
+                        // What came before this was told when this was written.
+                        break 'reading;
+                    }
+                }
+                // A word of the Host about the turn is neither said by the agent nor work.
+                Some(Entry::Notice(notice)) if notice.turn == Some(turn.0) => {}
+                // A call that is a row, the turn's own message, or what was there before it.
+                _ => break 'reading,
+            }
+        }
+        if chunk.len() < AT_A_TIME {
+            break;
+        }
+    }
+    said.reverse();
+    Ok(said)
+}
+
+/// Writes that tool work followed these replies: what they said was said along the way.
+fn follow(
+    batch: &mut Batch<'_>,
+    said: &mut Vec<String>,
+    turn: TurnId,
+    ts_ms: i64,
+) -> Result<(), ActorError> {
+    for reply in said.drain(..) {
+        let part = Entry::Commentary(Commentary::of(&reply, turn.0));
+        batch.item(written(&part, ts_ms)?);
+    }
+    Ok(())
+}
+
 fn show(drafts: &mut Vec<Draft>, turn: TurnId, origin: &Origin, live: LiveReply, ts_ms: i64) {
     match drafts.iter_mut().find(|draft| draft.id == live.id) {
         Some(draft) => draft.text = live.text,
@@ -727,6 +786,8 @@ impl Actor {
             actor.live = Some(LiveTurn {
                 turn,
                 last_row: message.id.clone(),
+                // The attempt that comes reads from the log what the turn has said.
+                said: Vec::new(),
                 interpreter: actor
                     .backend
                     .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
@@ -1464,6 +1525,7 @@ impl Actor {
                 text: draft.text,
                 trace_id: facts.trace_id.clone(),
                 origin: draft.origin,
+                ..Reply::default()
             });
             closes = piece.id().to_string();
             batch.item(written(&piece, now_ms)?);
@@ -1604,6 +1666,7 @@ impl Actor {
         self.live = Some(LiveTurn {
             turn,
             last_row,
+            said: unfollowed(self.recorder.log(), turn)?,
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
@@ -1706,7 +1769,10 @@ impl Actor {
                         }
                         Signal::Tool(call) => {
                             follow_tool(&mut tools, &call);
-                            last_row = call.id;
+                            // A use that is a part of a reply is no row: that reply is.
+                            if call.reply.is_none() {
+                                last_row = call.id;
+                            }
                         }
                         Signal::Notice(notice) => last_row = notice.id,
                         Signal::Model(named) => model = Some(named),
@@ -1738,6 +1804,7 @@ impl Actor {
             trace_id: message.trace_id,
             origin: message.origin,
             last_row,
+            said: unfollowed(self.recorder.log(), turn)?,
             model,
             tokens,
             interpreter,
@@ -2013,16 +2080,33 @@ impl Actor {
                             live.drafts.retain(|draft| draft.id != reply.id);
                             reply.trace_id = live.trace_id.clone();
                             reply.origin = live.origin.clone();
+                            // The tools it calls are work after what the turn said before.
+                            if !reply.tools.is_empty() {
+                                follow(&mut batch, &mut live.said, turn, t)?;
+                            }
+                            if !reply.text.trim().is_empty() {
+                                live.said.push(reply.id.clone());
+                            }
                             Entry::Reply(reply)
                         }
                         Signal::Tool(mut call) => {
                             call.origin = live.origin.clone();
+                            // A call no message carries is a row, and work, when it begins.
+                            let known = live.tools.iter().any(|tool| tool.id == call.id);
+                            if call.reply.is_none()
+                                && (call.status == ToolStatus::Running || !known)
+                            {
+                                follow(&mut batch, &mut live.said, turn, t)?;
+                            }
                             follow_tool(&mut live.tools, &call);
                             Entry::Tool(call)
                         }
                         Signal::Notice(notice) => Entry::Notice(notice),
                     };
-                    live.last_row = piece.id().to_string();
+                    // A part of a row is no row: the row it is a part of stays the last.
+                    if piece.part_of().is_none() {
+                        live.last_row = piece.id().to_string();
+                    }
                     batch.item(written(&piece, t)?);
                 }
             }

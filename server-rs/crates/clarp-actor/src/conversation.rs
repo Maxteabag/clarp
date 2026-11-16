@@ -6,11 +6,15 @@
 //! being written is not in the log; it takes the revisions in between, one for each change, and
 //! the item that finally stores it is above them all.
 //!
-//! How a turn ended is stored once, when it ends, and belongs to the row that closed the turn.
-//! That row changed when the turn ended, so it carries the end's revision from then on, and a
-//! client that asks what is newer is given the row again.
+//! A row stands where its own item is, which is written once. What happens to it afterwards
+//! is stored as parts that name it: the uses of the tools its message calls, that tool work
+//! came after it, how its turn ended when it is the row that closed the turn. A row is read
+//! as it is now, with its parts, and carries the revision of the newest of them: it changed
+//! when that part was written, and a client that asks what is newer is given the row again.
 
-use clarp_kernel::conversation::{Entry, Reply, TurnEnd};
+use std::collections::HashMap;
+
+use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
 use clarp_kernel::journal::kind;
 use clarp_kernel::turn::{Origin, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, Seq};
@@ -63,6 +67,26 @@ pub struct Versioned {
     pub turn_number: Option<u64>,
     /// How that turn ended, when this is the row that closed it.
     pub turn: Option<TurnEnd>,
+    /// The uses of the tools a reply's message calls, as they are now, in its order.
+    pub tools: Vec<ToolCall>,
+    /// Tool work came after this reply in the same turn: it was said along the way.
+    pub commentary: bool,
+}
+
+impl Versioned {
+    /// A thing by itself: no part of it is known, and no turn's end.
+    pub fn of(entry: Entry, revision: u64, ts_ms: i64) -> Self {
+        Self {
+            turn_number: entry.turn(),
+            entry,
+            revision,
+            ts_ms,
+            live: false,
+            turn: None,
+            tools: Vec::new(),
+            commentary: false,
+        }
+    }
 }
 
 /// A page of a conversation.
@@ -93,19 +117,17 @@ pub(crate) struct Draft {
 
 impl Draft {
     fn versioned(&self) -> Versioned {
+        let reply = Entry::Reply(Reply {
+            id: self.id.clone(),
+            turn: self.turn,
+            text: self.text.clone(),
+            trace_id: None,
+            origin: self.origin.clone(),
+            tools: Vec::new(),
+        });
         Versioned {
-            entry: Entry::Reply(Reply {
-                id: self.id.clone(),
-                turn: self.turn,
-                text: self.text.clone(),
-                trace_id: None,
-                origin: self.origin.clone(),
-            }),
-            revision: self.revision,
-            ts_ms: self.ts_ms,
             live: true,
-            turn_number: Some(self.turn),
-            turn: None,
+            ..Versioned::of(reply, self.revision, self.ts_ms)
         }
     }
 }
@@ -126,121 +148,133 @@ fn corrupt(item: &Item, error: serde_json::Error) -> ActorError {
     ))
 }
 
-fn row(item: &Item, entry: Entry) -> Versioned {
-    Versioned {
-        turn_number: item.turn.or(entry.turn()),
-        entry,
-        revision: item.seq * REVISION_STEP,
-        ts_ms: item.ts_ms,
-        live: false,
-        turn: None,
+/// Reads rows as they are now: each with the parts that name it.
+struct Reader<'a> {
+    log: &'a dyn AgentLog,
+    /// How the turns asked about ended, and where in the log that is said.
+    ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
+}
+
+impl<'a> Reader<'a> {
+    fn new(log: &'a dyn AgentLog) -> Self {
+        Self {
+            log,
+            ends: HashMap::new(),
+        }
+    }
+
+    /// How this turn ended, when it has.
+    fn end(&mut self, turn: u64) -> Result<Option<&(TurnEnd, Seq)>, ActorError> {
+        if !self.ends.contains_key(&turn) {
+            let mut found = None;
+            if let Some(stored) = self.log.find(&format!("t-{turn}"))?
+                && let Some(Entry::TurnEnd(end)) =
+                    Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
+            {
+                found = Some((end, stored.seq));
+            }
+            self.ends.insert(turn, found);
+        }
+        Ok(self.ends.get(&turn).and_then(Option::as_ref))
+    }
+
+    /// The row this item is, as it is now.
+    fn row(&mut self, item: &Item, entry: Entry) -> Result<Versioned, ActorError> {
+        let mut row = Versioned {
+            turn_number: item.turn.or(entry.turn()),
+            ..Versioned::of(entry, item.seq * REVISION_STEP, item.ts_ms)
+        };
+        let mut newest = item.seq;
+        if let Entry::Reply(reply) = &row.entry {
+            for id in &reply.tools {
+                let Some(stored) = self.log.find(id)? else {
+                    continue; // told of and never written: the turn was cut off there
+                };
+                if let Some(Entry::Tool(call)) =
+                    Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
+                {
+                    newest = newest.max(stored.seq);
+                    row.tools.push(call);
+                }
+            }
+            if !reply.text.trim().is_empty()
+                && let Some(stored) = self.log.find(&Commentary::id_of(&reply.id))?
+            {
+                newest = newest.max(stored.seq);
+                row.commentary = true;
+            }
+        }
+        if let Some(turn) = row.turn_number
+            && let Some((end, seq)) = self.end(turn)?
+            && end.closes == row.entry.id()
+        {
+            newest = newest.max(*seq);
+            row.turn = Some(end.clone());
+        }
+        row.revision = newest * REVISION_STEP;
+        Ok(row)
+    }
+
+    /// The row with this id as it is now, when this reader gets it. `None` for what is no
+    /// row: a part of one, a message that still waits outside the conversation.
+    fn stored(&mut self, id: &str, which: Which) -> Result<Option<Versioned>, ActorError> {
+        let Some(stored) = self.log.find(id)? else {
+            return Ok(None);
+        };
+        if !kind::ROWS.has(stored.kind) {
+            return Ok(None);
+        }
+        let entry = Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?;
+        match entry.filter(|entry| which.keeps(entry)) {
+            Some(entry) => self.row(&stored, entry).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
-/// Gives a row the end of the turn it closed. The row changed when the turn ended.
-fn close(row: &mut Versioned, end: TurnEnd, end_revision: u64) {
-    row.revision = row.revision.max(end_revision);
-    row.turn = Some(end);
-}
-
-/// The rows among these items, which are oldest first: the newest version of each thing, with
-/// the turns' ends on the rows that closed them.
+/// The rows these items are about, each once and as it is now. The items are oldest first.
+/// An item that is a row puts it where it stands. An item that is a part of a row says that
+/// the row changed: among changes ([`Place::Newest`]) the row stands where its newest part
+/// is; in a chat ([`Place::First`]) it stays where it is, and a part of a row that is not on
+/// the page says nothing.
 fn rows(
     log: &dyn AgentLog,
     items: &[Item],
     place: Place,
     which: Which,
 ) -> Result<Vec<Versioned>, ActorError> {
+    let mut reader = Reader::new(log);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
         let Some(entry) = Entry::from_item(item).map_err(|error| corrupt(item, error))? else {
             continue;
         };
-        let end = match entry {
-            Entry::TurnEnd(end) => end,
-            entry if !which.keeps(&entry) => continue,
-            entry => {
-                let version = row(item, entry);
-                match found
-                    .iter()
-                    .position(|known| known.entry.id() == version.entry.id())
-                {
-                    Some(at) if place == Place::First => {
-                        // It keeps the place and the time of its first appearance, and what
-                        // it was told about its turn.
-                        let (ts_ms, turn) = (found[at].ts_ms, found[at].turn.take());
-                        found[at] = Versioned {
-                            ts_ms,
-                            turn,
-                            ..version
-                        };
-                    }
-                    Some(at) => {
-                        let turn = found.remove(at).turn;
-                        found.push(Versioned { turn, ..version });
-                    }
-                    None => found.push(version),
-                }
-                continue;
+        if let Some(changed) = entry.part_of() {
+            if place == Place::Newest {
+                found.retain(|known| known.entry.id() != changed);
+                found.extend(reader.stored(changed, which)?);
             }
-        };
-        let end_revision = item.seq * REVISION_STEP;
+            continue;
+        }
+        if !which.keeps(&entry) {
+            continue;
+        }
+        let row = reader.row(item, entry)?;
         match found
             .iter()
-            .position(|known| known.entry.id() == end.closes)
+            .position(|known| known.entry.id() == row.entry.id())
         {
-            Some(at) if place == Place::First => close(&mut found[at], end, end_revision),
+            // A call that is a row by itself was written again when it ended. In a chat it
+            // keeps the place and the time of its first appearance.
+            Some(at) if place == Place::First => {
+                let ts_ms = found[at].ts_ms;
+                found[at] = Versioned { ts_ms, ..row };
+            }
             Some(at) => {
-                // The row changed now: among changes, this is where it stands.
-                let mut closed = found.remove(at);
-                close(&mut closed, end, end_revision);
-                found.push(closed);
+                found.remove(at);
+                found.push(row);
             }
-            // The row is older than this page. Someone who asks what is newer needs it again,
-            // because it changed; a page of a chat simply does not reach back to it.
-            None if place == Place::Newest => {
-                if let Some(stored) = log.find(&end.closes)? {
-                    let entry =
-                        Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?;
-                    if let Some(entry) = entry.filter(|entry| which.keeps(entry)) {
-                        let mut closed = row(&stored, entry);
-                        close(&mut closed, end, end_revision);
-                        found.push(closed);
-                    }
-                }
-            }
-            None => {}
-        }
-    }
-    // A turn whose end lies after this page: its closing row is here, the end is not.
-    let mut asked: Vec<u64> = Vec::new();
-    for at in (0..found.len()).rev() {
-        let Some(turn) = found[at].turn_number else {
-            continue;
-        };
-        if asked.contains(&turn) {
-            continue;
-        }
-        asked.push(turn);
-        if found
-            .iter()
-            .any(|known| known.turn.as_ref().is_some_and(|end| end.turn == turn))
-        {
-            continue;
-        }
-        let Some(stored) = log.find(&format!("t-{turn}"))? else {
-            continue;
-        };
-        let Some(Entry::TurnEnd(end)) =
-            Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
-        else {
-            continue;
-        };
-        if let Some(closing) = found
-            .iter_mut()
-            .find(|known| known.entry.id() == end.closes)
-        {
-            close(closing, end, stored.seq * REVISION_STEP);
+            None => found.push(row),
         }
     }
     Ok(found)
@@ -248,15 +282,7 @@ fn rows(
 
 /// The row with this id as it is now, with its turn's end if it closed one.
 pub(crate) fn one(log: &dyn AgentLog, id: &str) -> Result<Option<Versioned>, ActorError> {
-    let Some(stored) = log.find(id)? else {
-        return Ok(None);
-    };
-    if !kind::ROWS.has(stored.kind) {
-        return Ok(None); // a message that still waits outside the conversation
-    }
-    Ok(rows(log, &[stored], Place::First, Which::All)?
-        .into_iter()
-        .next())
+    Reader::new(log).stored(id, Which::All)
 }
 
 /// The newest `limit` things, in the order a chat shows them, with the replies being written.

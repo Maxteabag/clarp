@@ -719,32 +719,39 @@ pub fn card(name: &str, input: &Value, id: &str) -> Value {
     card
 }
 
+/// What the parts of what a tool returned say, one under the other: a part says its `text`,
+/// or its `content`; a plain text is a part; one that says nothing is left out.
+pub fn result_parts(content: &Value) -> String {
+    let Some(parts) = content.as_array() else {
+        return String::new();
+    };
+    let said = |part: &Value| -> Option<String> {
+        match part {
+            Value::String(text) => Some(text.clone()),
+            Value::Object(fields) => {
+                let first = [fields.get("text"), fields.get("content")]
+                    .into_iter()
+                    .find(|value| truthy(*value))
+                    .flatten();
+                Some(first.map(written).unwrap_or_default())
+            }
+            _ => None,
+        }
+    };
+    let texts: Vec<String> = parts
+        .iter()
+        .filter_map(said)
+        .filter(|text| !text.is_empty())
+        .collect();
+    texts.join("\n")
+}
+
 /// What is shown of what a tool returned: its text, or the texts of its parts one under the
 /// other, cut to 300 signs.
 pub fn result_text(content: &Value) -> String {
     match content {
         Value::String(_) => clipped(Some(content), 300),
-        Value::Array(parts) => {
-            let said = |part: &Value| -> Option<String> {
-                match part {
-                    Value::String(text) => Some(text.clone()),
-                    Value::Object(fields) => {
-                        let first = [fields.get("text"), fields.get("content")]
-                            .into_iter()
-                            .find(|value| truthy(*value))
-                            .flatten();
-                        Some(first.map(written).unwrap_or_default())
-                    }
-                    _ => None,
-                }
-            };
-            let texts: Vec<String> = parts
-                .iter()
-                .filter_map(said)
-                .filter(|text| !text.is_empty())
-                .collect();
-            clipped(Some(&Value::from(texts.join("\n"))), 300)
-        }
+        Value::Array(_) => clipped(Some(&Value::from(result_parts(content))), 300),
         _ => String::new(),
     }
 }

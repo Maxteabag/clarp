@@ -5,7 +5,7 @@
 //! the reply as it is written piece by piece, each whole message, each tool result, and at the
 //! end a result. Everything this file knows is what those lines mean.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
@@ -132,6 +132,8 @@ struct Draft {
     id: String,
     /// The text blocks of the message, by their index in it.
     blocks: Vec<(u64, String)>,
+    /// The tools the message calls, by the ids of their uses, in the order it calls them.
+    tools: Vec<String>,
 }
 
 impl Draft {
@@ -167,6 +169,9 @@ pub struct ClaudeInterpreter {
     /// whole message that follows the pieces must not be taken again.
     streamed: HashSet<String>,
     replies: u32,
+    /// How many replies each message has become. One, unless the tool goes on with a message
+    /// after something already answered it: what comes then is a reply of its own.
+    told: HashMap<String, u32>,
     /// Every tool call of this turn, as it stands.
     tools: BTreeMap<String, ToolCall>,
     /// The tool calls whose start was reported as an activity.
@@ -197,6 +202,17 @@ fn content_text(content: &Value) -> String {
     }
 }
 
+/// What a tool gave back, as a text: its own text, or what its parts say one under the
+/// other. A part says its `text`, or its `content`; one that says nothing is left out. (The
+/// Python Host's rule for what a card shows of a result.)
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(_) => clarp_kernel::tools::result_parts(content),
+        _ => String::new(),
+    }
+}
+
 impl ClaudeInterpreter {
     pub fn new(turn: u64, name: &str) -> Self {
         Self {
@@ -207,6 +223,7 @@ impl ClaudeInterpreter {
             draft: None,
             streamed: HashSet::new(),
             replies: 0,
+            told: HashMap::new(),
             tools: BTreeMap::new(),
             announced: HashSet::new(),
             usage_limit: false,
@@ -230,7 +247,11 @@ impl ClaudeInterpreter {
         // unbroken id, as every other id of a conversation is.
         match draft.id.strip_prefix("msg_").unwrap_or(&draft.id) {
             "" => format!("r-{}-{}", self.name, self.replies + 1),
-            name => format!("r-{name}"),
+            // A reply is written once. More of a message that became one is another.
+            name => match self.told.get(&draft.id) {
+                Some(before) => format!("r-{name}-{}", before + 1),
+                None => format!("r-{name}"),
+            },
         }
     }
 
@@ -247,24 +268,40 @@ impl ClaudeInterpreter {
         }
     }
 
-    /// The message being written is whole: it becomes a reply.
+    /// The message being written is whole: it becomes a reply, with what it said and the
+    /// tools it calls, and the uses of those tools begin. A message that says nothing and
+    /// calls a tool is a reply too: it is the row its tools are shown on.
     fn settle(&mut self, out: &mut Vec<Signal>) {
         let Some(draft) = self.draft.take() else {
             return;
         };
         let text = draft.text();
-        if text.trim().is_empty() {
+        if text.trim().is_empty() && draft.tools.is_empty() {
             return;
         }
         let id = self.reply_id(&draft);
         self.replies += 1;
+        if !draft.id.is_empty() {
+            *self.told.entry(draft.id).or_default() += 1;
+        }
         out.push(Signal::Reply(Reply {
             origin: clarp_kernel::turn::Origin::User,
-            id,
+            id: id.clone(),
             turn: self.turn,
-            text,
+            text: if text.trim().is_empty() {
+                String::new()
+            } else {
+                text
+            },
             trace_id: None,
+            tools: draft.tools.clone(),
         }));
+        for call in draft.tools {
+            if let Some(call) = self.tools.get_mut(&call) {
+                call.reply = Some(id.clone());
+                out.push(Signal::Tool(call.clone()));
+            }
+        }
     }
 
     /// The draft for the message with this id, settling the one before it.
@@ -275,6 +312,7 @@ impl ClaudeInterpreter {
         self.draft.get_or_insert_with(|| Draft {
             id: id.to_string(),
             blocks: Vec::new(),
+            tools: Vec::new(),
         })
     }
 
@@ -283,6 +321,7 @@ impl ClaudeInterpreter {
         let draft = self.draft.get_or_insert_with(|| Draft {
             id: String::new(),
             blocks: Vec::new(),
+            tools: Vec::new(),
         });
         let at = match draft.blocks.iter().position(|(i, _)| *i == index) {
             Some(at) => at,
@@ -452,6 +491,9 @@ impl ClaudeInterpreter {
                     };
                     self.announce(call_id, name, out);
                     if !self.tools.contains_key(call_id) {
+                        // The call belongs to its message, and is told when that message
+                        // is whole: after the reply it is shown on.
+                        self.draft_for(&id, out).tools.push(call_id.to_string());
                         let call = ToolCall {
                             origin: clarp_kernel::turn::Origin::User,
                             id: call_id.to_string(),
@@ -462,9 +504,9 @@ impl ClaudeInterpreter {
                             output: None,
                             started_at_ms: t,
                             ended_at_ms: None,
+                            reply: None,
                         };
-                        self.tools.insert(call_id.to_string(), call.clone());
-                        out.push(Signal::Tool(call));
+                        self.tools.insert(call_id.to_string(), call);
                     }
                 }
                 "text" if !self.streamed.contains(&id) => {
@@ -488,6 +530,19 @@ impl ClaudeInterpreter {
         let Some(content) = message["content"].as_array() else {
             return;
         };
+        // A result of a call the message being written makes: that message is whole enough.
+        let answered = |draft: &Draft| {
+            content.iter().any(|block| {
+                text_of(&block["type"]) == "tool_result"
+                    && draft
+                        .tools
+                        .iter()
+                        .any(|call| call == text_of(&block["tool_use_id"]))
+            })
+        };
+        if self.draft.as_ref().is_some_and(answered) {
+            self.settle(out);
+        }
         let mut finished = false;
         for block in content {
             if text_of(&block["type"]) != "tool_result" {
@@ -504,7 +559,7 @@ impl ClaudeInterpreter {
             } else {
                 ToolStatus::Ok
             };
-            call.output = Some(shorten(&content_text(&block["content"]), MAX_TOOL_OUTPUT));
+            call.output = Some(shorten(&result_text(&block["content"]), MAX_TOOL_OUTPUT));
             call.ended_at_ms = Some(t);
             out.push(Signal::Tool(call.clone()));
             finished = true;
@@ -721,7 +776,10 @@ mod tests {
             output: output.map(str::to_string),
             started_at_ms: 1_110,
             ended_at_ms,
+            reply: Some("r-1".to_string()),
         };
+        // The message is one reply: what it said and the tool it calls. It is told when it
+        // is whole, and the tool's use after it.
         assert_eq!(
             durable(&signals),
             vec![
@@ -733,14 +791,15 @@ mod tests {
                 Signal::Moved(Activity::Tool {
                     name: "Bash".to_string()
                 }),
-                Signal::Tool(tool(ToolStatus::Running, None, None)),
                 Signal::Reply(Reply {
                     origin: clarp_kernel::turn::Origin::User,
                     id: "r-1".to_string(),
                     turn: 7,
                     text: "I will look.".to_string(),
                     trace_id: None,
+                    tools: vec!["toolu_1".to_string()],
                 }),
+                Signal::Tool(tool(ToolStatus::Running, None, None)),
                 Signal::Tool(tool(ToolStatus::Ok, Some("a.txt"), Some(1_130))),
                 Signal::Moved(Activity::Thinking),
                 Signal::Moved(Activity::Responding),
@@ -750,8 +809,86 @@ mod tests {
                     turn: 7,
                     text: "One file.".to_string(),
                     trace_id: None,
+                    ..Reply::default()
                 }),
                 Signal::Ended(RunOutcome::Completed),
+            ]
+        );
+    }
+
+    /// What a turn put into the conversation, in a line each: a reply with the tools it
+    /// calls, a tool's use with the reply it is shown on and how it stands.
+    fn pieces(signals: &[Signal]) -> Vec<String> {
+        signals
+            .iter()
+            .filter_map(|signal| match signal {
+                Signal::Reply(reply) => {
+                    Some(format!("{} {:?} {:?}", reply.id, reply.text, reply.tools))
+                }
+                Signal::Tool(call) => Some(format!(
+                    "{} on {} {:?} {:?}",
+                    call.id,
+                    call.reply.as_deref().unwrap_or("nothing"),
+                    call.status,
+                    call.output.as_deref().unwrap_or("")
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_message_that_only_calls_tools_is_a_reply_that_says_nothing() {
+        // Whole messages, as a tool that does not stream says them: the message is whole
+        // when what its calls gave back arrives.
+        let signals = read(
+            &[
+                INIT,
+                r#"{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/a"}},{"type":"tool_use","id":"toolu_2","name":"Grep","input":{"pattern":"x"}}]}}"#,
+                r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"one"},{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"text","text":"two"},{"type":"image"},{"type":"text","text":""},{"content":"three"}],"is_error":true}]}}"#,
+                r#"{"type":"assistant","message":{"id":"msg_2","content":[{"type":"text","text":"Done."}]}}"#,
+                RESULT,
+            ],
+            (Some(0), None),
+        );
+        assert_eq!(
+            pieces(&signals),
+            [
+                r#"r-1 "" ["toolu_1", "toolu_2"]"#,
+                r#"toolu_1 on r-1 Running """#,
+                r#"toolu_2 on r-1 Running """#,
+                r#"toolu_1 on r-1 Ok "one""#,
+                // What came back in parts is what the parts say, one under the other.
+                "toolu_2 on r-1 Error \"two\\nthree\"",
+                r#"r-2 "Done." []"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_reply_is_told_once_and_more_of_its_message_is_another() {
+        // What a call gave back arrives before the message that made it has stopped: the
+        // message is whole enough to be told. What it goes on with is a reply of its own.
+        let lines = [
+            INIT.to_string(),
+            stream(r#"{"type":"message_start","message":{"id":"msg_1","role":"assistant"}}"#),
+            r#"{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}"#.to_string(),
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"a.txt"}]}}"#.to_string(),
+            r#"{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_2","name":"Bash","input":{"command":"pwd"}}]}}"#.to_string(),
+            stream(r#"{"type":"message_stop"}"#),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        // The process goes before the second call returns.
+        let signals = read(&lines, (None, Some(9)));
+        assert_eq!(
+            pieces(&signals),
+            [
+                r#"r-1 "" ["toolu_1"]"#,
+                r#"toolu_1 on r-1 Running """#,
+                r#"toolu_1 on r-1 Ok "a.txt""#,
+                r#"r-1-2 "" ["toolu_2"]"#,
+                r#"toolu_2 on r-1-2 Running """#,
+                r#"toolu_2 on r-1-2 Error "The turn ended before this tool finished.""#,
             ]
         );
     }
@@ -922,7 +1059,7 @@ mod tests {
         ];
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let signals = durable(&read(&lines, (None, Some(15))));
-        let tail = &signals[signals.len() - 3..];
+        let tail = &signals[signals.len() - 4..];
         assert_eq!(
             tail[0],
             Signal::Reply(Reply {
@@ -931,15 +1068,21 @@ mod tests {
                 turn: 7,
                 text: "Half a sen".to_string(),
                 trace_id: None,
+                tools: vec!["toolu_1".to_string()],
             }),
-            "what the agent had written is kept"
+            "what the agent had written is kept, with the tool it had called"
+        );
+        let on_it = Some("r-1".to_string());
+        assert!(
+            matches!(&tail[1], Signal::Tool(call) if call.status == ToolStatus::Running && call.reply == on_it),
+            "the tool's use begins on the reply"
         );
         assert!(
-            matches!(&tail[1], Signal::Tool(call) if call.status == ToolStatus::Error && call.ended_at_ms.is_some()),
+            matches!(&tail[2], Signal::Tool(call) if call.status == ToolStatus::Error && call.ended_at_ms.is_some() && call.reply == on_it),
             "a tool that never came back is closed"
         );
         assert_eq!(
-            tail[2],
+            tail[3],
             Signal::Ended(RunOutcome::Interrupted {
                 reason: "claude was ended by signal 15".to_string()
             })
