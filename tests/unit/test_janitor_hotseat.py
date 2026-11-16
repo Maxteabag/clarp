@@ -17,6 +17,10 @@ def _check_again(lane):
 @pytest.mark.parametrize("model,label,expected", [
     ("claude-fable-5-2[1m]", "Fable", True),
     ("claude-opus-5-5", "Opus", True),
+    ("opus", "Opus", True),
+    ("Claude-Opus-5-5", "Opus", True),
+    ("fable[1m]", "Fable", True),
+    ("Haiku[1M]", "Haiku", True),
     ("default", "Fable", True),
     ("opusplan", "Opus", False),
     ("octopus-large", "Opus", False),

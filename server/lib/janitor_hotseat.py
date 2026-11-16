@@ -290,7 +290,7 @@ def parse_codex(payload) -> list[dict]:
 def _repair_model_pin(value: str | None) -> str:
     from .provider_capabilities import claude_model_pin
     pin = claude_model_pin(value)
-    lowered = pin.casefold()
+    lowered = pin.casefold().removesuffix("[1m]")
     # Reuse declared labels, but do not borrow a family from a substring in an
     # unknown pin. Keep unknown pins nonempty so they cannot select CLI default.
     for family, label in _CLAUDE_FAMILY_LABELS:
