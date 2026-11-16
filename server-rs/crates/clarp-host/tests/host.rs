@@ -9081,6 +9081,38 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     assert!(lines[1].ends_with(" app synthetic-one {\"k\":1}"), "{log}");
     assert!(lines[2].ends_with(" app synthetic-two "), "{log}");
 
+    // What a phone's system told an app of itself is kept as it came, a file for each
+    // report; a device with limited scope hands over none, and what is no report is none.
+    let diagnostic = json!({
+        "crashDiagnostics": [{ "synthetic": "a stack" }, { "synthetic": "another" }],
+        "hangDiagnostics": [{ "synthetic": "a hang" }],
+        "appLaunchDiagnostics": "not a list",
+    });
+    let (status, said) = host.ask("POST", "/crash", Some(&diagnostic));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    let (status, _) = host.ask_as(&limited, "POST", "/crash", Some(&diagnostic));
+    assert_eq!(status, 403);
+    for not_one in [&b"null"[..], b"{", b"[1]", b"7"] {
+        let raw = fetch(&host, token, "POST", "/crash", &[], not_one);
+        assert_eq!(raw.status, 400, "{:?}", String::from_utf8_lossy(not_one));
+    }
+    let reports = place.root.join("data").join("crashes");
+    let kept: Vec<std::path::PathBuf> = std::fs::read_dir(&reports)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    let name = kept[0].file_name().unwrap().to_str().unwrap();
+    assert!(
+        name.starts_with("ios-diagnostic-") && name.ends_with(".json"),
+        "{name}"
+    );
+    let read: Value = serde_json::from_slice(&std::fs::read(&kept[0]).unwrap()).unwrap();
+    assert_eq!(read, diagnostic);
+    // Nothing at all is a report of nothing, as on the Python Host.
+    assert_eq!(fetch(&host, token, "POST", "/crash", &[], b"").status, 200);
+    assert_eq!(std::fs::read_dir(&reports).unwrap().count(), 2);
+
     // Whether the Host is up, and whether an agent is in a turn.
     let up = host.get("/status");
     assert_eq!(
@@ -14205,11 +14237,14 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     }
     assert_eq!(waiting(), ["m2", phones, "m4", "m5"]);
 
-    // While the turn runs, nothing is sent past it; what is not there is not there.
+    // While the turn runs, nothing is sent past it, and the queue is as it was; what is
+    // not there is not there.
+    let as_it_was = queue()["revision"].clone();
     assert_eq!(
         refused("POST", "/turn-queue/m4/send"),
         (409, "agent is still working".to_string())
     );
+    assert_eq!(queue()["revision"], as_it_was);
     for (method, path) in [
         ("POST", "/turn-queue/nothing/send"),
         ("DELETE", "/turn-queue/nothing"),
