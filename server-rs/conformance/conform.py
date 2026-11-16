@@ -435,7 +435,11 @@ def by_fiat(path, body):
 # answers a list, and empty, so that an app shows nothing there instead of an error. What is
 # compared of such an answer is what an app's reader needs of it: the status, and every field
 # with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
-NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options'})
+NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options',
+                      # Screens of what this Host has not, where the Python Host's first day says something
+                      # this Host must not: that a herald speaks up, that an agent may ring, that a picture
+                      # could be made with a key, what the Oracle could do. Compared as their fields.
+                      '/herald/settings', '/calls/ring', '/agent-portrait-generation', '/oracle/status'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
@@ -451,7 +455,7 @@ HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 # was pinned, put away or thrown away, and when what it asked was answered. Whether there is
 # one is compared; which moment it was is not.
 CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at',
-                        'helper_completed_at'})
+                        'helper_completed_at', 'server_now'})
 # The ids a Host gives to what agents make and ask, and to a persona its owner makes. Under their
 # own keys the harness's normalizer names them by the order they appear in (`artifact-<id:1>`).
 # They are also in the paths a client calls (`/decisions/<id>/resolve`), in what an agent is told

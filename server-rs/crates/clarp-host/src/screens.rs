@@ -64,8 +64,14 @@ async fn heartbeat_settings() -> Json<Value> {
     Json(kept("/heartbeat/settings"))
 }
 
-/// Turning something off that is off is done; turning it on is refused in words.
-async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answered {
+/// Turning something off that is off is done; turning it on is refused in words. `strict`:
+/// what is asked has to be plainly yes or no, as the Python Host asks of a heartbeat.
+async fn set_of_agent(
+    app: &App,
+    body: &[u8],
+    (field, strict): (&str, bool),
+    what: &str,
+) -> Answered {
     let asked: Value = if body.is_empty() {
         json!({})
     } else {
@@ -85,6 +91,9 @@ async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answer
     let Some(enabled) = asked.get(field) else {
         return Err(bad(&format!("{field} required")));
     };
+    if strict && !enabled.is_boolean() {
+        return Err(bad(&format!("{field} must be boolean")));
+    }
     if app.fleet.directory().named(session).is_none() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
     }
@@ -97,11 +106,12 @@ async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answer
 }
 
 async fn set_heartbeat(State(app): State<App>, body: axum::body::Bytes) -> Answered {
-    set_of_agent(&app, &body, "heartbeat_enabled", "An agent's heartbeat is").await
+    let field = ("heartbeat_enabled", true);
+    set_of_agent(&app, &body, field, "An agent's heartbeat is").await
 }
 
 async fn set_dreaming(State(app): State<App>, body: axum::body::Bytes) -> Answered {
-    set_of_agent(&app, &body, "dreaming_enabled", "Dreaming is").await
+    set_of_agent(&app, &body, ("dreaming_enabled", false), "Dreaming is").await
 }
 
 async fn no_heartbeat() -> ApiError {

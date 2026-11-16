@@ -1303,6 +1303,56 @@ SCENARIOS.append({
     ],
 })
 
+SCENARIOS.append({
+    'id': 'app-screens',
+    'what': "what an app's screens read of what a Host may have nothing of: an agent's heartbeat, schedules and "
+            'old goal, the goal ledger, pictures that could be made, the herald, judgments, diagnostics, the '
+            "janitors' policy, where the owner is, Cartesia's old picker, podcasts, the vocabulary, calls, the "
+            'Oracle; and what cannot be read as asked',
+    'steps': [
+        get(f'/agent-heartbeat/status?session={AGENT}', "an agent's heartbeat"),
+        get('/agent-heartbeat/status?session=nobody-there', 'the heartbeat of an agent that is not there'),
+        get('/agent-heartbeat/status', 'the heartbeat of nobody'),
+        get('/heartbeat/settings', 'how the heartbeat is set'),
+        post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': False}, 'a heartbeat that is off is turned off'),
+        post('/agent-heartbeat', {'heartbeat_enabled': False}, 'a heartbeat for nobody'),
+        post('/agent-heartbeat', {'session': AGENT}, 'a heartbeat that is neither'),
+        post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': 'no'}, 'a heartbeat that is a word'),
+        post('/agent-heartbeat', {'session': 'nobody-there', 'heartbeat_enabled': False},
+             'the heartbeat of an agent that is not there, turned off'),
+        get(f'/agent-schedules?session={AGENT}', "an agent's schedules"),
+        get(f'/agent-goal?session={AGENT}', 'the goal an agent works toward by itself'),
+        get('/agent-goal?session=nobody-there', 'the goal of an agent that is not there'),
+        get('/agent-goal', 'the goal of nobody'),
+        get('/goal-ledger?plan_id=nothing&limit=5', 'the ledger of a goal nobody has'),
+        get('/goal-ledger', 'the ledger of no goal'),
+        get('/goal-ledger?plan_id=nothing&limit=many', 'a ledger asked for by a word'),
+        get(f'/agent-portrait-generation?session={AGENT}', 'whether a picture could be made'),
+        get('/avatar-settings', 'how pictures are set'),
+        get('/herald/settings', 'how the herald is set'),
+        get('/judgments/settings', 'how judgments are set'),
+        get('/diagnostics/settings', 'how diagnostics are set'),
+        get('/janitor-policy', "the janitors' policy"),
+        get('/location', 'where the owner is'),
+        get('/cartesia-voices', "Cartesia's old picker"),
+        get('/podcast-history', 'the podcasts'),
+        get('/podcast-history/sources', 'what podcasts were made of'),
+        get('/vocab/packs', 'the packs of the vocabulary'),
+        get('/vocab/terms?pack_id=nothing', 'the terms of a pack that is not there'),
+        get('/vocab/terms', 'the terms of no pack'),
+        get('/vocab/profiles', 'the profiles of the vocabulary'),
+        get('/vocab/profile?profile_id=nothing', 'a profile that is not there'),
+        get('/vocab/assignments', 'who has which profile'),
+        get(f'/vocab/runs?session={AGENT}&limit=5', 'the runs of the vocabulary'),
+        get('/calls', 'the call the owner is in'),
+        get('/calls/ring', 'whether an agent rings'),
+        get('/oracle/status', 'what the Oracle can do'),
+        get('/oracle/contact', 'whom the Oracle is put through to'),
+        get('/oracle/delegations', 'what the Oracle handed on'),
+        get('/oracle/calls/status', 'what came of it'),
+    ],
+})
+
 EXPLAINED = '/tool-explanations/settings'
 
 SCENARIOS.append({
