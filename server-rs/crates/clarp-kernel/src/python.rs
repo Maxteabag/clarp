@@ -197,7 +197,7 @@ fn ascii_text(text: &str, out: &mut String) {
     out.push('"');
 }
 
-fn ascii_into(value: &Value, out: &mut String) {
+fn ascii_into(value: &Value, sorted: bool, out: &mut String) {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(truth) => out.push_str(if *truth { "true" } else { "false" }),
@@ -209,13 +209,15 @@ fn ascii_into(value: &Value, out: &mut String) {
                 if place > 0 {
                     out.push(',');
                 }
-                ascii_into(item, out);
+                ascii_into(item, sorted, out);
             }
             out.push(']');
         }
         Value::Object(fields) => {
             let mut fields: Vec<(&String, &Value)> = fields.iter().collect();
-            fields.sort_by(|a, b| a.0.cmp(b.0));
+            if sorted {
+                fields.sort_by(|a, b| a.0.cmp(b.0));
+            }
             out.push('{');
             for (place, (key, value)) in fields.into_iter().enumerate() {
                 if place > 0 {
@@ -223,7 +225,7 @@ fn ascii_into(value: &Value, out: &mut String) {
                 }
                 ascii_text(key, out);
                 out.push(':');
-                ascii_into(value, out);
+                ascii_into(value, sorted, out);
             }
             out.push('}');
         }
@@ -235,7 +237,15 @@ fn ascii_into(value: &Value, out: &mut String) {
 /// answers are kept, weighed and shown to their agent.
 pub fn sorted_ascii(value: &Value) -> String {
     let mut out = String::new();
-    ascii_into(value, &mut out);
+    ascii_into(value, true, &mut out);
+    out
+}
+
+/// A value as Python's `json.dumps(value, separators=(',', ':'))` writes it: its fields in
+/// the order they were put in, nothing between them, in ASCII.
+pub fn compact_ascii(value: &Value) -> String {
+    let mut out = String::new();
+    ascii_into(value, false, &mut out);
     out
 }
 
