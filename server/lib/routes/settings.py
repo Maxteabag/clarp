@@ -95,27 +95,40 @@ class SettingsRoutes:
         # recovered path is a pathlib.Path, which has no slash at its end, so
         # the question is read before the path is recovered.
         inside = raw.endswith("/")
-        raw = str(recover_user_path(raw))
-        if inside or raw.endswith("/"):
+        try:
+            recovered = recover_user_path(raw)
+        except OSError as e:
+            # A path the Host may not look at (the existence check raises for
+            # /proc/1/root/): an answer with nothing in it, not a closed connection.
+            log_exception("dirsPathRefused", e, detail=raw[:200])
+            self._send(200, json.dumps({"base": raw, "matches": []}).encode(), "application/json")
+            return
+        raw = str(recovered)
+        # Only an absolute path is listed from the inside: "./" and "../" are
+        # not the Host process's own directory to show.
+        if (inside and recovered.is_absolute()) or raw.endswith("/"):
             base, frag = raw.rstrip("/") or "/", ""
         else:
             base = os.path.dirname(raw) or "/"
             frag = os.path.basename(raw).lower()
         matches: list[str] = []
-        try:
-            for entry in sorted(os.listdir(base)):
-                if entry.startswith("."):
-                    continue
-                full = os.path.join(base, entry)
-                if not os.path.isdir(full):
-                    continue
-                if frag and not entry.lower().startswith(frag):
-                    continue
-                matches.append(full)
-                if len(matches) >= 20:
-                    break
-        except OSError as e:
-            log_exception("dirsListFail", e, detail=base)
+        # A directory that is not there (yet) is what typing a path looks like:
+        # nothing to offer and nothing to report. The app asks at every pause.
+        if os.path.isdir(base):
+            try:
+                for entry in sorted(os.listdir(base)):
+                    if entry.startswith("."):
+                        continue
+                    full = os.path.join(base, entry)
+                    if not os.path.isdir(full):
+                        continue
+                    if frag and not entry.lower().startswith(frag):
+                        continue
+                    matches.append(full)
+                    if len(matches) >= 20:
+                        break
+            except OSError as e:
+                log_exception("dirsListFail", e, detail=base)
         body = json.dumps({"base": base, "matches": matches}).encode()
         self._send(200, body, "application/json")
 

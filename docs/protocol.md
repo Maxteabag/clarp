@@ -679,7 +679,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   and every Fork / Resume / Compact / MCP control follows its flag. A flag
   the Host does not send means the client's old default, never "no".
 - `GET /voices?for=<session>` — voice catalogue with availability.
-- `GET /dirs?path=` — directory completion for the start dialog.
+- `GET /dirs?path=` — directory completion for the start dialog. Answers `{"base", "matches"}`: a path that
+  ends in a slash lists the visible directories inside it (absolute paths only); any other path completes its last
+  name in its parent. At most 20 matches. A directory that is not there answers no matches.
 - `POST /clog` — batched client diagnostics `{"events": [{"event", "detail",
   "trace_id", "clip_id"}]}`; the server files them next to its own logs.
 
