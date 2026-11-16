@@ -22,6 +22,15 @@ from tests.readmodel import rm_n14_harness as harness
 from tests.readmodel.test_rm_n14_equivalence import _clones
 
 
+# Two of the importer's defaults that tests here were written for, said where
+# they matter: the lane also runs with the Hosts' switches
+# (RM_N14_CONFIGURATION=hosts), where both are otherwise.
+# A grown file whose audit is due is imported in full.
+FULL_AUDIT = {"settings": {"audit_grown_by_digest": False}}
+# A full import reads the file a second time for its digest.
+SECOND_READ = {"settings": {"full_digest_while_parsing": False}}
+
+
 def _decision(report):
     [event] = [e for e in report["tail_events"] if e["event"] == "transcriptTailDecision"]
     return event["code"] + (f"({event['reason']})" if "reason" in event else "")
@@ -111,7 +120,7 @@ def test_an_unchanged_file_whose_audit_is_due_is_read_and_compared_not_replayed(
         _append(transcript, backend, 3)
         full.tick(7301)
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
-            assert _decision(after.tick(7301)) == "full_audit"
+            assert _decision(after.tick(7301, faults=FULL_AUDIT)) == "full_audit"
             harness.assert_product_equal(reference, candidate)
             # That was the audit: the clock starts again.
             _append(transcript, backend, 4)
@@ -146,7 +155,7 @@ def test_an_unchanged_file_that_has_had_its_number_of_imports_is_audited_after_a
         tmp_path, backend):
     """The other audit rule, ``audit_every`` imports since the last one."""
     reference, candidate, transcript = _world(tmp_path, backend)
-    two = {"settings": {"audit_every": 2}}
+    two = {"settings": {"audit_every": 2, **FULL_AUDIT["settings"]}}
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as before:
             full.tick(0)
@@ -206,7 +215,7 @@ def test_rows_written_while_the_host_was_down_make_the_next_change_a_full_import
                     "INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES (?,'pwa','while-down',?)",
                     (corpus.AGENT, harness.BASE_MS + 500))
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as after:
-            report = after.tick(1)
+            report = after.tick(1, faults=SECOND_READ)
             full.tick(1)
             harness.assert_product_equal(reference, candidate)
             # The stored frontier is taken up and its record asked, as a held
@@ -270,7 +279,7 @@ def test_an_import_that_wrote_rows_and_could_not_publish_is_followed_by_a_full_i
             harness.assert_product_equal(reference, candidate)
             _append(transcript, backend, 4)
             full.tick(2)
-            report = actual.tick(2)
+            report = actual.tick(2, faults=SECOND_READ)
             harness.assert_product_equal(reference, candidate)
             # The stored record's mark is below the rows that went in. That
             # is found before the tail reads the file: the one read is the

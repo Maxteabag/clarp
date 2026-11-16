@@ -215,6 +215,10 @@ def test_other_writer_can_commit_before_transcript_import_finishes(monkeypatch):
     import threading
     _agent()
     monkeypatch.setattr(message_store, 'IMPORT_COMMIT_EVERY', 2)
+    # The first batch is two rows because it ends by its rows. A batch also
+    # ends after 25 ms of wall clock; on a starved machine that came first and
+    # the batch held one row (the critical gate, 16 Nov 2026, load 18 to 26).
+    monkeypatch.setattr(message_store, 'IMPORT_WRITE_BUDGET_SECONDS', 1e9)
     inner = db.conn()
     released = threading.Event()
     wrote = threading.Event()

@@ -69,7 +69,11 @@ def test_isolated_full_reference_and_candidate_match_after_every_tick(tmp_path, 
         # imported bytes have been read once in that process.
         assert not reports[0]["candidate_fast_path_proven"]
         assert reports[1]["candidate_fast_path_proven"] is (tick > 0)
-        assert reports[1]["digest_reads"] == ["all"]
+        # The first, full import reads the file again for its digest unless
+        # the digest comes from its parse; a one-shot lane takes no settings
+        # of a test's own, so this follows the configuration.
+        first_from_parse = tick == 0 and not harness.full_import_reads_the_file_again()
+        assert reports[1]["digest_reads"] == ([] if first_from_parse else ["all"])
 
 
 def test_product_oracle_detects_side_effect_change_even_when_row_counts_match(tmp_path):

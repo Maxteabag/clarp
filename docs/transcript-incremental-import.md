@@ -385,8 +385,12 @@ imported as a tail leaves different rows.
 The lane (`tests/readmodel`) runs in two configurations. At the importer's
 defaults, and with `RM_N14_CONFIGURATION=hosts`, which adds the switches both
 Hosts run with (`carry_live_rows`, `tail_yield_after_first_write`,
-`carry_settled_turns`) under each test's own settings; a test about one of
-them being off says so itself. Two things differ between them on purpose.
+`carry_settled_turns`, `boundary_skips_dropped_records`,
+`tail_keeps_frontier_when_grown`, `audit_grown_by_digest`,
+`full_digest_while_parsing`) under each test's own settings; a test about one
+of them being off says so itself, and a switch joins the list
+(`HOSTS_SWITCHES` in the harness) when it is switched on there. Two things
+differ between them on purpose.
 A write that a test injects while an import has given the writer away is
 placed by what the tail did: the tail runs first, and the reference's replay
 gets the same write before the same row, not at the same count of yields. And
@@ -398,8 +402,16 @@ clock a Host also ends one by) and compares the numbers themselves. With the
 Hosts' switches a tail gives the writer away only once it has written and
 the replay before every batch, so there it compares what the numbers order:
 the rows' order of writing, which rows share a number, and how many rows a
-head, a replace revision and the clock are not older than
-(`test_rm_n14_revision_order.py`).
+head, a replace revision and the clock are not older than, with a head that
+never said a replace kept apart from one whose replace revision lies below
+every row (`test_rm_n14_revision_order.py`).
+
+One thing that comparison does not see: a row written again for nothing that
+keeps its place among the rows. The lane's clock stands still within a tick,
+so such a row keeps its `updated_at`, and its new number orders the same.
+The numbers themselves, compared at the defaults, do show it, on the paths
+the defaults take. A tail's cost in needless rewrites is therefore not to be
+judged from the Hosts' configuration alone.
 
 A process that holds no frontier for a file takes the stored one when it
 never had one (a Host start), lost it to the cache's size limit, or the last
