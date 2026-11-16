@@ -529,6 +529,30 @@ reason=bootstrap_refused` at every import). With
 `boundary_skips_dropped_records = true` a candidate is a record that, parsed
 alone, is a user turn. Off by default.
 
+A tail read its range (from the boundary to the end of the file) four
+times: to hash the part an earlier import read and compare it with the
+checkpoint's (`tail_rewritten`), to look for a record that reaches before
+the boundary, to parse it, and to hash all of it for the next checkpoint.
+The boundary moves only at a full import, so the range grows with every
+tail, up to `max_tail_bytes`. With `tail_hashes_while_parsing = true` the
+two hashes are taken from the parse: the reader the parser is handed hashes
+the bytes it passes on, and gives the digest of the earlier import's part on
+the way past its last byte. A tail then reads its range twice. The parse's
+digests are used only when the file did not change while it was parsed: the
+same inode, size, modification time and change time as when the reader
+opened it, and the size the import began with. Then what the parser was
+handed is the file, and a read would give the same digests; otherwise the
+range is read as before (what the change time does not see is said under
+`full_digest_while_parsing`, below, and holds here too).
+
+The earlier import's part is compared after the parse instead of before it.
+A rewrite of those bytes is the same full import, found one parse later; in
+a process's first tail, which reads every imported byte before it parses,
+that read finds it first and names it `imported_bytes`. One thing is found
+that was not: such a rewrite landing while the tail runs, in a way the other
+checks let pass, was missed until the audit, because the part had been read
+before it; now this tail is the full import. Off by default.
+
 `decide` returns a reason for a full import when there is no checkpoint, the
 parser version or backend differs, the inode or device changed (rotation or a
 rewrite renamed into place), the file is shorter than the checkpoint's

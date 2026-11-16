@@ -280,6 +280,11 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #                                   # record counts, also those the harness injects into a
 #                                   # turn; six after a prompt leave no checkpoint. Off by
 #                                   # default.
+# tail_hashes_while_parsing = false # true: a tail takes the two hashes of its range from its
+#                                   # own parse instead of reading the range for each, when
+#                                   # the file did not change while it was parsed: it reads
+#                                   # its range twice where it read it four times. Off by
+#                                   # default.
 # digest_every_tail = false        # true: read and digest every imported byte of a
 #                                   # transcript at every tail import (as before schema
 #                                   # 124). false: at the first tail after a Host start,
