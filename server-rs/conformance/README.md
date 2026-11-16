@@ -50,7 +50,13 @@ Python Host. Every difference is exactly one of:
    to whoever owns the Python Host's releases.
 
 The suite counts only while its proof holds: every planted change is caught by a difference
-of the kind it names.
+of the kind it names, in a scenario that ran to its end. A scenario that did not run to its
+end under a plant (the planted Python Host timed out in it) differs from the recording in
+every way and proves nothing, for or against: its differences are not counted, it is listed
+as a `RUN ERROR`, and it does not undo what the other scenarios showed. Before 16 Nov 2026 one
+such scenario made a plant count as missed that fourteen differences elsewhere showed (run
+43820942327, first attempt: `question` timed out under `state-transition`); a run error of the
+two recordings the Rust Host is compared with still fails the run, as it must.
 
 The reference is recorded twice in every run. Where the two recordings differ, the Python
 Host itself answers in more than one way: the report says so in its first part, the defect

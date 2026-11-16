@@ -30,6 +30,7 @@ import argparse
 import bisect
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import http.server
 import json
 import os
 from pathlib import Path
@@ -100,6 +101,35 @@ HEARD = scenarios.HEARD
 # given the same.
 SPEECH_OFF = '[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
 OWNERS_FILE = 'owner-config.toml'
+# What the reference Host's Cartesia answers every line with (`SYNTHETIC_MP3` and
+# `synthetic_cartesia` in tests/replay/host.py): a hundred silent frames. There, the adapter's
+# own transport is replaced; here, the Rust Host is given an address on this machine in
+# Cartesia's place, and the same bytes come from it.
+SYNTHETIC_MP3 = (b'\xff\xfb\x90\x00' + bytes(413)) * 100
+
+
+class StandInVoice:
+    """Cartesia on this machine: every line is answered with the same sound."""
+
+    def __init__(self):
+        class Answer(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802  (the name the server calls)
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/mpeg')
+                self.send_header('Content-Length', str(len(SYNTHETIC_MP3)))
+                self.end_headers()
+                self.wfile.write(SYNTHETIC_MP3)
+
+            def log_message(self, *args):
+                pass
+        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Answer)
+        self.address = f'http://127.0.0.1:{self.server.server_address[1]}/tts/bytes'
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
 
 
 class RustHost(replay.Host):
@@ -115,6 +145,7 @@ class RustHost(replay.Host):
         # reference Host as its config, this Host reads its owner's choices of speech from. With
         # none, speech out is off on both (tests/replay/host.py, isolate).
         (self.root / OWNERS_FILE).write_text(config or SPEECH_OFF)
+        self.voice = StandInVoice()
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         # The reference Host has its agents before it serves its first request. This one is given
         # the same agents and then started again, so that making them is not part of what a client
@@ -144,7 +175,9 @@ class RustHost(replay.Host):
                     # Speech in: the Host's own worker with no model in it, which hears in every
                     # clip what the reference Host's stand-in hears (tests/replay/host.py). No key
                     # of an engine outside is in this Host's world.
-                    'CLARP_WHISPER_FAKE_SAYS': HEARD, 'ELEVEN_API_KEY': ''})
+                    'CLARP_WHISPER_FAKE_SAYS': HEARD, 'ELEVEN_API_KEY': '',
+                    # Speech out: the engine that speaks is the stand-in on this machine.
+                    'CLARP_CARTESIA_ENDPOINT': self.voice.address})
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
              '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
@@ -169,6 +202,12 @@ class RustHost(replay.Host):
             os.killpg(self.process.pid, signal.SIGKILL)
         self.process.wait(timeout=5)
         self.process = None
+
+    def stop(self):
+        super().stop()
+        voice, self.voice = getattr(self, 'voice', None), None
+        if voice is not None:
+            voice.close()
 
 
 class Events(replay.SSE):
@@ -287,6 +326,16 @@ def run_step(host, events, step, http, variables, clock=None):
         replay._poll('a reply', replied)
     elif op == 'wait_busy':
         replay._poll('busy state', lambda: agent(host, session).get('busy') is step['busy'])
+    elif op == 'wait_clips':
+        # So many clips of what the agent said aloud were announced and are whole. Asked the
+        # way an app asks: what it may have missed, and each clip in one piece, for which a
+        # Host makes the asker wait.
+        def whole():
+            missed = host.request('GET', f'/clips/recoverable?session={session}')[2]
+            clips = [event.get('clip_id') for event in (missed or {}).get('events') or []]
+            return len(clips) >= step['count'] and all(
+                host.request('GET', f'/clips/{clip}/complete.mp3', timeout=40)[0] == 200 for clip in clips)
+        replay._poll('the clips', whole)
     elif op == 'wait_running':
         # A turn runs and nothing waits behind it: the agent is busy, its queue is empty, and what
         # the snapshot says the turn began at is the same in two readings. Read off the snapshot
@@ -333,7 +382,8 @@ def capture(make_host, scenario, root: Path) -> dict:
     events, frames, http, error, variables = None, [], [], None, {'workspace': str(root / 'workspace')}
     clock = TurnClock()
     try:
-        host.start()
+        # A scenario may bring the owner's settings its Host runs with (`config`).
+        host.start(scenario.get('config'))
         events = Events(host)
         replay._poll('the stream connected', lambda: events.frames)
         for index, step in enumerate(scenario['steps']):
@@ -438,6 +488,8 @@ CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at',
 ISSUED = re.compile(r'^(?:artifact|decision)-[0-9a-f]{12,64}$')
 # An id a preview cut short: `Decision ID: decision-7be0a016ae…`.
 CUT_ID = re.compile(r'((?:artifact|decision)-[0-9a-f]{4,})…$')
+# The name of a clip's file: the moment it was begun, in milliseconds, and whose it is.
+CLIP_FILE = re.compile(r'1[5-9][0-9]{11}__[A-Za-z0-9._-]+\.mp3')
 # The id a Host gives a file an agent published: `asset_` and twenty-four signs of an alphabet
 # that has an underscore in it. The harness's normalizer names such an id under its own key only
 # when it happens to have no underscore, which about half of them do; and the id is also in what
@@ -462,6 +514,10 @@ def settle(value, sessions):
             item = '<time>'  # a reading no TurnClock has told: there is none in a capture of this suite
         elif key in CLOCK_KEYS and isinstance(item, int) and not isinstance(item, bool) and item in EPOCH_MS:
             item = '<time>'
+        elif key == 'event_id' and isinstance(item, int) and not isinstance(item, bool):
+            # The number of the event something was announced with, in an answer that tells it
+            # again (a clip an app missed): each Host counts its events its own way.
+            item = '<event>'
         elif key == 'agents' and isinstance(item, list):
             # Both Hosts have two codex agents (rachel, mike) that no scenario is about. Both
             # sides are cut to the scenario's own.
@@ -703,6 +759,54 @@ def published(value, found: dict) -> dict:
     return found
 
 
+def spoken_clips(raw: dict) -> dict:
+    """The clips of what a capture's agents said aloud: the number a Host gave each, with the
+    name of its file. The Python Host counts its clips from one; the Rust Host numbers a clip by
+    the moment it was begun, which is also the first part of its file's name on both. What a
+    client relies on is that the same clip has the same number and the same name wherever it
+    is told, so each clip is named here in the order the clips were announced (both Hosts
+    number later clips higher)."""
+    clips: dict = {}
+
+    def look(value):
+        if isinstance(value, list):
+            for item in value:
+                look(item)
+        elif isinstance(value, dict):
+            number = value.get('clip_id')
+            if value.get('type') == 'audio' and isinstance(number, int) and not isinstance(number, bool):
+                name = value.get('name') or str(value.get('url') or '').rsplit('/', 1)[-1]
+                clips.setdefault(number, name if CLIP_FILE.fullmatch(name or '') else None)
+            for item in value.values():
+                look(item)
+    look([frame.get('data') for frame in raw['sse']])
+    look([exchange['body'] for exchange in raw['http']])
+    return {number: (f'<clip:{place}>', clips[number]) for place, number in enumerate(sorted(clips), 1)}
+
+
+def clips_by_name(value, clips: dict):
+    """Every clip under its name, wherever its number or its file's name is written: under
+    `clip_id`, in the address it is fetched by, in the path a client then asks for."""
+    if isinstance(value, list):
+        return [clips_by_name(item, clips) for item in value]
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            whole = isinstance(item, int) and not isinstance(item, bool)
+            if key == 'clip_id' and whole and item in clips:
+                out[key] = clips[item][0]
+            else:
+                out[key] = clips_by_name(item, clips)
+        return out
+    if not isinstance(value, str):
+        return value
+    for number, (name, file) in clips.items():
+        value = value.replace(f'/clips/{number}/', f'/clips/{name}/')
+        if file:
+            value = value.replace(file, name + file[file.index('__'):])
+    return value
+
+
 def cut_lists(value, found: dict) -> dict:
     """The names of the lists of Updates a capture's pages were cut from, and the cursors its
     pages ended with: each Host's own, named here in the order a client learns of them. What is
@@ -729,6 +833,9 @@ def seen_by_a_client(raw: dict) -> dict:
     lists = cut_lists([exchange['body'] for exchange in raw['http']], {})
     if lists:
         raw = {**raw, 'http': by_name(raw['http'], lists)}
+    clips = spoken_clips(raw)
+    if clips:
+        raw = {**raw, 'http': clips_by_name(raw['http'], clips), 'sse': clips_by_name(raw['sse'], clips)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
@@ -895,22 +1002,30 @@ def caught(change: dict, found: list) -> list:
 
 
 def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tuple:
-    """Every planted change must show against what was written down."""
+    """Every planted change must show against what was written down.
+
+    A planted change is caught when a scenario that ran to its end shows it. A scenario that
+    did not run to its end under a plant (the planted reference Host timed out in it) differs
+    from the recording in every way and proves nothing, for or against: what it shows is not
+    counted, it is reported, and it does not undo what the other scenarios proved. The claim
+    is that the suite can see the change, and one whole scenario that shows it is that."""
     lines, ok = ['# Planted changes', ''], True
     for change in changes:
         copy = planted_copy(build, change, run.label(f"plant-{change['id']}"))
         seen = corpus(python_host(copy), chosen, run.label(f"run-{change['id']}"), jobs)
         errors = run_errors(seen, change['id'])
+        cut_short = {scenario for scenario, views in seen.items() if views['full']['error']}
         report = differences(golden, seen, steady(chosen), view='core')
-        hits = caught(change, report.items)
-        verdict = 'CAUGHT' if hits and not errors else 'MISSED'
+        shown = [d for d in report.items if d['scenario'] not in cut_short]
+        hits = caught(change, shown)
+        verdict = 'CAUGHT' if hits else 'MISSED'
         ok = ok and verdict == 'CAUGHT'
         lines.append(f"{verdict:<7} {change['id']}: {change['what']} "
-                     f"({len(hits)} of {len(report.items)} differences show it)")
-        lines += [f'        RUN ERROR {line}' for line in errors]
+                     f"({len(hits)} of {len(shown)} differences show it)")
+        lines += [f'        RUN ERROR {line} (not counted: the scenario did not run to its end)' for line in errors]
         if verdict == 'MISSED':
             lines += [f"        saw {d['scenario']} / {d['channel']} / {d['locator']} / {d['kind']}"
-                      for d in report.items[:12]]
+                      for d in shown[:12]]
     lines.append('')
     lines.append('EVERY PLANTED CHANGE WAS CAUGHT' if ok else 'A PLANTED CHANGE WAS MISSED: the suite cannot be trusted')
     return lines, ok

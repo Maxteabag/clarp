@@ -495,6 +495,42 @@ tells an invented "Okay." from one that was said (the list throws both away), a 
 recordings, an agent's own language or engine, the record of each thing said (`/voice-events`), changing
 these settings from an app, and calls.
 
+**An agent says something aloud, and the Host makes a clip of it** (16 Nov 2026). A reply marks what is for
+the ear (`<speak>`), and only that is spoken, when the message it answers asked for it: what a person sends
+is answered aloud unless the app says otherwise, anything else only when it says so. Each marked part, in
+pieces an engine takes at once, is a **line**, and a line is written into the agent's log in the same append
+as its reply (`clarp-kernel` `spoken.rs`): a line waits to be spoken exactly when its reply is in the
+conversation, and a Host that is started again finds in its logs what it still owes the ear. A line goes one
+way: it waits, it is taken, it has a clip, the clip is whole or the engine failed and says why. One line of an
+agent at a time, in the order they were said, and four agents at once (`clarp-host` `voice.rs`). **Who speaks
+is the owner's choice, read where he keeps it**: the engine for every agent and the one tried after it, an
+entry for a single agent, the voices of his personas, the keys, all from the Python Host's own config each
+time a line is to be said (`owner.rs`, `--speech-keys`; the rules are that Host's, `said.rs`, held by its own
+functions' recorded answers). Two engines are behind the port (`clarp-speech` `speak.rs`): Gemini through
+either of Google's doors, its sound piped through an encoder as it comes, and Cartesia. When the first cannot
+begin, the next does; **what was begun in one voice is never begun again in another**. An engine that is not
+built here, has no voice for the agent or has no key is passed over before anything is announced, and a line
+nothing can say is over without a clip: no app waits for sound that never comes. **The clip is announced
+before its first byte is there** (the event `audio`, with where it is fetched as a file, as a stream and
+whole), so a listener hears the beginning of a long line while its end is still being made. A clip is a file
+under the Host's data (`audio/<milliseconds>__<session>.mp3`, readable by its owner alone), and its number is
+that moment: no two clips of a Host have the same, also across restarts. What lasts is in the agent's log
+(the line, its clip, whether it is whole, what an app said of playing it); what the Host holds in memory is
+only how far a growing clip has come, and the routes find a clip in what the agents publish of their logs,
+without asking an agent. The routes are the Python Host's (`/audio/<name>`, `/clips/<n>/stream` in its three
+shapes, `/clips/<n>/complete.mp3`, `/clips/ack`, `/clips/recoverable`, `/clips/message`): a stream for a
+player that takes one, the part that was asked for as far as the clip has come with its length told as not
+yet known, the file once it is whole. A user's Stop takes back what still waits; what is being said is said
+to its end, as on that Host. After a restart, a line that was being said a moment ago waits again, one begun
+long before is over, and one that has waited more than half an hour for a Host that was away is not spoken
+any more. Clips are kept a week, 256 MiB at most, to be played again. Held end to end with a stand-in for
+Cartesia on the loopback (`tests/host.rs`: the clip fetched while it grows, an engine that is down, a Host
+killed and started again; no test reaches an engine outside) and by the scenario `speech-out`. Not there:
+ElevenLabs, Google's Chirp voices, a local voice and custom adapters as engines that speak; the raw and HLS
+ways of delivering a clip; the herald that decides which of several agents' clips is played first; what the
+apps read and set of voices (`/voice-catalog`, `/voices`, `/agent-voice`, `/voice-preview`); the record of
+each thing said (`/voice-events`); and calls.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
