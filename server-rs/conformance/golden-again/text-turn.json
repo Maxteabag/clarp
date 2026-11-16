@@ -34,7 +34,7 @@
     "file": "<id:2>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 6,
+    "latest_revision": 5,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -74,14 +74,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "msg-<id:3>",
+      "id": "live-<id:3>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 2,
+      "revision": 5,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -90,7 +90,15 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>"
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
      }
     ]
    },
@@ -150,7 +158,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 6,
+      "head_revision": 5,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -163,7 +171,7 @@
       "last_activity": "<time>",
       "last_completed_message": "Claude replay reply: synthetic greeting alpha",
       "last_message": "Claude replay reply: synthetic greeting alpha",
-      "last_message_id": "msg-<id:3>",
+      "last_message_id": "live-<id:3>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -1761,21 +1769,6 @@
   {
    "data": {
     "agent_id": "<id:5>",
-    "client_msg_id": "alpha",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
     "detail": {
      "backend_session_id": "<id:2>",
      "dispatch": "claude",
@@ -1816,6 +1809,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "alpha",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -1877,7 +1885,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:7>",
+    "source_message_id": "live-<id:3>",
     "type": "user-notification",
     "unread": true
    },
