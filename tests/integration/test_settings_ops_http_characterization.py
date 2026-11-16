@@ -7,6 +7,7 @@ as it is today. The library rules behind them have their own unit tests.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -160,7 +161,50 @@ def test_dirs_answers_when_a_tilde_user_does_not_exist(running_server, monkeypat
     path = f"~{username}{suffix}"
     query = urllib.parse.urlencode({"path": path})
     assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
-    assert logged == [("dirsPathRefused", "RuntimeError")]
+    assert logged == []
+
+
+@pytest.mark.parametrize("path", ["~abc\0/", "~abc\0/projects/"])
+def test_dirs_answers_a_malformed_tilde_username_quietly(running_server, monkeypatch, path):
+    base, _ctx, _srv = running_server
+    from lib.routes import settings as settings_routes
+
+    logged = []
+    monkeypatch.setattr(settings_routes, "log_exception",
+                        lambda *args, **kwargs: logged.append(args))
+    query = urllib.parse.urlencode({"path": path})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
+    assert logged == []
+
+
+@pytest.mark.parametrize("error_type", [LookupError, ValueError])
+@pytest.mark.parametrize("failure_site", ["recovery", "named-expansion"])
+def test_dirs_does_not_swallow_an_unrelated_recovery_error(monkeypatch, error_type, failure_site):
+    from lib import launch_paths
+    from lib.routes import settings as settings_routes
+
+    failure = error_type("unrelated recovery defect")
+    def broken(_raw):
+        raise failure
+    path = "/projects/"
+    if failure_site == "recovery":
+        monkeypatch.setattr(launch_paths, "recover_user_path", broken)
+    else:
+        import pathlib
+        path = "~typed-user/"
+        original_expanduser = pathlib.Path.expanduser
+        def broken_expansion(candidate):
+            if str(candidate) == "~typed-user":
+                raise failure
+            return original_expanduser(candidate)
+        monkeypatch.setattr(pathlib.Path, "expanduser", broken_expansion)
+    responses = []
+    handler = SimpleNamespace(_query=lambda: {"path": [path]},
+                              _send=lambda *args: responses.append(args))
+    with pytest.raises(error_type) as caught:
+        settings_routes.SettingsRoutes._handle_dirs(handler)
+    assert caught.value is failure
+    assert responses == []
 
 
 def test_message_tool_details_requires_a_known_message(running_server):
@@ -171,3 +215,62 @@ def test_message_tool_details_requires_a_known_message(running_server):
         404, {"error": "message not found"})
     assert _call(base, "GET", "/message-tool-details?session=claude&message_id=m1") == (
         404, {"error": "message not found"})
+
+
+@pytest.mark.parametrize("input_path", ["absolute", "~", "~/projects/"])
+def test_dirs_logs_a_host_home_failure(running_server, tmp_path, monkeypatch, input_path):
+    import pathlib
+    from lib.routes import settings as settings_routes
+
+    base, _ctx, _srv = running_server
+    path = str(tmp_path) + "/" if input_path == "absolute" else input_path
+    failure = RuntimeError("Host account has no home")
+    logged = []
+    monkeypatch.setattr(settings_routes, "log_exception",
+                        lambda event, error, **more: logged.append((event, error)))
+    def no_home(cls):
+        raise failure
+    query = urllib.parse.urlencode({"path": path})
+    with monkeypatch.context() as home_failure:
+        home_failure.setattr(pathlib.Path, "home", classmethod(no_home))
+        assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
+    assert logged == [("dirsPathRefused", failure)]
+
+
+@pytest.mark.parametrize("configured_root", [False, True], ids=["ordinary", "workspace"])
+@pytest.mark.parametrize("suffix", ["", "/", "/x"])
+def test_dirs_preserves_a_named_home_ending_in_space(
+        running_server, tmp_path, monkeypatch, configured_root, suffix):
+    pwd = pytest.importorskip("pwd")
+    base, _ctx, _srv = running_server
+    actual_home = tmp_path / "named home "
+    sibling = tmp_path / "named home"
+    (actual_home / "x-real-home").mkdir(parents=True)
+    (sibling / "x-trimmed-home").mkdir(parents=True)
+    original_lookup = pwd.getpwnam
+    def lookup(username):
+        if username == "clarp-space-home":
+            return SimpleNamespace(pw_dir=str(actual_home))
+        return original_lookup(username)
+    monkeypatch.setattr(pwd, "getpwnam", lookup)
+    if configured_root:
+        monkeypatch.setenv("CLARP_DEPLOYMENT_MODE", "container")
+        monkeypatch.setenv("CLARP_WORKSPACE_ROOT", str(tmp_path))
+    else:
+        monkeypatch.delenv("CLARP_DEPLOYMENT_MODE", raising=False)
+    path = "~clarp-space-home" + suffix
+    expected = ({"base": str(tmp_path), "matches": [str(actual_home)]} if suffix == "" else
+                {"base": str(actual_home), "matches": [str(actual_home / "x-real-home")]})
+    query = urllib.parse.urlencode({"path": path})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, expected)
+
+
+@pytest.mark.parametrize("path", ["~", "~/"])
+def test_dirs_classifier_bypasses_own_home_without_expanding(monkeypatch, path):
+    import pathlib
+    from lib.routes import settings as settings_routes
+
+    def unexpected_expansion(_path):
+        pytest.fail("The named-user classifier must not expand the Host's own home")
+    monkeypatch.setattr(pathlib.Path, "expanduser", unexpected_expansion)
+    assert settings_routes._named_user_miss(path) is False
