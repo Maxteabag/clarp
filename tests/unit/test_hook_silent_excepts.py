@@ -2,8 +2,8 @@
 
 A failure first appends its content-free private line, then optionally mirrors
 its exception class (and SQLite error name) into telemetry. Detailed capture
-never gates the mandatory line. Nothing is emitted on the hook's stdout/stderr,
-including deferred sink diagnostics at process exit.
+never gates the mandatory line. The reporter never intercepts process streams;
+existing sink diagnostics remain outside this reporter's contract (issue #395).
 """
 from __future__ import annotations
 
@@ -263,7 +263,8 @@ def test_real_record_failure_keeps_trace_when_event_writers_both_fail(
         blocker.rollback()
         blocker.close()
     output = capsys.readouterr()
-    assert (output.out, output.err) == ("", "")
+    assert output.out == ""
+    # Existing event-sink stderr is intentionally unchanged (issue #395).
     assert connection.execute(
         "SELECT COUNT(*) FROM diagnostic_events WHERE source='toolstart_hook' AND event='recordFail'").fetchone()[0] == 0
     if not log_unwritable:
@@ -287,7 +288,7 @@ def test_real_report_with_unwritable_hook_log_still_writes_event(monkeypatch, tm
         "SELECT COUNT(*) FROM diagnostic_events WHERE source='toolend_hook' AND event='resolveFail'").fetchone()[0] == 1
 
 
-def test_real_writer_failure_stays_private_through_hook_exit(tmp_path):
+def test_real_writer_failure_preserves_hook_status_stdout_and_private_line(tmp_path):
     import os
     import subprocess
     import sys
@@ -323,7 +324,83 @@ def test_real_writer_failure_stays_private_through_hook_exit(tmp_path):
                             env={**os.environ}, capture_output=True, timeout=10)
     assert result.returncode == 0
     assert result.stdout == b"caller-output"
-    assert result.stderr == b""
+    # The sink's existing stderr, including shutdown diagnostics, is out of scope.
     lines = RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()
     assert len(lines) == 1 and "recordFail OperationalError SQLITE_BUSY" in lines[0]
     assert "SECRET" not in lines[0]
+
+
+def _report_with_independent_exit(tmp_path, action):
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    setup = textwrap.dedent('''
+        import atexit,pathlib,sys
+        root=pathlib.Path(sys.argv[1])
+        sys.path[:0]=[str(root/'server'),str(root/'plugin/hooks')]
+        from lib import db,diagnostics_settings
+        import _hook_report
+        db.run_as_service('tests');db.conn()
+        diagnostics_settings.update({'enabled':False,'categories':[]})
+    ''')
+    body = setup + action + "\n_hook_report.report('toolend_hook','resolveFail',ValueError('SECRET'))\n"
+    return subprocess.run([sys.executable, "-c", body, str(HOOKS.parents[1])],
+                          env={**os.environ}, capture_output=True, timeout=10)
+
+
+def test_independent_exit_error_remains_visible_after_report(tmp_path):
+    action = "def late_failure():\n    raise RuntimeError('INDEPENDENT_EXIT_ERROR')\natexit.register(late_failure)"
+    result = _report_with_independent_exit(tmp_path, action)
+    assert result.returncode == 0
+    assert result.stdout == b""
+    assert b"RuntimeError" in result.stderr and b"INDEPENDENT_EXIT_ERROR" in result.stderr
+    assert len(RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()) == 1
+
+
+def test_independent_exit_print_remains_visible_after_report(tmp_path):
+    action = "atexit.register(lambda: print('independent-exit-output'))"
+    result = _report_with_independent_exit(tmp_path, action)
+    assert result.returncode == 0
+    assert result.stdout == b"independent-exit-output\n"
+    assert result.stderr == b""
+    assert len(RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()) == 1
+
+
+def test_companion_thread_stdout_during_real_emit_arrives_whole(monkeypatch, tmp_path, capsys):
+    import sys
+    import threading
+    from lib import diagnostics_settings, telemetry
+
+    diagnostics_settings.update({"enabled":True,"categories":["agents"]})
+    reporter = _load("_hook_report", monkeypatch)
+    connection = telemetry.conn()
+    entered = threading.Event()
+    written = threading.Event()
+    empty = json.dumps({"from":"companion","message":""}, separators=(",", ":")) + "\n"
+    payload = json.dumps({"from":"companion","message":"x" * (65-len(empty))}, separators=(",", ":")) + "\n"
+    assert len(payload.encode()) == 65
+    def companion():
+        if entered.wait(2):
+            sys.stdout.write(payload)
+            sys.stdout.flush()
+            written.set()
+    def during_insert(sql):
+        if "INSERT INTO DIAGNOSTIC_EVENTS" in sql.upper():
+            entered.set()
+            written.wait(2)
+    thread = threading.Thread(target=companion, daemon=True)
+    connection.set_trace_callback(during_insert)
+    thread.start()
+    try:
+        assert reporter.report("toolstart_hook", "recordFail", _locked()) is None
+    finally:
+        connection.set_trace_callback(None)
+        entered.set()
+        thread.join(3)
+    assert not thread.is_alive() and written.is_set()
+    output = capsys.readouterr()
+    assert output.out.encode() == payload.encode()
+    assert output.err == ""
+    assert len(RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()) == 1
