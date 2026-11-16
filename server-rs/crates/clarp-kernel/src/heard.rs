@@ -12,8 +12,13 @@
 //! and their words are the Python Host's (`transcription_results.py`, `stt_router.py`,
 //! `stt.py`, `hallucinations.py`, `stt_providers.py`), held by `tests/speech_vectors.rs`.
 
+use clarp_speech::listen::{is_space, strip};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+
+/// What an engine heard and how a clip is handed to one are the engines' side of this
+/// ([`clarp_speech::listen`]); they are named here with the rules they belong to.
+pub use clarp_speech::listen::{Segment, file_name, suffix, terms};
 
 /// The largest clip that is taken: 64 MiB.
 pub const LARGEST_CLIP: usize = 64 * 1024 * 1024;
@@ -34,15 +39,6 @@ pub const BUSY: &str = "whisper busy";
 /// What an engine nobody installed is refused with.
 pub fn not_installed(model: &str) -> String {
     format!("transcription model not installed: {model}")
-}
-
-/// What Python's `str.strip()` takes off both ends: what `str.isspace()` calls space.
-fn is_space(sign: char) -> bool {
-    sign.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&sign)
-}
-
-fn strip(text: &str) -> &str {
-    text.trim_matches(is_space)
 }
 
 /// The name an app gives a job, as it is kept: letters, digits, `.`, `_` and `-`, 128 at
@@ -172,23 +168,6 @@ pub const CLOUD_PROVIDERS: [&str; 4] = ["deepgram", "elevenlabs", "cartesia", "g
 /// Whether an engine's name is one of a cloud provider's.
 pub fn is_cloud(model: &str) -> bool {
     CLOUD_PROVIDERS.contains(&provider_of(model).as_str())
-}
-
-/// The words an engine is asked to listen for, from the one line they are handed over in.
-pub fn terms(payload: &str) -> Vec<String> {
-    payload
-        .split(',')
-        .map(strip)
-        .filter(|term| !term.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-/// One piece of what the Host's own engine heard, with how likely it is that nobody spoke.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Segment {
-    pub text: String,
-    pub no_speech_prob: f64,
 }
 
 /// What was heard, from the pieces the engine is sure enough were speech.
@@ -324,37 +303,6 @@ pub fn ends_terminal(text: &str) -> bool {
     }
 }
 
-/// What a clip is called when it is handed to an engine over the network, by what it says
-/// it is.
-pub fn file_name(content_type: &str) -> &'static str {
-    let kind = content_type.to_lowercase();
-    if kind.contains("mp4") || kind.contains("m4a") {
-        "audio.m4a"
-    } else if kind.contains("wav") {
-        "audio.wav"
-    } else if kind.contains("ogg") {
-        "audio.ogg"
-    } else if kind.contains("mpeg") || kind.contains("mp3") {
-        "audio.mp3"
-    } else {
-        "audio.webm"
-    }
-}
-
-/// The ending of the file a clip is written to for the Host's own engine, which reads what
-/// a clip is off its name.
-pub fn suffix(content_type: &str) -> &'static str {
-    if content_type.contains("mp4") || content_type.contains("m4a") {
-        ".m4a"
-    } else if content_type.contains("wav") {
-        ".wav"
-    } else if content_type.contains("ogg") {
-        ".ogg"
-    } else {
-        ".webm"
-    }
-}
-
 /// The answer to a clip that was turned into text: the text, whether it ends as a sentence
 /// ends, and the trace the message travels under when the app sends it. The fields a Host
 /// with heralds, an orchestrator and a vocabulary fills are there and say that none acted.
@@ -415,12 +363,6 @@ mod tests {
         assert_eq!(kept("  Thank you.  "), "");
         assert_eq!(kept("[Music]"), "");
         assert_eq!(kept("  Open the log. "), "Open the log.");
-        assert_eq!(suffix("audio/mp4"), ".m4a");
-        assert_eq!(
-            suffix("AUDIO/WAV"),
-            ".webm",
-            "as it is written, like the Python Host"
-        );
         assert_eq!(
             not_installed("x:y"),
             "transcription model not installed: x:y"

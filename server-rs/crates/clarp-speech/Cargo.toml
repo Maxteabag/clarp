@@ -7,9 +7,8 @@ publish.workspace = true
 
 [dependencies]
 regex.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+ureq.workspace = true
 
 [lints]
 workspace = true
