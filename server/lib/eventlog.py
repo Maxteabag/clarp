@@ -432,11 +432,9 @@ def emit(source: str, event: str, *,
          trace_id: str | None = None,
          context: EventContext | None = None,
          detail: dict | None = None,
-         now: _dt.datetime | None = None) -> bool:
+         now: _dt.datetime | None = None) -> None:
     """Write a single event row. Never raises — logging must not break the
-    caller. Return False when policy declines the event, True after handing it
-    to the existing sinks (SQLite may be deferred until its transaction ends).
-    The return value is not a durability acknowledgement."""
+    caller."""
     if context is not None:
         trace_id = trace_id or context.trace_id
         session = session or context.session
@@ -447,7 +445,7 @@ def emit(source: str, event: str, *,
     from . import diagnostics_settings
     if not diagnostics_settings.allows_event(
             source=source, event=event, path=path):
-        return False
+        return
     now_dt = now or _dt.datetime.now(_dt.timezone.utc)
     record: dict = {
         "ts": _iso(now_dt),
@@ -489,11 +487,10 @@ def emit(source: str, event: str, *,
             size = len(json.dumps(record, separators=(",", ":")))
         except Exception as error:
             print(f"eventlog serialization failed: {error}", file=sys.stderr)
-            return False
+            return
     record = _bounded(record, size)
     _write_sqlite(record, now_dt)
     _append_jsonl(record, now_dt)
-    return True
 
 
 def _append_jsonl(record: dict, now: _dt.datetime) -> None:

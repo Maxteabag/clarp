@@ -362,14 +362,3 @@ def test_the_seeded_diagnostics_settings_outlive_their_cache_window(tmp_path, mo
     eventlog.emit("test", "after")
     rows = _read_lines(next(tmp_path.glob("*.jsonl")))
     assert [r["event"] for r in rows] == ["before", "after"]
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-def test_emit_returns_its_authoritative_policy_outcome(enabled):
-    from lib import diagnostics_settings, telemetry
-
-    diagnostics_settings.update({"enabled": enabled, "categories": ["agents"]})
-    result = eventlog.emit("toolstart_hook", "outcomeProbe", level="error", detail={"error": "ValueError"})
-    assert result is enabled
-    assert telemetry.conn().execute(
-        "SELECT COUNT(*) FROM diagnostic_events WHERE event='outcomeProbe'").fetchone()[0] == int(enabled)
