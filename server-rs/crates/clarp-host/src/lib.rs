@@ -27,6 +27,7 @@ pub mod files;
 pub mod fleet;
 pub mod goaltool;
 pub mod heard;
+pub mod heartbeat;
 pub mod hub;
 pub mod ids;
 pub mod joblog;

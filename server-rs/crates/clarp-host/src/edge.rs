@@ -105,6 +105,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     (CHIP, 45),
     // `POST /turn-queue/resume`.
     ("turn_queue_resume", 7),
+    // The heartbeat: the owner's settings, an agent's switch and cadence, and the turn an
+    // idle agent that asked for it is given (`/heartbeat/settings`, `/agent-heartbeat`).
+    ("heartbeat", 1),
     // A running turn as items that appear, grow and settle: `live` events on `/events?live=`
     // and `GET /live` (`docs/live-items.md`).
     ("live_items", 42),
@@ -168,6 +171,8 @@ pub struct App {
     pub chip: Arc<crate::chip::Chip>,
     /// The prompts agents are sent at set times.
     pub schedules: Arc<crate::schedules::Desk>,
+    /// The heartbeat: its settings, and what is remembered of each agent it wakes.
+    pub heartbeat: Arc<crate::heartbeat::Desk>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
@@ -351,6 +356,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::calls::routes())
         .merge(crate::chip::routes())
         .merge(crate::schedules::routes())
+        .merge(crate::heartbeat::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
@@ -1085,8 +1091,11 @@ async fn import_agent(
         // The conversation keeps its name: it is the tool's session, which goes on.
         conversation_id: backend_session.clone().unwrap_or_default(),
         created_at_ms: app.clock.now_ms(),
-        // An agent that was muted or put away stays so where it goes, and keeps its voice.
+        // An agent that was muted or put away stays so where it goes, and keeps its voice
+        // and its heartbeat (which the Python Host writes as a number).
         muted: request.agent["muted"] == true,
+        heartbeat_enabled: matches!(request.agent["heartbeat_enabled"].as_i64(), Some(1))
+            || request.agent["heartbeat_enabled"] == true,
         archived_at_ms: request.agent["archived_at"].as_i64(),
         voice_id: field("voice_id"),
         // A helper stays a helper, as its work stood. The agent that made it is named by
@@ -1477,8 +1486,9 @@ pub(crate) async fn send_message(
         .as_deref()
         .map(|origin| origin.trim().to_lowercase())
         .unwrap_or_default();
-    if named == "heartbeat" {
-        // This Host has no heartbeats. The Python Host's words for one where they are off.
+    if named == "heartbeat" && app.config.heartbeats_disabled {
+        // A Host whose heartbeats are off takes none from outside either: the Python Host's
+        // words for it.
         return Err(ApiError::plain(
             StatusCode::CONFLICT,
             "Heartbeats are disabled on this Host",
@@ -1486,9 +1496,11 @@ pub(crate) async fn send_message(
     }
     let origin = match (sender.is_some(), named.as_str()) {
         (true, _) | (false, "agent") => from_agent(),
-        (false, "oracle" | "schedule" | "automation" | "watcher" | "dreaming") => Origin::Trigger {
-            name: named.clone(),
-        },
+        (false, "oracle" | "schedule" | "automation" | "watcher" | "dreaming" | "heartbeat") => {
+            Origin::Trigger {
+                name: named.clone(),
+            }
+        }
         (false, _) => Origin::User,
     };
     let origin_is_user = origin == Origin::User;

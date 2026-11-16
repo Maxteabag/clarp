@@ -1,14 +1,4 @@
 {
- "/heartbeat/settings": {
-  "heartbeat_prompt": "This is a continuity check, not a new task. Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Review the durable goal/task plan included below, current commitments, and queued team updates. If a pending or in-progress plan item can be advanced safely, continue it now; do not reply HEARTBEAT_OK merely because no new chat message arrived. Do not infer or repeat old tasks from prior chats. Do not restart completed or stale work. Audit durable background jobs and update any job whose displayed state is stale. Preserve genuine active work. If no current work can be advanced and nothing needs attention, reply HEARTBEAT_OK and take no action.",
-  "ok": true,
-  "settings": {
-   "heartbeat_backoff_cap_sec": 3600,
-   "heartbeat_backoff_strategy": "exponential",
-   "heartbeat_dormant_after_noops": 5,
-   "heartbeat_interval_sec": 1800
-  }
- },
  "/judgments/settings": {
   "defaults": {
    "enabled": false,
@@ -113,18 +103,6 @@
   "persona": "",
   "session": "",
   "stale": ""
- },
- "/agent-heartbeat/status": {
-  "history": [],
-  "ok": true,
-  "schedule": {
-   "dormant": false,
-   "effective_interval_sec": 1800,
-   "enabled": false,
-   "last_started_at": null,
-   "next_heartbeat_at": null,
-   "noop_streak": 0
-  }
  },
  "/orchestrator/settings": {
   "settings": {

@@ -12613,16 +12613,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
 
     // What is read: nothing of the kind is here, said in the Python Host's own fields.
     let read = |path: &str| host.get(path);
-    let status = read(&format!("/agent-heartbeat/status?session={echo}"));
-    assert_eq!(status["schedule"]["enabled"], false);
-    assert_eq!(
-        (&status["session"], &status["history"], &status["ok"]),
-        (&json!(echo), &json!([]), &json!(true))
-    );
-    assert_eq!(
-        read("/heartbeat/settings")["settings"]["heartbeat_interval_sec"],
-        1800
-    );
     assert_eq!(
         read(&format!("/agent-goal?session={echo}")),
         json!({ "session": echo, "goal": null })
@@ -12798,10 +12788,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     // A change to any of it is refused, and says that it is not built: nothing is taken
     // and then not done.
     for (path, body) in [
-        (
-            "/heartbeat/settings",
-            json!({ "heartbeat_interval_sec": 600 }),
-        ),
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
         ("/agent-portrait-generation", json!({ "session": echo })),
@@ -12835,10 +12821,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     }
 
     // What an agent does by itself is off, and turning it off is done; turning it on is not.
-    for (path, field) in [
-        ("/agent-heartbeat", "heartbeat_enabled"),
-        ("/agent-dreaming", "dreaming_enabled"),
-    ] {
+    for (path, field) in [("/agent-dreaming", "dreaming_enabled")] {
         let off = host.post(path, json!({ "session": echo, field: false }));
         assert_eq!(
             off,
@@ -12866,7 +12849,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         }
     }
     assert_eq!(
-        host.get("/agents/snapshot")["agents"][0]["heartbeat_enabled"],
+        host.get("/agents/snapshot")["agents"][0]["dreaming_enabled"],
         false
     );
 }
@@ -13624,4 +13607,434 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
     assert!(!elsewhere.status.success());
     let said = String::from_utf8_lossy(&elsewhere.stderr).into_owned();
     assert!(said.contains("an address on this machine"), "{said}");
+}
+
+// ---- the heartbeat ---------------------------------------------------------------------------
+
+#[test]
+fn an_agent_that_asked_for_it_is_given_a_heartbeat_and_what_it_answers_is_counted() {
+    use clarp_kernel::heartbeat::{NOTHING_TO_DO, PROMPT};
+    let place = Place::new("heartbeat");
+    let fast = ["--heartbeats-checked-every-ms", "200"];
+    let host = place.start_with("", &fast);
+    let echo = host.new_agent("Echo");
+    let status = || host.get(&format!("/agent-heartbeat/status?session={echo}"));
+    let rows = |origin: &str, role: &str| -> Vec<Value> {
+        let turns = host.turns(&echo).into_iter();
+        turns
+            .filter(|row| row["origin"] == origin && row["role"] == role)
+            .collect()
+    };
+    let mut sent = 0;
+    let mut says = |text: &str, origin: &str| -> Value {
+        sent += 1;
+        let id = format!("hb{sent}");
+        host.post(
+            "/send",
+            json!({ "session": echo, "text": text, "client_msg_id": id, "origin": origin }),
+        );
+        let mine = format!("u-{id}");
+        let mut answer = Value::Null;
+        wait_for("the answer", || {
+            let rows = host.turns(&echo);
+            let at = rows.iter().position(|row| row["id"] == mine);
+            let after = at.map(|at| rows[at + 1..].to_vec()).unwrap_or_default();
+            let said = after.into_iter().find(|row| row["role"] == "assistant");
+            answer = said.unwrap_or(Value::Null);
+            !answer.is_null() && host.state(&echo) == "done"
+        });
+        answer
+    };
+
+    // The owner's settings: as a Host comes, then changed, all of what is named or nothing.
+    let settings = host.get("/heartbeat/settings");
+    assert_eq!(
+        settings,
+        json!({
+            "ok": true,
+            "settings": {
+                "heartbeat_interval_sec": 1800, "heartbeat_backoff_strategy": "exponential",
+                "heartbeat_backoff_cap_sec": 3600, "heartbeat_dormant_after_noops": 5,
+            },
+            "heartbeat_prompt": PROMPT,
+        })
+    );
+    let ours = json!({
+        "heartbeat_interval_sec": 600, "heartbeat_backoff_strategy": " linear ",
+        "heartbeat_backoff_cap_sec": 3600, "heartbeat_dormant_after_noops": 2,
+    });
+    let changed = host.post("/heartbeat/settings", ours);
+    assert_eq!(
+        changed["settings"],
+        json!({
+            "heartbeat_interval_sec": 600, "heartbeat_backoff_strategy": "linear",
+            "heartbeat_backoff_cap_sec": 3600, "heartbeat_dormant_after_noops": 2,
+        })
+    );
+    for (body, why) in [
+        (
+            json!({ "heartbeat_interval_sec": 59 }),
+            "heartbeat_interval_sec must be 60...86400",
+        ),
+        (
+            json!({ "heartbeat_interval_sec": "600" }),
+            "heartbeat_interval_sec must be an integer",
+        ),
+        (
+            json!({ "heartbeat_backoff_cap_sec": 100 }),
+            "heartbeat_backoff_cap_sec must be interval...86400",
+        ),
+        (
+            json!({ "heartbeat_backoff_strategy": "quadratic" }),
+            "invalid heartbeat_backoff_strategy",
+        ),
+        (json!([1]), "bad json"),
+    ] {
+        let (answered, said) = host.ask("POST", "/heartbeat/settings", Some(&body));
+        assert_eq!(
+            (answered, said["error"].as_str()),
+            (400, Some(why)),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        host.get("/heartbeat/settings")["settings"],
+        changed["settings"]
+    );
+
+    // An agent that did not ask is left alone, and its profile says so.
+    let before = status();
+    assert_eq!(
+        before,
+        json!({
+            "ok": true, "session": echo, "history": [],
+            "schedule": {
+                "enabled": false, "last_started_at": null, "next_heartbeat_at": null,
+                "effective_interval_sec": 600, "noop_streak": 0, "dormant": false,
+            },
+        })
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    assert!(
+        host.turns(&echo).is_empty(),
+        "nobody is woken who did not ask"
+    );
+
+    // The switch: what is asked has to be plainly yes or no, of an agent that is there.
+    for (body, answered, why) in [
+        (
+            json!({ "heartbeat_enabled": true }),
+            400,
+            "session required",
+        ),
+        (
+            json!({ "session": echo }),
+            400,
+            "heartbeat_enabled required",
+        ),
+        (
+            json!({ "session": echo, "heartbeat_enabled": "yes" }),
+            400,
+            "heartbeat_enabled must be boolean",
+        ),
+        (
+            json!({ "session": "nobody", "heartbeat_enabled": true }),
+            404,
+            "no such agent",
+        ),
+        (json!([1]), 400, "bad json"),
+    ] {
+        let (status, said) = host.ask("POST", "/agent-heartbeat", Some(&body));
+        assert_eq!(
+            (status, said["error"].as_str()),
+            (answered, Some(why)),
+            "{body}"
+        );
+    }
+    let on = host.post(
+        "/agent-heartbeat",
+        json!({ "session": echo, "heartbeat_enabled": true }),
+    );
+    assert_eq!(
+        on,
+        json!({ "ok": true, "session": echo, "heartbeat_enabled": true })
+    );
+    assert_eq!(
+        host.get("/agents/snapshot")["agents"][0]["heartbeat_enabled"],
+        true
+    );
+
+    // It is given a heartbeat: the prompt, as something the Host sends by itself, with the
+    // plan it has standing (none); and its answer is an answer to a heartbeat.
+    wait_for("the heartbeat", || {
+        !rows("heartbeat", "assistant").is_empty() && host.state(&echo) == "done"
+    });
+    // A chat shows neither the prompt nor an answer that carries the word: both are the
+    // Host's own business. What the agent answered is in its profile as it was said (the
+    // scripted agent says the first line of what it was told: the prompt's own words).
+    let asked = rows("heartbeat", "user");
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0]["text"], "Automated heartbeat check");
+    let answers = rows("heartbeat", "assistant");
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["text"], NOTHING_TO_DO);
+    assert!(rows("user", "user").is_empty() && rows("user", "assistant").is_empty());
+    let shown = status();
+    let schedule = &shown["schedule"];
+    let started = schedule["last_started_at"].as_i64().unwrap();
+    assert_eq!(
+        (
+            &schedule["enabled"],
+            &schedule["noop_streak"],
+            &schedule["dormant"]
+        ),
+        (&json!(true), &json!(0), &json!(false))
+    );
+    // The next is due an interval after this one was started, and not sooner.
+    let next = schedule["next_heartbeat_at"].as_i64().unwrap();
+    assert!((next - started - 600_000).abs() <= 1, "{schedule}");
+    assert_eq!(shown["history"].as_array().unwrap().len(), 1);
+    assert_eq!(shown["history"][0]["text"], PROMPT);
+    assert_eq!(shown["history"][0]["id"], answers[0]["id"]);
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(
+        rows("heartbeat", "user").len(),
+        1,
+        "one heartbeat, not one at every look"
+    );
+
+    // An answer that says no more than that nothing is to be done is kept as one line that
+    // says so, and counts: the next heartbeat comes later, and after enough of them none.
+    let nothing = says("HEARTBEAT_OK", "heartbeat");
+    assert_eq!(nothing["text"], NOTHING_TO_DO);
+    let schedule = status()["schedule"].clone();
+    assert_eq!(
+        (
+            &schedule["noop_streak"],
+            &schedule["effective_interval_sec"],
+            &schedule["dormant"]
+        ),
+        (&json!(1), &json!(1200), &json!(false))
+    );
+    // Asked again, it is counted once.
+    assert_eq!(status()["schedule"]["noop_streak"], 1);
+    let nothing = says("  HEARTBEAT_OK - all quiet.  ", "heartbeat");
+    assert_eq!(nothing["text"], NOTHING_TO_DO);
+    let schedule = status()["schedule"].clone();
+    assert_eq!(
+        (
+            &schedule["noop_streak"],
+            &schedule["dormant"],
+            &schedule["next_heartbeat_at"]
+        ),
+        (&json!(2), &json!(true), &Value::Null)
+    );
+
+    // Something it did wakes it; so does a person who speaks to it. And the word alone in
+    // a turn that is no heartbeat's is kept as the line too, and counts as nothing.
+    let did = says("The build was red and is fixed.", "heartbeat");
+    assert_eq!(did["text"], "The build was red and is fixed.");
+    let schedule = status()["schedule"].clone();
+    assert_eq!(
+        (&schedule["noop_streak"], &schedule["dormant"]),
+        (&json!(0), &json!(false))
+    );
+    says("HEARTBEAT_OK", "heartbeat");
+    assert_eq!(status()["schedule"]["noop_streak"], 1);
+    let word = says("HEARTBEAT_OK", "user");
+    assert_eq!(word["text"], NOTHING_TO_DO);
+    let schedule = status()["schedule"].clone();
+    assert_eq!(
+        schedule["noop_streak"], 0,
+        "a person spoke to it: {schedule}"
+    );
+    // Somebody spoke with it a moment ago: it is left alone for as long as its interval is.
+    let next = schedule["next_heartbeat_at"].as_i64().unwrap();
+    assert!(next - now_ms() > 590_000, "{schedule}");
+    let kept_word = says("I say HEARTBEAT_OK but then I go on", "user");
+    assert_eq!(kept_word["text"], "I say HEARTBEAT_OK but then I go on");
+
+    // What is kept outlives the Host: the settings, the switch, and what is remembered.
+    let remembered = status()["schedule"].clone();
+    host.kill();
+    let host = place.start_with("", &fast);
+    assert_eq!(
+        host.get("/heartbeat/settings")["settings"],
+        changed["settings"]
+    );
+    assert_eq!(
+        host.get("/agents/snapshot")["agents"][0]["heartbeat_enabled"],
+        true
+    );
+    let again = host.get(&format!("/agent-heartbeat/status?session={echo}"))["schedule"].clone();
+    assert_eq!(
+        (
+            &again["last_started_at"],
+            &again["noop_streak"],
+            &again["enabled"]
+        ),
+        (
+            &remembered["last_started_at"],
+            &remembered["noop_streak"],
+            &json!(true)
+        )
+    );
+    // Turned off, nobody is woken, and its profile says so.
+    let off = host.post(
+        "/agent-heartbeat",
+        json!({ "session": echo, "heartbeat_enabled": false }),
+    );
+    assert_eq!(off["heartbeat_enabled"], false);
+    let schedule = host.get(&format!("/agent-heartbeat/status?session={echo}"))["schedule"].clone();
+    assert_eq!(
+        (&schedule["enabled"], &schedule["next_heartbeat_at"]),
+        (&json!(false), &Value::Null)
+    );
+    drop(host);
+
+    // A Host whose heartbeats are turned off wakes nobody and takes none from outside.
+    let place = Place::new("heartbeat-off");
+    let host = place.start_in("", &fast, &[("CLARP_HEARTBEATS_DISABLED", "1")]);
+    let echo = host.new_agent("Echo");
+    host.post(
+        "/agent-heartbeat",
+        json!({ "session": echo, "heartbeat_enabled": true }),
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    assert!(host.turns(&echo).is_empty(), "nobody is woken");
+    let refused = fetch(
+        &host,
+        "",
+        "POST",
+        "/send",
+        &[("Content-Type", "application/json")],
+        json!({ "session": echo, "text": "x", "client_msg_id": "h1", "origin": "heartbeat" })
+            .to_string()
+            .as_bytes(),
+    );
+    assert_eq!(
+        (refused.status, refused.text().as_str()),
+        (409, "Heartbeats are disabled on this Host")
+    );
+}
+
+#[test]
+fn a_heartbeat_shows_an_agent_the_plan_it_has_standing_and_leaves_alone_one_its_goal_wakes() {
+    use clarp_kernel::heartbeat::PROMPT;
+    let place = Place::new("heartbeat-plan");
+    // A stand-in for Claude Code that writes down what it was handed, and answers.
+    let lines = place.root.join("lines");
+    let claude = place.root.join("claude");
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!("printf '%s\\n' \"$message\" >> \"{}\"\n", lines.display()),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    let fast = ["--heartbeats-checked-every-ms", "200"];
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &fast, &world);
+    let dir = place.root.clone();
+    let make = |name: &str| -> String {
+        let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
+        made["session"].as_str().unwrap().to_string()
+    };
+    let (planner, keeper) = (make("Planner"), make("Keeper"));
+    let heartbeats = |session: &str| -> usize {
+        let rows = host.turns(session).into_iter();
+        rows.filter(|row| row["origin"] == "heartbeat" && row["role"] == "user")
+            .count()
+    };
+    let handed = || -> Vec<String> {
+        let handed = std::fs::read_to_string(&lines).unwrap_or_default();
+        let each = handed.lines().map(|line| {
+            let handed: Value = serde_json::from_str(line).unwrap();
+            handed["message"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        });
+        each.collect()
+    };
+
+    // One has a plan standing that nothing wakes it for: two things open, one of them with
+    // a part that is done.
+    let items = json!([
+        { "id": "probe", "title": "Probe it", "subtasks": [{ "id": "probe-a", "title": "A part" }] },
+        { "id": "build", "title": "Build it" },
+    ])
+    .to_string();
+    let commitment =
+        json!({ "outcome": "It is shipped", "criteria": ["It runs"], "limits": "None" })
+            .to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &["create", &planner, "ship", "Ship it", &items, &commitment],
+    );
+    assert_eq!(plan["recovery_enabled"], 0);
+    let plan_id = plan["plan_id"].as_str().unwrap();
+    goal(
+        &host,
+        &dir,
+        &["step", plan_id, "0", "probe-a", "completed", "It behaves"],
+    );
+
+    // The other is committed to a goal that wakes it by itself. A goal is bound to the
+    // conversation its owner has with its tool: a turn nobody's gives it one.
+    host.post(
+        "/send",
+        json!({ "session": keeper, "text": "begin", "client_msg_id": "k1", "origin": "automation" }),
+    );
+    wait_for("the turn that binds the conversation", || {
+        handed().len() == 1 && host.state(&keeper) == "done"
+    });
+    let commitment = json!({
+        "outcome": "It is kept", "criteria": ["It runs"], "limits": "None", "enroll": true,
+    })
+    .to_string();
+    let kept = goal(
+        &host,
+        &dir,
+        &["create", &keeper, "keep", "Keep it", "[]", &commitment],
+    );
+    assert_eq!(kept["recovery_enabled"], 1);
+
+    // Both ask for the heartbeat. The one with the plan is shown it, in its order and
+    // without what is done; the one its goal wakes is not asked at all.
+    for session in [&keeper, &planner] {
+        host.post(
+            "/agent-heartbeat",
+            json!({ "session": session, "heartbeat_enabled": true }),
+        );
+    }
+    wait_for("the heartbeat of the one with the plan", || {
+        heartbeats(&planner) == 1 && handed().len() == 2 && host.state(&planner) == "done"
+    });
+    assert_eq!(
+        handed()[1],
+        format!("{PROMPT}\n\nDurable plan: Ship it\n- [pending] Probe it\n- [pending] Build it")
+    );
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(
+        (heartbeats(&keeper), heartbeats(&planner), handed().len()),
+        (0, 1, 2)
+    );
+    let started = |session: &str| {
+        let status = host.get(&format!("/agent-heartbeat/status?session={session}"));
+        status["schedule"]["last_started_at"].clone()
+    };
+    assert!(started(&planner).is_i64());
+    assert_eq!(started(&keeper), Value::Null);
+    // What it answered says something: it is asked again at the owner's interval.
+    let status = host.get(&format!("/agent-heartbeat/status?session={planner}"));
+    assert_eq!(status["history"][0]["text"], "on it");
+    assert_eq!(
+        (
+            &status["schedule"]["noop_streak"],
+            &status["schedule"]["effective_interval_sec"]
+        ),
+        (&json!(0), &json!(1800))
+    );
 }

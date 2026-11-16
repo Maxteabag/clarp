@@ -1,8 +1,8 @@
 //! What an app's screens ask of a Host that has nothing of the kind yet.
 //!
 //! The phone app asks a Host about fourteen features and calls everything else when its
-//! user opens the screen: an agent's heartbeat, its schedules and portraits, the
-//! vocabulary, calls, the Oracle. Where this Host has none of that, a missing route is an
+//! user opens the screen: whether an agent dreams, its portraits, the vocabulary, the
+//! Oracle. Where this Host has none of that, a missing route is an
 //! error on a screen. So each is answered: a reading with what the Python Host says on its
 //! first day, corrected where that would claim something this Host does not do (nobody
 //! rings, no picture is made), and a change with a refusal in words.
@@ -50,28 +50,10 @@ fn agent_of(app: &App, asked: &HashMap<String, String>, missing: &str) -> Result
     }
 }
 
-// ---- what an agent does by itself: heartbeat, dreaming, schedules, an old kind of goal --------
+// ---- what an agent does by itself: dreaming, an old kind of goal ----------------------------
 
-/// `GET /agent-heartbeat/status?session=`: no agent of this Host is woken by a heartbeat.
-async fn heartbeat_status(State(app): State<App>, Query(asked): Asked) -> Answered {
-    let session = agent_of(&app, &asked, "no such agent")?;
-    let mut body = kept("/agent-heartbeat/status");
-    body["session"] = json!(session);
-    Ok(Json(body))
-}
-
-async fn heartbeat_settings() -> Json<Value> {
-    Json(kept("/heartbeat/settings"))
-}
-
-/// Turning something off that is off is done; turning it on is refused in words. `strict`:
-/// what is asked has to be plainly yes or no, as the Python Host asks of a heartbeat.
-async fn set_of_agent(
-    app: &App,
-    body: &[u8],
-    (field, strict): (&str, bool),
-    what: &str,
-) -> Answered {
+/// Turning something off that is off is done; turning it on is refused in words.
+async fn set_of_agent(app: &App, body: &[u8], field: &str, what: &str) -> Answered {
     let asked: Value = if body.is_empty() {
         json!({})
     } else {
@@ -91,9 +73,6 @@ async fn set_of_agent(
     let Some(enabled) = asked.get(field) else {
         return Err(bad(&format!("{field} required")));
     };
-    if strict && !enabled.is_boolean() {
-        return Err(bad(&format!("{field} must be boolean")));
-    }
     if app.fleet.directory().named(session).is_none() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
     }
@@ -105,17 +84,8 @@ async fn set_of_agent(
     ))
 }
 
-async fn set_heartbeat(State(app): State<App>, body: axum::body::Bytes) -> Answered {
-    let field = ("heartbeat_enabled", true);
-    set_of_agent(&app, &body, field, "An agent's heartbeat is").await
-}
-
 async fn set_dreaming(State(app): State<App>, body: axum::body::Bytes) -> Answered {
-    set_of_agent(&app, &body, ("dreaming_enabled", false), "Dreaming is").await
-}
-
-async fn no_heartbeat() -> ApiError {
-    not_built("The heartbeat is")
+    set_of_agent(&app, &body, "dreaming_enabled", "Dreaming is").await
 }
 
 /// `GET /agent-goal?session=`: the goal an agent works toward by itself in the old way.
@@ -428,13 +398,7 @@ pub fn routes() -> Router<App> {
         .route("/backend-auth", get(logins))
         .route("/backend-usage", get(usage))
         .route("/backend-auth/{action}", post(no_logins))
-        .route("/agent-heartbeat/status", get(heartbeat_status))
-        .route("/agent-heartbeat", post(set_heartbeat))
         .route("/agent-dreaming", post(set_dreaming))
-        .route(
-            "/heartbeat/settings",
-            get(heartbeat_settings).post(no_heartbeat),
-        )
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))
         .route("/goal-ledger", get(goal_ledger))
