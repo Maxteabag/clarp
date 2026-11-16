@@ -1023,6 +1023,7 @@ def spoken(name, clip='synthetic-audio-bytes-one', **headers):
             'raw': {'content_type': 'audio/webm', 'bytes': clip}, 'headers': headers}
 
 
+SPEECH_SETTINGS = '/transcription-providers'
 UTTERANCE = {'X-Transcription-ID': 'utt-one', 'X-Utterance-ID': 'utt-one', 'X-Transcription-Session': AGENT,
              'X-Hands-Free': '1'}
 
@@ -1054,65 +1055,49 @@ SCENARIOS.append({
         spoken('the same name for what is said next', clip='synthetic-audio-bytes-two', **UTTERANCE),
         {'op': 'delete', 'path': '/transcription-results/has%20space', 'name': 'forget under a name that is none'},
         {'op': 'delete', 'path': '/transcription-results/utt-one', 'name': 'forgotten once more'},
+        # The owner's settings of speech in, made from an app: what is refused and in which
+        # words, and an agent's own language and engines, given and taken away again. No clip
+        # is spoken while the agent has engines of its own: the reference Host's stand-in for
+        # an engine is none of them.
+        post(SPEECH_SETTINGS, {'language': 'english'}, 'a language that is none'),
+        post(SPEECH_SETTINGS, {'agent_languages': {AGENT: 'no,en,pt,sv'}}, 'four languages for one agent'),
+        post(SPEECH_SETTINGS, {'agent_engines': {AGENT: 'nothing:of-the-kind'}}, 'an engine nobody knows'),
+        post(SPEECH_SETTINGS, {'agent_engines': {'': 'google:chirp_3'}}, 'engines for nobody'),
+        post(SPEECH_SETTINGS, {'agent_engines': [AGENT]}, 'engines that are a list'),
+        post(SPEECH_SETTINGS, {'engine': 3}, 'an engine that is a number'),
+        post(SPEECH_SETTINGS, {'turn_taking': 'sometimes'}, 'a way of taking turns that is none'),
+        post(SPEECH_SETTINGS, {'agent_languages': {AGENT.title(): 'NO,en'},
+                               'agent_engines': {AGENT.title(): ' elevenlabs:scribe_v2 , google:chirp_3 '}},
+             'an agent gets a language and engines of its own'),
+        get(SPEECH_SETTINGS, 'the settings with the agent in them'),
+        post(SPEECH_SETTINGS, {'agent_languages': {AGENT: None}, 'agent_engines': {AGENT: ''}},
+             'the agent is heard like every agent again'),
     ],
 })
-
-# The owner's settings of a Host whose agents are heard: Cartesia speaks, with a key and a
-# voice for the scenarios' agent. On the reference Host the adapter's transport is replaced by
-# a fixed synthetic answer (tests/replay/host.py); the Rust Host is given a stand-in's address.
-SPEAKS = ('[tts]\nprovider = "cartesia"\nfallback = "none"\n'
-          '[audio]\ndelivery = "chunked-file"\n[network]\nadvertise_lan = false\n'
-          '[cartesia]\napi_key = "replay-synthetic-key"\n'
-          f'[cartesia.voices]\n{AGENT.title()} = "replay-voice-{AGENT}"\n')
-CLIP = '/clips/{clip}'
-
 
 def ack(name, **said):
     return post('/clips/ack', said, name)
 
 
-def part(path, wanted, name):
-    return {**get(path, name), 'headers': {'Range': wanted}}
-
-
 SCENARIOS.append({
     'id': 'speech-out',
-    'what': 'an agent says a part of its answer aloud: the clip is announced, fetched whole, as a stream and in '
-            'parts, by its number and by the name of its file; an app says what became of it and is offered '
-            'it again until it played it; what is no clip, and what an app may not say',
-    'config': SPEAKS,
+    'what': 'the routes of speech out when nothing was said aloud: no clip an app missed, what an app may not '
+            'say of a clip, what is no clip and no file, and the clips of a reply that has none. (The '
+            "reference says nothing aloud in this harness: its fake Claude writes no transcript. A clip's own "
+            'routes are held by the Rust Host\'s tests.)',
     'steps': [
-        # The fake answers with the message, so the reply marks the same part for the ear.
-        send('synthetic question <speak>synthetic spoken answer</speak>', 'aloud', synthesize_audio=True),
-        {'op': 'wait_reply', 'after': 'u-aloud'},
-        {'op': 'wait_clips', 'count': 1},
-        {'op': 'quiesce'},
-        LOG,
-        {**get(f'/clips/recoverable?session={AGENT}', 'what an app missed'),
-         'save': {'clip': 'events.0.clip_id', 'file': 'events.0.name'}},
-        get(CLIP + '/complete.mp3', 'the whole clip'),
-        get(CLIP + '/stream', 'the clip by its number'),
-        part(CLIP + '/stream', 'bytes=0-1', 'its first two bytes'),
-        part(CLIP + '/stream', 'bytes=41000-', 'from a byte on to its end'),
-        part(CLIP + '/stream', 'bytes=41700-', 'a part past its end'),
-        part(CLIP + '/stream', 'bytes=-4', 'its last bytes, which a clip is not asked for'),
-        get('/audio/{file}', 'the clip by the name of its file'),
-        part('/audio/{file}', 'bytes=-4', 'the last bytes of its file'),
-        part('/audio/{file}', 'bytes=41700-', 'a part past the end of its file'),
-        ack('an app has it', clip_id='{clip}', status='queued'),
-        ack('an app begins to play it', clip_id='{clip}', status='play-start'),
-        get(f'/clips/recoverable?session={AGENT}', 'offered again while it plays'),
-        ack('an app played it', clip_id='{clip}', status='play-ok'),
-        get(f'/clips/recoverable?session={AGENT}', 'not offered again'),
-        get('/clips/recoverable?session=nobody', 'the clips of an agent nobody has'),
-        ack('a status that is none', clip_id='{clip}', status='played'),
+        get(f'/clips/recoverable?session={AGENT}', 'no clip was missed'),
+        get('/clips/recoverable', 'no clip of anybody was missed'),
+        ack('a status that is none', clip_id=1, status='played'),
         ack('a number that is none', clip_id='x', status='play-ok'),
+        ack('a number and a status that are none', clip_id='x', status='played'),
         ack('a clip nobody has', clip_id=999999, status='play-ok'),
-        ack('a clip by its address', url='http://synthetic/audio/{file}', status='play-start'),
+        ack('a clip nobody has, by its number as a text', clip_id='999999', status='queued'),
+        ack('a clip nobody has, by its address', url='http://synthetic/audio/1794800000000__claire.mp3',
+            status='play-start'),
         ack('nothing named', status='play-start'),
         get('/clips/abc/stream', 'a number that is none, as a stream'),
         get('/clips/abc/complete.mp3', 'a number that is none, whole'),
-        get('/clips/999999/stream', 'a stream nobody has'),
         get('/clips/999999/complete.mp3', 'a clip nobody has, whole'),
         get('/audio/nothing.mp3', 'a file that is not there'),
         get(f'/clips/message?session={AGENT}', 'the clips of a reply nobody names'),
