@@ -168,6 +168,11 @@ if [ "$whisper" != off ]; then
     speech=" --whisper-python \"$whisper\" --whisper-worker \"$share/libexec/whisper-worker.py\" --whisper-model $whisper_model --whisper-compute $whisper_compute${whisper_source:+ --whisper-source \"$whisper_source\"}"
 fi
 speech="$speech${speech_keys:+ --speech-keys \"$speech_keys\"} --transcription-engine $transcription_engine"
+# The faces agents are shown with: the pictures the repository ships (static/avatars and the
+# janitors' beside them), copied beside the Host, which hands them out and says in each agent's
+# row which one is its. Installed without the repository beside it, the Host ships none.
+faces=""
+pictures="$here/../static"
 open_files="$(python_unit LimitNOFILE)"
 case "$open_files" in ''|*[!0-9]*) open_files=65536 ;; esac
 arenas="$(python_unit Environment | tr ' ' '\n' | sed -n 's/^MALLOC_ARENA_MAX=//p' | head -1)"
@@ -178,6 +183,24 @@ done
 (cd "$from" && sha256sum --quiet -c SHA256SUMS) || { echo "install-host: the binaries in $from are not the ones that were built" >&2; exit 1; }
 
 mkdir -p "$share/bin" "$share/tools" "$share/data" "$share/cache" "$share/logs" "$config" "$units"
+if [ -d "$pictures/avatars" ]; then
+    mkdir -p "$share/static"
+    for kept_in in avatars janitor-avatars; do
+        [ -d "$pictures/$kept_in" ] || continue
+        # Copied beside what is there and moved into its place: a picture that is being
+        # fetched is never half a file.
+        rm -rf "$share/static/.$kept_in.new"
+        cp -r "$pictures/$kept_in" "$share/static/.$kept_in.new"
+        rm -rf "$share/static/.$kept_in.old"
+        [ -d "$share/static/$kept_in" ] && mv "$share/static/$kept_in" "$share/static/.$kept_in.old"
+        mv "$share/static/.$kept_in.new" "$share/static/$kept_in"
+        rm -rf "$share/static/.$kept_in.old"
+    done
+    faces=" --static $share/static"
+elif [ -d "$share/static/avatars" ]; then
+    # Installed before with the repository beside it: what was copied then is kept.
+    faces=" --static $share/static"
+fi
 # What the Host keeps is its user's alone: conversations, the phones' tokens. The unit below
 # says so for everything the Host writes from now on; this says it for what is there already.
 chmod -R go-rwx "$share/data" "$share/cache" "$share/logs"
@@ -319,7 +342,7 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${push_relay:+ --push-relay $push_relay}$speech
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${push_relay:+ --push-relay $push_relay}$speech$faces
 Restart=on-failure
 RestartSec=2
 

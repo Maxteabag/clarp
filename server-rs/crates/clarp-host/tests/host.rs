@@ -9209,3 +9209,129 @@ fn a_turn_is_shown_as_it_runs_to_those_who_asked_and_again_after_the_host_was_ki
         .collect();
     assert_eq!(ops, ["done", "turn", "status"], "{last}");
 }
+
+#[test]
+fn an_agent_is_shown_with_a_face_and_anybody_may_fetch_the_picture() {
+    let place = Place::new("faces");
+    // The pictures this Host ships: one for a name, one for every agent of a kind of tool
+    // that has none of its own, and one of the name on a family of model.
+    let pictures = place.root.join("static");
+    std::fs::create_dir_all(pictures.join("avatars/models")).unwrap();
+    std::fs::create_dir_all(pictures.join("app")).unwrap();
+    std::fs::write(pictures.join("avatars/echo.png"), b"a picture of Echo").unwrap();
+    std::fs::write(
+        pictures.join("avatars/default-scripted.png"),
+        b"nobody in particular",
+    )
+    .unwrap();
+    std::fs::write(
+        pictures.join("avatars/models/echo.opus.png"),
+        b"Echo on Opus",
+    )
+    .unwrap();
+    std::fs::write(pictures.join("app/bundle.js"), b"not a picture").unwrap();
+    let host = place.start_with("secret", &["--static", pictures.to_str().unwrap()]);
+    let echo = host.new_agent("Echo");
+    let other = host.new_agent("Somebody Else");
+    let row = |session: &str| -> Value {
+        let agents = host.get("/agents/snapshot")["agents"].clone();
+        let found = agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session);
+        found.cloned().unwrap()
+    };
+    let face = row(&echo)["avatar_url"].as_str().unwrap().to_string();
+    let (address, version) = face.split_once("?v=").unwrap();
+    assert_eq!(address, "/static/avatars/echo.png");
+    assert_eq!(
+        version.len(),
+        16,
+        "what is in the picture is in its address: {face}"
+    );
+    assert_eq!(
+        row(&echo)["model_avatar_url"],
+        "",
+        "no model named, and the tool names none"
+    );
+    assert!(
+        row(&other)["avatar_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("/static/avatars/default-scripted.png?v="),
+        "an agent whose name has no picture has its tool's"
+    );
+    // An agent on a model has the picture drawn for its name on that family of model.
+    host.post(
+        "/agent-llm",
+        json!({ "session": echo, "model": "claude-opus-5-5" }),
+    );
+    let on_model = row(&echo)["model_avatar_url"].as_str().unwrap().to_string();
+    assert!(
+        on_model.starts_with("/static/avatars/models/echo.opus.png?v="),
+        "{on_model}"
+    );
+
+    // Anybody may fetch a picture: its address goes where no token does. Under the address
+    // of its content it is kept for good.
+    let fetched = fetch(&host, "", "GET", &face, &[], b"");
+    assert_eq!(
+        (fetched.status, fetched.text().as_str()),
+        (200, "a picture of Echo")
+    );
+    assert_eq!(fetched.header("content-type"), "image/png");
+    assert_eq!(
+        fetched.header("cache-control"),
+        "public, max-age=31536000, immutable"
+    );
+    assert_eq!(fetched.header("etag"), format!("\"{version}\""));
+    // Asked for without it, or under what it no longer is, it is checked each time, and a
+    // client that has it is told so.
+    for stale in [address.to_string(), format!("{address}?v=0000000000000000")] {
+        let checked = fetch(&host, "", "GET", &stale, &[], b"");
+        assert_eq!(
+            (checked.status, checked.header("cache-control")),
+            (200, "no-cache"),
+            "{stale}"
+        );
+        let has_it = [("If-None-Match", checked.header("etag"))];
+        let unchanged = fetch(&host, "", "GET", &stale, &has_it, b"");
+        assert_eq!(
+            (unchanged.status, unchanged.body.len()),
+            (304, 0),
+            "{stale}"
+        );
+        assert_eq!(unchanged.header("etag"), format!("\"{version}\""));
+    }
+    let part = fetch(&host, "", "GET", &face, &[("Range", "bytes=2-8")], b"");
+    assert_eq!((part.status, part.text().as_str()), (206, "picture"));
+    assert_eq!(part.header("content-range"), "bytes 2-8/17");
+    // What is not there, what is no picture, and what leaves the pictures.
+    for (path, status, said) in [
+        ("/static/avatars/nobody.png", 404, "not found"),
+        ("/static/app/bundle.js", 404, "not found"),
+        ("/static/avatars/../app/bundle.js", 403, "forbidden"),
+        ("/static/avatars//echo.png", 403, "forbidden"),
+        ("/static/avatars", 404, "not found"),
+    ] {
+        let refused = fetch(&host, "", "GET", path, &[], b"");
+        assert_eq!(
+            (refused.status, refused.text().as_str()),
+            (status, said),
+            "{path}"
+        );
+    }
+    // Nothing else opens without a token, and a picture is only fetched.
+    assert_eq!(
+        fetch(&host, "", "GET", "/agents/snapshot", &[], b"").status,
+        401
+    );
+    assert_eq!(fetch(&host, "", "POST", &face, &[], b"").status, 401);
+
+    // A Host that ships no pictures shows its agents without a face, and hands none out.
+    host.kill();
+    let host = place.start_with("secret", &[]);
+    assert_eq!(host.get("/agents/snapshot")["agents"][0]["avatar_url"], "");
+    assert_eq!(fetch(&host, "", "GET", &face, &[], b"").status, 404);
+}
