@@ -301,12 +301,21 @@ done
 # agent runs on. There is one for every tool the Host answers and for every tool of the Python
 # Host on this machine, so that the name is never looked for further along the path. What the
 # Host does not have yet it says so itself, and does nothing.
+# A tool that was reached through a Python Host's wrapper carries that wrapper's mark of its
+# hand-over (CLARP_WRAPPER_HANDOVER, issue 388 of the repository): the wrapper sets it before it
+# hands a call over, and refuses a call that already has it, so that two wrappers never hand a
+# call to each other without end. The mark ends at this Host's tool, which is no wrapper: what
+# the tool starts (a helper, a worker that outlives the turn) may call a tool again, and that is
+# a call of its own. Each tool below begins by taking it off.
+mark_ends='# The mark of another Host'"'"'s hand-over ends here: what this tool starts may call a tool again.
+unset CLARP_WRAPPER_HANDOVER'
 tools=0
 for tool in $( { printf '%s\n' clarp-agent-bg clarp-admin clarp-goal clarp-agent-artifacts; ls "$python_share"/bin 2>/dev/null | grep '^clarp-' || true; } | sort -u); do
     case "$tool" in clarp-sub-agent|clarp-media-publish) continue ;; esac
     cat > "$share/tools/.$tool.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
+$mark_ends
 exec "$share/bin/clarp-host" tool $tool "\$@"
 EOF
     chmod 755 "$share/tools/.$tool.new"
@@ -351,6 +360,7 @@ if [ -f "$sub_agent" ]; then
 #!/bin/sh
 # Written by install-host: the program an agent on the Rust Host starts helpers with.
 # What it keeps of its helpers is this Host's own, apart from a Python Host's on the same machine.
+$mark_ends
 CLARP_SUB_AGENT_DIR="\${CLARP_SUB_AGENT_DIR:-$share/data/sub-agents}"; export CLARP_SUB_AGENT_DIR
 exec python3 "$share/libexec/sub_agent.py" "\$@"
 EOF
@@ -359,6 +369,7 @@ else
     cat > "$share/tools/.clarp-sub-agent.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
+$mark_ends
 exec "$share/bin/clarp-host" tool clarp-sub-agent "\$@"
 EOF
 fi
@@ -379,6 +390,7 @@ if [ -f "$media_publish" ]; then
     cat > "$share/tools/.clarp-media-publish.new" <<EOF
 #!/bin/sh
 # Written by install-host: the program an agent on the Rust Host publishes an image or a file with.
+$mark_ends
 if [ -n "\${CLARP_HOST_ADDR:-}" ] && [ -n "\${CLARP_TOOL_TOKEN:-}" ]; then
     CLAUDE_PWA_BASE_URL="http://\$CLARP_HOST_ADDR/tools"; CLAUDE_PWA_TOKEN="\$CLARP_TOOL_TOKEN"
     export CLAUDE_PWA_BASE_URL CLAUDE_PWA_TOKEN
@@ -395,6 +407,7 @@ else
     cat > "$share/tools/.clarp-media-publish.new" <<EOF
 #!/bin/sh
 # Written by install-host: one of an agent's own tools on the Rust Host.
+$mark_ends
 exec "$share/bin/clarp-host" tool clarp-media-publish "\$@"
 EOF
 fi
