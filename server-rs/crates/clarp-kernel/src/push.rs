@@ -153,6 +153,97 @@ pub fn decision(asked: &Asked<'_>) -> Value {
     payload
 }
 
+/// A ring, as a phone is told of it: an agent calls, or its call ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Rung<'a> {
+    pub ring_id: &'a str,
+    /// The ring's state now.
+    pub state: &'a str,
+    pub session: &'a str,
+    pub persona: &'a str,
+    pub reason: &'a str,
+    pub opening_line: &'a str,
+    pub opening_audio_url: &'a str,
+    pub expires_at: i64,
+    /// What happened: `ring` for the incoming call, then `answered`, `declined`, `missed`
+    /// or `cancelled`.
+    pub kind: &'a str,
+    /// The owner lets a locked phone show why the agent calls.
+    pub show_reason: bool,
+    pub avatar_url: &'a str,
+    pub avatar_custom: bool,
+    pub server_instance_id: &'a str,
+}
+
+/// The name every push of one ring goes by: the incoming call is replaced by what became
+/// of it.
+pub fn ring_notification_id(ring_id: &str) -> String {
+    clip(&format!("ring-{ring_id}"), 64)
+}
+
+/// The payload for a ring. The incoming call breaks through Focus, makes a sound and has
+/// the actions the app registered for a call (answer, decline); what became of it is quiet,
+/// except that a missed call is shown like a message.
+pub fn ring(rung: &Rung<'_>) -> Value {
+    let persona = match rung.persona.trim() {
+        "" => "Clarp",
+        name => name,
+    };
+    let title = match rung.kind {
+        "missed" => format!("Missed call from {persona}"),
+        "declined" => format!("Declined call from {persona}"),
+        "answered" => format!("Call with {persona}"),
+        "cancelled" => format!("{persona} hung up"),
+        _ => format!("{persona} is calling"),
+    };
+    // Who is calling is shown on a locked phone; why, only when the owner said so.
+    let body = if rung.show_reason {
+        clip(rung.reason, 300)
+    } else {
+        "Incoming call".to_string()
+    };
+    let notification_id = ring_notification_id(rung.ring_id);
+    let mut payload = json!({
+        "aps": {
+            "alert": { "title": title, "body": body },
+            "mutable-content": 1,
+            "thread-id": format!("ring-{}", rung.session),
+        },
+        "kind": "agent-ring",
+        "ring_id": rung.ring_id,
+        "ring_state": rung.state,
+        "session": rung.session,
+        "persona": persona,
+        "reason": rung.reason,
+        "opening_line": rung.opening_line,
+        "opening_audio_url": rung.opening_audio_url,
+        "expires_at": rung.expires_at,
+        "notification_id": notification_id,
+    });
+    if rung.kind == "ring" {
+        payload["aps"]["interruption-level"] = json!("time-sensitive");
+        payload["aps"]["sound"] = json!("default");
+        payload["aps"]["category"] = json!("agent-call");
+        payload["aps"]["relevance-score"] = json!(1.0);
+    } else {
+        payload["aps"]["interruption-level"] = json!(if rung.kind == "missed" {
+            "active"
+        } else {
+            "passive"
+        });
+    }
+    if !rung.server_instance_id.is_empty() {
+        payload["server_instance_id"] = json!(rung.server_instance_id);
+    }
+    if !rung.avatar_url.is_empty() {
+        payload["avatar_url"] = json!(rung.avatar_url);
+        if rung.avatar_custom {
+            payload["avatar_custom"] = json!(true);
+        }
+    }
+    payload
+}
+
 /// Whether a request breaks through Focus: only when the agent is blocked on it and has
 /// said that it cannot wait. Blocked alone, or urgent alone, is an ordinary notification.
 pub fn needs_interruption(blocks_progress: bool, urgency: &str) -> bool {

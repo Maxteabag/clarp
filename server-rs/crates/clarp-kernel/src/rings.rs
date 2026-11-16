@@ -1,0 +1,990 @@
+//! Rings: an agent calls its owner.
+//!
+//! An agent that needs its user now, by voice, asks the Host to ring the owner's phone with
+//! a reason and the line it will open with. The phone shows an incoming call. Answering
+//! starts an ordinary call with that agent on the floor ([`crate::calls`]), and the opening
+//! line, already voiced in the agent's own voice, is heard first.
+//!
+//! A ring is a request; answering is the user's. The Host records the ring, says who may
+//! ring and how often, and ends every ring one way: answered, declined, cancelled by the
+//! agent, or missed when nobody took it in time. Every request, refused or not, and every
+//! outcome is written to a trail the owner can read.
+//!
+//! This is the Python Host's contract (`docs/agent-rings.md`, `server/lib/agent_rings.py`)
+//! for the ring whose opening line is said, as rules without a store, a clock, a voice or a
+//! phone: a request is given the moment and the Host's agents, and says what it answers,
+//! what the apps are told, what phones are pushed and what is noted in the agent's
+//! conversation. A ring held as a live voice call, and a ring that listens first, are other
+//! contracts this Host does not have: asked for, they are refused in words that tell the
+//! caller how to ring instead.
+//!
+//! Held to the Python Host's own module by `tests/fixtures/rings-vectors.json`.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
+
+use crate::calls::{self, Asker, Calls, Contact, Refused, refused, refused_with};
+use crate::python;
+
+/// How long a ring rings before it is missed.
+pub const RING_MS: i64 = 45 * 1000;
+/// How long an agent waits between its rings.
+pub const BETWEEN_MS: i64 = 60 * 1000;
+const HOUR_MS: i64 = 60 * 60 * 1000;
+/// How many rings a Host places in an hour.
+pub const HOURLY_MOST: usize = 10;
+/// How many rings are kept, and how many lines of the trail.
+pub const KEPT: usize = 50;
+pub const AUDIT_KEPT: usize = 200;
+/// How many lines of the trail the owner is shown, the newest first.
+pub const AUDIT_SHOWN: usize = 50;
+/// How long a reason and an opening line may be.
+pub const REASON_MOST: usize = 200;
+pub const OPENING_MOST: usize = 600;
+
+const RINGING: &str = "ringing";
+const ANSWERED: &str = "answered";
+const DECLINED: &str = "declined";
+const MISSED: &str = "missed";
+const CANCELLED: &str = "cancelled";
+
+/// The ways a conversation of a ring can be held. This Host holds the first.
+const CLASSIC: &str = "classic";
+const LIVE: &str = "agent_live_v1";
+/// The ways a ring can open. This Host has the first.
+const SAY: &str = "say";
+const LISTEN_FIRST: &str = "listen_first";
+
+/// One ring, as it is kept and as an app reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ring {
+    pub ring_id: String,
+    pub session: String,
+    pub persona: String,
+    pub agent_id: String,
+    /// Why the agent calls: what the incoming call shows.
+    pub reason: String,
+    /// What the agent says first when the user answers.
+    pub opening_line: String,
+    /// Where that line is, voiced; empty when it could not be voiced: the phone shows it.
+    #[serde(default)]
+    pub opening_audio_url: String,
+    /// `ringing`, `answered`, `declined`, `missed` or `cancelled`.
+    pub state: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    #[serde(default)]
+    pub ended_at: Option<i64>,
+    /// The phone that answered.
+    #[serde(default)]
+    pub answered_by: String,
+    /// The call the answer started.
+    #[serde(default)]
+    pub call_id: String,
+}
+
+impl Ring {
+    fn rings(&self) -> bool {
+        self.state == RINGING
+    }
+
+    /// As an app and an agent's tool read it.
+    pub fn told(&self, now_ms: i64) -> Value {
+        let mut told = serde_json::to_value(self).unwrap_or_else(|_| json!({}));
+        told["server_now"] = json!(now_ms);
+        told
+    }
+
+    /// What the apps are told when it changes.
+    fn event(&self, now_ms: i64) -> Value {
+        json!({
+            "type": "agent-ring", "ring_id": self.ring_id, "session": self.session,
+            "agent_id": self.agent_id, "persona": self.persona, "reason": self.reason,
+            "opening_line": self.opening_line, "opening_audio_url": self.opening_audio_url,
+            "state": self.state, "created_at": self.created_at, "expires_at": self.expires_at,
+            "ended_at": self.ended_at, "answered_by": self.answered_by, "call_id": self.call_id,
+            "server_now": now_ms,
+        })
+    }
+}
+
+/// An agent as the rules of ringing see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Caller {
+    pub session: String,
+    pub persona: String,
+    pub agent_id: String,
+    /// A muted agent does not ring.
+    pub muted: bool,
+    /// An agent that is a contact: not archived, and not one that only tidies up.
+    pub can_call: bool,
+}
+
+/// The agents of the Host: those a name may mean, and any of them by its id.
+#[derive(Clone, Copy)]
+pub struct People<'a> {
+    pub roster: &'a [Contact],
+    pub known: &'a dyn Fn(&str) -> Option<Caller>,
+}
+
+/// A request to ring.
+#[derive(Debug, Clone, Copy)]
+pub struct Asked<'a> {
+    /// The agent whose turn asks, proven by the turn: it rings as itself only. Empty: the
+    /// owner's own tools, which name the agent.
+    pub turn_agent_id: &'a str,
+    /// The agent the request names.
+    pub agent: &'a str,
+    pub reason: &'a str,
+    pub opening_line: &'a str,
+    /// How the conversation is to be held; null: as a call.
+    pub conversation_mode: &'a Value,
+    /// What a live voice call would be told. A call takes none.
+    pub event_context: &'a Value,
+    /// How the ring opens, when the request says.
+    pub opening_mode: Option<&'a Value>,
+}
+
+/// A ring that may be placed: who rings, and what the incoming call says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Admitted {
+    caller: Caller,
+    reason: String,
+    opening: String,
+    at: i64,
+}
+
+impl Admitted {
+    /// The line the agent opens with: what is voiced before the ring is placed.
+    pub fn opening(&self) -> &str {
+        &self.opening
+    }
+
+    pub fn caller(&self) -> &Caller {
+        &self.caller
+    }
+}
+
+/// An answer to a ring.
+#[derive(Debug, Clone, Copy)]
+pub struct Answer<'a> {
+    /// The phone that answers, or the administrator.
+    pub principal: &'a str,
+    pub ring_id: &'a str,
+    pub conversation_mode: &'a Value,
+    pub opening_mode: Option<&'a Value>,
+}
+
+/// A notice for the conversation of the agent that rang: quiet, never spoken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub agent_id: String,
+    /// One for each ring and outcome: the same notice is written once.
+    pub id: String,
+    pub text: String,
+}
+
+/// What the owner's phones are pushed: a ring as it is now, and what happened to it
+/// (`ring`, `answered`, `declined`, `missed`, `cancelled`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pushed {
+    pub ring: Ring,
+    pub kind: &'static str,
+}
+
+/// Which of what is kept changed, and is to be kept again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Changed {
+    pub rings: bool,
+    pub audit: bool,
+    pub settings: bool,
+    pub voip: bool,
+}
+
+/// What a request did beside its answer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Effects {
+    /// What the apps are told, in order: one `agent-ring` event for each change.
+    pub events: Vec<Value>,
+    pub notices: Vec<Notice>,
+    pub pushes: Vec<Pushed>,
+    /// The lines this request wrote to the trail.
+    pub audited: Vec<Value>,
+    pub changed: Changed,
+}
+
+/// The rings of a Host, the owner's switches for them, the trail, and the tokens phones
+/// left for calls.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rings {
+    rings: Vec<Ring>,
+    audit: Vec<Value>,
+    enabled: bool,
+    show_reason: bool,
+    voip: Vec<Value>,
+}
+
+impl Default for Rings {
+    fn default() -> Self {
+        Self {
+            rings: Vec::new(),
+            audit: Vec::new(),
+            // Rings are on until the owner turns them off; why an agent calls is not
+            // shown on a locked phone until the owner says so.
+            enabled: true,
+            show_reason: false,
+            voip: Vec::new(),
+        }
+    }
+}
+
+/// A text on one line, its blanks single, and no longer than `most` signs.
+fn one_line(text: &str, most: usize) -> String {
+    let words: Vec<&str> = text
+        .split(python::blank)
+        .filter(|word| !word.is_empty())
+        .collect();
+    words.join(" ").chars().take(most).collect()
+}
+
+fn over(ring: &Ring, now_ms: i64) -> Refused {
+    refused_with(
+        409,
+        "the call is over",
+        json!({ "ring": ring.told(now_ms) }),
+    )
+}
+
+/// What the agent is told of the outcome of its ring.
+fn notice_of(kind: &str, reason: &str) -> Option<String> {
+    let said = match kind {
+        ANSWERED => "The user answered your call about",
+        DECLINED => "The user declined your call about",
+        MISSED => "The user did not answer your call about",
+        CANCELLED => "You cancelled your call about",
+        _ => return None,
+    };
+    Some(format!("Call: {said}: {reason}"))
+}
+
+/// Whether a request asks for a live voice call. What is no way to hold a conversation is
+/// refused.
+fn live_asked(conversation_mode: &Value) -> Result<bool, Refused> {
+    match conversation_mode {
+        Value::Null => Ok(false),
+        Value::String(mode) if mode == CLASSIC => Ok(false),
+        Value::String(mode) if mode == LIVE => Ok(true),
+        _ => Err(refused(400, "live_mode_invalid")),
+    }
+}
+
+impl Rings {
+    /// From what is kept. `settings` is what [`Rings::settings`] gave.
+    pub fn kept(rings: Vec<Ring>, audit: Vec<Value>, settings: &Value, voip: Vec<Value>) -> Self {
+        Self {
+            rings,
+            audit,
+            enabled: settings["enabled"].as_bool().unwrap_or(true),
+            show_reason: settings["show_reason"].as_bool().unwrap_or(false),
+            voip,
+        }
+    }
+
+    /// The rings, to be kept.
+    pub fn rings(&self) -> &[Ring] {
+        &self.rings
+    }
+
+    /// The trail, the oldest line first, to be kept.
+    pub fn audit(&self) -> &[Value] {
+        &self.audit
+    }
+
+    /// The tokens phones left for calls, to be kept.
+    pub fn voip(&self) -> &[Value] {
+        &self.voip
+    }
+
+    /// The owner's switches: whether agents may ring at all, and whether a locked phone
+    /// shows why.
+    pub fn settings(&self) -> Value {
+        json!({ "enabled": self.enabled, "show_reason": self.show_reason })
+    }
+
+    /// Whether a locked phone shows why an agent calls.
+    pub fn shows_reason(&self) -> bool {
+        self.show_reason
+    }
+
+    /// The ring that rings now, when one does and it is not overdue: what a timer is set by.
+    pub fn ringing(&self) -> Option<&Ring> {
+        self.rings.iter().rev().find(|ring| ring.rings())
+    }
+
+    fn write(&mut self, entry: Value, now_ms: i64, out: &mut Effects) {
+        let mut line = Map::new();
+        line.insert("at".to_string(), json!(now_ms));
+        if let Value::Object(entry) = entry {
+            line.extend(entry);
+        }
+        let line = Value::Object(line);
+        self.audit.push(line.clone());
+        if self.audit.len() > AUDIT_KEPT {
+            let dropped = self.audit.len() - AUDIT_KEPT;
+            self.audit.drain(..dropped);
+        }
+        out.audited.push(line);
+        out.changed.audit = true;
+    }
+
+    /// The event, the push and the agent's notice for one change of a ring.
+    fn announce(ring: &Ring, kind: &'static str, now_ms: i64, out: &mut Effects) {
+        out.events.push(ring.event(now_ms));
+        out.pushes.push(Pushed {
+            ring: ring.clone(),
+            kind,
+        });
+        if let Some(text) = notice_of(kind, &ring.reason) {
+            out.notices.push(Notice {
+                agent_id: ring.agent_id.clone(),
+                id: format!("{}:{}", ring.ring_id, ring.state),
+                text,
+            });
+        }
+    }
+
+    /// Every ring that is overdue is missed from now on. Answers which became so.
+    fn settle(&mut self, now_ms: i64, out: &mut Effects) -> Vec<String> {
+        let mut missed = Vec::new();
+        for place in 0..self.rings.len() {
+            if !self.rings[place].rings() || now_ms < self.rings[place].expires_at {
+                continue;
+            }
+            self.rings[place].state = MISSED.to_string();
+            self.rings[place].ended_at = Some(now_ms);
+            let ring = self.rings[place].clone();
+            out.changed.rings = true;
+            let entry = json!({
+                "outcome": MISSED, "ring_id": ring.ring_id, "session": ring.session, "by": "timeout",
+            });
+            self.write(entry, now_ms, out);
+            missed.push(ring);
+        }
+        for ring in &missed {
+            Self::announce(ring, MISSED, now_ms, out);
+        }
+        missed.into_iter().map(|ring| ring.ring_id).collect()
+    }
+
+    /// The timer of a ring went: what is overdue is missed. Answers the rings that became so.
+    pub fn timer(&mut self, now_ms: i64, out: &mut Effects) -> Vec<String> {
+        self.settle(now_ms, out)
+    }
+
+    fn place_of(&self, ring_id: &str) -> Result<usize, Refused> {
+        let found = self.rings.iter().position(|ring| ring.ring_id == ring_id);
+        found.ok_or_else(|| refused(404, "unknown call"))
+    }
+
+    /// `GET /calls/ring`: one ring by its id, or the one that rings now, with the owner's
+    /// switches.
+    pub fn look(
+        &mut self,
+        ring_id: &str,
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Value, Refused> {
+        self.settle(now_ms, out);
+        let ring = if ring_id.is_empty() {
+            self.ringing()
+        } else {
+            Some(&self.rings[self.place_of(ring_id)?])
+        };
+        let ring = ring.map_or(Value::Null, |ring| ring.told(now_ms));
+        Ok(json!({ "ring": ring, "settings": self.settings() }))
+    }
+
+    /// The agent that calls. One proven by its turn rings as itself only.
+    fn caller(asked: &Asked, people: People) -> Result<Caller, Refused> {
+        let named = python::strip(asked.agent);
+        if !asked.turn_agent_id.is_empty() {
+            let me = (people.known)(asked.turn_agent_id);
+            let me = me.ok_or_else(|| refused(404, "unknown agent"))?;
+            if !named.is_empty() && calls::named(named, people.roster, &[])?.agent_id != me.agent_id
+            {
+                return Err(refused(403, "an agent can only ring as itself"));
+            }
+            return Ok(me);
+        }
+        if named.is_empty() {
+            return Err(refused(400, "agent required"));
+        }
+        let contact = calls::named(named, people.roster, &[])?;
+        Ok((people.known)(&contact.agent_id).unwrap_or_else(|| Caller {
+            session: contact.session.clone(),
+            persona: contact.persona.clone(),
+            agent_id: contact.agent_id.clone(),
+            muted: false,
+            can_call: true,
+        }))
+    }
+
+    /// Whether this agent may ring now.
+    fn may_ring(&self, caller: &Caller, now_ms: i64) -> Result<(), Refused> {
+        if !self.enabled {
+            return Err(refused(403, "agent calls are turned off"));
+        }
+        if !caller.can_call {
+            return Err(refused(403, "this agent cannot call"));
+        }
+        if caller.muted {
+            return Err(refused(403, "this agent is muted"));
+        }
+        if self.rings.iter().any(Ring::rings) {
+            return Err(refused(409, "the user is already being called"));
+        }
+        let mut own = self.rings.iter().rev();
+        if let Some(last) = own.find(|ring| ring.agent_id == caller.agent_id)
+            && now_ms - last.created_at < BETWEEN_MS
+        {
+            let wait = (BETWEEN_MS - (now_ms - last.created_at) + 999) / 1000;
+            return Err(refused_with(
+                429,
+                "wait before calling again",
+                json!({ "retry_after_s": wait }),
+            ));
+        }
+        let this_hour = self.rings.iter();
+        if this_hour
+            .filter(|ring| now_ms - ring.created_at < HOUR_MS)
+            .count()
+            >= HOURLY_MOST
+        {
+            return Err(refused(429, "too many calls this hour"));
+        }
+        Ok(())
+    }
+
+    /// `POST /calls/ring`, its first half: whether this ring may be placed. What is refused
+    /// is written to the trail with the reason it gave. An admitted ring is voiced, and
+    /// then placed ([`Rings::place`]): no other ring is admitted in between.
+    pub fn admit(
+        &mut self,
+        asked: &Asked,
+        people: People,
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Admitted, Refused> {
+        let reason = one_line(asked.reason, REASON_MOST);
+        let opening = one_line(asked.opening_line, OPENING_MOST);
+        self.settle(now_ms, out);
+        let mut who = (
+            String::new(),
+            String::new(),
+            asked.turn_agent_id.to_string(),
+        );
+        let mut admitted = || -> Result<Caller, Refused> {
+            let live = live_asked(asked.conversation_mode)?;
+            let caller = Self::caller(asked, people)?;
+            who = (
+                caller.session.clone(),
+                caller.persona.clone(),
+                caller.agent_id.clone(),
+            );
+            if live {
+                // A live voice call's opening is its own; it is asked for with no other.
+                if reason.is_empty() {
+                    return Err(refused(400, "reason required"));
+                }
+                if opening.is_empty() {
+                    return Err(refused(400, "opening_line required"));
+                }
+                if asked.opening_mode.is_some_and(|mode| mode != SAY) {
+                    return Err(refused(400, "live_mode_invalid"));
+                }
+                self.may_ring(&caller, now_ms)?;
+                // No phone holds a live voice call through this Host: the caller rings an
+                // ordinary call instead, as it does where no phone can.
+                return Err(refused(409, "live_client_required"));
+            }
+            if reason.is_empty() {
+                return Err(refused(400, "reason required"));
+            }
+            let listens = match asked.opening_mode {
+                None => false,
+                Some(Value::String(mode)) if mode == SAY => false,
+                Some(Value::String(mode)) if mode == LISTEN_FIRST => true,
+                Some(_) => return Err(refused(400, "unknown opening_mode")),
+            };
+            if opening.is_empty() {
+                return Err(refused(400, "opening_line required"));
+            }
+            if !asked.event_context.is_null() {
+                return Err(refused(400, "live_context_invalid"));
+            }
+            if listens {
+                return Err(refused(
+                    409,
+                    "listen-first opening is unavailable on this Host; ring with opening_mode say",
+                ));
+            }
+            self.may_ring(&caller, now_ms)?;
+            Ok(caller)
+        };
+        match admitted() {
+            Ok(caller) => Ok(Admitted {
+                caller,
+                reason,
+                opening,
+                at: now_ms,
+            }),
+            Err(why) => {
+                let (session, persona, agent_id) = who;
+                let entry = json!({
+                    "outcome": "refused", "error": why.body["error"], "session": session,
+                    "persona": persona, "agent_id": agent_id, "reason": reason,
+                });
+                self.write(entry, now_ms, out);
+                Err(why)
+            }
+        }
+    }
+
+    /// `POST /calls/ring`, its second half: the admitted ring rings. `opening_audio_url` is
+    /// where its opening line is, voiced, or empty; `new_id` is a new id for it.
+    pub fn place(
+        &mut self,
+        admitted: Admitted,
+        opening_audio_url: &str,
+        new_id: &str,
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Ring {
+        let Admitted {
+            caller,
+            reason,
+            opening,
+            at,
+        } = admitted;
+        let ring = Ring {
+            ring_id: format!("rng_{new_id}"),
+            session: caller.session,
+            persona: caller.persona,
+            agent_id: caller.agent_id,
+            reason,
+            opening_line: opening,
+            opening_audio_url: opening_audio_url.to_string(),
+            state: RINGING.to_string(),
+            created_at: at,
+            expires_at: at + RING_MS,
+            ended_at: None,
+            answered_by: String::new(),
+            call_id: String::new(),
+        };
+        self.rings.push(ring.clone());
+        if self.rings.len() > KEPT {
+            let dropped = self.rings.len() - KEPT;
+            self.rings.drain(..dropped);
+        }
+        out.changed.rings = true;
+        let entry = json!({
+            "outcome": RINGING, "ring_id": ring.ring_id, "session": ring.session,
+            "persona": ring.persona, "agent_id": ring.agent_id, "reason": ring.reason,
+        });
+        self.write(entry, now_ms, out);
+        Self::announce(&ring, "ring", now_ms, out);
+        ring
+    }
+
+    /// What the one who rang is answered, once the phones were pushed: `delivery` is what
+    /// became of that.
+    pub fn rung(ring: &Ring, delivery: Value, now_ms: i64) -> Value {
+        json!({
+            "ok": true, "ring": ring.told(now_ms), "delivery": delivery,
+            "summary": format!("Calling the user. The call rings for {} seconds.", RING_MS / 1000),
+        })
+    }
+
+    /// A ring that rings ends as `state`. `own`: the agent that may end it, when only one may.
+    fn end(
+        &mut self,
+        ring_id: &str,
+        (state, by): (&'static str, &str),
+        own: Option<&str>,
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Value, Refused> {
+        self.settle(now_ms, out);
+        let place = self.place_of(ring_id)?;
+        let ring = &self.rings[place];
+        if own.is_some_and(|agent| !agent.is_empty() && ring.agent_id != agent) {
+            return Err(refused(403, "an agent can only cancel its own call"));
+        }
+        if ring.state == state {
+            return Ok(json!({ "ok": true, "ring": ring.told(now_ms), "changed": false }));
+        }
+        if !ring.rings() {
+            return Err(over(ring, now_ms));
+        }
+        self.rings[place].state = state.to_string();
+        self.rings[place].ended_at = Some(now_ms);
+        out.changed.rings = true;
+        let ring = self.rings[place].clone();
+        let entry = json!({
+            "outcome": state, "ring_id": ring.ring_id, "session": ring.session, "by": by,
+        });
+        self.write(entry, now_ms, out);
+        Self::announce(&ring, state, now_ms, out);
+        Ok(json!({ "ok": true, "ring": ring.told(now_ms), "changed": true }))
+    }
+
+    /// `POST /calls/ring/decline`: the user does not take the call.
+    pub fn decline(
+        &mut self,
+        (principal, ring_id): (&str, &str),
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Value, Refused> {
+        self.end(ring_id, (DECLINED, principal), None, now_ms, out)
+    }
+
+    /// `POST /calls/ring/cancel`: the agent hangs up before the user answers. An agent
+    /// proven by its turn cancels its own ring only; the owner's tools any.
+    pub fn cancel(
+        &mut self,
+        (turn_agent_id, ring_id): (&str, &str),
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Value, Refused> {
+        let ring = &self.rings[self.place_of(ring_id)?];
+        if !ring.rings() {
+            return Ok(json!({ "ok": true, "ring": ring.told(now_ms), "changed": false }));
+        }
+        let by = if turn_agent_id.is_empty() {
+            "owner"
+        } else {
+            turn_agent_id
+        };
+        self.end(ring_id, (CANCELLED, by), Some(turn_agent_id), now_ms, out)
+    }
+
+    /// `POST /calls/ring/answer`: the user takes the call. A call starts with the agent on
+    /// the floor, and the answer hands back the opening line to play first. The same phone
+    /// asking again is given the same call; another is told the call was answered elsewhere.
+    pub fn answer(
+        &mut self,
+        calls: &mut Calls,
+        asked: &Answer,
+        with: (&[Contact], &str),
+        at: calls::At,
+        (out, of_calls): (&mut Effects, &mut calls::Effects),
+    ) -> Result<Value, Refused> {
+        let now_ms = at.now_ms;
+        let live = live_asked(asked.conversation_mode)?;
+        let known = self.rings.iter().any(|ring| ring.ring_id == asked.ring_id);
+        if known && live {
+            // A ring is answered as it was placed: none of this Host's is a live voice call.
+            return Err(refused(409, "live_mode_conflict"));
+        }
+        self.settle(now_ms, out);
+        let place = self.place_of(asked.ring_id)?;
+        let ring = &self.rings[place];
+        if ring.state == ANSWERED {
+            if ring.answered_by != asked.principal {
+                return Err(refused(409, "the call was answered elsewhere"));
+            }
+            let call = calls.by_id(&ring.call_id, now_ms).unwrap_or(Value::Null);
+            return Ok(Self::answered(
+                ring,
+                call,
+                false,
+                asked.opening_mode,
+                now_ms,
+            ));
+        }
+        if !ring.rings() {
+            return Err(over(ring, now_ms));
+        }
+        let placed = json!({
+            "ring_id": ring.ring_id, "reason": ring.reason, "opening_line": ring.opening_line,
+        });
+        let asker = Asker {
+            caller: asked.principal,
+            by: &ring.session,
+            ..Asker::default()
+        };
+        let agents = [ring.session.clone()];
+        let started = calls.start(
+            asker,
+            (&agents, &ring.ring_id, Some(placed)),
+            with,
+            at,
+            of_calls,
+        )?;
+        let call = started["call"].clone();
+        let ring = &mut self.rings[place];
+        ring.state = ANSWERED.to_string();
+        ring.ended_at = Some(now_ms);
+        ring.answered_by = asked.principal.to_string();
+        ring.call_id = call["call_id"].as_str().unwrap_or("").to_string();
+        out.changed.rings = true;
+        let ring = ring.clone();
+        let entry = json!({
+            "outcome": ANSWERED, "ring_id": ring.ring_id, "session": ring.session,
+            "by": asked.principal, "call_id": ring.call_id,
+        });
+        self.write(entry, now_ms, out);
+        Self::announce(&ring, ANSWERED, now_ms, out);
+        Ok(Self::answered(
+            &ring,
+            call,
+            true,
+            asked.opening_mode,
+            now_ms,
+        ))
+    }
+
+    fn answered(
+        ring: &Ring,
+        call: Value,
+        changed: bool,
+        opening_mode: Option<&Value>,
+        now_ms: i64,
+    ) -> Value {
+        let mut opening = json!({
+            "text": ring.opening_line, "audio_url": ring.opening_audio_url,
+            "session": ring.session, "persona": ring.persona,
+        });
+        // A phone that says how it would open is told how this ring opens: its line is said.
+        if opening_mode.is_some() {
+            opening["mode"] = json!(SAY);
+        }
+        json!({
+            "ok": true, "ring": ring.told(now_ms), "call": call, "changed": changed,
+            "opening": opening,
+        })
+    }
+
+    /// `GET /calls/ring/settings`: the owner's switches and the newest of the trail.
+    pub fn shown(&self) -> Value {
+        let newest: Vec<&Value> = self.audit.iter().rev().take(AUDIT_SHOWN).collect();
+        json!({ "ok": true, "settings": self.settings(), "audit": newest })
+    }
+
+    /// `POST /calls/ring/settings`: the owner turns rings on or off, or says whether a
+    /// locked phone shows why an agent calls.
+    pub fn change(
+        &mut self,
+        said: &Value,
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Value, Refused> {
+        if let Some(enabled) = said.get("enabled") {
+            let Some(enabled) = enabled.as_bool() else {
+                return Err(refused(400, "enabled must be true or false"));
+            };
+            self.enabled = enabled;
+            out.changed.settings = true;
+            self.write(
+                json!({ "outcome": "settings", "enabled": enabled }),
+                now_ms,
+                out,
+            );
+        }
+        if let Some(show) = said.get("show_reason") {
+            let Some(show) = show.as_bool() else {
+                return Err(refused(400, "show_reason must be true or false"));
+            };
+            self.show_reason = show;
+            out.changed.settings = true;
+            self.write(
+                json!({ "outcome": "settings", "show_reason": show }),
+                now_ms,
+                out,
+            );
+        }
+        Ok(self.shown())
+    }
+
+    /// `POST /calls/ring/voip-token`: a phone leaves the token an incoming call would be
+    /// pushed to, one for each phone; an empty token forgets it. `modes`: the ways it can
+    /// hold a ring's conversation, when it says.
+    pub fn voip_token(
+        &mut self,
+        principal: &str,
+        (token, environment, modes): (&str, &str, &Value),
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Value, Refused> {
+        let token = python::strip(token).to_lowercase();
+        let environment = if environment.to_lowercase() == "sandbox" {
+            "sandbox"
+        } else {
+            "production"
+        };
+        let signs = token.chars().count();
+        let hex = token
+            .chars()
+            .all(|sign| sign.is_ascii_digit() || ('a'..='f').contains(&sign));
+        if !token.is_empty() && !((32..=200).contains(&signs) && hex) {
+            return Err(refused(400, "token must be hex"));
+        }
+        let modes: Vec<&str> = match modes {
+            Value::Null => Vec::new(),
+            Value::Array(modes) if modes.len() <= 2 => {
+                let mut known = Vec::new();
+                for mode in modes {
+                    match mode.as_str() {
+                        Some(mode @ (CLASSIC | LIVE)) => {
+                            if !known.contains(&mode) {
+                                known.push(mode);
+                            }
+                        }
+                        _ => return Err(refused(400, "live_mode_invalid")),
+                    }
+                }
+                known
+            }
+            _ => return Err(refused(400, "live_mode_invalid")),
+        };
+        let place = self
+            .voip
+            .iter()
+            .position(|row| row["principal"] == principal);
+        if token.is_empty() {
+            if let Some(place) = place {
+                self.voip.remove(place);
+            }
+        } else {
+            let mut row = json!({
+                "principal": principal, "token": token, "environment": environment,
+                "updated_at": now_ms,
+            });
+            if !modes.is_empty() {
+                row["supported_conversation_modes"] = json!(modes);
+            }
+            match place {
+                Some(place) => self.voip[place] = row,
+                None => self.voip.push(row),
+            }
+        }
+        out.changed.voip = true;
+        Ok(json!({ "ok": true, "registered": !token.is_empty() }))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn theo() -> Caller {
+        Caller {
+            session: "theo-97e5".to_string(),
+            persona: "Theo".to_string(),
+            agent_id: "a-theo".to_string(),
+            muted: false,
+            can_call: true,
+        }
+    }
+
+    fn asked<'a>(conversation_mode: &'a Value, opening_mode: Option<&'a Value>) -> Asked<'a> {
+        Asked {
+            turn_agent_id: "a-theo",
+            agent: "",
+            reason: "A leak",
+            opening_line: "Shall I look?",
+            conversation_mode,
+            event_context: &Value::Null,
+            opening_mode,
+        }
+    }
+
+    #[test]
+    fn what_this_host_does_not_hold_is_refused_with_the_way_to_ring_instead() {
+        let known = |agent_id: &str| (agent_id == "a-theo").then(theo);
+        let people = People {
+            roster: &[],
+            known: &known,
+        };
+        let mut rings = Rings::default();
+        let mut out = Effects::default();
+        // A live voice call: the caller is told that no phone can hold one, which is what
+        // it rings an ordinary call on.
+        let live = json!("agent_live_v1");
+        let refused = rings
+            .admit(&asked(&live, None), people, 1_000, &mut out)
+            .unwrap_err();
+        assert_eq!(
+            (refused.status, &refused.body["error"]),
+            (409, &json!("live_client_required"))
+        );
+        // One that listens first: the same, in words.
+        let listens = json!("listen_first");
+        let refused = rings
+            .admit(
+                &asked(&Value::Null, Some(&listens)),
+                people,
+                1_000,
+                &mut out,
+            )
+            .unwrap_err();
+        assert_eq!(refused.status, 409);
+        let said = refused.body["error"].as_str().unwrap();
+        assert!(said.ends_with("ring with opening_mode say"), "{said}");
+        // Both are in the trail, and nothing rings.
+        assert_eq!(out.audited.len(), 2);
+        assert!(rings.ringing().is_none() && out.events.is_empty());
+        // The same ring as an ordinary call is placed.
+        let say = json!("say");
+        let admitted = rings
+            .admit(
+                &asked(&json!("classic"), Some(&say)),
+                people,
+                1_000,
+                &mut out,
+            )
+            .unwrap();
+        let ring = rings.place(admitted, "", "1", 1_000, &mut out);
+        assert_eq!(rings.ringing(), Some(&ring));
+        assert_eq!(ring.expires_at, 1_000 + RING_MS);
+    }
+
+    #[test]
+    fn rings_are_read_back_as_they_were_kept() {
+        let known = |agent_id: &str| (agent_id == "a-theo").then(theo);
+        let people = People {
+            roster: &[],
+            known: &known,
+        };
+        let mut rings = Rings::default();
+        let mut out = Effects::default();
+        let admitted = rings
+            .admit(&asked(&Value::Null, None), people, 1_000, &mut out)
+            .unwrap();
+        rings.place(admitted, "/audio/1000__theo-97e5.mp3", "1", 1_000, &mut out);
+        rings
+            .change(
+                &json!({ "enabled": false, "show_reason": true }),
+                2_000,
+                &mut out,
+            )
+            .unwrap();
+        let kept = serde_json::to_vec(rings.rings()).unwrap();
+        let again = Rings::kept(
+            serde_json::from_slice(&kept).unwrap(),
+            rings.audit().to_vec(),
+            &rings.settings(),
+            rings.voip().to_vec(),
+        );
+        assert_eq!(again, rings);
+        assert!(again.shows_reason());
+        // What was kept before a field was there is read with the field empty.
+        let old = json!([{
+            "ring_id": "rng_1", "session": "s", "persona": "P", "agent_id": "a", "reason": "r",
+            "opening_line": "o", "state": "missed", "created_at": 1, "expires_at": 2,
+        }]);
+        let read: Vec<Ring> = serde_json::from_value(old).unwrap();
+        assert_eq!((read[0].ended_at, read[0].call_id.as_str()), (None, ""));
+    }
+}
