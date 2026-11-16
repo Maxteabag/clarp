@@ -17,15 +17,13 @@ conformance run compares them (`NOT_YET` in `conformance/conform.py`).
 
 The Rust Host lists a feature when everything the feature names is built and held to the Python
 Host (`FEATURES` in `crates/clarp-host/src/edge.rs`, each with the contract number that
-introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 15 Nov 2026 these are:
-`pairing`, `turn_queue_resume`, `background_jobs`, `background_job_cancel_generation`,
+introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 16 Nov 2026 these are:
+`pairing`, `turn_queue_resume`, `log_turn_summary`, `background_jobs`, `background_job_cancel_generation`,
 `durable_task_goals`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`,
 `artifact_pins`, `decision_lifecycle`, `text_input_requests`, `push_grants`, `push_unregister`,
 `desktop_send_quiet_push`, `snapshot_without_archived`, `helper_agents`, `media`, `html_reports`,
 `html_report_revisions`, `html_form_network`, `attention_index`. Everything else in the Python Host's list is absent, also where a part
-of it is built (`goal_updater`: a criterion can be set aside, the Goal keeper is not there;
-`log_turn_summary`: rows carry the turn's end, an answer that tool work follows is not yet marked
-as commentary).
+of it is built (`goal_updater`: a criterion can be set aside, the Goal keeper is not there).
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
@@ -70,14 +68,13 @@ it covers that exact difference and nothing else.
 |---|---|---|---|
 | A plain send that has to wait | changes the queue and announces nothing (defect R5) | announces it with `queue-updated`, like a send with `queue_if_busy` | Every device shows the same queue, not only the one that sent |
 | The preview of a notification for a spoken reply | shows an emotion tag the engine acts out, `[sigh]` (defect R10) | does not | A notification shows the reply as every other place shows it |
-| `phase` of the reply that closes a later turn | `null` when the turn before had settled, `final` otherwise (defect R6) | `final` | A reply that closes a completed turn is the agent's final word in it, whenever it is read |
+| What the conversation shows of a turn that follows a settled one | only the rows written while the turn ran: what the agent said, with `phase: null`, without the cards of its tools and without the messages that only call tools (defect R6). The first turn of a conversation has all of it | every turn the same: a row for each message of the agent, a card for each tool it calls, `commentary` for what was said before tool work and `final` for what was said after it | What a turn did is shown whichever turn it was. The scenario `tool-turns` has two turns for this: the first is the same on both Hosts in every field |
 | `last_completed_message` after a later turn of an agent: one that had waited in the queue, or a plain one that was not its first | the user's message, though the agent has answered it (defect R12) | the agent's answer | A list of chats shows what the agent last said, whichever way the turn began |
 | `model` in an agent's row after a turn that completed | empty after some turns (defect R13) | the model that answered | An app shows which model an agent runs on; a turn that completed has said it |
 | `pinned` in the answer to the discard of a pinned artifact | `true`, beside `pinned_at: null` (defect R15) | `false` | A discard unpins. The answer says what is now true |
 | A reply, to a client that catches up by revision | given again after the next message arrived: the Host wrote it a second time (defect R16) | given once | A row that did not change is not sent again |
 | `live_activity` in an agent's row after its first turn | missing until the next turn, in some runs (defect R17) | there: at rest, since the turn's end | An app's line for an agent says what the agent last did, whichever turn that was |
 | What a tool that died left on stderr, as the state of the failed turn gives it (`detail.error`) | as the tool wrote it, with the end of its last line | the same words without the line's end | The words are what failed, the line's end is how a terminal was told. `detail.provider_message` and the row under the message carry them without it on both Hosts |
-| `phase` of the last thing a turn said before it failed | `final` | none | A turn that failed has no final word: the row below says why it ended |
 
 ## Differences the conformance corpus does not reach
 
@@ -121,4 +118,6 @@ it covers that exact difference and nothing else.
 | A report whose revision is published again as it is, or as it once was | answered with the report as it stands, and announced as changed (`artifact-updated`) | answered the same, and nothing is announced | Nothing changed |
 | A report's revision that names no version | `revision-` and the 32 hex digits of a random UUID | `revision-` and 32 random hex digits | Random on both |
 | A goal's updater (`updater` in a plan: whether a janitor keeps the goal's bookkeeping, which, when it last ran, its last receipt) | as the janitor left it | off, with nothing in it | Janitors are not on this Host. A goal that moves here is the same goal in everything else (rehearsed on 15 Nov with 18 real plans) |
+| The calls of a tool whose reader does not group them into messages (Codex) | cells on the rows of the agent's messages (`display_cells`) | a row for each call (`kind: tool`), with the card of the call | Codex's cells are not built yet. Its calls are shown, each by its card, and carry the turn's trace |
+| A tool that had not returned when its turn failed or its process went without an end | `recorded` | `recorded` | The same. Before 16 Nov 2026 this Host said `error` with a sentence of its own; now only an interrupted turn changes what its tools left unfinished (`interrupted`, on both Hosts) |
 

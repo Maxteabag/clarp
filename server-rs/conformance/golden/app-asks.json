@@ -5824,7 +5824,7 @@
        "tint_dark": "#c0caf5",
        "tint_light": "#3c4257"
       },
-      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"d6fb6f54-46d8-4c8c-895c-fabb5f38f242\"}",
+      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"89d5ed2c-c4e5-4a38-81fa-170bfd1ef05c\"}",
       "cli_version_source": {
        "detail": "<ROOT>/provider/fake-codex --version",
        "freshness": "fresh",
@@ -6431,6 +6431,79 @@
    "path": "/agent-model-options",
    "status": 200,
    "step": "the models an agent can be given"
+  },
+  {
+   "body": {
+    "name": "synthetic_note.md",
+    "ok": true,
+    "path": "<ROOT>/uploads/claire/u-<id:10>-synthetic_note.md",
+    "session": "claire",
+    "size": 24
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/upload",
+   "status": 200,
+   "step": "the user attaches a file"
+  },
+  {
+   "body": {
+    "name": "synthetic_note.md",
+    "ok": true,
+    "path": "<ROOT>/uploads/claire/u-<id:10>-synthetic_note.md",
+    "session": "claire",
+    "size": 24
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/upload",
+   "status": 200,
+   "step": "the same file again"
+  },
+  {
+   "body": {
+    "error": "upload id reused for different content"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/upload",
+   "status": 409,
+   "step": "another file under the same id"
+  },
+  {
+   "body": {
+    "error": "invalid upload id"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/upload",
+   "status": 400,
+   "step": "a file under an id that is none"
+  },
+  {
+   "body": {
+    "error": "bad size"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/upload",
+   "status": 400,
+   "step": "a file of nothing"
   }
  ],
  "live": {

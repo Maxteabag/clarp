@@ -66,10 +66,6 @@ b552ef3283ca  roster-edits: the same, in the snapshot asked for in another word
 bf8a0c0234d1  failed-turns: detail.error of the tool that died
 d7c35cb7c0f7  failed-turns: the same, of the tool that died after a turn that worked
 
-# The last thing a turn said before it failed has no phase (the Python Host calls it `final`).
-59a4ff8c8349  failed-turns: phase of what the turn had said when its account was out
-0b9d76905486  failed-turns: the same row, in the log at the end
-
 # `GET /status` without a session names the agent the Python Host falls back to; this Host has
 # none it falls back to, and names none.
 522a5dba49c5  app-asks: session of the status nobody named a session for
@@ -79,3 +75,36 @@ d7c35cb7c0f7  failed-turns: the same, of the tool that died after a turn that wo
 # answering without `captured`, as a Python Host does that takes them.
 e520c307dcd4  app-asks: captured, of one line of an app's log
 7933fd99ead0  app-asks: captured, of several lines
+
+# The conversation has the tool work of every turn: a message that only calls tools is a row,
+# each row has a card for each tool its message calls, and what was said before tool work is
+# commentary. (Of a turn that follows a settled one the Python Host shows only what it wrote
+# while the turn ran: the rows with text, without cards and without a phase. Reference defect
+# R6, seen with tools.) Three rows more after the second turn, and what follows from them.
+7c531f9849ee  tool-turns: the rows after the second turn, in the short form (14, where the Python Host has 11)
+d146349e26ed  tool-turns: the first row of the second turn, in the short form: how many cards it has
+bdae038a8002  tool-turns: the first row of the second turn, in the short form: its phase
+8f39b82fdf10  tool-turns: the first row of the second turn, in the short form: that there are details to open
+27cb426174af  tool-turns: the first row of the second turn, in the short form: its cards
+8442dcb0e36e  tool-turns: its second row, in the short form: how many cards it has
+61dc3760dcc8  tool-turns: its second row, in the short form: what it says (the Python Host has the next text row here)
+bb1f82a28a3c  tool-turns: its second row, in the short form: that there are details to open
+d1a282c67bbb  tool-turns: its second row, in the short form: its cards
+449dd70f2674  tool-turns: its third row, in the short form: how many cards it has
+d42002ac5baf  tool-turns: its third row, in the short form: its phase
+c264fcea9d05  tool-turns: its third row, in the short form: what it says (the Python Host has the next text row here)
+1ef1950e766a  tool-turns: its third row, in the short form: that there are details to open
+377ee05006ad  tool-turns: its third row, in the short form: its cards
+aeae9c739560  tool-turns: its third row, in the short form: the turn's end (it is on the row that closed the turn, three rows further down)
+8ddceb2c4381  tool-turns: the rows after the second turn, whole (14, where the Python Host has 11)
+378c27fda6a9  tool-turns: the first row of the second turn, whole: its phase
+67f6127add17  tool-turns: the first row of the second turn, whole: its cards
+43849afd46e1  tool-turns: its second row, whole: what it says (the Python Host has the next text row here)
+71fdebbe6947  tool-turns: its second row, whole: its cards
+5aea2a4c366d  tool-turns: its third row, whole: its phase
+b31fe1910bca  tool-turns: its third row, whole: what it says (the Python Host has the next text row here)
+8bc4e90966b5  tool-turns: its third row, whole: its cards
+ca92e3773cde  tool-turns: its third row, whole: the turn's end (it is on the row that closed the turn, three rows further down)
+2a86588b81e4  tool-turns: the id of the first notification (ids are numbered as they come, and six tool ids came before)
+ed6d06764d02  tool-turns: the id of the second notification
+39ab584a295e  tool-turns: the row the second notification is about (three rows further down)
