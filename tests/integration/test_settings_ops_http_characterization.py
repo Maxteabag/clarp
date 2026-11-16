@@ -7,6 +7,7 @@ as it is today. The library rules behind them have their own unit tests.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -160,7 +161,37 @@ def test_dirs_answers_when_a_tilde_user_does_not_exist(running_server, monkeypat
     path = f"~{username}{suffix}"
     query = urllib.parse.urlencode({"path": path})
     assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
-    assert logged == [("dirsPathRefused", "RuntimeError")]
+    assert logged == []
+
+
+@pytest.mark.parametrize("path", ["~abc\0/", "~abc\0/projects/"])
+def test_dirs_answers_a_malformed_tilde_username_quietly(running_server, monkeypatch, path):
+    base, _ctx, _srv = running_server
+    from lib.routes import settings as settings_routes
+
+    logged = []
+    monkeypatch.setattr(settings_routes, "log_exception",
+                        lambda *args, **kwargs: logged.append(args))
+    query = urllib.parse.urlencode({"path": path})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
+    assert logged == []
+
+
+def test_dirs_does_not_swallow_an_unrelated_recovery_error(monkeypatch):
+    from lib import launch_paths
+    from lib.routes import settings as settings_routes
+
+    failure = LookupError("unrelated recovery defect")
+    def broken(_raw):
+        raise failure
+    monkeypatch.setattr(launch_paths, "recover_user_path", broken)
+    responses = []
+    handler = SimpleNamespace(_query=lambda: {"path": ["/projects/"]},
+                              _send=lambda *args: responses.append(args))
+    with pytest.raises(LookupError) as caught:
+        settings_routes.SettingsRoutes._handle_dirs(handler)
+    assert caught.value is failure
+    assert responses == []
 
 
 def test_message_tool_details_requires_a_known_message(running_server):
