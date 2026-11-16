@@ -82,7 +82,6 @@ def test_word_similarity_prefix_score_meets_threshold():
     ("Zoe\u0308\u0301", "Zoe\u0308\u0301? ", "check the branch"),
     ("Zoë", "Zoë, ", "écris à Rachél"),
     ("Zoë", "Zoë ", "\u0301keep this mark"),
-    ("Zoë", "Zoë", "♥ check the branch"),
     ("Rachel", "Rachel", ""),
 ])
 def test_unicode_address_is_removed_without_eating_the_request(name, address, body):
@@ -178,3 +177,48 @@ def test_judged_cut_uses_the_selected_name(monkeypatch, name, text, wanted):
 def test_name_extension_requires_a_word_end(name, text, before_387, wanted):
     assert resolve_agent_by_spoken_name(text, {"agent": {"name": name}}) == ("agent", wanted), (
         f"before PR 387 the body was {before_387!r}")
+
+
+@pytest.mark.parametrize("joiner", ["\u200d", "\u200c"])
+@pytest.mark.parametrize("name,tail,before_387", [
+    ("Anna Maria", "na please", "Maria"),
+    ("Mary Ann", "ette go", "Ann"),
+    ("Jean Luc", "as go", "Luc"),
+    ("Zoë", "y go", "ë"),
+])
+def test_joined_name_continuations_keep_the_pre_387_cut(name, tail, before_387, joiner):
+    assert resolve_agent_by_spoken_name(name + joiner + tail, {"agent": {"name": name}}) == (
+        "agent", before_387 + joiner + tail)
+
+
+@pytest.mark.parametrize("after,wanted", [
+    ("\u2060go", "ë\u2060go"),  # format: word joiner
+    ("\ufeffgo", "ë\ufeffgo"),  # format: zero-width no-break space
+    ("\x01go", "ë\x01go"),      # control, not whitespace
+    ("🙂go", "ë🙂go"),             # symbol, other
+    ("€go", "ë€go"),              # symbol, currency
+    ("+go", "ë+go"),              # symbol, math
+    ("^go", "ë^go"),              # symbol, modifier
+    ("♥ check the branch", "ë♥ check the branch"),
+    ("\u00a0go", "go"),          # no-break space
+    ("\tgo", "go"),
+    ("\ngo", "go"),
+    (",go", "go"),
+    (".go", "go"),
+    (":go", "go"),
+    ("-go", "go"),
+    ("—go", "—go"),
+    ("_go", "_go"),
+    ("'go", "'go"),
+    ("’go", "’go"),
+    ('"go', '"go'),
+    ("“go", "“go"),
+    ("”go", "”go"),
+    ("[go", "[go"),
+    ("]go", "]go"),
+])
+def test_only_whitespace_or_punctuation_allows_name_extension(after, wanted):
+    # Pre-387 always returned "ë" + after for these inputs. Only a positive
+    # separator admits the complete-name repair; symbols/formats stay as-is.
+    assert resolve_agent_by_spoken_name("Zoë" + after, {"agent": {"name": "Zoë"}}) == (
+        "agent", wanted)
