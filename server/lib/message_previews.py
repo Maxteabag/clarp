@@ -354,7 +354,21 @@ def _floor() -> dict[tuple[str, str | None], int]:
     if conn().in_transaction:
         hit, kept = _FLOOR_CACHE.get("all", database)
         return kept if hit else _read_floor()
-    return _FLOOR_CACHE.get_or_compute("all", database, _read_floor)
+    return _FLOOR_CACHE.get_or_compute("all", database, _kept_floor)
+
+
+def _kept_floor() -> dict[tuple[str, str | None], int]:
+    """The floor as it is kept, and a line in the journal when it holds
+    anything. This read is the only check there is that the heads cover
+    their messages: a head left behind afterwards, in a running Host, shows
+    nowhere, and the agent list alone then gives that conversation its old
+    revision and preview until its next write or a restart. A count, no ids."""
+    found = _read_floor()
+    if found:
+        without = sum(1 for _key, _revision in found.items() if _key[1] is None)
+        cache_log.log("dashboardHeadsBehind",
+                      f"conversations={len(found)} without_session={without}")
+    return found
 
 
 def _revision_maps(agents_sql: str, params: tuple = ()) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
@@ -406,7 +420,9 @@ def _preview_key(agent_id: str, revisions: dict, heads: dict) -> tuple:
     Every writer in this code base that changes what a preview shows raises
     its conversation's head: a new, edited or rewritten row is given the next
     number of the message clock and the head is raised to it, and a delete
-    raises the head, each in the row's own transaction. The key used to carry
+    raises the head, each in the transaction that writes the row
+    (message_writes._row_with_its_head where the writer opens none of its
+    own; test_heads_at_every_commit asks it of every commit). The key used to carry
     the messages' highest updated_at as a second witness, for a transcript
     import that rewrote a row in place under its old revision; an import
     gives a row it changes a new revision (message_import_rows), and no

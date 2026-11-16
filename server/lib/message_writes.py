@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -75,6 +76,30 @@ def client_message_trace(client_msg_id: str) -> str:
     return str((row["trace_id"] if row else "") or "")
 
 
+@contextmanager
+def _row_with_its_head(database):
+    """One transaction for a message row and its conversation's head.
+
+    The store's connection commits each statement by itself unless a
+    transaction is open, so a writer that gives a row a revision and then
+    raises the head made two commits: between them the head was below its
+    messages, and a second statement that gave up on the lock left it there.
+    The agent list reads what changed from the heads alone (issue 371). A
+    caller's open transaction is joined, neither committed nor rolled back."""
+    if database.in_transaction:
+        yield
+        return
+    database.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+    if database.in_transaction:
+        database.execute("COMMIT")
+
+
 def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
     """Hand an admitted-but-never-launched user row to a new attempt.
 
@@ -89,22 +114,23 @@ def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
     ).fetchone()
     if row is None or row["trace_id"] == new_trace:
         return
-    revision = _next_revision(database)
-    # updated_at stays: it is the row's send order, by which the import links
-    # transcript copies to client rows.
-    database.execute(
-        "UPDATE messages SET trace_id = ?, revision = ?"
-        " WHERE message_id = ? AND role = 'user'",
-        (new_trace, revision, _client_message_id(client_msg_id)),
-    )
-    database.execute(
-        """INSERT INTO conversation_heads (
-               agent_id, backend_session_id, revision, replace_revision
-           ) VALUES (?, ?, ?, 0)
-           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-               revision = MAX(conversation_heads.revision, excluded.revision)""",
-        (row["agent_id"], row["backend_session_id"], revision),
-    )
+    with _row_with_its_head(database):
+        revision = _next_revision(database)
+        # updated_at stays: it is the row's send order, by which the import links
+        # transcript copies to client rows.
+        database.execute(
+            "UPDATE messages SET trace_id = ?, revision = ?"
+            " WHERE message_id = ? AND role = 'user'",
+            (new_trace, revision, _client_message_id(client_msg_id)),
+        )
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (row["agent_id"], row["backend_session_id"], revision),
+        )
 
 
 def has_client_message(client_msg_id: str) -> bool:
@@ -241,44 +267,45 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
     seq = min(int(row["next_seq"]), -1)  # negative band, never collides with transcript
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
-    revision = _next_revision(database)
-    inserted = database.execute(
-        """INSERT INTO messages (
-               message_id, agent_id, backend_session_id, source_file, seq,
-               role, timestamp, text, kind, tool_name, tools_json,
-               display_cells_json, updated_at, revision, origin,
-               sender_agent_id, prompt_admission_id, trace_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(message_id) DO NOTHING""",
-        (
-            msg_id, agent_id, backend_session_id, f"client:{client_msg_id}", seq,
-            "user", timestamp, text, None, None, "[]", "[]",
-            timestamp_ms, revision, origin, sender_agent_id,
-            prompt_admission_id or None, (trace_id or "").strip() or None,
-        ),
-    )
-    if inserted.rowcount != 1:
-        # Another request admitted the same client id between our SELECT and
-        # INSERT. Return the winning durable row and let dispatch admission
-        # treat this request as a retry rather than launching it again.
-        return record_user_message(
-            agent_id=agent_id,
-            backend_session_id=backend_session_id,
-            client_msg_id=client_msg_id,
-            text=text,
-            origin=origin,
-            sender_agent_id=sender_agent_id,
-            prompt_admission_id=prompt_admission_id,
-            trace_id=trace_id,
+    with _row_with_its_head(database):
+        revision = _next_revision(database)
+        inserted = database.execute(
+            """INSERT INTO messages (
+                   message_id, agent_id, backend_session_id, source_file, seq,
+                   role, timestamp, text, kind, tool_name, tools_json,
+                   display_cells_json, updated_at, revision, origin,
+                   sender_agent_id, prompt_admission_id, trace_id
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(message_id) DO NOTHING""",
+            (
+                msg_id, agent_id, backend_session_id, f"client:{client_msg_id}", seq,
+                "user", timestamp, text, None, None, "[]", "[]",
+                timestamp_ms, revision, origin, sender_agent_id,
+                prompt_admission_id or None, (trace_id or "").strip() or None,
+            ),
         )
-    database.execute(
-        """INSERT INTO conversation_heads (
-               agent_id, backend_session_id, revision, replace_revision
-           ) VALUES (?, ?, ?, 0)
-           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-               revision = MAX(conversation_heads.revision, excluded.revision)""",
-        (agent_id, backend_session_id, revision),
-    )
+        if inserted.rowcount != 1:
+            # Another request admitted the same client id between our SELECT and
+            # INSERT. Return the winning durable row and let dispatch admission
+            # treat this request as a retry rather than launching it again.
+            return record_user_message(
+                agent_id=agent_id,
+                backend_session_id=backend_session_id,
+                client_msg_id=client_msg_id,
+                text=text,
+                origin=origin,
+                sender_agent_id=sender_agent_id,
+                prompt_admission_id=prompt_admission_id,
+                trace_id=trace_id,
+            )
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, backend_session_id, revision),
+        )
     return {
         "id": msg_id,
         "role": "user",
@@ -357,31 +384,32 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
             int(cause["updated_at"] or 0) + 1,
         )
     timestamp = _iso_from_ms(timestamp_ms)
-    revision = _next_revision(database)
-    inserted = database.execute(
-        """INSERT INTO messages (
-               message_id, agent_id, backend_session_id, source_file, seq,
-               role, timestamp, text, kind, tool_name, tools_json,
-               display_cells_json, updated_at, revision, origin,
-               sender_agent_id, trace_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(message_id) DO NOTHING""",
-        (
-            msg_id, agent_id, backend_session_id, f"marker:{cause_message_id}",
-            seq, "assistant", timestamp, text, None, None, "[]", "[]",
-            timestamp_ms, revision, MARKER_ORIGIN, None, trace_id or None,
-        ),
-    )
-    if inserted.rowcount != 1:
-        return None
-    database.execute(
-        """INSERT INTO conversation_heads (
-               agent_id, backend_session_id, revision, replace_revision
-           ) VALUES (?, ?, ?, 0)
-           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-               revision = MAX(conversation_heads.revision, excluded.revision)""",
-        (agent_id, backend_session_id, revision),
-    )
+    with _row_with_its_head(database):
+        revision = _next_revision(database)
+        inserted = database.execute(
+            """INSERT INTO messages (
+                   message_id, agent_id, backend_session_id, source_file, seq,
+                   role, timestamp, text, kind, tool_name, tools_json,
+                   display_cells_json, updated_at, revision, origin,
+                   sender_agent_id, trace_id
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(message_id) DO NOTHING""",
+            (
+                msg_id, agent_id, backend_session_id, f"marker:{cause_message_id}",
+                seq, "assistant", timestamp, text, None, None, "[]", "[]",
+                timestamp_ms, revision, MARKER_ORIGIN, None, trace_id or None,
+            ),
+        )
+        if inserted.rowcount != 1:
+            return None
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, backend_session_id, revision),
+        )
     return {
         "id": msg_id, "role": "assistant", "timestamp": timestamp,
         "text": text, "kind": None, "tool_name": None, "tools": [],
@@ -427,31 +455,32 @@ def _record_system_notice(agent_id, backend_session_id, msg_id, text):
     seq = min(int(row["next_seq"]), -1)
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
-    revision = _next_revision(database)
-    inserted = database.execute(
-        """INSERT INTO messages (
-               message_id, agent_id, backend_session_id, source_file, seq,
-               role, timestamp, text, kind, tool_name, tools_json,
-               display_cells_json, updated_at, revision, origin,
-               sender_agent_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(message_id) DO NOTHING""",
-        (
-            msg_id, agent_id, backend_session_id, msg_id,
-            seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
-            timestamp_ms, revision, MARKER_ORIGIN, None,
-        ),
-    )
-    if inserted.rowcount != 1:
-        return None
-    database.execute(
-        """INSERT INTO conversation_heads (
-               agent_id, backend_session_id, revision, replace_revision
-           ) VALUES (?, ?, ?, 0)
-           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-               revision = MAX(conversation_heads.revision, excluded.revision)""",
-        (agent_id, backend_session_id, revision),
-    )
+    with _row_with_its_head(database):
+        revision = _next_revision(database)
+        inserted = database.execute(
+            """INSERT INTO messages (
+                   message_id, agent_id, backend_session_id, source_file, seq,
+                   role, timestamp, text, kind, tool_name, tools_json,
+                   display_cells_json, updated_at, revision, origin,
+                   sender_agent_id
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(message_id) DO NOTHING""",
+            (
+                msg_id, agent_id, backend_session_id, msg_id,
+                seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
+                timestamp_ms, revision, MARKER_ORIGIN, None,
+            ),
+        )
+        if inserted.rowcount != 1:
+            return None
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, backend_session_id, revision),
+        )
     return {"id": msg_id, "role": "assistant", "timestamp": timestamp,
             "text": text, "origin": MARKER_ORIGIN, "revision": revision}
 
@@ -488,31 +517,32 @@ def record_dream_digest(*, agent_id: str, backend_session_id: str,
     seq = min(int(row["next_seq"]), -1)
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
-    revision = _next_revision(database)
-    inserted = database.execute(
-        """INSERT INTO messages (
-               message_id, agent_id, backend_session_id, source_file, seq,
-               role, timestamp, text, kind, tool_name, tools_json,
-               display_cells_json, updated_at, revision, origin,
-               sender_agent_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(message_id) DO NOTHING""",
-        (
-            msg_id, agent_id, backend_session_id, f"dream:{run_id}",
-            seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
-            timestamp_ms, revision, "dreaming", None,
-        ),
-    )
-    if inserted.rowcount != 1:
-        return None
-    database.execute(
-        """INSERT INTO conversation_heads (
-               agent_id, backend_session_id, revision, replace_revision
-           ) VALUES (?, ?, ?, 0)
-           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-               revision = MAX(conversation_heads.revision, excluded.revision)""",
-        (agent_id, backend_session_id, revision),
-    )
+    with _row_with_its_head(database):
+        revision = _next_revision(database)
+        inserted = database.execute(
+            """INSERT INTO messages (
+                   message_id, agent_id, backend_session_id, source_file, seq,
+                   role, timestamp, text, kind, tool_name, tools_json,
+                   display_cells_json, updated_at, revision, origin,
+                   sender_agent_id
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(message_id) DO NOTHING""",
+            (
+                msg_id, agent_id, backend_session_id, f"dream:{run_id}",
+                seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
+                timestamp_ms, revision, "dreaming", None,
+            ),
+        )
+        if inserted.rowcount != 1:
+            return None
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, backend_session_id, revision),
+        )
     return {
         "id": msg_id, "role": "assistant", "timestamp": timestamp,
         "text": text, "origin": "dreaming", "revision": revision,

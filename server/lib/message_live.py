@@ -13,7 +13,7 @@ from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
-from .message_writes import _facade, _latest_user_provenance, _next_revision
+from .message_writes import _facade, _latest_user_provenance, _next_revision, _row_with_its_head
 
 
 def _live_message_id(agent_id: str, backend_session_id: str, trace_id: str,
@@ -356,24 +356,25 @@ def delete_live_assistant_message(*, agent_id: str, backend_session_id: str,
             WHERE agent_id=? AND backend_session_id=? AND source_file=?
               AND message_id<>?""",
         (agent_id, backend_session_id, f"live:{trace_id or msg_id}", msg_id)).fetchall()]
-    deleted = database.execute(
-        f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(ids))})"
-        " AND source_file LIKE 'live:%'", ids).rowcount
-    if not deleted:
-        return False
-    revision = _next_revision(database)
-    database.execute(
-        """INSERT INTO conversation_heads (
-               agent_id, backend_session_id, revision, replace_revision
-           ) VALUES (?, ?, ?, ?)
-           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-               revision = MAX(conversation_heads.revision, excluded.revision),
-               replace_revision = MAX(
-                   conversation_heads.replace_revision,
-                   excluded.replace_revision
-               )""",
-        (agent_id, backend_session_id, revision, revision),
-    )
+    with _row_with_its_head(database):
+        deleted = database.execute(
+            f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(ids))})"
+            " AND source_file LIKE 'live:%'", ids).rowcount
+        if not deleted:
+            return False
+        revision = _next_revision(database)
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, ?)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision),
+                   replace_revision = MAX(
+                       conversation_heads.replace_revision,
+                       excluded.replace_revision
+                   )""",
+            (agent_id, backend_session_id, revision, revision),
+        )
     return True
 
 
@@ -466,6 +467,16 @@ def _rewrite_streamed_row(agent_id: str, backend_session_id: str, trace_id: str,
         if not changed:
             database.execute("ROLLBACK")
             return None
+        # The head with the row: the caller raises it again when it settles
+        # the row, but gives up before that when a newer turn has opened, and
+        # the row's new words would then stand above their head (issue 371).
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision=MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, backend_session_id, revision))
         database.execute("COMMIT")
     except Exception:
         database.execute("ROLLBACK")
