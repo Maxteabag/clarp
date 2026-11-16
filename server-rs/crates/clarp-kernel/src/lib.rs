@@ -25,5 +25,6 @@ pub mod recovery;
 pub mod requests;
 pub mod roster;
 pub mod said;
+pub mod spoken;
 pub mod tools;
 pub mod turn;

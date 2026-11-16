@@ -27,7 +27,7 @@ pub struct Sender {
 }
 
 /// A message to the agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     /// For a message from an app: `u-` and the id the app minted, so that the bubble the app
     /// painted and this item are the same thing.
@@ -41,6 +41,16 @@ pub struct Message {
     /// The app that sent it, when it said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
+    /// What the agent answers is said aloud: the parts of its replies it marks for the ear.
+    /// So it is for what a person sends, unless the app says otherwise; for anything else
+    /// only when it is asked for.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub speak: bool,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(truth: &bool) -> bool {
+    !*truth
 }
 
 /// One message of the agent's tool, once that message is whole: what the agent said in it,
@@ -335,6 +345,7 @@ mod tests {
                 trace_id: None,
                 sender: None,
                 client: Some("desktop".to_string()),
+                ..Message::default()
             }),
             Entry::Reply(Reply {
                 origin: Origin::Trigger {

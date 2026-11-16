@@ -15,6 +15,7 @@ use clarp_backend::scripted::Scripted;
 use clarp_codec::standard_set;
 use clarp_kernel::conversation::{Entry, Message, ToolStatus};
 use clarp_kernel::journal::kind;
+use clarp_kernel::spoken::{CUT_OFF, LineState};
 use clarp_kernel::turn::{Admission, Origin, Outcome, TurnId};
 use clarp_ports::log::LogEngine;
 use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolWriter};
@@ -178,6 +179,7 @@ fn message(id: &str, text: &str) -> Message {
         trace_id: None,
         sender: None,
         client: None,
+        ..Message::default()
     }
 }
 
@@ -907,6 +909,195 @@ fn only_an_interrupted_turn_changes_what_its_tools_left_unfinished() {
             row("r-a", "agent: ", "t1 Running", false, "completed"),
         ]
     );
+}
+
+/// The agent's lines as they stand: each line's id, what is said, and where it stands.
+fn lines(actor: &Actor) -> Vec<(String, String, LineState)> {
+    let lines = actor.speech().lines().iter();
+    lines
+        .map(|line| (line.id.clone(), line.text.clone(), line.state))
+        .collect()
+}
+
+fn line(id: &str, text: &str, state: LineState) -> (String, String, LineState) {
+    (id.to_string(), text.to_string(), state)
+}
+
+#[test]
+fn what_a_reply_marks_for_the_ear_waits_to_be_spoken_and_goes_one_way() {
+    let mut world = World::new("spoken");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    // A message whose answers are said aloud.
+    let now = world.tick();
+    let aloud = Message {
+        speak: true,
+        ..message("u-1", "go")
+    };
+    let (_, out) = actor.send(&aloud, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert!(actor.speech().lines().is_empty());
+
+    // The agent says something for the eye and something for the ear, and calls a tool.
+    // What it marked waits to be spoken from the moment the reply is in the conversation.
+    claude_message(
+        &mut world,
+        1,
+        "a",
+        "Looking. <speak>I will look.</speak>",
+        &["t1"],
+    );
+    let seen = world.hint(&mut actor);
+    assert!(seen.changed.speech && seen.changed.conversation);
+    assert_eq!(
+        lines(&actor),
+        [line("s-a-1", "I will look.", LineState::Queued)]
+    );
+    let queued = &actor.speech().lines()[0];
+    assert_eq!(
+        (queued.reply.as_str(), queued.turn, queued.first),
+        ("r-a", 1, true)
+    );
+
+    // An engine takes it: one line of an agent at a time.
+    let now = world.tick();
+    let taken = actor.claim_line(now).unwrap().unwrap();
+    assert_eq!(
+        (taken.id.as_str(), taken.state),
+        ("s-a-1", LineState::Speaking)
+    );
+    assert!(actor.claim_line(now).unwrap().is_none());
+    let begun = actor
+        .line_begun("s-a-1", (41, "1000__maximus.mp3"), ("gemini", "Kore"), now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(begun.clip_id, Some(41));
+    assert!(
+        actor
+            .line_begun("s-nothing", (42, "x.mp3"), ("gemini", "Kore"), now)
+            .unwrap()
+            .is_none()
+    );
+
+    // Meanwhile the turn goes on and says more for the ear: it waits behind the first.
+    claude_returns(&mut world, 1, "t1", "a.txt", false);
+    claude_message(&mut world, 1, "c", "<speak>One file.</speak> Done.", &[]);
+    world.says(
+        1,
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Done."}"#,
+    );
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        lines(&actor),
+        [
+            line("s-a-1", "I will look.", LineState::Speaking),
+            line("s-c-1", "One file.", LineState::Queued),
+        ]
+    );
+    assert!(actor.claim_line(world.tick()).unwrap().is_none());
+
+    // The clip is whole, and the app says it played it.
+    let now = world.tick();
+    let spoken = actor.line_ended("s-a-1", Ok(2_048), now).unwrap().unwrap();
+    assert_eq!(
+        (spoken.state, spoken.bytes),
+        (LineState::Spoken, Some(2_048))
+    );
+    assert!(
+        actor.line_ended("s-a-1", Ok(1), now).unwrap().is_none(),
+        "over once"
+    );
+    assert!(actor.line_played(41, "play-ok", None, now).unwrap());
+    assert!(
+        !actor.line_played(99, "play-ok", None, now).unwrap(),
+        "nobody's clip"
+    );
+    assert_eq!(
+        actor.speech().by_clip(41).unwrap().played.as_deref(),
+        Some("play-ok")
+    );
+
+    // The next line is taken, and the Host goes away while it is being spoken, for long.
+    let taken = actor.claim_line(world.tick()).unwrap().unwrap();
+    assert_eq!(taken.id, "s-c-1");
+    drop(actor);
+    world.now_ms += 3 * 60 * 1_000;
+    let actor = world.open();
+    // What was spoken is still spoken; what was cut off long ago is not begun again.
+    assert_eq!(
+        lines(&actor),
+        [
+            line("s-a-1", "I will look.", LineState::Spoken),
+            line("s-c-1", "One file.", LineState::Failed),
+        ]
+    );
+    assert_eq!(actor.speech().lines()[1].error.as_deref(), Some(CUT_OFF));
+    // What is in the conversation is as it was: speech is beside it, not in it.
+    assert_eq!(
+        chat(&actor.tail(10).unwrap())
+            .iter()
+            .map(|row| row.0.as_str())
+            .collect::<Vec<_>>(),
+        ["u-1", "r-a", "r-c"]
+    );
+}
+
+#[test]
+fn a_line_cut_off_a_moment_ago_waits_again_and_a_stop_takes_back_what_waits() {
+    let mut world = World::new("spoken-again");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    let now = world.tick();
+    let aloud = Message {
+        speak: true,
+        ..message("u-1", "go")
+    };
+    let (_, out) = actor.send(&aloud, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    let said = "<speak>First part.</speak> And <speak>second part.</speak>";
+    claude_message(&mut world, 1, "a", said, &[]);
+    world.hint(&mut actor);
+    assert_eq!(
+        lines(&actor),
+        [
+            line("s-a-1", "First part.", LineState::Queued),
+            line("s-a-2", "second part.", LineState::Queued),
+        ]
+    );
+    // An engine takes the first, and the Host is started again a moment later.
+    actor.claim_line(world.tick()).unwrap().unwrap();
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(
+        lines(&actor),
+        [
+            line("s-a-1", "First part.", LineState::Queued),
+            line("s-a-2", "second part.", LineState::Queued),
+        ],
+        "begun a moment ago: it waits again"
+    );
+    // The user stops the agent: nothing more of what it had to say is spoken.
+    let (_, out) = actor.stop("user", world.tick()).unwrap();
+    assert!(out.changed.speech);
+    world.carry_out(&mut actor, out);
+    assert_eq!(
+        lines(&actor),
+        [
+            line("s-a-1", "First part.", LineState::Dropped),
+            line("s-a-2", "second part.", LineState::Dropped),
+        ]
+    );
+    assert!(actor.claim_line(world.tick()).unwrap().is_none());
+
+    // A message whose answers are not said aloud: what its replies mark is read, not heard.
+    let mut quiet = World::new("spoken-quiet");
+    quiet.backend = Arc::new(Claude::new());
+    let mut actor = quiet.open();
+    quiet.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_message(&mut quiet, 1, "a", "<speak>Not aloud.</speak>", &[]);
+    let seen = quiet.hint(&mut actor);
+    assert!(!seen.changed.speech && actor.speech().lines().is_empty());
 }
 
 /// Two messages, the second sent while the first turn runs; a tool call; replies in pieces.

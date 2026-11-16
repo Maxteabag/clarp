@@ -1345,6 +1345,7 @@ impl Worker {
                         trace_id: Some(request_id),
                         sender: None,
                         client: None,
+                        ..Message::default()
                     };
                     // Left for the agent, as the Python Host leaves it: it goes through the
                     // queue, where an app shows it while it waits. A hold that was placed
