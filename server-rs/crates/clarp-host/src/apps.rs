@@ -581,6 +581,38 @@ async fn set_explanations(
     Ok(Json(explanations_told(&app)))
 }
 
+/// How many of the things an app asks about in one request are answered for.
+const EXPLAINED_AT_ONCE: usize = 8;
+
+/// `POST /tool-explanations`: an app asks for the use of tools to be explained in plain
+/// words. Nothing explains here, so it is answered as the Python Host answers where its
+/// owner turned explaining off: each thing that was asked about, the first eight, as
+/// `disabled`, and no model named. An app then shows the tool's own command.
+async fn explain(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
+    // Nothing at all is an empty object, as on the Python Host.
+    let asked = match serde_json::from_slice::<Value>(&body) {
+        _ if body.is_empty() => json!({}),
+        Ok(asked @ Value::Object(_)) => asked,
+        _ => return Err(bad("object required")),
+    };
+    let directory = app.fleet.directory();
+    let session = asked["session"].as_str();
+    if !session.is_some_and(|session| directory.named(session).is_some()) {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "agent not found"));
+    }
+    let items = asked["items"].as_array().map_or(&[][..], Vec::as_slice);
+    let first = items.iter().take(EXPLAINED_AT_ONCE);
+    let answered: Vec<Value> = first
+        .filter(|item| item.is_object())
+        .map(|item| json!({ "id": item["id"], "status": "disabled" }))
+        .collect();
+    Ok(Json(json!({
+        "detail_level": asked["detail_level"],
+        "model": "",
+        "items": answered,
+    })))
+}
+
 /// Whether agents are told how they speak, as an app is told it.
 fn personalities_told(app: &App) -> Value {
     let directory = app.fleet.directory();
@@ -774,6 +806,7 @@ pub fn routes() -> Router<App> {
             "/tool-explanations/settings",
             get(explanations).post(set_explanations),
         )
+        .route("/tool-explanations", post(explain))
         .route(
             "/controller-actions",
             get(controller_actions).post(no_controller_actions),
