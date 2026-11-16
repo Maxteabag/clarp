@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shutil
 from lib.outdated_clients import _note_outdated_client
 from lib import health
@@ -14,6 +15,25 @@ from lib import identity
 from lib.log import log_exception
 from lib.herald import DEFAULT_SPEAK_IF_SHORT_CHARS, MAX_SPEAK_IF_SHORT_CHARS, get_settings as get_herald_settings, update_settings as update_herald_settings
 from lib.personalities import get_settings as get_personality_settings, update_settings as update_personality_settings
+
+
+def _named_user_miss(raw: str) -> bool:
+    """Classify a typed ~user miss without supplying a recovered path."""
+    if not raw.startswith("~"):
+        return False
+    path = pathlib.Path(raw)
+    username = path.parts[0][1:]
+    if not username:  # ~ and ~/ use the Host account, whose failures must log.
+        return False
+    if "\0" in username:
+        return True
+    try:
+        path.expanduser()
+    except RuntimeError:
+        # expanduser cannot resolve this named user. No recovery/home work
+        # is in this catch; its failures retain the handler's diagnostics.
+        return True
+    return False
 
 
 class SettingsRoutes:
@@ -96,11 +116,11 @@ class SettingsRoutes:
         # the question is read before the path is recovered.
         inside = raw.endswith("/")
         try:
-            recovered = recover_user_path(raw)
+            recovered = None if _named_user_miss(raw) else recover_user_path(raw)
         except (OSError, RuntimeError) as e:
-            # A refused path or an unknown ~user: an answer with nothing in
-            # it, not a closed connection (expanduser raises RuntimeError).
             log_exception("dirsPathRefused", e, detail=raw[:200])
+            recovered = None
+        if recovered is None:
             self._send(200, json.dumps({"base": raw, "matches": []}).encode(), "application/json")
             return
         raw = str(recovered)
