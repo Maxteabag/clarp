@@ -32,6 +32,7 @@ use crate::config::Config;
 use crate::edge::App;
 use crate::ids;
 use crate::media::header_text;
+use crate::owner::OwnerFile;
 
 /// How long an answer is kept for a request that may come again.
 const KEPT_FOR: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -43,110 +44,6 @@ const WAITS: Duration = Duration::from_secs(10);
 /// How many of the fleet's names an engine is asked to listen for.
 const NAMES: usize = 40;
 
-/// The text that `key` has in the table `[table]` of a file written in TOML, when it has a
-/// plain one there. This reads as much of TOML as a key in a table takes: tables in
-/// brackets, a value in double quotes with its escapes, or in single quotes as it stands.
-pub fn text_in(file: &str, table: &str, key: &str) -> Option<String> {
-    let mut inside = false;
-    for line in file.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix('[') {
-            // `[[name]]` begins a list of tables, which holds no key of ours.
-            let named = rest.split(']').next().map(str::trim);
-            inside = !rest.starts_with('[') && named == Some(table);
-            continue;
-        }
-        if !inside {
-            continue;
-        }
-        let Some((name, value)) = line.split_once('=') else {
-            continue;
-        };
-        if name.trim().trim_matches('"') == key {
-            return plain(value.trim());
-        }
-    }
-    None
-}
-
-/// A value of TOML that is one plain text on one line.
-fn plain(value: &str) -> Option<String> {
-    if let Some(rest) = value.strip_prefix('\'') {
-        // Three quotes begin a text of several lines, which no key is.
-        if rest.starts_with("''") {
-            return None;
-        }
-        return rest.split_once('\'').map(|(text, _)| text.to_string());
-    }
-    let rest = value.strip_prefix('"')?;
-    if rest.starts_with("\"\"") {
-        return None;
-    }
-    let mut out = String::new();
-    let mut signs = rest.chars();
-    while let Some(sign) = signs.next() {
-        match sign {
-            '"' => return Some(out),
-            '\\' => {
-                let escaped = signs.next()?;
-                let digits = match escaped {
-                    'u' => 4,
-                    'U' => 8,
-                    _ => 0,
-                };
-                if digits > 0 {
-                    let code: String = signs.by_ref().take(digits).collect();
-                    let sign = u32::from_str_radix(&code, 16).ok().and_then(char::from_u32);
-                    out.push(sign.filter(|_| code.len() == digits)?);
-                    continue;
-                }
-                out.push(match escaped {
-                    'n' => '\n',
-                    't' => '\t',
-                    'r' => '\r',
-                    'b' => '\u{8}',
-                    'f' => '\u{c}',
-                    '"' => '"',
-                    '\\' => '\\',
-                    _ => return None,
-                });
-            }
-            other => out.push(other),
-        }
-    }
-    None // never closed
-}
-
-/// Where the keys of engines that are reached over the network are found: a file of the
-/// Python Host's kind first, this Host's own environment after it. A key is read when a clip
-/// is to be heard and kept nowhere, so what the owner changes there is what is used next,
-/// and no key is copied into this Host.
-#[derive(Debug, Clone, Default)]
-pub struct Keys {
-    file: Option<PathBuf>,
-}
-
-impl Keys {
-    pub fn new(file: Option<PathBuf>) -> Self {
-        Self { file }
-    }
-
-    /// The key of this provider, when there is one.
-    pub fn of(&self, provider: &str) -> Option<String> {
-        let variable = match provider {
-            "elevenlabs" => "ELEVEN_API_KEY",
-            _ => return None,
-        };
-        let written = self
-            .file
-            .as_ref()
-            .and_then(|file| std::fs::read_to_string(file).ok())
-            .and_then(|text| text_in(&text, provider, "api_key"))
-            .filter(|key| !key.is_empty());
-        written.or_else(|| std::env::var(variable).ok().filter(|key| !key.is_empty()))
-    }
-}
-
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
@@ -154,7 +51,8 @@ pub struct Ears {
     own: Option<(Arc<dyn Listener>, String)>,
     /// ElevenLabs Scribe, which is there when its key is.
     scribe: Arc<dyn Listener>,
-    keys: Keys,
+    /// Where keys are read: the owner's own file, then this Host's environment.
+    keys: OwnerFile,
     /// The engine that hears a clip nobody named one for: `local`, or a cloud engine's name.
     engine: String,
     /// The language that is spoken to this Host's agents.
@@ -188,9 +86,9 @@ impl Ears {
             let engine: Arc<dyn Listener> = Arc::new(whisper);
             (engine, config.whisper_model.clone())
         });
-        let keys = Keys::new(config.speech_keys.clone());
+        let keys = OwnerFile::new(config.speech_keys.clone());
         let read = keys.clone();
-        let mut scribe = Scribe::new("scribe_v2", Box::new(move || read.of("elevenlabs")));
+        let mut scribe = Scribe::new("scribe_v2", Box::new(move || read.key("elevenlabs")));
         if !config.scribe_endpoint.is_empty() {
             scribe = scribe.at(config.scribe_endpoint.clone());
         }
@@ -214,7 +112,7 @@ impl Ears {
     /// Whether a provider's engines can be used on this Host: it is built here and has
     /// its key.
     fn has(&self, provider: &str) -> bool {
-        provider == "elevenlabs" && self.keys.of(provider).is_some()
+        provider == "elevenlabs" && self.keys.key(provider).is_some()
     }
 
     /// Which engine hears a clip for which the app asked for `requested` (nothing: whatever
@@ -253,7 +151,7 @@ impl Ears {
             // An engine the contract lists and this Host does not have.
             return Err((StatusCode::BAD_REQUEST, heard::not_installed(&model)));
         }
-        if self.keys.of(provider.id).is_none() {
+        if self.keys.key(provider.id).is_none() {
             let no_key = format!("{} API key is not configured", provider.id);
             return Err((StatusCode::INTERNAL_SERVER_ERROR, no_key));
         }
@@ -570,82 +468,4 @@ pub fn routes() -> Router<App> {
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
         .route("/transcription-providers", get(providers))
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_key_is_read_from_its_table_of_a_file_in_toml() {
-        let file = r#"
-# The Python Host's own file, as much of it as matters here.
-[server]
-api_key = "the server's, which is another"
-
-[elevenlabs]  # speech
-model = 'eleven_v3'
-api_key = "sk_\"quoted\"\\ and é \n end" # the key
-speed = 1.1
-
-[[voices]]
-api_key = "in a list of tables"
-
-[whisper]
-model = "small.en"
-compute = 'int8'
-enabled = true
-"#;
-        assert_eq!(
-            text_in(file, "elevenlabs", "api_key").as_deref(),
-            Some("sk_\"quoted\"\\ and \u{e9} \n end")
-        );
-        assert_eq!(
-            text_in(file, "elevenlabs", "model").as_deref(),
-            Some("eleven_v3")
-        );
-        assert_eq!(
-            text_in(file, "whisper", "model").as_deref(),
-            Some("small.en")
-        );
-        assert_eq!(text_in(file, "whisper", "compute").as_deref(), Some("int8"));
-        // What is no plain text is none: a number, a truth, a table that is not there.
-        assert_eq!(text_in(file, "elevenlabs", "speed"), None);
-        assert_eq!(text_in(file, "whisper", "enabled"), None);
-        assert_eq!(text_in(file, "voices", "api_key"), None);
-        assert_eq!(text_in(file, "deepgram", "api_key"), None);
-        assert_eq!(text_in("[a]\nkey = \"never closed", "a", "key"), None);
-        assert_eq!(
-            text_in("[a]\nkey = \"\"\"several\nlines\"\"\"", "a", "key"),
-            None
-        );
-        assert_eq!(
-            text_in("[a]\n\"key\" = \"quoted name\"", "a", "key").as_deref(),
-            Some("quoted name")
-        );
-        assert_eq!(
-            text_in("key = \"before any table\"\n[a]\n", "a", "key"),
-            None
-        );
-    }
-
-    #[test]
-    fn a_key_is_read_from_the_file_each_time_it_is_needed() {
-        let dir = std::env::temp_dir().join(format!("clarp-keys-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("config.toml");
-        std::fs::write(&file, "[elevenlabs]\napi_key = \"from-the-file\"\n").unwrap();
-        let keys = Keys::new(Some(file.clone()));
-        assert_eq!(keys.of("elevenlabs").as_deref(), Some("from-the-file"));
-        assert_eq!(
-            keys.of("deepgram"),
-            None,
-            "an engine this Host does not have"
-        );
-        // The owner changes the key: the next clip is heard with the new one.
-        std::fs::write(&file, "[elevenlabs]\napi_key = \"changed\"\n").unwrap();
-        assert_eq!(keys.of("elevenlabs").as_deref(), Some("changed"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
