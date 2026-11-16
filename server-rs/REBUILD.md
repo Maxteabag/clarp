@@ -595,9 +595,17 @@ The snapshot lists the personas this Host has built in (`personas`: a name, its 
 it speaks, the kind of tool it belongs to) and offers their names before the agents' (`roster`). They are the
 Python Host's lists, carried as data, with the owner's file adding to them by that Host's rules
 (`personas.rs`, held by what the Python Host lists under three made-up owner's files, each asked in a room of
-its own). Their order is this Host's own, the roster's. On the owner's Host that is 84 of his 93. Not there: a
-persona the owner makes himself (nine of the 93), a picture an agent chose itself (eleven of his 180 agents),
-the janitors' pictures, and the making of pictures.
+its own). Their order is this Host's own, the roster's. On the owner's Host that is 84 of his 93. The other
+nine are the owner's own, and that is built too: he makes a persona (`POST /personas`), changes it
+(`POST /personas/update`) and removes it (`DELETE /personas/<name>`), and it has a picture of its own
+(`GET /persona-avatars/<id>`, with the token, as on the Python Host). A persona whose maker names no voice is
+given the first voice of Cartesia's that no agent and no persona has. Of a persona that is built in only the
+look can be changed. The rules are the kernel's (`personas.rs`, `Book`), held by 28 steps recorded from the
+Python Host's own functions in two rooms: what it answers, what it refuses and in which words, what is made
+or changed afterwards, and the voice the next persona would be given. The fleet keeps what the owner made
+(tables `persona` and `persona-look`; a picture is kept once, under its digest, beside what agents publish)
+and tells the apps (`agent-roster`: `persona-created`, `persona-updated`, `persona-deleted`). Not there: a
+picture an agent chose itself (eleven of his 180 agents), the janitors' pictures, and the making of pictures.
 
 **An agent's tool is told who the agent is, and how to speak** (16 Nov 2026). Found by reading for the
 personas, not by a run: until this build the Host handed a tool the user's words and nothing else. An agent

@@ -447,11 +447,12 @@ HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 # one is compared; which moment it was is not.
 CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at',
                         'helper_completed_at'})
-# The ids a Host gives to what agents make and ask. Under their own keys the harness's
-# normalizer names them by the order they appear in (`artifact-<id:1>`). They are also in the
-# paths a client calls (`/decisions/<id>/resolve`) and in what an agent is told and says back
-# (`Decision ID: ...`), and there the normalizer leaves them: hex in free text is content to it.
-ISSUED = re.compile(r'^(?:artifact|decision)-[0-9a-f]{12,64}$')
+# The ids a Host gives to what agents make and ask, and to a persona its owner makes. Under their
+# own keys the harness's normalizer names them by the order they appear in (`artifact-<id:1>`).
+# They are also in the paths a client calls (`/decisions/<id>/resolve`), in what an agent is told
+# and says back (`Decision ID: ...`) and in where a persona's own picture is fetched
+# (`avatar_url`), and there the normalizer leaves them: hex in free text is content to it.
+ISSUED = re.compile(r'^(?:artifact|decision|persona)-[0-9a-f]{12,64}$')
 # An id a preview cut short: `Decision ID: decision-7be0a016ae…`.
 CUT_ID = re.compile(r'((?:artifact|decision)-[0-9a-f]{4,})…$')
 # The id a Host gives a file an agent published: `asset_` and twenty-four signs of an alphabet
