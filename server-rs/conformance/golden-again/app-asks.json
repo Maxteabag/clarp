@@ -5824,7 +5824,7 @@
        "tint_dark": "#c0caf5",
        "tint_light": "#3c4257"
       },
-      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"cd54f183-a273-47dd-9c11-cff884567f2b\"}",
+      "cli_version": "{\"type\": \"thread.started\", \"thread_id\": \"17c0d5cd-449a-4444-957e-69706e11f26a\"}",
       "cli_version_source": {
        "detail": "<ROOT>/provider/fake-codex --version",
        "freshness": "fresh",

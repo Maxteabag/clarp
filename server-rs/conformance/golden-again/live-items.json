@@ -2208,21 +2208,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "shown-1",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -2669,6 +2654,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "shown-1",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -3039,27 +3039,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "detail": {
-     "backend_session_id": "<id:4>",
-     "dispatch": "claude",
-     "origin": "user",
-     "source": "pwa",
-     "trace_id": "<id:3>"
-    },
-    "event_id": "<eid:agent-state#1@0952e1>",
-    "kind": "thinking",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -3080,29 +3059,6 @@
    },
    "event": null,
    "id": null
-  },
-  {
-   "data": {
-    "action": "thinking",
-    "agent_id": "<id:1>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#2@0952e1>",
-    "file_path": "",
-    "kind": "thinking",
-    "persona": "Claire",
-    "phase": "thinking",
-    "session": "claire",
-    "started_at_ms": null,
-    "state": "thinking",
-    "status": "running",
-    "summary": "Thinking",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": "<time>",
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#2@0952e1>"
   },
   {
    "data": {
@@ -3146,26 +3102,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "detail": {
-     "dispatch": "claude",
-     "origin": "user",
-     "phase": "thinking",
-     "trace_id": "<id:3>"
-    },
-    "event_id": "<eid:agent-state#3@0952e1>",
-    "kind": "thinking",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#3@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -3203,6 +3139,70 @@
    },
    "event": null,
    "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "backend_session_id": "<id:4>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:3>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "dispatch": "claude",
+     "origin": "user",
+     "phase": "thinking",
+     "trace_id": "<id:3>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
   },
   {
    "data": {

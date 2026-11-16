@@ -260,15 +260,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 6,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      }
     ]
    },
@@ -2105,15 +2097,7 @@
       "tool_details_available": false,
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 6,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      }
     ]
    },
@@ -2429,15 +2413,7 @@
       "tool_details_available": false,
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 6,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      },
      {
       "activity_count": 0,
@@ -2794,15 +2770,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 6,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      },
      {
       "automated": false,
@@ -2948,21 +2916,6 @@
   {
    "data": {
     "agent_id": "<id:9>",
-    "client_msg_id": "tools-1",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:9>",
     "detail": {
      "backend_session_id": "<id:2>",
      "dispatch": "claude",
@@ -3003,6 +2956,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:9>",
+    "client_msg_id": "tools-1",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -3064,7 +3032,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "<row:6>",
+    "source_message_id": "<a row the conversation does not have>",
     "type": "user-notification",
     "unread": true
    },

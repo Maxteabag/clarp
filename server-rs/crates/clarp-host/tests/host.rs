@@ -2981,6 +2981,147 @@ impl StandInRelay {
 }
 
 #[test]
+fn a_push_shows_the_face_of_the_agent_it_is_about() {
+    let relay = StandInRelay::start();
+    let place = Place::new("push-faces");
+    let pictures = place.root.join("static");
+    std::fs::create_dir_all(pictures.join("avatars")).unwrap();
+    std::fs::write(pictures.join("avatars/echo.png"), b"a picture of Echo").unwrap();
+    let host = place.start_with(
+        "the-administrators-token",
+        &[
+            "--push-relay",
+            &format!("http://{}", relay.address),
+            "--static",
+            pictures.to_str().unwrap(),
+        ],
+    );
+    let (phone, _) = pair(&host, "Phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    // The phone says where it reaches this Host: a face is fetched from there.
+    let at = "https://host.example:7690";
+    let registered = host.ask_as(
+        &phone,
+        "POST",
+        "/devices",
+        Some(&json!({
+            "token": "a1".repeat(32), "session": "echo", "push_grant": grant, "base_url": at,
+        })),
+    );
+    assert_eq!(registered, (200, json!({ "ok": true })));
+    let echo = host.new_agent("Echo");
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Pictured", "backend": "scripted", "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU=" }),
+    );
+    let pictured = made["session"].as_str().unwrap().to_string();
+    let agent_id = |session: &str| -> String {
+        let agents = host.get("/agents/snapshot")["agents"].clone();
+        let found = agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned();
+        found.unwrap()["agent_id"].as_str().unwrap().to_string()
+    };
+    // What the relay was sent about a turn that ended on this.
+    let pushed = |text: &str| -> Option<Value> {
+        relay
+            .taken()
+            .iter()
+            .map(|(_, _, body)| body["notifications"][0]["payload"].clone())
+            .find(|payload| payload["aps"]["alert"]["body"] == text)
+    };
+
+    // An agent with no picture of its own shows the one this Host ships for its name, which
+    // anybody may fetch.
+    host.send(&echo, "the build is green", "m1");
+    wait_for("the push about Echo", || {
+        pushed("the build is green").is_some()
+    });
+    let payload = pushed("the build is green").unwrap();
+    let face = payload["avatar_url"].as_str().unwrap();
+    assert!(
+        face.starts_with(&format!("{at}/static/avatars/echo.png?v=")),
+        "{face}"
+    );
+    assert!(
+        payload.get("avatar_custom").is_none(),
+        "the picture is not the agent's own: {payload}"
+    );
+    let shipped = fetch(&host, "", "GET", face.strip_prefix(at).unwrap(), &[], b"");
+    assert_eq!(
+        (shipped.status, shipped.text().as_str()),
+        (200, "a picture of Echo")
+    );
+
+    // An agent with a picture of its own shows that, by an address this Host signed: for
+    // this agent, for this picture, for a day. It opens without a token, and by nothing else.
+    host.send(&pictured, "the tests ran", "m2");
+    wait_for("the push about the agent with a picture", || {
+        pushed("the tests ran").is_some()
+    });
+    let payload = pushed("the tests ran").unwrap();
+    assert_eq!(payload["avatar_custom"], true);
+    let face = payload["avatar_url"].as_str().unwrap();
+    let path = face.strip_prefix(at).unwrap();
+    let of_pictured = agent_id(&pictured);
+    assert!(
+        path.starts_with(&format!("/notification-avatars/{of_pictured}?v=")),
+        "{face}"
+    );
+    let (unsigned, signature) = path.rsplit_once("&sig=").unwrap();
+    let (_, expires_at) = unsigned.rsplit_once("&exp=").unwrap();
+    let day = 86_400;
+    let good_for = expires_at.parse::<i64>().unwrap() - now_ms() / 1_000;
+    assert!(
+        (day - 120..=day).contains(&good_for),
+        "good for a day: {good_for} s"
+    );
+    let fetched = fetch(&host, "", "GET", path, &[], b"");
+    assert_eq!(
+        (fetched.status, fetched.text().as_str()),
+        (200, "a made-up picture")
+    );
+    assert_eq!(fetched.header("content-type"), "image/jpeg");
+    let refused = |path: &str| {
+        let answer = fetch(&host, "", "GET", path, &[], b"");
+        (answer.status, answer.text())
+    };
+    let forbidden = (403, "forbidden".to_string());
+    // Another signature, a later day under the same signature, another picture, or nothing.
+    let other = format!("{unsigned}&sig={}", "0".repeat(signature.len()));
+    assert_eq!(refused(&other), forbidden);
+    let later = path.replace(
+        &format!("&exp={expires_at}"),
+        &format!("&exp={}", expires_at.parse::<i64>().unwrap() + 1),
+    );
+    assert_eq!(refused(&later), forbidden);
+    let (before, after) = path.split_once("?v=").unwrap();
+    let another = format!("{before}?v=0000000000000000{}", &after[16..]);
+    assert_eq!(refused(&another), forbidden);
+    assert_eq!(
+        refused(&format!("/notification-avatars/{of_pictured}")),
+        forbidden
+    );
+    // The signature is for one agent: it opens nobody else's, and an agent with no picture
+    // of its own has none to open.
+    let of_echo = agent_id(&echo);
+    assert_eq!(
+        refused(&path.replace(&of_pictured, &of_echo)),
+        (404, "not found".to_string())
+    );
+    // Only a fetch is open: nothing is sent to that address without the token.
+    assert_eq!(fetch(&host, "", "POST", path, &[], b"").status, 401);
+}
+
+#[test]
 fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     let relay = StandInRelay::start();
     let place = Place::new("push");
