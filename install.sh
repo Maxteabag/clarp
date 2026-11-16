@@ -440,6 +440,14 @@ temporary = destination.with_name(f".{destination.name}.next")
 temporary.write_text(
     "#!/bin/sh\n"
     "# managed-by-clarp\n"
+    'if [ -n "${CLARP_HOST_ADDR:-}" ]; then\n'
+    f'  clarp_tool="${{CLARP_SHARE_DIR:-}}/tools/"{shlex.quote(destination.name)}\n'
+    '  if [ -n "${CLARP_SHARE_DIR:-}" ] && [ -f "$clarp_tool" ] && [ -x "$clarp_tool" ] && ! [ "$clarp_tool" -ef "$0" ]; then\n'
+    '    exec "$clarp_tool" "$@"\n'
+    '  fi\n'
+    f"  printf '%s\\n' {shlex.quote(destination.name + ': this turn belongs to another Clarp Host')} >&2\n"
+    '  exit 69\n'
+    'fi\n'
     f"export CLARP_SHARE_DIR={shlex.quote(str(share))}\n"
     f"export CLARP_CONFIG_DIR={shlex.quote(str(config))}\n"
     f"export CLARP_CACHE_DIR={shlex.quote(str(cache))}\n"
