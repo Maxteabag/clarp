@@ -579,6 +579,17 @@ async fn set_humanness(
     Ok(Json(humanness_kept(&app).told()))
 }
 
+/// `GET /dirs?path=`: the directories a path that is being typed can go on with, for the
+/// field an app has for where an agent works.
+async fn dirs(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
+    let asked = query.get("path").cloned().unwrap_or_default();
+    let looked = move || crate::config::directories(&asked, &crate::config::home());
+    let (base, matches) = tokio::task::spawn_blocking(looked)
+        .await
+        .unwrap_or_default();
+    Json(json!({ "base": base, "matches": matches }))
+}
+
 async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
@@ -604,6 +615,7 @@ pub fn routes() -> Router<App> {
         .route("/teams", get(teams))
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
+        .route("/dirs", get(dirs))
         .route(
             "/personalities/settings",
             get(personalities).post(set_personalities),
