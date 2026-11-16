@@ -1335,6 +1335,7 @@ SCENARIOS.append({
         get('/janitor-policy', "the janitors' policy"),
         get('/location', 'where the owner is'),
         get('/cartesia-voices', "Cartesia's old picker"),
+        get('/tts/providers', 'the engines that speak, for the old settings screen'),
         get('/podcast-history', 'the podcasts'),
         get('/podcast-history/sources', 'what podcasts were made of'),
         get('/vocab/packs', 'the packs of the vocabulary'),

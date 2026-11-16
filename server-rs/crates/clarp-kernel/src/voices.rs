@@ -333,6 +333,41 @@ pub fn catalog(agents: &[Agent<'_>], current: &str, speech: &Speech<'_>) -> Valu
     })
 }
 
+/// The engines that speak, as the old settings screen reads them (`GET /tts/providers`,
+/// the Python Host's `tts_providers.status`): each as the Host's list has it, with whether
+/// it can be used, whether it is the one every agent speaks with and whether it is the one
+/// tried after that; and "no voice" last. `google_source` is which of the owner's sections
+/// Google would sign in by (`google_tts` or `google_stt`), never a file or a project.
+pub fn status(speech: &Speech<'_>, google_source: &str) -> Value {
+    let rows = lists()["providers"].as_array().into_iter().flatten();
+    let providers: Vec<Value> = rows
+        .map(|row| {
+            let provider = row["id"].as_str().unwrap_or("");
+            let mut entry = row.as_object().cloned().unwrap_or_default();
+            let available = match provider {
+                "google" => speech.google_error.is_none(),
+                CARTESIA | ELEVENLABS | GEMINI | "deepgram" => (speech.has_key)(provider),
+                _ => row["installed"].as_bool().unwrap_or(true),
+            };
+            if provider == "google" {
+                entry.insert("credential_source".to_string(), json!(google_source));
+                entry.insert("error".to_string(), json!(speech.google_error));
+            }
+            entry.insert("available".to_string(), json!(available));
+            entry.insert("installed".to_string(), json!(true));
+            entry.insert("selected".to_string(), json!(provider == speech.provider));
+            entry.insert("fallback".to_string(), json!(provider == speech.fallback));
+            Value::Object(entry)
+        })
+        .collect();
+    json!({
+        "provider": speech.provider,
+        "fallback": speech.fallback,
+        "voice": "",
+        "providers": providers,
+    })
+}
+
 /// The ElevenLabs voices of the settings screen, each with who has it: `GET /voices`. A
 /// voice is somebody's when it is what that agent has stored, whole; the agent that is
 /// looked at does not take its own voice.

@@ -92,6 +92,8 @@ def one(case: dict) -> dict:
     # Cartesia's list is fetched with its key: with one, the made-up list; without, none.
     cartesia_voices.english_voices = lambda **_: [dict(row) for row in CARTESIA_LIVE] if cfg.cartesia_key() else []
     answer = voice_catalog.catalog(case['agents'], case['session'])
+    # And the engines as the old settings screen reads them (`GET /tts/providers`).
+    engines = tts_providers.status()
     lists = {
         'providers': [dict(row) for row in tts_providers.CATALOG],
         'gemini': [list(row) for row in voice_catalog.GEMINI_VOICES],
@@ -102,7 +104,7 @@ def one(case: dict) -> dict:
     }
     import shutil
     shutil.rmtree(root, ignore_errors=True)
-    return {'answer': answer, 'lists': lists}
+    return {'answer': answer, 'engines': engines, 'lists': lists}
 
 
 def main() -> int:
@@ -120,7 +122,7 @@ def main() -> int:
         told = json.loads(ran.stdout.splitlines()[-1])
         assert lists in (None, told['lists']), 'the lists are the same for every case'
         lists = told['lists']
-        cases.append({**case, 'cartesia_live': CARTESIA_LIVE, 'answer': told['answer']})
+        cases.append({**case, 'cartesia_live': CARTESIA_LIVE, 'answer': told['answer'], 'engines': told['engines']})
     vectors = {
         'written_by': f'server-rs/tools/catalog-vectors.py with Python {sys.version_info.major}.{sys.version_info.minor}',
         'cases': cases,
