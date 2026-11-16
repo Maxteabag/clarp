@@ -201,6 +201,9 @@ pub struct Chirp {
     /// The short-lived tokens that were bought, by the file that bought them, each with
     /// when it runs out.
     tokens: Mutex<HashMap<PathBuf, (String, Instant)>>,
+    /// Held while a token is bought: the pieces of one clip are asked for together, and
+    /// only the first of them buys.
+    buying: Mutex<()>,
 }
 
 /// What an answer that is no success is said to be: the status and the beginning of what
@@ -240,6 +243,7 @@ impl Chirp {
             piece_seconds: PIECE_SECONDS,
             timeout: Duration::from_secs(60),
             tokens: Mutex::default(),
+            buying: Mutex::default(),
         }
     }
 
@@ -301,6 +305,8 @@ impl Chirp {
     /// A short-lived token for the owner's account: the one that was bought before while
     /// it lasts another minute, or a new one.
     fn token(&self, credentials: &Path) -> Result<String, String> {
+        // One buys at a time: whoever waited finds the token the first one bought.
+        let _one_at_a_time = self.buying.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((token, runs_out)) = self.tokens().get(credentials)
             && *runs_out > Instant::now() + Duration::from_secs(60)
         {
