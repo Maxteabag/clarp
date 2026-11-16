@@ -6,6 +6,7 @@
 //! writes to are given to it through `clarp-ports`.
 
 pub mod activity;
+pub mod addressed;
 pub mod agent;
 pub mod artifacts;
 pub mod conversation;

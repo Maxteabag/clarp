@@ -630,6 +630,22 @@ which the iOS app has a switch for), how human voices sound (`/voice-humanness`)
 while it works (`/agent-voice-verbosity`). One thing is not copied: the Python Host never tells Claude Code
 the last of these (reference defect R21); here every tool is told.
 
+**A spoken message finds its agent by its name** (16 Nov 2026). Found the same way, by reading what the
+apps send: a message dictated hands-free carries `hands_free`, and unless it also says that it is for the
+agent it names (`force_session`), the Python Host looks whom it is for. Until this build this Host gave
+every message to the agent the app named, so "Rachel, check the branch", said while Mike was open, went to
+Mike. Now it is as there with the router of spoken messages off, which is how that Host comes
+(`clarp-kernel` `addressed.rs`, held to that Host's own functions for 94 messages, 35 pairs of words and 14
+choices of where a message goes): the agent whose name the message begins with, within the first three words
+after "hey", "ok" and the like, by the name as written or, for the first word, by one much like it ("Bell"
+for Bella; the measure is Python's `difflib`, which the kernel already had for diffs); the address is taken
+off; that agent is the open one from then on. Without a name the message stays with the agent that is open,
+then with the one the app named. What was typed, or dictated for the open agent, is for the agent it names,
+as before. The router that asks a model is not built: an app that asks it (`/orchestrator/route-delegation`)
+is answered as by a Host whose router is off and asks its user. One thing is not copied: the Python Host
+leaves the end of a name's word in the message when the word has a letter English has not (reference defect
+R23).
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as

@@ -211,6 +211,17 @@ impl<'a> Matcher<'a> {
 }
 
 /// A range of lines as a unified diff names it in the line that begins a group.
+/// How alike two sequences are, from 0 to 1: twice what they share over what both have
+/// (`SequenceMatcher(None, a, b).ratio()`). Two empty ones are wholly alike.
+pub fn ratio(a: &[&str], b: &[&str]) -> f64 {
+    let length = a.len() + b.len();
+    if length == 0 {
+        return 1.0;
+    }
+    let shared: usize = Matcher::new(a, b).blocks().iter().map(|run| run.size).sum();
+    2.0 * shared as f64 / length as f64
+}
+
 fn range(start: usize, stop: usize) -> String {
     let length = stop - start;
     match length {

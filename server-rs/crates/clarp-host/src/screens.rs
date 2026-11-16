@@ -298,6 +298,24 @@ async fn no_oracle() -> ApiError {
     not_built("The Oracle is")
 }
 
+// ---- the router of spoken messages ------------------------------------------------------------
+
+/// `GET /orchestrator/settings`: the router that asks a model whom a spoken message is for.
+/// This Host has none, which is how the Python Host comes too (off): its settings as there
+/// on the first day, nothing it could run on, nothing it decided. A message that begins
+/// with an agent's name finds its agent without it (`clarp_kernel::addressed`).
+async fn router_settings() -> Json<Value> {
+    Json(kept("/orchestrator/settings"))
+}
+
+async fn router_decisions() -> Json<Value> {
+    Json(json!({ "decisions": [] }))
+}
+
+async fn no_router() -> ApiError {
+    not_built("The router that asks a model whom a spoken message is for is")
+}
+
 // ---- the tools' logins and what they use ------------------------------------------------------
 
 /// `GET /backend-auth` (`?harnesses=all` for an app that lists every harness): whether each
@@ -497,6 +515,12 @@ pub fn routes() -> Router<App> {
         .route("/calls", get(calls).post(no_calls))
         .route("/calls/ring", get(ring).post(no_calls))
         .route("/calls/{*rest}", post(no_calls))
+        .route(
+            "/orchestrator/settings",
+            get(router_settings).post(no_router),
+        )
+        .route("/orchestrator/decisions", get(router_decisions))
+        .route("/orchestrator/addressing", post(no_router))
         .route("/oracle/status", get(oracle_status))
         .route("/oracle/contact", get(oracle_contact).post(no_oracle))
         .route(

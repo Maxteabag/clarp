@@ -2132,6 +2132,206 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
 }
 
 #[test]
+fn a_message_dictated_hands_free_goes_to_the_agent_it_names_at_its_beginning() {
+    let place = Place::new("addressed");
+    let host = place.start();
+    let (rachel, mike, claire) = (
+        host.new_agent("Rachel"),
+        host.new_agent("Mike"),
+        host.new_agent("Claire"),
+    );
+    let focus = || host.get("/agents/snapshot")["focus"].clone();
+    let id_of = |session: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .unwrap()["agent_id"]
+            .clone()
+    };
+    // Sends, and waits until the agent it went to has answered what it was given.
+    let send = |body: Value, given: &str| -> String {
+        let sent = host.post("/send", body);
+        assert_eq!(sent["ok"], true, "{sent}");
+        let session = sent["session"].as_str().unwrap().to_string();
+        let reply = said("assistant", given);
+        wait_for("the answer", || {
+            host.conversation(&session).contains(&reply)
+        });
+        assert!(
+            host.conversation(&session).contains(&said("user", given)),
+            "the agent is given {given:?}"
+        );
+        session
+    };
+    let refused = |path: &str, body: Value| {
+        let answer = fetch(
+            &host,
+            "",
+            "POST",
+            path,
+            &[("Content-Type", "application/json")],
+            body.to_string().as_bytes(),
+        );
+        (answer.status, answer.text())
+    };
+    assert_eq!(focus(), Value::Null);
+
+    // With no agent open, a message that names none, or one that is none, is for the Host's
+    // default, as on the Python Host (`claude`): this Host has no agent of that name.
+    assert_eq!(
+        refused("/send", json!({ "text": "anybody", "hands_free": true })),
+        (404, "unknown agent".to_string())
+    );
+    assert_eq!(
+        refused(
+            "/send",
+            json!({ "session": "nobody", "text": "anybody", "hands_free": true })
+        ),
+        (404, "unknown agent".to_string())
+    );
+
+    // Dictated hands-free with nobody named and no agent open: for the agent the app names.
+    // It only stayed where it was sent: no agent is opened by it.
+    let to = send(
+        json!({ "session": mike, "text": "run the tests", "hands_free": true, "client_msg_id": "h0" }),
+        "run the tests",
+    );
+    assert_eq!(to, mike);
+    assert_eq!(focus(), Value::Null);
+
+    // It begins with a name: for that agent, whoever the app names, without the address.
+    // That agent is the open one from then on.
+    let to = send(
+        json!({ "session": mike, "text": "  Hey Rachel, check the branch ", "hands_free": true, "client_msg_id": "h1" }),
+        "check the branch",
+    );
+    assert_eq!(to, rachel);
+    assert_eq!(focus(), id_of(&rachel));
+    assert!(
+        !host
+            .conversation(&mike)
+            .iter()
+            .any(|(_, text)| text.contains("branch")),
+        "nothing of it went to the agent the app named"
+    );
+
+    // Without a name it stays with the agent that is open, whoever the app names.
+    let to = send(
+        json!({ "session": claire, "text": "and tell me when it is green", "hands_free": true, "client_msg_id": "h2" }),
+        "and tell me when it is green",
+    );
+    assert_eq!(to, rachel);
+
+    // A name much like one, as a transcript writes it.
+    let to = send(
+        json!({ "session": mike, "text": "Clair: hello there", "hands_free": true, "client_msg_id": "h3" }),
+        "hello there",
+    );
+    assert_eq!(to, claire);
+    assert_eq!(focus(), id_of(&claire));
+
+    // A name alone is not taken off: the agent is given what was said.
+    let to = send(
+        json!({ "session": claire, "text": "Mike?", "hands_free": true, "client_msg_id": "h4" }),
+        "Mike?",
+    );
+    assert_eq!(to, mike);
+
+    // What says it is for the agent it names is: the app chose, and a name changes nothing.
+    let to = send(
+        json!({
+            "session": claire, "text": "Rachel, this is for Claire", "hands_free": true,
+            "force_session": true, "client_msg_id": "h5",
+        }),
+        "Rachel, this is for Claire",
+    );
+    assert_eq!(to, claire);
+    // And so is what was typed, or dictated for the agent that is open.
+    let to = send(
+        json!({ "session": mike, "text": "Rachel said so", "client_msg_id": "h6" }),
+        "Rachel said so",
+    );
+    assert_eq!(to, mike);
+    assert_eq!(focus(), id_of(&mike));
+
+    // What names no agent and says it is for the one it names is for nobody; and a message
+    // that says nothing is none.
+    assert_eq!(
+        refused("/send", json!({ "text": "anybody" })),
+        (404, "unknown forced agent".to_string())
+    );
+    assert_eq!(
+        refused("/send", json!({ "session": mike, "hands_free": true })),
+        (400, "empty text".to_string())
+    );
+
+    // An app that cannot tell whom a message is for asks the router of spoken messages.
+    // This Host has none, and says what a Python Host says whose router is off: nothing is
+    // sent, and the app asks its user.
+    let before = host.conversation(&mike).len();
+    let (status, asked) = host.ask(
+        "POST",
+        "/orchestrator/route-delegation",
+        Some(&json!({
+            "session": mike, "text": "somebody should look at this", "hands_free": true,
+            "force_session": false, "orchestrator_fallback": true, "trace_id": "trace-1",
+            "client_msg_id": "h7",
+        })),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        asked,
+        json!({
+            "ok": true, "session": "", "dispatch": "", "trace_id": "trace-1",
+            "orchestrator": { "action": "disabled", "decision_id": null, "decision": null },
+        })
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(host.conversation(&mike).len(), before);
+    // The same path with the agent chosen is a send.
+    let (status, sent) = host.ask(
+        "POST",
+        "/orchestrator/route-delegation",
+        Some(&json!({
+            "session": rachel, "text": "Mike, this is for Rachel", "hands_free": true,
+            "force_session": true, "client_msg_id": "h8",
+        })),
+    );
+    assert_eq!((status, &sent["session"]), (200, &json!(rachel)));
+    assert!(sent.get("orchestrator").is_none(), "{sent}");
+
+    // The router's screen: off, nothing to run it on, nothing decided; and it is not
+    // turned on from an app.
+    let settings = host.get("/orchestrator/settings");
+    assert_eq!(settings["settings"]["enabled"], false);
+    assert_eq!(
+        (&settings["providers"], &settings["recent_decisions"]),
+        (&json!([]), &json!([]))
+    );
+    assert_eq!(
+        host.get("/orchestrator/decisions"),
+        json!({ "decisions": [] })
+    );
+    for path in ["/orchestrator/settings", "/orchestrator/addressing"] {
+        let (status, why) = host.ask(
+            "POST",
+            path,
+            Some(&json!({ "enabled": true, "mode": "ai" })),
+        );
+        assert_eq!(status, 501, "{path}: {why}");
+        assert!(
+            why["error"]
+                .as_str()
+                .unwrap()
+                .ends_with("not built on this Host yet"),
+            "{why}"
+        );
+    }
+}
+
+#[test]
 fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
     let place = Place::new("focus");
     let host = place.start();
