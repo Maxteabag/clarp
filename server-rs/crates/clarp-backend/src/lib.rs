@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_kernel::conversation::{Notice, Reply, ToolCall};
+use clarp_kernel::live::Glimpse;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::Record;
 
@@ -79,6 +80,10 @@ pub enum Signal {
     /// Something the user should be told that the agent did not say.
     Notice(Notice),
     Live(LiveReply),
+    /// Something of the turn as it runs, for those who watch it: a message or a thought as it
+    /// stands, a tool call, what a tool returned. Shown and never stored
+    /// (`docs/live-items.md`).
+    Glimpse(Glimpse),
     /// The model the tool says it runs on.
     Model(String),
     /// What the tool says the turn took in and gave out, in tokens.

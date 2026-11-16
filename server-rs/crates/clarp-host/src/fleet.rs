@@ -698,6 +698,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         stop_grace_ms: STOP_GRACE_MS,
         keep_spools: works.config.keep_spools,
         accounts: works.config.accounts,
+        epoch: works.hub.epoch().to_string(),
     };
     Ok(Setup {
         record: record.clone(),

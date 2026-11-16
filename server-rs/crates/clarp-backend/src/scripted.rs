@@ -17,11 +17,15 @@
 use std::collections::BTreeMap;
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
+use clarp_kernel::live::Glimpse;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::Value;
 
 use crate::{Backend, ErrorTail, Interpreter, Launch, LiveReply, SESSION_ENV, Signal, TurnSpec};
+
+/// What the ids of the scripted tool's live items begin with.
+const SHOWN: &str = "sc";
 
 pub struct Scripted {
     program: String,
@@ -108,6 +112,12 @@ impl ScriptedInterpreter {
             id: self.reply_id(),
             text: self.draft.clone(),
         }));
+        // And for those who watch the turn: the message as an item that grows.
+        out.push(Signal::Glimpse(Glimpse::Message {
+            id: format!("{SHOWN}:{}", self.reply_id()),
+            text: self.draft.clone(),
+            row: Some(self.reply_id()),
+        }));
     }
 
     fn settle(&mut self, out: &mut Vec<Signal>) {
@@ -117,6 +127,9 @@ impl ScriptedInterpreter {
         }
         let id = self.reply_id();
         self.replies += 1;
+        out.push(Signal::Glimpse(Glimpse::Done {
+            id: format!("{SHOWN}:{id}"),
+        }));
         out.push(Signal::Reply(Reply {
             origin: clarp_kernel::turn::Origin::User,
             id,
@@ -161,9 +174,16 @@ impl ScriptedInterpreter {
                 ended_at_ms: None,
                 ..ToolCall::default()
             };
-            self.tools.insert(id, call.clone());
+            self.tools.insert(id.clone(), call.clone());
             out.push(Signal::Moved(Activity::Tool {
                 name: name.to_string(),
+            }));
+            out.push(Signal::Glimpse(Glimpse::Tool {
+                id: format!("{SHOWN}:{id}"),
+                call_id: id,
+                name: name.to_string(),
+                input: call.input.clone(),
+                whole: true,
             }));
             out.push(Signal::Tool(call));
         }
@@ -179,6 +199,11 @@ impl ScriptedInterpreter {
             };
             call.output = Some(text("output").unwrap_or("").to_string());
             call.ended_at_ms = Some(t);
+            out.push(Signal::Glimpse(Glimpse::Returned {
+                id: format!("{SHOWN}:{}", call.id),
+                content: Value::String(text("output").unwrap_or("").to_string()),
+                failed,
+            }));
             out.push(Signal::Tool(call.clone()));
             out.push(Signal::Moved(Activity::Thinking));
         }
@@ -267,7 +292,7 @@ mod tests {
         );
         let durable: Vec<Signal> = signals
             .into_iter()
-            .filter(|signal| !matches!(signal, Signal::Live(_)))
+            .filter(|signal| !matches!(signal, Signal::Live(_) | Signal::Glimpse(_)))
             .collect();
         assert_eq!(durable.len(), 8);
         assert_eq!(

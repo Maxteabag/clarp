@@ -143,11 +143,16 @@ impl Host {
 
     /// Listens to the Host's events on a thread and collects them as they come.
     fn listen(&self) -> Arc<Mutex<Vec<Value>>> {
+        self.listen_at("/events")
+    }
+
+    /// Listens to the Host's events as a connection that asked this way.
+    fn listen_at(&self, path: &str) -> Arc<Mutex<Vec<Value>>> {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let mut stream = TcpStream::connect(&self.address).unwrap();
-        stream
-            .write_all(b"GET /events HTTP/1.1\r\nHost: test\r\nAccept: text/event-stream\r\n\r\n")
-            .unwrap();
+        let asked =
+            format!("GET {path} HTTP/1.1\r\nHost: test\r\nAccept: text/event-stream\r\n\r\n");
+        stream.write_all(asked.as_bytes()).unwrap();
         let collected = heard.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stream).lines() {
@@ -8791,4 +8796,416 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
         .find(|voice| voice["id"] == "c-voice-one")
         .unwrap();
     assert_eq!(given["taken_by"], "Echo");
+}
+
+/// A stand-in for Claude Code that streams a turn the way Claude Code does: it thinks, says
+/// what it will do, calls a tool that takes as long as the message says, and answers. The
+/// message names the turn (`one`, `two`), so that no two turns use an id twice. What it
+/// reads is the message as Claude Code is given it: a line of JSON.
+const STAND_IN_STREAMS: &str = r#"#!/bin/sh
+read message
+case "$message" in *one*) tag=one;; *two*) tag=two;; *) tag=other;; esac
+case "$message" in *slow*) pause=6;; *long*) pause=60;; *) pause=0;; esac
+say() { printf '%s\n' "$1"; }
+piece() { say "{\"type\":\"stream_event\",\"event\":$1,\"parent_tool_use_id\":null}"; }
+say '{"type":"system","subtype":"init","session_id":"stand-in","model":"stand-in"}'
+piece "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_A$tag\",\"role\":\"assistant\",\"content\":[]}}"
+piece '{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}'
+piece '{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"**Looking for the file**\nIt is here."}}'
+piece '{"type":"content_block_stop","index":0}'
+piece '{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}'
+piece '{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I will "}}'
+piece '{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"look."}}'
+piece '{"type":"content_block_stop","index":1}'
+piece "{\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_$tag\",\"name\":\"Bash\",\"input\":{}}}"
+piece '{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"command\": \"sleep 2; "}}'
+piece '{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"echo found\"}"}}'
+piece '{"type":"content_block_stop","index":2}'
+say "{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_A$tag\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"I will look.\"},{\"type\":\"tool_use\",\"id\":\"toolu_$tag\",\"name\":\"Bash\",\"input\":{\"command\":\"sleep 2; echo found\"}}]}}"
+piece '{"type":"message_stop"}'
+sleep "$pause"
+say "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_$tag\",\"content\":\"found\\nit\"}]}}"
+piece "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_B$tag\",\"role\":\"assistant\",\"content\":[]}}"
+piece '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}'
+piece '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Found it."}}'
+piece '{"type":"content_block_stop","index":0}'
+piece '{"type":"message_stop"}'
+say '{"type":"result","subtype":"success","is_error":false,"session_id":"stand-in","result":"Found it."}'
+"#;
+
+#[test]
+fn a_turn_is_shown_as_it_runs_to_those_who_asked_and_again_after_the_host_was_killed() {
+    use clarp_kernel::live::View;
+
+    let place = Place::new("shown");
+    let claude = place.root.join("claude");
+    program(&claude, STAND_IN_STREAMS);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let features = host.get("/server-info")["capabilities"]["features"].clone();
+    assert!(
+        features.as_array().unwrap().contains(&json!("live_items")),
+        "an app learns from the features that turns are shown here: {features}"
+    );
+    let made = host.post("/agents", json!({ "name": "Watcher", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let live = |host: &Host| host.get(&format!("/live?session={agent}"));
+    let kinds = |shown: &Value| -> Vec<String> {
+        let items = shown["items"].as_array().unwrap();
+        items
+            .iter()
+            .map(|item| {
+                format!(
+                    "{} {}",
+                    item["kind"].as_str().unwrap(),
+                    item["status"].as_str().unwrap()
+                )
+            })
+            .collect()
+    };
+
+    // Before any turn: an idle, empty view, of no conversation yet. Nothing explains a
+    // tool's use on this Host, and the answer says so.
+    let nothing = live(&host);
+    assert_eq!(
+        (
+            &nothing["lseq"],
+            &nothing["turn"],
+            &nothing["items"],
+            &nothing["conv"],
+            &nothing["session"]
+        ),
+        (
+            &json!(0),
+            &Value::Null,
+            &json!([]),
+            &json!(""),
+            &json!(agent)
+        )
+    );
+    assert_eq!(
+        nothing["activity"],
+        json!({"state": "idle", "tool": null, "running_tools": 0, "headline": null, "item_id": null,
+               "since_ms": null, "turn_id": null, "turn_started_ms": null})
+    );
+    assert_eq!(
+        nothing["tool_explanations"],
+        json!({"enabled": false, "detail_level": 2})
+    );
+    let epoch = nothing["epoch"].as_str().unwrap().to_string();
+    assert!(!epoch.is_empty());
+    for nobody in ["/live?session=nobody", "/live", "/live?session="] {
+        let (status, refused) = host.ask("GET", nobody, None);
+        assert_eq!(
+            (status, &refused),
+            (404, &json!({"error": "unknown session"})),
+            "{nobody}"
+        );
+    }
+
+    // Three connections: one that follows the agent, one that asked for the status lines
+    // alone, and one that asked for nothing of it.
+    let follows = host.listen_at(&format!("/events?live={agent},someone-else"));
+    let lists = host.listen_at("/events?live=");
+    let plain = host.listen();
+    let shown_to = |heard: &Arc<Mutex<Vec<Value>>>| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        heard
+            .iter()
+            .filter(|event| event["type"] == "live")
+            .cloned()
+            .collect()
+    };
+    // What a turn shows is never sent again: the connections are open before it begins.
+    let open = |heard: &Arc<Mutex<Vec<Value>>>| !heard.lock().unwrap().is_empty();
+    wait_for("the connections to be open", || {
+        open(&follows) && open(&lists) && open(&plain)
+    });
+
+    let sent = host.send(&agent, "slow one", "m1");
+    let trace = sent["trace_id"].as_str().unwrap().to_string();
+    // Waits for what is shown of the agent's turn, and says what was shown when it gives up.
+    let wait_shown = |host: &Host, what: &str, ready: &dyn Fn(&Value) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let shown = live(host);
+            if ready(&shown) {
+                return shown;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "waiting for {what}; what is shown is {shown:#}, the conversation {:#?}",
+                host.turns(&agent)
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    let during = wait_shown(&host, "the tool to be shown as running", &|shown| {
+        kinds(shown) == ["reasoning completed", "message completed", "tool running"]
+    });
+    assert_eq!(during["epoch"], epoch);
+    assert_eq!(
+        (
+            &during["turn"]["turn_id"],
+            &during["turn"]["status"],
+            &during["turn"]["tool_count"]
+        ),
+        (&json!(trace), &json!("running"), &json!(1))
+    );
+    assert_eq!(
+        (&during["turn"]["ended_at_ms"], &during["turn"]["worked_ms"]),
+        (&Value::Null, &Value::Null)
+    );
+    let items = during["items"].as_array().unwrap();
+    // What it thinks has its headline; what it said before the tool was narration, and is
+    // written into the row of the conversation that the app has too.
+    assert_eq!(
+        (&items[0]["id"], &items[0]["title"], &items[0]["text"]),
+        (
+            &json!("cl:msg_Aone:0"),
+            &json!("Looking for the file"),
+            &json!("**Looking for the file**\nIt is here.")
+        )
+    );
+    assert_eq!(
+        (
+            &items[1]["id"],
+            &items[1]["text"],
+            &items[1]["phase"],
+            &items[1]["row_id"]
+        ),
+        (
+            &json!("cl:msg_Aone:1"),
+            &json!("I will look."),
+            &json!("commentary"),
+            &json!("r-Aone")
+        )
+    );
+    let rows = host.turns(&agent);
+    assert!(
+        rows.iter().any(|row| row["id"] == "r-Aone"),
+        "the row the message names is there: {rows:#?}"
+    );
+    let tool = &items[2];
+    assert_eq!(
+        tool["tool"],
+        json!({"name": "Bash", "call_id": "toolu_one", "category": "exec", "group": null,
+               "label": "sleep 2; echo found", "command": "sleep 2; echo found",
+               "input_preview": {"command": "sleep 2; echo found"}, "explain": null, "output": null,
+               "diff": null})
+    );
+    assert_eq!(
+        (&tool["id"], &tool["turn_id"], &tool["ended_at_ms"]),
+        (&json!("cl:toolu_one"), &json!(trace), &Value::Null)
+    );
+    for item in items {
+        assert_eq!(item["conv"], during["conv"]);
+        assert!(
+            item["started_at_ms"].as_i64().unwrap() > 1_700_000_000_000,
+            "{item}"
+        );
+    }
+    let doing = &during["activity"];
+    assert_eq!(
+        (
+            &doing["state"],
+            &doing["headline"],
+            &doing["running_tools"],
+            &doing["item_id"],
+            &doing["turn_id"]
+        ),
+        (
+            &json!("tool"),
+            &json!("Running sleep 2; echo found"),
+            &json!(1),
+            &json!("cl:toolu_one"),
+            &json!(trace)
+        )
+    );
+    assert_eq!(doing["tool"]["call_id"], "toolu_one");
+    assert_eq!(doing["turn_started_ms"], during["turn"]["started_at_ms"]);
+
+    // The connection that follows the agent was sent every operation, numbered one by one,
+    // and a client that applied each of them holds what the Host answers.
+    wait_for("the events to arrive", || {
+        shown_to(&follows)
+            .last()
+            .is_some_and(|event| event["lseq"] == during["lseq"])
+    });
+    let events = shown_to(&follows);
+    let mut client = View::new();
+    client.apply_snapshot(&json!({"epoch": epoch, "lseq": 0}));
+    for (place, event) in events.iter().enumerate() {
+        assert_eq!(event["lseq"], json!(place + 1), "{event}");
+        assert_eq!(
+            (&event["epoch"], &event["session"], &event["conv"]),
+            (&json!(epoch), &json!(agent), &during["conv"])
+        );
+        assert!(
+            event.get("event_id").is_none(),
+            "a live event has no number: {event}"
+        );
+        assert!(event["server_now_ms"].as_i64().unwrap() > 1_700_000_000_000);
+        assert!(
+            client.apply_event(event).is_empty(),
+            "a client takes {event}"
+        );
+    }
+    let held: Vec<Value> = client.items().into_iter().cloned().collect();
+    assert_eq!(json!(held), during["items"]);
+    assert_eq!(client.activity(), &during["activity"]);
+    // The connection that asked for the status lines alone was sent those and the turn,
+    // under the same numbers, and nothing of the items.
+    let listed = shown_to(&lists);
+    assert!(!listed.is_empty());
+    for event in &listed {
+        let ops = event["ops"].as_array().unwrap();
+        assert!(!ops.is_empty(), "{event}");
+        assert!(
+            ops.iter()
+                .all(|op| op["op"] == "status" || op["op"] == "turn"),
+            "{event}"
+        );
+        assert!(events.iter().any(|whole| whole["lseq"] == event["lseq"]));
+    }
+    assert!(listed.iter().any(|event| {
+        let ops = event["ops"].as_array().unwrap();
+        ops.iter()
+            .any(|op| op["op"] == "status" && op["activity"]["state"] == "tool")
+    }));
+    // And the one that asked for nothing of it was sent nothing of it, while it was told of
+    // the turn as every connection is.
+    assert!(shown_to(&plain).is_empty());
+    assert!(
+        plain
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-state")
+    );
+
+    // The Host is killed while the tool runs, and started again. What is shown of the turn
+    // is built again from the turn's own record: the same items, begun when they began,
+    // under another name of the run, which tells a client to ask for all of it anew.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    let after = live(&host);
+    assert_ne!(after["epoch"], json!(epoch), "another run of the Host");
+    assert_eq!(
+        kinds(&after),
+        ["reasoning completed", "message completed", "tool running"]
+    );
+    assert_eq!(after["turn"], during["turn"]);
+    for (again, before) in after["items"].as_array().unwrap().iter().zip(items) {
+        for same in [
+            "id",
+            "kind",
+            "status",
+            "ordinal",
+            "started_at_ms",
+            "ended_at_ms",
+            "text",
+            "title",
+            "tool",
+            "row_id",
+            "phase",
+            "turn_id",
+        ] {
+            assert_eq!(again[same], before[same], "{same} of {}", before["id"]);
+        }
+    }
+    assert_eq!(after["activity"]["state"], "tool");
+    assert_eq!(after["activity"]["tool"], during["activity"]["tool"]);
+
+    // The tool returns and the turn answers: everything settles.
+    wait_for("the turn to end", || {
+        live(&host)["turn"]["status"] == "completed"
+    });
+    let ended = live(&host);
+    assert_eq!(
+        kinds(&ended),
+        [
+            "reasoning completed",
+            "message completed",
+            "tool completed",
+            "message completed"
+        ]
+    );
+    let items = ended["items"].as_array().unwrap();
+    assert_eq!(
+        items[2]["tool"]["output"],
+        json!({"tail": ["found", "it"], "total_lines": 2, "truncated": false, "exit_code": 0})
+    );
+    assert_eq!(
+        (&items[3]["text"], &items[3]["phase"], &items[3]["row_id"]),
+        (&json!("Found it."), &json!("final"), &json!("r-Bone"))
+    );
+    let turn = &ended["turn"];
+    assert_eq!(
+        turn["worked_ms"].as_i64().unwrap(),
+        turn["ended_at_ms"].as_i64().unwrap() - turn["started_at_ms"].as_i64().unwrap()
+    );
+    assert!(turn["worked_ms"].as_i64().unwrap() >= 5_000, "{turn}");
+    assert_eq!(
+        (
+            &ended["activity"]["state"],
+            &ended["activity"]["turn_started_ms"]
+        ),
+        (&json!("idle"), &Value::Null)
+    );
+    wait_for("the answer in the conversation", || {
+        host.turns(&agent)
+            .iter()
+            .any(|row| row["id"] == "r-Bone" && row["text"] == "Found it.")
+    });
+
+    // A turn that is stopped in the middle of its tool ends for those who watch too: the
+    // tool is interrupted, the turn is, and the status line says so.
+    let follows = host.listen_at("/events?live=*");
+    wait_for("the connection to be open", || open(&follows));
+    host.send(&agent, "long two", "m2");
+    wait_for("the second tool to be shown as running", || {
+        kinds(&live(&host))
+            .last()
+            .is_some_and(|last| last == "tool running")
+    });
+    let second = live(&host);
+    assert_eq!(
+        second["items"].as_array().unwrap().len(),
+        3,
+        "a new turn shows its own items alone"
+    );
+    host.post("/stop", json!({ "session": agent }));
+    wait_for("the stop to be shown", || {
+        live(&host)["turn"]["status"] == "interrupted"
+    });
+    let stopped = live(&host);
+    assert_eq!(
+        kinds(&stopped),
+        [
+            "reasoning completed",
+            "message completed",
+            "tool interrupted"
+        ]
+    );
+    assert_eq!(
+        (
+            &stopped["activity"]["state"],
+            &stopped["activity"]["headline"]
+        ),
+        (&json!("interrupted"), &json!("Interrupted"))
+    );
+    wait_for("the end to be sent", || {
+        shown_to(&follows)
+            .last()
+            .is_some_and(|event| event["lseq"] == stopped["lseq"])
+    });
+    let last = shown_to(&follows).last().cloned().unwrap();
+    let ops: Vec<&str> = last["ops"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|op| op["op"].as_str().unwrap())
+        .collect();
+    assert_eq!(ops, ["done", "turn", "status"], "{last}");
 }
