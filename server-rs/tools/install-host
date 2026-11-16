@@ -31,7 +31,8 @@
 #                  that has faster-whisper. Default: the Python Host's own on this machine, when it
 #                  has the library; it is run where it is, with the model that Host is set to and
 #                  the model's files that are on this machine already. `off`, or no such Python:
-#                  this Host has no engine of its own
+#                  this Host has no engine of its own. Run this again after the Python Host was
+#                  updated: its Python is in a directory that Host makes anew each time
 #   --speech-keys  the file in which the keys of engines reached over the network (ElevenLabs) are
 #                  looked up each time a clip is to be heard. Default: the Python Host's own
 #                  config, when it is there. Nothing of it is copied or kept: a key the owner
