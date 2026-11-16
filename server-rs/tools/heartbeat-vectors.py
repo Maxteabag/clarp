@@ -114,7 +114,7 @@ def run() -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import heartbeat, settings_store
+    from lib import heartbeat, origins, settings_store
 
     words = {'PROMPT': heartbeat.HEARTBEAT_PROMPT, 'RESTART': heartbeat.RESTART_HEARTBEAT_PREFIX,
              'INTERRUPTED': heartbeat.INTERRUPTED_HEARTBEAT_PREFIX}
@@ -124,9 +124,24 @@ def run() -> dict:
             text = text.replace('{' + name + '}', value)
         return text
 
+    def shown(text, origin):
+        # What the conversation keeps of an answer, and what it counts as: the Python Host's
+        # own steps for a row of the agent (`message_writes.py`), for this word alone.
+        skip, kept = origins.ack_for_origin(heartbeat.strip_heartbeat_ack(text), text, token=heartbeat.HEARTBEAT_OK,
+                                            origin=origin, own='heartbeat')
+        counted = ''
+        if skip:
+            counted = 'noop' if origin == 'heartbeat' else ''
+            kept = 'Heartbeat check: no action needed.'
+        if origin == 'heartbeat' and not counted and not heartbeat.is_neutral_heartbeat_status(kept):
+            counted = 'activity'
+        return {'text': kept, 'counted': counted}
+
     def reply(text):
         skip, clean = heartbeat.strip_heartbeat_ack(text)
-        return {'text': text, 'skip': skip, 'clean': clean, 'neutral': heartbeat.is_neutral_heartbeat_status(text)}
+        return {'text': text, 'skip': skip, 'clean': clean, 'neutral': heartbeat.is_neutral_heartbeat_status(text),
+                'only': origins.ack_only_token(text, heartbeat.HEARTBEAT_OK),
+                'in_its_turn': shown(text, 'heartbeat'), 'in_another': shown(text, 'user')}
 
     def setting(change):
         for key in (heartbeat.KEY_INTERVAL_SEC, heartbeat.KEY_BACKOFF_STRATEGY, heartbeat.KEY_BACKOFF_CAP_SEC,
