@@ -257,6 +257,15 @@ pub struct PersonaSaid {
     pub picture: String,
 }
 
+/// What was left with the Host of one kind: each key with what is under it.
+pub type Left = Vec<(String, Vec<u8>)>;
+
+/// The table of a kind of thing that is left with the Host (`FleetHandle::keep`): one of its
+/// own, apart from every table the fleet keeps for itself.
+fn shelf(kind: &str) -> String {
+    format!("kept.{kind}")
+}
+
 /// The name a persona's or an agent's own picture is kept under, by its digest. The Python
 /// Host keeps each as a JPEG file, whatever is in it, and hands it out as one.
 pub fn picture_name(digest: &str) -> String {
@@ -470,6 +479,20 @@ enum Ask {
     Set {
         settings: Vec<(String, String)>,
         answer: Answer<Result<(), Unavailable>>,
+    },
+    /// Something small is left with the Host under a key, in the table of its kind, or
+    /// taken away (`None`).
+    Keep {
+        kind: &'static str,
+        key: String,
+        value: Option<Vec<u8>>,
+        answer: Answer<Result<(), Unavailable>>,
+    },
+    /// What was left of a kind: under one key, or all of it, ordered by key.
+    Kept {
+        kind: &'static str,
+        key: Option<String>,
+        answer: Answer<Result<Left, Unavailable>>,
     },
     /// The owner makes a persona (`original` is `None`) or changes the one of that name.
     /// `fetched` are the voices of Cartesia's this Host has listed: what a voice is picked
@@ -717,6 +740,45 @@ impl FleetHandle {
     /// returns, and after a restart.
     pub async fn set(&self, settings: Vec<(String, String)>) -> Result<(), Unavailable> {
         self.ask(|answer| Ask::Set { settings, answer }).await?
+    }
+
+    /// Leaves something small with the Host under a key, in the table of its kind (where a
+    /// phone said it is), or takes it away (`None`). It is there after a restart. A kind's
+    /// table is its own: nothing the fleet keeps for itself can be written this way.
+    pub async fn keep(
+        &self,
+        kind: &'static str,
+        key: String,
+        value: Option<Vec<u8>>,
+    ) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Keep {
+            kind,
+            key,
+            value,
+            answer,
+        })
+        .await?
+    }
+
+    /// What was left of a kind under a key.
+    pub async fn kept(
+        &self,
+        kind: &'static str,
+        key: String,
+    ) -> Result<Option<Vec<u8>>, Unavailable> {
+        let key = Some(key);
+        let found = self.ask(|answer| Ask::Kept { kind, key, answer }).await??;
+        Ok(found.into_iter().next().map(|(_, value)| value))
+    }
+
+    /// Everything that was left of a kind, ordered by key.
+    pub async fn kept_all(&self, kind: &'static str) -> Result<Left, Unavailable> {
+        self.ask(|answer| Ask::Kept {
+            kind,
+            key: None,
+            answer,
+        })
+        .await?
     }
 
     /// Says what became of a push to a token. Does not wait.
@@ -1049,8 +1111,40 @@ impl Fleet {
                 Ask::Set { settings, answer } => {
                     let _ = answer.send(Ok(self.set(settings)));
                 }
+                Ask::Keep {
+                    kind,
+                    key,
+                    value,
+                    answer,
+                } => {
+                    let _ = answer.send(Ok(self.keep(kind, &key, value)));
+                }
+                Ask::Kept { kind, key, answer } => {
+                    let _ = answer.send(Ok(self.kept(kind, key.as_deref())));
+                }
             }
         }
+    }
+
+    fn keep(&mut self, kind: &str, key: &str, value: Option<Vec<u8>>) -> Result<(), Unavailable> {
+        let table = shelf(kind);
+        let done = match value {
+            Some(value) => self.store.put(&table, key, &value),
+            None => self.store.delete(&table, key).map(|_| ()),
+        };
+        done.map_err(|error| Unavailable(error.to_string()))
+    }
+
+    fn kept(&self, kind: &str, key: Option<&str>) -> Result<Left, Unavailable> {
+        let table = shelf(kind);
+        let found = match key {
+            Some(key) => self.store.get(&table, key).map(|value| {
+                let value = value.map(|value| (key.to_string(), value));
+                value.into_iter().collect()
+            }),
+            None => self.store.list(&table),
+        };
+        found.map_err(|error| Unavailable(error.to_string()))
     }
 
     fn claim_job(

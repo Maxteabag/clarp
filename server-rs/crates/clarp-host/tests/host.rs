@@ -2332,6 +2332,122 @@ fn a_message_dictated_hands_free_goes_to_the_agent_it_names_at_its_beginning() {
 }
 
 #[test]
+fn a_phone_says_where_it_is_and_an_agent_asks_for_it() {
+    let place = Place::new("places");
+    let host = place.start_with_token("secret");
+    let echo = host.new_agent("Echo");
+    let where_is = |host: &Host, session: &str| host.get(&format!("/location?session={session}"));
+    let refused = |path: &str, body: Value| {
+        let (status, why) = host.ask("POST", path, Some(&body));
+        (status, why["error"].as_str().unwrap_or("").to_string())
+    };
+    // Nobody said anything yet.
+    assert_eq!(where_is(&host, &echo), json!({}));
+    assert_eq!(host.get("/location"), json!({}));
+
+    // The app says where its phone is, for the agent that asked or is open.
+    let said = host.post(
+        "/location",
+        json!({ "session": format!(" {echo} "), "lat": 59.91, "lng": "10.75", "accuracy": 12 }),
+    );
+    let told = said["ts"].as_i64().unwrap();
+    assert!((now_ms() - told).abs() < 60_000, "{said}");
+    assert_eq!(
+        said,
+        json!({ "ok": true, "session": echo, "lat": 59.91, "lng": 10.75, "accuracy": 12.0, "ts": told })
+    );
+    assert_eq!(
+        where_is(&host, &echo),
+        json!({ "lat": 59.91, "lng": 10.75, "accuracy": 12.0, "ts": told })
+    );
+    // A place is one session's: another has none.
+    assert_eq!(where_is(&host, "somebody-else"), json!({}));
+
+    // What is no place is refused in words, and the last place stays.
+    for (body, why) in [
+        (json!({ "lat": 1, "lng": 2 }), "session required"),
+        (json!({ "session": echo }), "lat/lng required"),
+        (
+            json!({ "session": echo, "lat": "north", "lng": 2 }),
+            "lat/lng required",
+        ),
+        (
+            json!({ "session": echo, "lat": 91, "lng": 2 }),
+            "latitude must be between -90 and 90",
+        ),
+        (
+            json!({ "session": echo, "lat": 1, "lng": -181 }),
+            "longitude must be between -180 and 180",
+        ),
+        (
+            json!({ "session": echo, "lat": 1, "lng": 2, "accuracy": -5 }),
+            "accuracy must be non-negative",
+        ),
+    ] {
+        assert_eq!(
+            refused("/location", body.clone()),
+            (400, why.to_string()),
+            "{body}"
+        );
+    }
+    assert_eq!(where_is(&host, &echo)["lat"], 59.91);
+
+    // A newer place takes the older one's; without how far off it may be, that is unknown.
+    let newer = host.post(
+        "/location",
+        json!({ "session": echo, "lat": -90, "lng": 180 }),
+    );
+    assert_eq!(
+        (&newer["lat"], &newer["lng"], &newer["accuracy"]),
+        (&json!(-90.0), &json!(180.0), &Value::Null)
+    );
+    let kept = where_is(&host, &echo);
+    assert_eq!(kept["accuracy"], Value::Null);
+
+    // An agent asks where its user is: every app that listens is told.
+    let events = host.listen_at("/events?token=secret");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        host.post("/location/request", json!({ "session": echo })),
+        json!({ "ok": true })
+    );
+    wait_for("the question to reach the apps", || {
+        let heard = events.lock().unwrap();
+        heard
+            .iter()
+            .any(|event| event["type"] == "location-request" && event["session"] == echo.as_str())
+    });
+    assert_eq!(
+        refused("/location/request", json!({})),
+        (400, "session required".to_string())
+    );
+
+    // A device that may only read and send may say where it is, and asks nobody.
+    let (limited, _) = pair(&host, "Watch", "limited");
+    let (status, said) = host.ask_as(
+        &limited,
+        "POST",
+        "/location",
+        Some(&json!({ "session": echo, "lat": 1, "lng": 2 })),
+    );
+    assert_eq!((status, &said["ok"]), (200, &json!(true)));
+    let (status, _) = host.ask_as(
+        &limited,
+        "POST",
+        "/location/request",
+        Some(&json!({ "session": echo })),
+    );
+    assert_eq!(status, 403);
+
+    // It is the Host's to keep.
+    let before = where_is(&host, &echo);
+    assert_eq!((&before["lat"], &before["lng"]), (&json!(1.0), &json!(2.0)));
+    host.kill();
+    let host = place.start_with_token("secret");
+    assert_eq!(where_is(&host, &echo), before);
+}
+
+#[test]
 fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
     let place = Place::new("focus");
     let host = place.start();
@@ -10873,7 +10989,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/herald/settings", json!({ "disabled": false })),
         ("/judgments/settings", json!({ "enabled": true })),
         ("/diagnostics/settings", json!({ "enabled": true })),
-        ("/location", json!({ "lat": 1.0, "lon": 2.0 })),
         ("/vocab/packs", json!({ "name": "p" })),
         ("/vocab/run", json!({ "session": echo })),
         ("/calls", json!({ "sessions": [echo] })),

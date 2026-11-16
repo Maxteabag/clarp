@@ -1438,4 +1438,32 @@ SCENARIOS.append({
     ],
 })
 
+PLACE = '/location'
+
+SCENARIOS.append({
+    'id': 'places',
+    'what': "where the owner's phone is: the app says it for a session, the agent's tools read the last place "
+            'said, a newer one takes its place; what is no place is refused in words; and an agent asks for it',
+    'steps': [
+        get(f'{PLACE}?session={AGENT}', 'nobody said where'),
+        get(PLACE, 'where, for no session'),
+        post(PLACE, {'session': AGENT, 'lat': 59.91, 'lng': '10.75', 'accuracy': 12}, 'the app says where its phone is'),
+        get(f'{PLACE}?session={AGENT}', 'the last place said'),
+        get(f'{PLACE}?session=nobody', "another session's place"),
+        post(PLACE, {'lat': 1, 'lng': 2}, 'a place for nobody'),
+        post(PLACE, {'session': AGENT}, 'no place'),
+        post(PLACE, {'session': AGENT, 'lat': 'north', 'lng': 2}, 'a word for a number'),
+        post(PLACE, {'session': AGENT, 'lat': None, 'lng': 2}, 'nothing for a number'),
+        post(PLACE, {'session': AGENT, 'lat': 91, 'lng': 2}, 'north of the pole'),
+        post(PLACE, {'session': AGENT, 'lat': 1, 'lng': -181}, 'west of the date line'),
+        post(PLACE, {'session': AGENT, 'lat': 1, 'lng': 2, 'accuracy': -5}, 'less than exact'),
+        post(PLACE, {'session': AGENT, 'lat': 1, 'lng': 2, 'accuracy': 'about ten'}, 'a word for how exact'),
+        post(PLACE, {'session': AGENT, 'lat': True, 'lng': ' -180 '}, 'a truth and a padded text for numbers'),
+        post(PLACE, {'session': f' {AGENT} ', 'lat': -90, 'lng': 180}, 'a newer place, at the edges'),
+        get(f'{PLACE}?session={AGENT}', 'the newer place'),
+        post(f'{PLACE}/request', {'session': AGENT}, 'an agent asks where its user is'),
+        post(f'{PLACE}/request', {}, 'nobody asks'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

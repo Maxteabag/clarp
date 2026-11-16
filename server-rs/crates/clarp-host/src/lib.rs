@@ -35,6 +35,7 @@ pub mod owner;
 pub mod pairing;
 pub mod peers;
 pub mod personas;
+pub mod places;
 pub mod plans;
 pub mod process;
 pub mod push;

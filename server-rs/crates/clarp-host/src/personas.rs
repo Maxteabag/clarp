@@ -25,7 +25,7 @@ use crate::fleet::{PersonaSaid, picture_name};
 use crate::media;
 
 /// A request's body as the object it has to be. No body is an empty object.
-fn object(body: &Bytes) -> Result<Map<String, Value>, ApiError> {
+pub(crate) fn object(body: &Bytes) -> Result<Map<String, Value>, ApiError> {
     let given = if body.is_empty() {
         json!({})
     } else {

@@ -240,6 +240,7 @@ pub fn router(app: App) -> Router {
         .merge(peers::routes())
         .merge(roster::routes())
         .merge(crate::personas::routes())
+        .merge(crate::places::routes())
         .merge(crate::files::routes())
         .merge(crate::screens::routes())
         .merge(crate::voice::routes())
@@ -314,6 +315,7 @@ const LIMITED_POSTS: &[&str] = &[
     "/clog",
     "/clips/ack",
     "/voice-events",
+    "/location",
 ];
 
 /// What a device with limited scope is kept from altogether, also from reading: the Host's
