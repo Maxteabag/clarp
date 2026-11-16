@@ -117,6 +117,25 @@ FORWARDED = [
                  'Sec-Websocket-Protocol': 'gone'}, 'body': 0, 'passthrough': False},
     {'headers': {'connection': ' Upgrade ,  x-one ,, X-TWO', 'x-one': '1', 'X-Two': '2', 'x-three': '3'},
      'body': 0, 'passthrough': False},
+    # What is no header HTTP can carry: the request is refused whole.
+    {'headers': {'x-ok': '1', 'x bad': '1'}, 'body': 0, 'passthrough': False},
+    {'headers': {'': 'x'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x:colon': '1'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-\u00f6': '1'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok\r\nx-more': '1'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok': 'a\nb'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok': 'a\rb'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok': 'a\x00b'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok': 'a\x7fb'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-count': 5}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-none': None}, 'body': 0, 'passthrough': False},
+    {'headers': {'connection': 'x-ok', 'x-ok': 'a\nb'}, 'body': 0, 'passthrough': False},
+    {'headers': {'cf-ray': 'a\nb'}, 'body': 0, 'passthrough': False},
+    # And what is one, though it looks odd.
+    {'headers': {'x-ok': 'a\tb'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok': 'Zo\u00eb'}, 'body': 0, 'passthrough': False},
+    {'headers': {'x-ok': ''}, 'body': 0, 'passthrough': False},
+    {'headers': {"!#$%&'*+-.^_`|~09azAZ": 'every sign a name may have'}, 'body': 0, 'passthrough': False},
 ]
 
 # ---- when the relay is dialled again -----------------------------------------------------------
@@ -420,9 +439,14 @@ def run_all() -> dict:
 
     forwarded = []
     for case in FORWARDED:
-        handed = rc.forward_request_headers(case['headers'], '127.0.0.1:7690', case['body'],
-                                            passthrough_encoding=case['passthrough'])
-        forwarded.append({**case, 'headers': list(case['headers'].items()), 'handed': list(handed.items())})
+        row = {**case, 'headers': list(case['headers'].items())}
+        try:
+            handed = rc.forward_request_headers(case['headers'], '127.0.0.1:7690', case['body'],
+                                                passthrough_encoding=case['passthrough'])
+            row['handed'] = list(handed.items())
+        except Exception as error:  # noqa: BLE001
+            row['refused'] = words(error)
+        forwarded.append(row)
 
     delays = [{**case, 'delay': rc.reconnect_delay(case['previous'], was_connected=case['was_connected'],
                                                    close=case['close'])} for case in DELAYS]
