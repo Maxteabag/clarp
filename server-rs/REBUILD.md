@@ -654,9 +654,11 @@ for Bella; the measure is Python's `difflib`, which the kernel already had for d
 off; that agent is the open one from then on. Without a name the message stays with the agent that is open,
 then with the one the app named. What was typed, or dictated for the open agent, is for the agent it names,
 as before. The router that asks a model is not built: an app that asks it (`/orchestrator/route-delegation`)
-is answered as by a Host whose router is off and asks its user. One thing is not copied: the Python Host
-leaves the end of a name's word in the message when the word has a letter English has not (reference defect
-R23).
+is answered as by a Host whose router is off and asks its user. A name the message spells out is taken off
+whole, all its words and its letters however they are composed, as the Python Host does since its fix of
+reference defect R23 (16 Nov 2026). One thing is not copied: a word is taken off whole or not at all, where
+the Python Host leaves the end of a word that spells the name another way, and cuts a longer word where the
+name ends in it (reference defect R27).
 
 **A phone says where it is** (16 Nov 2026). The first of the screens of what this Host had not that is
 built instead of answered as nothing: the app says where its phone is for a session (`POST /location`), an
