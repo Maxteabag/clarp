@@ -393,3 +393,22 @@ def test_narration_odd_values_follow_shared_catalogue(narration_hook_pair, case,
     clause = voice_verbosity.narration_clause(expected_level)
     expected["hookSpecificOutput"]["additionalContext"] = context[:-len(header)] + "\n\n" + clause + header
     assert actual.stdout == (json.dumps(expected) + "\n").encode()
+
+
+def test_narration_failure_writes_one_private_line_with_capture_off(
+        narration_hook_pair, tmp_path):
+    from lib import diagnostics_settings, telemetry
+    from lib.paths import RuntimePaths
+
+    diagnostics_settings.update({"enabled": False, "categories": []})
+    (main, _), (actual, _) = narration_hook_pair(stored=2, unavailable=True, real_storage=True)
+    assert main.returncode == actual.returncode == 0
+    assert actual.stdout == main.stdout
+    assert actual.stderr == main.stderr == b""
+    lines = RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()
+    assert len(lines) == 1
+    assert "userprompt_hook" in lines[0] and "narrationFail ImportError" in lines[0]
+    assert "test: narration unavailable" not in lines[0]
+    assert telemetry.conn().execute(
+        "SELECT COUNT(*) FROM diagnostic_events WHERE event='narrationFail'").fetchone()[0] == 0
+    assert diagnostics_settings.get().enabled is False
