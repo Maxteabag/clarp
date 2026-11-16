@@ -1295,6 +1295,10 @@ SCENARIOS.append({
         {'op': 'delete', 'path': '/personas/Scout%20Two', 'name': 'a persona that was removed'},
         {'op': 'delete', 'path': '/personas/Mike', 'name': 'a built-in persona is not removed'},
         {'op': 'delete', 'path': '/personas/nobody-of-the-kind', 'name': 'nobody is not removed'},
+        # The conversations of the two agents: read, so that the rows their own rows of the
+        # list name are compared as rows and not by how each Host spells an id.
+        get('/log?session=pictured', 'the conversation of the agent made as a persona'),
+        get('/log?session=voiced', 'the conversation of the agent with what is its own'),
         {**SNAPSHOT, 'name': 'snapshot afterwards'},
     ],
 })

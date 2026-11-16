@@ -10292,3 +10292,195 @@ fn an_agent_that_moves_stays_who_it_was() {
         "{started}"
     );
 }
+
+#[test]
+fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refused_in_words() {
+    let place = Place::new("screens");
+    let host = place.start();
+    let echo = host.new_agent("Echo");
+
+    // What is read: nothing of the kind is here, said in the Python Host's own fields.
+    let read = |path: &str| host.get(path);
+    let status = read(&format!("/agent-heartbeat/status?session={echo}"));
+    assert_eq!(status["schedule"]["enabled"], false);
+    assert_eq!(
+        (&status["session"], &status["history"], &status["ok"]),
+        (&json!(echo), &json!([]), &json!(true))
+    );
+    assert_eq!(
+        read("/heartbeat/settings")["settings"]["heartbeat_interval_sec"],
+        1800
+    );
+    assert_eq!(
+        read("/agent-schedules?session=echo"),
+        json!({ "schedules": [] })
+    );
+    assert_eq!(
+        read(&format!("/agent-goal?session={echo}")),
+        json!({ "session": echo, "goal": null })
+    );
+    assert_eq!(
+        read("/goal-ledger?plan_id=a-plan&limit=5"),
+        json!({ "events": [], "has_more": false, "next_after": 0, "plan_id": "a-plan" })
+    );
+    assert_eq!(
+        read("/agent-portrait-generation?session=echo")["available"],
+        false
+    );
+    assert_eq!(read("/avatar-settings"), json!({ "model_avatars": false }));
+    assert_eq!(
+        read("/herald/settings")["settings"]["disabled"],
+        true,
+        "nobody heralds here"
+    );
+    assert_eq!(read("/judgments/settings")["settings"]["enabled"], false);
+    assert_eq!(read("/diagnostics/settings")["settings"]["enabled"], false);
+    assert_eq!(read("/janitor-policy")["revision"], 0);
+    assert_eq!(read("/location"), json!({}));
+    assert_eq!(
+        read("/cartesia-voices"),
+        json!({ "available": false, "voices": [] })
+    );
+    assert_eq!(
+        read("/podcast-history"),
+        json!({ "conversations": [], "next_cursor": null })
+    );
+    assert_eq!(
+        read("/podcast-history/sources"),
+        json!({ "next_offset": null, "sources": [] })
+    );
+    assert_eq!(read("/vocab/packs"), json!({ "packs": [] }));
+    assert_eq!(
+        read("/vocab/terms?pack_id=p1"),
+        json!({ "pack_id": "p1", "terms": [] })
+    );
+    assert_eq!(read("/vocab/profiles"), json!({ "profiles": [] }));
+    assert_eq!(read("/vocab/assignments"), json!({ "assignments": [] }));
+    assert_eq!(
+        read("/vocab/runs?session=echo&limit=5"),
+        json!({ "runs": [] })
+    );
+    let call = read("/calls");
+    assert!(call["call"].is_null() && call["server_now"].as_i64().unwrap() > 1_500_000_000_000);
+    assert_eq!(
+        read("/calls/ring")["settings"]["enabled"],
+        false,
+        "nobody rings from here"
+    );
+    let oracle = read("/oracle/status");
+    assert_eq!(
+        (&oracle["available"], &oracle["v2"]["available"]),
+        (&json!(false), &json!(false))
+    );
+    assert_eq!(
+        oracle["v2"]["podcast"], false,
+        "and it claims nothing it cannot do"
+    );
+    assert_eq!(
+        read("/oracle/contact"),
+        json!({ "persona": "", "session": "", "stale": "" })
+    );
+    assert_eq!(read("/oracle/delegations"), json!({ "delegations": [] }));
+    assert_eq!(read("/oracle/calls/status"), json!({ "delegations": [] }));
+
+    // What cannot be read as asked, in the Python Host's words.
+    for (path, status, why) in [
+        (
+            "/agent-heartbeat/status?session=nobody",
+            404,
+            "no such agent",
+        ),
+        ("/agent-heartbeat/status", 404, "no such agent"),
+        ("/agent-goal", 400, "session required"),
+        ("/agent-goal?session=nobody", 404, "no such agent"),
+        ("/goal-ledger", 400, "plan_id required"),
+        (
+            "/goal-ledger?plan_id=p&limit=many",
+            400,
+            "after and limit are integers",
+        ),
+        ("/vocab/terms", 400, "pack_id is required"),
+        ("/vocab/profile?profile_id=nothing", 404, "no such profile"),
+    ] {
+        let (answered, said) = host.ask("GET", path, None);
+        assert_eq!(
+            (answered, said["error"].as_str()),
+            (status, Some(why)),
+            "{path}"
+        );
+    }
+
+    // A change to any of it is refused, and says that it is not built: nothing is taken
+    // and then not done.
+    for (path, body) in [
+        (
+            "/heartbeat/settings",
+            json!({ "heartbeat_interval_sec": 600 }),
+        ),
+        (
+            "/agent-schedules",
+            json!({ "session": echo, "name": "n", "cron": "* * * * *", "prompt": "p" }),
+        ),
+        (
+            "/agent-schedules/toggle",
+            json!({ "schedule_id": "s", "enabled": true }),
+        ),
+        ("/agent-goal", json!({ "session": echo, "goal": "g" })),
+        ("/agent-goal/pause", json!({ "session": echo })),
+        ("/agent-portrait-generation", json!({ "session": echo })),
+        ("/avatar-settings", json!({ "model_avatars": true })),
+        ("/herald/settings", json!({ "disabled": false })),
+        ("/judgments/settings", json!({ "enabled": true })),
+        ("/diagnostics/settings", json!({ "enabled": true })),
+        ("/location", json!({ "lat": 1.0, "lon": 2.0 })),
+        ("/vocab/packs", json!({ "name": "p" })),
+        ("/vocab/run", json!({ "session": echo })),
+        ("/calls", json!({ "sessions": [echo] })),
+        ("/calls/ring/voip-token", json!({ "token": "t" })),
+        ("/calls/ring/answer", json!({ "ring_id": "r" })),
+        ("/oracle/contact", json!({ "session": echo })),
+        ("/oracle/handoff", json!({ "session": echo })),
+        ("/oracle/v2/calls/control", json!({ "action": "end" })),
+    ] {
+        let (status, said) = host.ask("POST", path, Some(&body));
+        let why = said["error"].as_str().unwrap_or("");
+        assert_eq!(status, 501, "{path}: {said}");
+        assert!(why.ends_with("not built on this Host yet"), "{path}: {why}");
+    }
+
+    // What an agent does by itself is off, and turning it off is done; turning it on is not.
+    for (path, field) in [
+        ("/agent-heartbeat", "heartbeat_enabled"),
+        ("/agent-dreaming", "dreaming_enabled"),
+    ] {
+        let off = host.post(path, json!({ "session": echo, field: false }));
+        assert_eq!(
+            off,
+            json!({ "ok": true, "session": echo, field: false }),
+            "{path}"
+        );
+        let (status, said) = host.ask("POST", path, Some(&json!({ "session": echo, field: true })));
+        assert_eq!(status, 501, "{path}: {said}");
+        for (body, status, why) in [
+            (json!({ field: false }), 400, "session required".to_string()),
+            (json!({ "session": echo }), 400, format!("{field} required")),
+            (
+                json!({ "session": "nobody", field: false }),
+                404,
+                "no such agent".to_string(),
+            ),
+            (json!([1]), 400, "bad json".to_string()),
+        ] {
+            let (answered, said) = host.ask("POST", path, Some(&body));
+            assert_eq!(
+                (answered, said["error"].as_str()),
+                (status, Some(why.as_str())),
+                "{path} {body}"
+            );
+        }
+    }
+    assert_eq!(
+        host.get("/agents/snapshot")["agents"][0]["heartbeat_enabled"],
+        false
+    );
+}
