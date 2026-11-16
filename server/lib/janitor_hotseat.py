@@ -288,10 +288,15 @@ def parse_codex(payload) -> list[dict]:
 
 
 def _repair_model_pin(value: str | None) -> str:
-    # The producer reports quota-family labels, not CLI model identifiers.
-    # Share the switcher's declared family mapping before exact proof matching.
-    spec = _claude_model_spec(value)
-    return spec[1] if spec is not None else ""
+    from .provider_capabilities import claude_model_pin
+    pin = claude_model_pin(value)
+    lowered = pin.casefold()
+    # Reuse declared labels, but do not borrow a family from a substring in an
+    # unknown pin. Keep unknown pins nonempty so they cannot select CLI default.
+    for family, label in _CLAUDE_FAMILY_LABELS:
+        if lowered == family or lowered.startswith(f"claude-{family}-"):
+            return label
+    return pin
 
 
 @dataclass(frozen=True)
@@ -1353,9 +1358,10 @@ def read_repair_accounts(command: str) -> tuple[list[dict], dict, _RepairRead]:
 def repair_requested_model() -> str:
     """Use the maintained runtime default; never a Janitor's own Codex model.
 
-    The model must match the authoritative report's scope identifier exactly
-    (case aside). A display label/model-id mismatch stays unverified rather
-    than guessing family aliases or probing a model on repaired credentials.
+    Normalize the stored pin and CLI-default sentinel first, then map declared
+    Claude aliases/model namespaces to quota-family labels. Verification still
+    requires an exact fresh reported scope; unknown pins cannot borrow another
+    family's quota. This does not probe a model on repaired credentials.
     """
     return _auth_repair_provider().auth_repair.requested_model()
 
