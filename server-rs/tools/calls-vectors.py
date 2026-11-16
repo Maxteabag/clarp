@@ -267,9 +267,113 @@ def run() -> dict:
     return answered
 
 
+# What was said in a call, oldest first: whose conversation it is in, whether the user said it
+# (to that agent) or the agent did, and the words. The header an agent is given quotes what was
+# said since it last spoke.
+LONG = 'A sentence of the long report that goes on. ' * 9
+TALK = [
+    ('a-theo', 'user', "What's the plan for Friday?"), ('a-theo', 'assistant', 'Ship the beta on Friday and keep the flag off.'),
+    ('a-mike', 'user', 'Mike, what do you think?'), ('a-mike', 'assistant', 'I would wait a week.'),
+    ('a-nadia', 'user', 'Nadia?'), ('a-nadia', 'assistant', 'The migration is the only risk.'),
+    ('a-theo', 'user', 'Theo, a long one please.'), ('a-theo', 'assistant', LONG.strip()),
+    ('a-omar', 'assistant', 'Omar, from before he was put on hold.'),
+    ('a-mike', 'user', 'And now, Mike?'),
+]
+MUCH = [('a-theo' if n % 2 else 'a-nadia', 'assistant' if n % 3 else 'user', f'Line number {n} of many, said to fill the header. ' * 2)
+        for n in range(30)]
+
+
+def headers() -> list:
+    """Runs in a process of its own: the header the Python Host gives an agent of a call."""
+    spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
+    host = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(host)
+    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-calls-headers-', dir='/var/tmp'))
+    (root / 'scenario-config.toml').write_text('')
+    host.isolate(root)
+    host.loopback_only()
+    sys.path.insert(0, str(REPO / 'server'))
+    from lib import db, group_calls, oracle_contact, settings_store
+
+    oracle_contact.roster = lambda: [dict(agent) for agent in ROSTER]
+    group_calls._host_id = lambda: 'host-1'
+    group_calls._notify = lambda call, notices: None
+    state = {'now': 1_800_000_000_000, 'made': 0, 'talk': []}
+    group_calls.now_ms = lambda: state['now']
+
+    class Minted:
+        def __init__(self, number):
+            self.hex = f'{number:032x}'
+
+    def mint():
+        state['made'] += 1
+        return Minted(state['made'])
+
+    group_calls.uuid.uuid4 = mint
+
+    class Rows:
+        """The conversations of the call's agents, as the header's question finds them."""
+        def execute(self, sql, params=()):
+            # The question asks for the rows of the call's own agents.
+            self.asked_for = {value for value in params if isinstance(value, str)}
+            return self
+
+        def fetchall(self):
+            return [{'agent_id': agent, 'role': role, 'text': text} for agent, role, text in state['talk']
+                    if agent in self.asked_for]
+
+    real = db.conn
+    rows = []
+
+    def told(name, talk, sessions):
+        state['talk'] = talk
+        db.conn = lambda: Rows()
+        try:
+            said = {session: group_calls.prompt_header(session) for session in sessions}
+        finally:
+            db.conn = real
+        raw = json.loads(settings_store.get(group_calls.KEY + A))
+        rows.append({'name': name, 'now': state['now'], 'calls': raw['calls'], 'talk': [list(row) for row in talk],
+                     'told': said})
+
+    everyone = ['theo-97e5', 'mike-86db', 'nadia', 'omar-1', 'mikael']
+    group_calls.start(A, ['theo', 'mike', 'nadia', 'omar'])
+    told('nobody was spoken to yet', TALK, everyone)
+    group_calls.route(A, '', 'mike-86db')
+    told('the user speaks to one of four', TALK, everyone)
+    group_calls.change(A, 'hold', 'omar')
+    told('one of them is on hold', TALK, everyone)
+    told('nothing was said yet', [], everyone)
+    told('much was said', MUCH + [('a-mike', 'user', 'So?')], everyone)
+    told('the agent itself spoke last', TALK + [('a-mike', 'assistant', 'Mike answered that.')], everyone)
+    state['now'] += 10 * 60 * 1000
+    told('ten minutes after the user spoke to it', TALK, everyone)
+    state['now'] += 1
+    told('a moment later', TALK, everyone)
+    group_calls.route(A, '', 'nadia')
+    group_calls.change(A, 'remove', 'theo')
+    told('another is spoken to, and one has left', TALK, everyone)
+    group_calls.end(A)
+    told('the call is over', TALK, everyone)
+    group_calls.start(A, ['nadia'])
+    group_calls.route(A, '', 'nadia')
+    told('a call with one agent', TALK, everyone)
+    group_calls.start(A, ['theo', 'nadia'], ring={'reason': 'a possible leak at pump 01', 'ring_id': 'rng_1',
+                                                   'opening_line': 'Camera 2 shows a possible water leak. Shall I look?'})
+    group_calls.route(A, '', 'theo-97e5')
+    told('the agent rang the user, who answered', TALK[:2], everyone)
+    group_calls.route(A, '', 'nadia')
+    told('and the user turns to another', TALK[:2], everyone)
+    shutil.rmtree(root, ignore_errors=True)
+    return rows
+
+
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == '--run':
         print(json.dumps(run()))
+        return 0
+    if len(sys.argv) > 1 and sys.argv[1] == '--headers':
+        print(json.dumps(headers()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
                          env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
@@ -277,6 +381,12 @@ def main() -> int:
         print(ran.stderr[-3000:], file=sys.stderr)
         return 1
     said = json.loads(ran.stdout.splitlines()[-1])
+    ran = subprocess.run([sys.executable, '-I', __file__, '--headers'], capture_output=True, text=True,
+                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+    if ran.returncode != 0:
+        print(ran.stderr[-3000:], file=sys.stderr)
+        return 1
+    said['headers'] = json.loads(ran.stdout.splitlines()[-1])
     out = ['{', ' "most": %d, "kept_ended": %d, "stale_ms": %d,' % (said['most'], said['kept_ended'], said['stale_ms']),
            ' "roster": [']
     out.extend('  ' + json.dumps(agent, ensure_ascii=True) + (',' if at < len(said['roster']) - 1 else '')
@@ -293,6 +403,11 @@ def main() -> int:
         out.extend('   ' + json.dumps(row, ensure_ascii=True) + (',' if index < len(rows) - 1 else '')
                    for index, row in enumerate(rows))
         out.append('  ]}' + (',' if at < len(said['scripts']) - 1 else ''))
+    out.append(' ],')
+    out.append(' "headers": [')
+    rows = said['headers']
+    out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if index < len(rows) - 1 else '')
+               for index, row in enumerate(rows))
     out.append(' ]')
     out.append('}')
     OUT.write_text('\n'.join(out) + '\n')
@@ -300,7 +415,7 @@ def main() -> int:
     refused = sum(1 for script in said['scripts'] for row in script['steps'] if row['refused'])
     resolved = sum(1 for row in said['names'] if 'session' in row)
     print(f'{OUT.relative_to(REPO)}: {len(said["scripts"])} scripts of {steps} steps ({refused} refused), '
-          f'{len(said["names"])} names ({resolved} mean one agent)')
+          f'{len(said["names"])} names ({resolved} mean one agent), {len(said["headers"])} moments of what agents are told')
     return 0
 
 

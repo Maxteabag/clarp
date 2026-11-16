@@ -250,20 +250,29 @@ pub struct Call {
     /// The session that gets what names nobody; empty when nobody can take speech.
     pub floor: String,
     pub participants: Vec<Participant>,
+    // What follows is the Host's own, kept under the names the Python Host keeps it under
+    // and told to nobody.
     /// Who had the floor, the latest last: where it goes back to.
-    #[serde(default)]
+    #[serde(default, rename = "_floor_order")]
     floor_order: Vec<String>,
     /// The request that started it: the same request again is the same call.
-    #[serde(default)]
+    #[serde(default, rename = "_request_id")]
     request_id: String,
-    #[serde(default)]
+    #[serde(default, rename = "_changed_at")]
     changed_at: i64,
     /// Whom the call's latest utterance went to, and when.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    routed: Option<(String, i64)>,
+    #[serde(default, rename = "_routed", skip_serializing_if = "Option::is_none")]
+    routed: Option<Routed>,
     /// What the agent that placed the call said it is about (an answered ring).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "_ring", skip_serializing_if = "Option::is_none")]
     ring: Option<Value>,
+}
+
+/// Whom an utterance of a call went to, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Routed {
+    session: String,
+    at: i64,
 }
 
 impl Call {
@@ -281,7 +290,7 @@ impl Call {
     pub fn routed(&self) -> Option<(&str, i64)> {
         self.routed
             .as_ref()
-            .map(|(session, at)| (session.as_str(), *at))
+            .map(|routed| (routed.session.as_str(), routed.at))
     }
 
     /// What the agent that placed the call said it is about.
@@ -349,6 +358,132 @@ impl Call {
         still
             .filter(|part| part.session != without && part.state != LEFT)
             .collect()
+    }
+}
+
+/// How many things that were said a call's header quotes, how long it may be with them,
+/// and how long one of them may be.
+pub const QUOTES_MOST: usize = 12;
+pub const QUOTED_SIGNS_MOST: usize = 1_500;
+pub const QUOTE_SIGNS_MOST: usize = 280;
+/// How long after the user spoke to an agent in a call that agent's turns are the call's.
+pub const ROUTE_FRESH_MS: i64 = 10 * 60 * 1000;
+
+/// Something that was said in a call: in whose conversation, whether the user said it (to
+/// that agent) or the agent did, and the words as a reader sees them, on one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Said<'a> {
+    pub agent_id: &'a str,
+    pub by_user: bool,
+    pub text: &'a str,
+}
+
+impl Call {
+    /// What was said in the call since this session's agent last spoke, the oldest first,
+    /// as short lines that say who said it: the newest twelve, and no more than fits. What
+    /// the agent is answering now is its prompt, and is not quoted.
+    fn quotes(&self, session: &str, said: &[Said]) -> Vec<String> {
+        let Some(me) = self.place(session).map(|place| &self.participants[place]) else {
+            return Vec::new();
+        };
+        let persona_of = |agent_id: &str| {
+            let part = self
+                .participants
+                .iter()
+                .find(|part| part.agent_id == agent_id);
+            part.map(|part| part.persona.as_str())
+        };
+        let in_call: Vec<&Said> = said
+            .iter()
+            .filter(|one| persona_of(one.agent_id).is_some())
+            .collect();
+        let mine = |one: &&Said| one.agent_id == me.agent_id;
+        let after_own = in_call
+            .iter()
+            .rposition(|one| mine(one) && !one.by_user)
+            .map_or(0, |last| last + 1);
+        let mut since = &in_call[after_own..];
+        while let [rest @ .., last] = since
+            && mine(last)
+            && last.by_user
+        {
+            since = rest;
+        }
+        let (mut quotes, mut used) = (Vec::new(), 0);
+        for one in since.iter().rev() {
+            let text = if one.text.chars().count() <= QUOTE_SIGNS_MOST {
+                one.text.to_string()
+            } else {
+                let cut: String = one.text.chars().take(QUOTE_SIGNS_MOST - 1).collect();
+                format!("{}…", cut.trim_end_matches(python::blank))
+            };
+            let persona = persona_of(one.agent_id).unwrap_or("");
+            let line = if one.by_user {
+                format!("User -> {persona}: {text}")
+            } else {
+                format!("{persona}: {text}")
+            };
+            let signs = line.chars().count();
+            if quotes.len() >= QUOTES_MOST || used + signs > QUOTED_SIGNS_MOST {
+                break;
+            }
+            used += signs;
+            quotes.push(line);
+        }
+        quotes.reverse();
+        quotes
+    }
+
+    /// What an agent of the call is told with a turn in which the user speaks to it: who
+    /// else is in the call, who is on hold, what it rang about when it placed the call, and
+    /// what was said since it last spoke. It goes with what the tool is told, never into the
+    /// user's words.
+    pub fn header(&self, session: &str, said: &[Said]) -> String {
+        let Some(me) = self.place(session).map(|place| &self.participants[place]) else {
+            return String::new();
+        };
+        let others: Vec<&Participant> = self
+            .participants
+            .iter()
+            .filter(|part| part.session != session && part.reachable())
+            .collect();
+        let held: Vec<&Participant> = self
+            .participants
+            .iter()
+            .filter(|part| part.state == ON_HOLD)
+            .collect();
+        let mut first = format!(
+            "[Group call] You are {}, on a voice call with the user",
+            me.persona
+        );
+        if !others.is_empty() {
+            first.push_str(&format!(", {}", names(&others)));
+        }
+        first.push('.');
+        if !held.is_empty() {
+            first.push_str(&format!(" On hold: {}.", names(&held)));
+        }
+        first.push_str(concat!(
+            " The user is talking to you now. The other participants do not hear this turn;",
+            " they see it quoted like the lines below when they speak next.",
+        ));
+        let mut lines = vec![first];
+        if let Some(placed) = &self.ring
+            && placed["session"] == session
+        {
+            let word = |key: &str| placed[key].as_str().unwrap_or("");
+            lines.push(format!(
+                "You called the user about: {}. They answered and heard your opening line: \"{}\"",
+                word("reason"),
+                word("opening_line"),
+            ));
+        }
+        let quotes = self.quotes(session, said);
+        if !quotes.is_empty() {
+            lines.push("Since you last spoke:".to_string());
+            lines.extend(quotes);
+        }
+        lines.join("\n")
     }
 }
 
@@ -420,6 +555,21 @@ impl Calls {
     /// One phone's calls, to be kept.
     pub fn of(&self, principal: &str) -> &[Call] {
         self.books.get(principal).map_or(&[], Vec::as_slice)
+    }
+
+    /// The call a turn of this session's agent belongs to: one that is up, in which the
+    /// agent can take speech and the user spoke to it last, not long ago. Nothing is
+    /// changed by asking: a call nobody touched for half a day is simply not found.
+    pub fn turn_of(&self, session: &str, now_ms: i64) -> Option<&Call> {
+        self.books.keys().find_map(|principal| {
+            let call = &self.books[principal][self.live_at(principal)?];
+            let fresh = now_ms - call.changed_at <= STALE_MS;
+            let part = call.place(session).map(|place| &call.participants[place])?;
+            let spoken_to = call.routed.as_ref().is_some_and(|routed| {
+                routed.session == session && now_ms - routed.at <= ROUTE_FRESH_MS
+            });
+            (fresh && part.reachable() && spoken_to).then_some(call)
+        })
     }
 
     fn live_at(&self, principal: &str) -> Option<usize> {
@@ -875,7 +1025,10 @@ impl Calls {
         if !call.participants[part].reachable() {
             return;
         }
-        call.routed = Some((session.to_string(), at.now_ms));
+        call.routed = Some(Routed {
+            session: session.to_string(),
+            at: at.now_ms,
+        });
         let mut changed = call.participants[part].set(ACTIVE, at.now_ms);
         changed |= call.give_floor(session);
         if changed {
