@@ -519,6 +519,19 @@ run on the same commit was green, and the test waits now.
 Not shown yet: a WebSocket through the relay (this Host has no WebSocket route), a loss of the connection
 on the real relay and the dial after it (shown against the stand-in), and the owner's own phone.
 
+**Voice, as the owner's phone uses it** (16 Nov, 23:19, on the build of `a60c7839`). Counted on his Hosts over
+three days, his voice goes as clips: what he says is sent to be heard (`POST /transcribe`, 56 times on
+elitebook), and what an agent says aloud is fetched as a clip; the sockets of live voice were asked not once,
+on either Host. So that is what was shown through the relay's public address, by a device of the check's own
+that was paired through the relay: it asked a Codex agent for a spoken reply; the clip was announced to it
+four seconds after its message; the whole clip came through the relay in 0.52 seconds (39,750 bytes of
+`audio/mpeg`); a piece of it, asked for as a player asks (`Range: bytes=0-1023`), came as that piece (206),
+and what came through the relay was the clip as the Host has it, byte for byte. Then the same clip was sent
+back through the relay to be heard, as a phone sends what its user said: heard in 1.67 seconds by this
+Host's own Whisper, all five words of the line that had been said. A clip from nobody was not heard (401).
+The line was said once by the owner's engine; nothing else left the machine but through the relay. Not
+shown by this: a WebSocket through the relay, which this Host has not.
+
 ## A schedule
 
 On 16 Nov 2026 at 20:49, on the build of `99fe37a7`, with one real Codex turn, by a check that makes an
