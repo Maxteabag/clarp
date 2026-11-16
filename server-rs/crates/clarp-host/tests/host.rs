@@ -2639,11 +2639,8 @@ fn a_call_is_the_hosts_record_of_who_is_in_it_and_its_messages_go_to_who_can_tak
         (status, unknown),
         (404, json!({ "ok": false, "error": "unknown agent" }))
     );
-    let (status, odd) = as_phone("POST", "/calls/dance", Some(json!({ "agent": "theo" })));
-    assert_eq!(
-        (status, &odd["error"]),
-        (400, &json!("unknown action 'dance'"))
-    );
+    let (status, _) = as_phone("POST", "/calls/dance", Some(json!({ "agent": "theo" })));
+    assert_eq!(status, 404, "what is no change of a call is no route");
     let (status, bad) = as_phone("POST", "/calls", Some(json!({ "agents": "theo" })));
     assert_eq!(
         (status, bad),

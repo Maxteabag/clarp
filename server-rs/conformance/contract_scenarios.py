@@ -1497,4 +1497,85 @@ SCENARIOS.append({
     ],
 })
 
+PHONE = 'device_synthetic'
+
+
+def in_call(text, msg_id, session, to=None, **extra):
+    """A message of the call for one of its agents, and the wait for the answer of the agent the
+    Host took it to (`to`, when that is another)."""
+    to = to or session
+    return [post('/send', {'session': session, 'text': text, 'client_msg_id': msg_id, 'synthesize_audio': False,
+                           'hands_free': True, 'force_session': True, 'call_id': '{call}', **extra}, f'send {msg_id}'),
+            {'op': 'wait_reply', 'after': f'u-{msg_id}', 'session': to},
+            {'op': 'quiesce', 'session': to}]
+
+
+SCENARIOS.append({
+    'id': 'calls',
+    'what': "a call: the Host's record of a hands-free conversation with several agents, for the phone that "
+            'owns it. It starts, an agent is put on hold and taken off, the floor moves, one is called '
+            'instead of another, a third is asked in by a name as it is said and leaves; a message of the '
+            'call goes to the agent it names when that one can take speech and to the floor when not; the '
+            'call ends, and a message of a call that is over is refused. What is no request is refused in '
+            "words. Each change is told to the apps, and noted in the agents' conversations.",
+    'sessions': (AGENT, NOVA),
+    'steps': [
+        get('/calls', 'no call is up'),
+        post('/calls', {'agents': [AGENT]}, 'a call for no phone'),
+        post('/calls', {'agents': AGENT, 'principal': PHONE}, 'agents that are no list'),
+        post('/calls', {'agents': [], 'principal': PHONE}, 'a call with nobody'),
+        post('/calls', {'agents': ['nobody-there'], 'principal': PHONE}, 'a call with somebody the Host has not'),
+        post('/calls/add', {'agent': AGENT}, 'no call to ask anybody into'),
+        post('/calls/end', {}, 'no call to end'),
+        # Both agents have a conversation before the call: a notice is written where one is.
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        send('synthetic word before the call', 'callzero'),
+        {'op': 'wait_reply', 'after': 'u-callzero'},
+        {'op': 'quiesce'},
+        send('synthetic word before the call', 'callzeronova', session=NOVA),
+        {'op': 'wait_reply', 'after': 'u-callzeronova', 'session': NOVA},
+        {'op': 'quiesce', 'session': NOVA},
+        {**post('/calls', {'agents': ['Claire', 'nova'], 'principal': PHONE, 'request_id': 'synthetic-call'},
+                'a call starts'), 'save': {'call': 'call.call_id'}},
+        post('/calls', {'agents': ['nova'], 'principal': PHONE, 'request_id': 'synthetic-call'},
+             'the same request again'),
+        get('/calls', 'the call that is up'),
+        get(f'/calls?principal={PHONE}', "the phone's call"),
+        get('/calls?principal=device_other', "another phone's call"),
+        # A message of the call for the one who was only asked in: it is in, and has the floor.
+        *in_call('synthetic call word alfa', 'callalfa', NOVA),
+        get('/calls', 'the floor went to the one who was spoken to'),
+        post('/calls/hold', {'agent': 'Nova'}, 'one is put on hold'),
+        post('/calls/hold', {'agent': 'nova'}, 'on hold already'),
+        # On hold it takes no speech: what is said to it goes to who has the floor.
+        *in_call('synthetic call word bravo', 'callbravo', NOVA, to=AGENT),
+        post('/calls/resume', {'agent': 'novah'}, 'back, by a name as it is said'),
+        post('/calls/resume', {'agent': 'nova'}, 'not on hold'),
+        post('/calls/switch', {'agent': 'nova'}, 'the floor goes to the other'),
+        post('/calls/transfer', {'agent': 'claire'}, 'the one on the floor is held and the first is called'),
+        post('/calls/remove', {'agent': 'somebody-else'}, 'a name nobody has'),
+        post('/calls/add', {'agent': ''}, 'nobody is asked in'),
+        post('/calls/add', ['claire'], 'a change that is no object'),
+        post('/calls/dance', {'agent': 'claire'}, 'what is no change'),
+        post('/calls/hold', {'agent': 'claire'}, 'the other is put on hold too'),
+        post('/send', {'session': AGENT, 'text': 'synthetic call word charlie', 'client_msg_id': 'callcharlie',
+                       'synthesize_audio': False, 'call_id': '{call}'}, 'a message when nobody can take speech'),
+        post('/send', {'session': AGENT, 'text': '  ', 'client_msg_id': 'callnothing', 'call_id': '{call}'},
+             'a message of the call that says nothing'),
+        post('/calls/remove', {'agent': 'nova'}, 'one leaves'),
+        post('/calls/remove', {'agent': 'claire'}, 'the last one leaves: the call is over'),
+        get('/calls', 'no call is up any more'),
+        post('/send', {'session': AGENT, 'text': 'synthetic call word delta', 'client_msg_id': 'calldelta',
+                       'synthesize_audio': False, 'call_id': '{call}'}, 'a message of a call that is over'),
+        post('/calls/end', {'call_id': '{call}', 'principal': PHONE}, 'the call that is over is ended'),
+        # A second call takes the place of a first one that is up.
+        post('/calls', {'agents': ['nova'], 'principal': PHONE}, 'another call'),
+        post('/calls', {'agents': ['claire', 'Nova']}, 'a call that takes its place, for the phone of the newest'),
+        post('/calls/end', {}, 'it ends'),
+        get(f'/log?session={NOVA}', 'the conversation of the second agent'),
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

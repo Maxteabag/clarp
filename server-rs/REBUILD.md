@@ -676,6 +676,23 @@ offered only what was announced. Three things are done otherwise, each in the re
 clip nothing came of is taken back instead of announced later, two agents let speak in one breath are
 heard in the order of their sessions, and the settings a change does not name are not written.
 
+**Calls** (16 Nov 2026). The first of the larger things an app's screens were only answered for: a call is
+the Host's record of a hands-free conversation with several agents, for the phone that owns it: who is in
+it, who is on hold, who has the floor. The phone captures and plays; the record changes by an explicit
+request (the app's buttons, an agent's `clarp-admin call`) and by routing, which moves the floor to whoever
+was spoken to. The rules are the kernel's (`calls.rs`), the Python Host's contract (`docs/group-calls.md`)
+without a store, a clock or a stream, held to that Host's own module through 11 scripts of 186 steps from
+two phones and the administrator, over 69 names typed and spoken, and in 13 moments of what an agent of a
+call is told (`tools/calls-vectors.py`). At the edge (`clarp-host` `calls.rs`) one request at a time is
+asked of them; each phone's calls are kept where the fleet keeps small things, under the Python Host's own
+names for what a Host keeps to itself; every change is told to the apps (`group-call`) and noted quietly in
+the conversations of the agents it concerns, by a word of the Host's that belongs to no turn. A message
+that carries its call goes to the agent it names when that one can take speech, else to the floor, and a
+call that is over refuses it. Every message to an agent the user spoke to in a call carries the call's
+header to the turn's tool: who else is there, and what was said since the agent last spoke, gathered from
+the conversations of the call's agents. The feature is advertised (`group_calls`). Not built with it: how
+a call is transcribed (its own feature), and rings.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as

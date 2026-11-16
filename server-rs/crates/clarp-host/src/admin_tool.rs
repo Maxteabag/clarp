@@ -398,6 +398,98 @@ async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// `clarp-admin call status|start|end|add|remove|hold|resume|switch|transfer`: an agent
+/// manages its user's call (the skill `clarp-calls`): who is in it, on hold, or has the
+/// floor. The answer is printed as the Python tool prints it: the Host's answer as JSON, and
+/// exit 1 when the Host refuses. The agent that asks is the one whose turn this is.
+async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
+    use clarp_kernel::calls::{ADMINISTRATOR, Asker};
+    let usage = |why: &str| {
+        let commands = "{status,start,end,add,remove,hold,resume,switch,transfer}";
+        ToolAnswer::said(
+            2,
+            format!("usage: clarp-admin call [-h] {commands} ...\nclarp-admin call: error: {why}"),
+        )
+    };
+    let Some((command, rest)) = args.split_first() else {
+        return usage("the following arguments are required: call_command");
+    };
+    let takes = match command.as_str() {
+        "status" | "end" => 0,
+        "start" => usize::MAX,
+        "add" | "remove" | "hold" | "resume" | "switch" | "transfer" => 1,
+        // Ringing the user is not on this Host yet.
+        "ring" | "ring-status" | "ring-cancel" | "rings" => {
+            return not_here(&format!("call {command}"));
+        }
+        other => {
+            return usage(&format!(
+                "argument call_command: invalid choice: {}",
+                python::text(other)
+            ));
+        }
+    };
+    let parsed = match parse(rest, &["--call", "--principal"], &[], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let agents = &parsed.positional;
+    match takes {
+        0 if !agents.is_empty() => {
+            return usage(&format!("unrecognized arguments: {}", agents.join(" ")));
+        }
+        usize::MAX if agents.is_empty() => {
+            return usage("the following arguments are required: AGENT");
+        }
+        1 if agents.is_empty() => return usage("the following arguments are required: AGENT"),
+        1 if agents.len() != 1 => {
+            let said = json!({ "ok": false, "error": format!("call {command} takes one agent") });
+            return ToolAnswer::printed(2, said.to_string());
+        }
+        _ => {}
+    }
+    let by = tool
+        .env
+        .get(SESSION_ENV)
+        .map_or("", |session| session.trim());
+    let by = app
+        .member(by)
+        .map_or_else(String::new, |member| member.record.session.clone());
+    let (call_id, principal) = (
+        parsed.option("--call").unwrap_or("").to_string(),
+        parsed.option("--principal").unwrap_or("").to_string(),
+    );
+    let asker = Asker {
+        caller: ADMINISTRATOR,
+        call_id: &call_id,
+        principal: &principal,
+        by: &by,
+    };
+    let desk = app.calls.clone();
+    let asked = desk.ask(app, |calls, at, (roster, new_id), out| {
+        match command.as_str() {
+            "status" => calls.snapshot(asker, at, out),
+            "start" => {
+                let asker = Asker {
+                    call_id: "",
+                    ..asker
+                };
+                calls.start(asker, (agents, "", None), (roster, new_id), at, out)
+            }
+            "end" => calls.end(asker, at, out),
+            action => calls.change(asker, (action, &agents[0]), roster, at, out),
+        }
+    });
+    match asked.await {
+        Ok(Ok(answer)) => shown(&answer),
+        Ok(Err(refused)) => match serde_json::to_string_pretty(&refused.body) {
+            Ok(body) => ToolAnswer::printed(1, body),
+            Err(error) => ToolAnswer::said(1, format!("clarp-admin: {error}")),
+        },
+        Err(unavailable) => ToolAnswer::said(1, format!("clarp-admin call: {}", unavailable.0)),
+    }
+}
+
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
@@ -407,6 +499,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "model" => model(app, call, rest).await,
         Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,
         Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
+        Some((command, rest)) if command == "call" => self::call(app, call, rest).await,
         Some((command, _)) => not_here(command),
         None => ToolAnswer::said(2, "usage: clarp-admin COMMAND ..."),
     }
