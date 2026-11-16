@@ -163,6 +163,8 @@ async fn serve(config: Config) -> Result<(), String> {
         calls: Arc::default(),
         chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
         schedules: Arc::default(),
+        door: Arc::default(),
+        connector: Arc::new(clarp_host::connector::Connector::told(&config)),
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
             // nobody will ask for again are forgotten on the side.
@@ -213,7 +215,11 @@ async fn serve(config: Config) -> Result<(), String> {
         config.launcher
     );
     // The edge is told who connected: the administrator's token opens the Host only from here.
-    let service = edge::router(app).into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let router = edge::router(app.clone());
+    // And where the Host is reached through a relay, what a phone asks there is asked of
+    // the same routes, from now on.
+    clarp_host::connector::run(&app, router.clone());
+    let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, service)
         .with_graceful_shutdown(told_to_stop())
         .await
@@ -263,6 +269,23 @@ fn main() -> ExitCode {
                 eprintln!(
                     "clarp-host pair: {error}\n{}",
                     clarp_host::admin::PAIR_USAGE
+                );
+                ExitCode::from(2)
+            }
+        };
+    }
+    if args.peek().map(String::as_str) == Some("network") {
+        args.next();
+        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        return match clarp_host::admin::network(args, &token) {
+            Ok(shown) => {
+                println!("{shown}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!(
+                    "clarp-host network: {error}\n{}",
+                    clarp_host::admin::NETWORK_USAGE
                 );
                 ExitCode::from(2)
             }

@@ -20,12 +20,16 @@ clarp-store-mem.workspace = true
 clarp-store-sqlite.workspace = true
 futures-util.workspace = true
 nix.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 toml.workspace = true
+tower.workspace = true
 ureq.workspace = true
+webpki-roots.workspace = true
 
 [lints]
 workspace = true

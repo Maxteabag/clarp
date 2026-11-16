@@ -91,6 +91,14 @@ pub struct Config {
     pub google_speech_endpoint: String,
     /// A stand-in for the program that decodes a clip for that engine. Empty: `ffmpeg`.
     pub chirp_decoder: String,
+    /// A file of the Python Host's kind that says whether this Host is reached through the
+    /// connection relay (`[network] relay_enabled`); the relay's name for the Host and its
+    /// key are beside it, in `relay.json`. `None`: this Host dials no relay. It is its own
+    /// word and nothing else's: a Host that reads the owner's keys from the Python Host's
+    /// file does not thereby take that Host's name at the relay.
+    pub relay_config: Option<PathBuf>,
+    /// A stand-in for the relay, on this machine. Empty: the relay the settings name.
+    pub relay_stand_in: String,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
@@ -102,7 +110,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
-[--static DIR]
+[--static DIR] [--relay-config FILE]
 The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
 the push relay, when it has one, from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
 over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY.";
@@ -227,6 +235,7 @@ impl Config {
         let mut speech_language = "en".to_string();
         let mut speech_keys = None;
         let mut static_dir = None;
+        let mut relay_config = None;
         let mut transcription_engine = "local".to_string();
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
@@ -295,6 +304,7 @@ impl Config {
                 "--speech-language" => speech_language = value("a language")?,
                 "--speech-keys" => speech_keys = Some(PathBuf::from(value("a file")?)),
                 "--static" => static_dir = Some(PathBuf::from(value("a directory")?)),
+                "--relay-config" => relay_config = Some(PathBuf::from(value("a file")?)),
                 "--transcription-engine" => transcription_engine = value("a name")?,
                 other => return Err(format!("unknown argument {other}")),
             }
@@ -341,6 +351,15 @@ impl Config {
             return Err(both.to_string());
         }
         let chirp_decoder = std::env::var("CLARP_CHIRP_DECODER").unwrap_or_default();
+        // A stand-in for the relay is on this machine too: the key a Host dials with goes
+        // over TLS, or stays here.
+        let relay_stand_in = std::env::var("CLARP_RELAY_DIAL").unwrap_or_default();
+        let here = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
+        if !relay_stand_in.is_empty() && !here.iter().any(|begin| relay_stand_in.starts_with(begin))
+        {
+            let only = "an address on this machine (ws://127.0.0.1:PORT)";
+            return Err(format!("CLARP_RELAY_DIAL {relay_stand_in}: {only}"));
+        }
         Ok(Self {
             run_dir,
             listen: listen
@@ -390,6 +409,8 @@ impl Config {
             google_token_endpoint,
             google_speech_endpoint,
             chirp_decoder,
+            relay_config,
+            relay_stand_in,
         })
     }
 }
@@ -586,5 +607,13 @@ mod tests {
         );
         assert!(parse(&["--push-relay", "http://127.0.0.1:9"]).is_ok());
         assert!(parse(&["--push-relay", "http://relay.example"]).is_err());
+        // And it dials no relay for the phones until it is given the file that says so.
+        assert_eq!(config.relay_config, None);
+        assert_eq!(
+            parse(&["--relay-config", "/c/config.toml"])
+                .unwrap()
+                .relay_config,
+            Some(PathBuf::from("/c/config.toml"))
+        );
     }
 }

@@ -34,7 +34,7 @@ clarp-store-sqlite = { path = "crates/clarp-store-sqlite" }
 clarp-store-files = { path = "crates/clarp-store-files" }
 clarp-speech = { path = "crates/clarp-speech" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 # The owner's own file of settings is written in TOML, by hand and by other programs. It is
 # read by a reader of TOML: a reader of lines would misread what it did not expect, and what
@@ -44,6 +44,17 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 # HTTPS. A small blocking client on a thread of its own; nothing else in the Host speaks TLS.
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 clarp-spool = { path = "crates/clarp-spool" }
+# The connection relay: the one outbound WebSocket a phone's requests come down, over TLS. It is
+# the crate Axum takes for WebSockets (its `ws`), so that the Host has one of them, and its TLS
+# is the rustls the push relay's client already brings.
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+# Whom the connector trusts to be the relay is said by the Host itself: the web's authorities,
+# with the one provider of cryptography the Host has. Both are what the push client brings.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+# The Host's own router, asked from inside the Host: what came through the relay is served by
+# the same routes as what came through the door, with no socket in between.
+tower = { version = "0.5", default-features = false, features = ["util"] }
 nix = { version = "0.29", features = ["signal", "process", "poll"] }
 regex = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
