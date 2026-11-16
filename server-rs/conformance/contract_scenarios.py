@@ -1898,6 +1898,52 @@ SCENARIOS.append({
 })
 
 
+def picture(width):
+    """A tiny picture that is no other tiny picture: a GIF this many dots wide."""
+    return 'GIF89a' + chr(width) + '\x00\x03\x00' + '\x00' * 6
+
+
+def portrait(change, name, **more):
+    return {'op': 'post', 'path': '/agent-portraits', 'body': {'session': AGENT, **change}, 'name': name, **more}
+
+
+PORTRAITS = get(f'/agent-portraits?session={AGENT}')
+
+SCENARIOS.append({
+    'id': 'agent-portraits',
+    'what': 'the portraits an agent keeps: pictures it published are kept as portraits, three at most and each '
+            'once; one of them is made the picture the agent wears, and is then its face wherever it is shown; '
+            'and what is asked for that is not there is refused in words',
+    'steps': [
+        {**PORTRAITS, 'name': 'the portraits of an agent that wears no picture of its own'},
+        get('/agent-portraits?session=nobody-of-the-kind', 'the portraits of nobody'),
+        {**publish(picture(2), 'image/gif', 'one.gif'), 'save': {'one': 'asset.asset_id'}},
+        {**publish(picture(3), 'image/gif', 'two.gif'), 'save': {'two': 'asset.asset_id'}},
+        {**publish(picture(4), 'image/gif', 'three.gif'), 'save': {'three': 'asset.asset_id'}},
+        {**publish(picture(5), 'image/gif', 'four.gif'), 'save': {'four': 'asset.asset_id'}},
+        portrait({'action': 'add_media_asset', 'asset_id': '{one}'}, 'a picture it published is kept',
+                 save={'first': 'portraits.0.portrait_id'}),
+        portrait({'action': 'add_media_asset', 'asset_id': '{one}'}, 'kept a second time, it is kept once'),
+        portrait({'action': 'add_media_asset', 'asset_id': '{two}'}, 'a second is kept'),
+        portrait({'action': 'add_media_asset', 'asset_id': '{three}'}, 'a third is kept'),
+        portrait({'action': 'add_media_asset', 'asset_id': '{four}'}, 'a fourth is one too many'),
+        portrait({'action': 'add_media_asset', 'asset_id': 'asset_nothing_of_the_kind'}, 'what it never published'),
+        portrait({'action': 'add_media_asset'}, 'nothing named to keep'),
+        portrait({'action': 'select_primary', 'portrait_id': 'portrait_nothing_of_the_kind'}, 'a portrait it has not'),
+        portrait({'action': 'paint'}, 'a change nobody knows'),
+        post('/agent-portraits', {'session': 'nobody-of-the-kind', 'action': 'select_primary', 'portrait_id': 'x'},
+             'a portrait chosen for nobody'),
+        post('/agent-portraits', {'session': 'nobody-of-the-kind', 'action': 'paint'},
+             'a change nobody knows, for nobody'),
+        portrait({'action': 'select_primary', 'portrait_id': '{first}'}, 'one of them is made the picture it wears'),
+        {**PORTRAITS, 'name': 'the portraits afterwards: the one it wears first'},
+        get('/agent-portraits/{first}/content', 'the picture of the portrait it wears'),
+        get('/agent-portraits/portrait_nothing_of_the_kind/content', 'the picture of a portrait nobody has'),
+        {**SNAPSHOT, 'name': 'the snapshot: the agent wears the picture it was given'},
+    ],
+})
+
+
 def settings(change, name):
     return post('/heartbeat/settings', change, name)
 

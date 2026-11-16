@@ -495,6 +495,12 @@ RING = re.compile(r'rng_[0-9a-f]{32}')
 # The id a Host gives a schedule: `sched_` and twelve hex signs. It is in the schedule's record and
 # in the path a client changes and removes it by. Named as the calls are.
 SCHEDULE = re.compile(r'sched_[0-9a-f]{12}')
+# The id a Host gives a portrait an agent keeps: `portrait_` and twenty-four signs for one chosen
+# from what the agent published, and `portrait_legacy_`, the agent's id and the beginning of the
+# picture's digest for the picture an agent wears. It is in the list of an agent's portraits, in
+# where a portrait's picture is fetched, and in what a client names when it chooses one. Named as
+# the calls are.
+PORTRAIT = re.compile(r'portrait_(?:legacy_[0-9a-f]+_[0-9a-f]{24}|[A-Za-z0-9_]{24})')
 # The clip of a ring's opening line, where a Host voiced it: the name of its file begins with the
 # moment it was made. The harness's normalizer names such a file only under the keys it knows.
 RING_CLIP = re.compile(r'/audio/1[5-9][0-9]{11}(__[A-Za-z0-9._-]+\.mp3)')
@@ -818,6 +824,9 @@ def called(value, found: dict) -> dict:
             elif key == 'schedule_id' and isinstance(item, str) and SCHEDULE.fullmatch(item):
                 known = sum(1 for name in found.values() if name.startswith('<schedule:'))
                 found.setdefault(item, f'<schedule:{known + 1}>')
+            elif key == 'portrait_id' and isinstance(item, str) and PORTRAIT.fullmatch(item):
+                known = sum(1 for name in found.values() if name.startswith('<portrait:'))
+                found.setdefault(item, f'<portrait:{known + 1}>')
             else:
                 called(item, found)
     return found
@@ -1152,7 +1161,15 @@ def main(argv=None) -> int:
             recordings, lines, ok = record(build, chosen, run, args.jobs)
             for directory, seen in zip(golden_dirs(args.out / 'golden'), recordings):
                 write_golden(directory, seen)
-            proof, proved = prove(build, recordings[0], chosen, plants.CHANGES, run, args.jobs)
+            if args.scenarios:
+                # A question about some scenarios: the planted changes are tried on the whole
+                # corpus only, where each of them has a scenario that can show it. A part of
+                # the corpus proves nothing about the suite, and gates nothing.
+                proof = ['# Planted changes', '',
+                         'NOT TRIED: a part of the corpus was asked for; the whole corpus is the gate']
+                proved = True
+            else:
+                proof, proved = prove(build, recordings[0], chosen, plants.CHANGES, run, args.jobs)
             rust_lines, conforms, rust_seen = against_rust(
                 rust, recordings, chosen, load_intended(args.intended), run, args.jobs)
             write_golden(args.out / 'rust', rust_seen)
