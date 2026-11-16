@@ -9,6 +9,7 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 |---|---|
 | The agent: its name, session name, backend, working directory, model and effort | read from `GET /agents/snapshot`. An agent's row shows the model that last answered when the agent is set to none, and does not say which of the two it shows: here the agent is set to the model its row shows, so it goes on with the model it ran |
 | Who it is: its voices, its symbol, the picture it has of its own, and how it speaks | its voices and its symbol from its row; the picture from `GET /avatars/<agent>`; how it speaks from the persona of its name in `personas` of the snapshot, because an agent's row does not say. An agent whose own way of speaking is no longer its persona's (the persona was changed or removed after the agent was made, or the agent was given another name) arrives speaking as the persona of its name speaks now, or with its name alone |
+| The portraits it keeps, the one it wears among them | read from `GET /agent-portraits?session=` and each portrait's picture from the address the list gives; kept here under the ids they have, each with the file of the gallery it was chosen from named as it was. A portrait whose picture cannot be read stays behind; the agent arrives |
 | Whether it has the heartbeat on | from its row (`heartbeat_enabled`). What its heartbeat remembered on the other Host does not come (how often it found nothing to do, whether it had gone dormant): here it begins at the owner's interval, and while the agent is held after its arrival it is given none |
 | Its conversation, every row as the apps show it, in the same order, under the same ids | read from `GET /log`, page by page |
 | The tool's own session (Claude's session, Codex's thread) | the next turn continues it: the agent remembers |
@@ -20,7 +21,7 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 
 ## What does not move yet
 
-- The portraits it keeps beside the one it wears (`GET /agent-portraits`), how much it says while it works and how human it sounds: none of them is in what a Host shows of an agent.
+- How much it says while it works and how human it sounds: neither is in what a Host shows of an agent.
 - What it threw away: an artifact that was discarded stays where it was.
 - What users answered to a form before the move: it is in the conversation, where the agent
   was told it. The form arrives as it is and takes answers anew, unless its schema has a

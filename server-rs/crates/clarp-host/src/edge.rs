@@ -25,6 +25,7 @@ use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::journal::Reworded;
+use clarp_kernel::kept_portraits::{self, Portrait};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::python;
 use clarp_kernel::trust::{self, FailureLimiter};
@@ -1053,6 +1054,10 @@ struct ImportRequest {
     /// The picture it has of its own there, in base64, as `GET /avatars/<agent>` gave it.
     #[serde(default)]
     picture: Option<String>,
+    /// The portraits it keeps there, each as the other Host's `GET /agent-portraits` listed
+    /// it, with its picture in base64.
+    #[serde(default)]
+    portraits: Vec<Value>,
 }
 
 /// An artifact that comes with an agent.
@@ -1083,7 +1088,36 @@ async fn import_agent(
     // arrives with another face than it was sent with is not what was asked for.
     let picture = clarp_kernel::personas::picture(request.picture.as_deref().unwrap_or(""))
         .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    // The portraits it keeps, the one it wears among them: that one is known by its
+    // picture, which is the agent's. One whose picture cannot be read, or is no picture,
+    // is left behind: the agent arrives, with the face it was sent with. A portrait whose
+    // picture another has is that portrait, and no more are taken than an agent keeps.
+    let mut portraits: Vec<Portrait> = Vec::new();
+    let mut pictures: Vec<(String, Vec<u8>)> = Vec::new();
+    for moved in &request.portraits {
+        let said = |key: &str| moved[key].as_str().unwrap_or("").to_string();
+        let Ok(Some((bytes, digest))) = clarp_kernel::personas::picture(&said("picture")) else {
+            continue;
+        };
+        let Some(kind) = kept_portraits::picture_kind(&bytes) else {
+            continue;
+        };
+        let twice = portraits.iter().any(|kept| kept.sha256 == digest);
+        if said("portrait_id").is_empty() || twice || portraits.len() >= kept_portraits::MOST {
+            continue;
+        }
+        portraits.push(Portrait {
+            portrait_id: said("portrait_id"),
+            media_asset_id: Some(said("media_asset_id")).filter(|asset| !asset.is_empty()),
+            sha256: digest.clone(),
+            mime_type: kind.to_string(),
+            created_by: said("created_by"),
+            created_at: moved["created_at"].as_i64().unwrap_or(0),
+        });
+        pictures.push((crate::fleet::picture_name(&digest), bytes));
+    }
     let record = AgentRecord {
+        portraits,
         agent_id: field("agent_id"),
         session: field("session"),
         persona: field("persona"),
@@ -1115,10 +1149,12 @@ async fn import_agent(
         avatar: picture.as_ref().map(|(_, digest)| digest.clone()),
         ..AgentRecord::default()
     };
-    // The picture is kept before the agent that names it.
+    // The picture is kept before the agent that names it, and so are its portraits'.
     if let Some((bytes, digest)) = &picture {
-        let name = crate::fleet::picture_name(digest);
-        let kept = app.blobs.put(&name, bytes);
+        pictures.push((crate::fleet::picture_name(digest), bytes.clone()));
+    }
+    for (name, bytes) in &pictures {
+        let kept = app.blobs.put(name, bytes);
         kept.map_err(|error| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
     }
     let rows: Vec<ImportedRow> = request
