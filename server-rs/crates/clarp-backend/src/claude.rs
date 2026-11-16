@@ -106,6 +106,7 @@ impl Backend for Claude {
         // hands the model what a hook says between the same marks.
         if let Some(told) = &spec.told {
             let said = told::beside(&told.persona, &spec.session, told.spoken);
+            let said = told::in_call(said, told.call.as_deref());
             let (opens, ends) = REMINDER;
             content.push(json!({"type": "text", "text": format!("{opens}\n{said}\n{ends}")}));
         }
@@ -1431,6 +1432,9 @@ mod tests {
                     tags: false,
                     narration: 1,
                 }),
+                call: Some(
+                    "[Group call] You are Maximus, on a voice call with the user.".to_string(),
+                ),
             }),
             ..spec.clone()
         });
@@ -1457,10 +1461,16 @@ mod tests {
         assert!(said.contains("This turn belongs to Maximus (Clarp session maximus)."));
         assert!(said.contains("<speak>") && said.contains("Humanness: 0/10."));
         assert!(said.contains("Narration level: milestones."));
+        // The header of a call the turn is a part of comes after everything else.
+        assert!(
+            said.ends_with("\n\n[Group call] You are Maximus, on a voice call with the user.\n</system-reminder>"),
+            "{said}"
+        );
         let silent = Claude::new().launch(&TurnSpec {
             told: Some(told::Turn {
                 persona: "Maximus".to_string(),
                 spoken: None,
+                call: None,
             }),
             ..spec.clone()
         });

@@ -10597,6 +10597,22 @@ fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
     );
     let (_, words, _) = ask(&mike, "and now?", false);
     assert_eq!(words, "and now?");
+    // An agent its user muted pages nobody; it is told what was not heard like any other.
+    host.post("/agent-mute", json!({ "session": mike, "muted": true }));
+    let handed_before = std::fs::read_to_string(&lines).unwrap().lines().count();
+    host.post(
+        "/send",
+        json!({
+            "session": mike, "text": "still?", "synthesize_audio": false, "client_msg_id": "unheard-2",
+            "unheard_audio_sessions": [mike],
+        }),
+    );
+    wait_for("the turn of the muted and unheard", || {
+        let handed = std::fs::read_to_string(&lines).unwrap().lines().count();
+        handed > handed_before && host.state(&mike) == "done"
+    });
+    assert!(last().1.starts_with("<clarp-delivery-context>\n"));
+    host.post("/agent-mute", json!({ "session": mike, "muted": false }));
 
     // All of it is the Host's to keep: a Host that was killed tells the same.
     host.kill();

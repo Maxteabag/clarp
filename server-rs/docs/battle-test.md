@@ -151,9 +151,10 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 15:58 (16 Nov) | the Host updated by the installer, `5976918e` to `47ff6794`: the build that tells an agent's tool who the agent is, whose turn it is and how to speak | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 16:10 (16 Nov) | the Host updated by the installer, `47ff6794` to `341125e3`: the build with the personas the owner makes, agents made as them, the files where an agent works and the screens of what this Host has not | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 17:19 (16 Nov) | the Host updated by the installer, `341125e3` to `0917e7a4`: the build with the app's remaining screens, an agent's face in a push, a spoken message that finds its agent by its name, and a phone's place | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 18:01 (16 Nov) | the Host updated by the installer, `0917e7a4` to `afbf6959`: the build with the herald | 3 | every turn in its command (`sleep 40`) | held: the new build answered in the same millisecond, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Eighty-nine turns in twenty-five
+completed, answered with its word, and its command ran exactly once. Ninety-two turns in twenty-six
 exercises, none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
@@ -384,6 +385,29 @@ with another signature nor unsigned (403). The phone's place was said for the ag
 with the moment it was said; a place north of the pole was refused, 400, in words; and an agent's question
 for it was taken. Then the agent was removed: the Host had its twelve agents as before.
 
+## An agent raises its hand
+
+On 16 Nov 2026 at 18:01, on the build of `afbf6959`, with real Claude Code turns on the small model and the
+owner's own engines (Gemini, then Cartesia), by a check that makes an agent of its own and removes it. The
+herald was as it comes: on, and a reply of 120 signs or fewer said at once.
+
+The user was with one agent (it was the open one) and another had a report of 180 signs to say aloud, by a
+message nobody waits for the answer to. Until this build its clip would have been announced to the apps the
+moment it was begun. Now one clip was announced, and it was not the report: the herald's own, in that
+agent's voice, marked to be played whichever agent is open, with no line of the agent's behind it. The
+report was held, and an app that had been away was not offered it. When the user opened that agent, the
+report's clip was announced, with the same mark. Then the user turned away again and the agent said "Done.":
+that was announced at once, with no herald. No engine failed.
+
+The same check asked what a tool is told when the app says its user has not heard the last reply
+(`unheard_audio_sessions`). A real model, asked whether its message came with such a note, answered "Yes.
+The note begins: "The user began a new spoken"."; one whose user had heard everything answered that there
+was none; and the conversation kept the user's words alone. Two things this check taught. Asked in a more
+roundabout way, the same model with the same note answered that there was none: what a model makes of a
+note is the model's, and the proof that the note is handed over is the test with a tool that writes down
+what it is handed. And the build held the note back from an agent its user had muted, which is a mistake of
+this Host's (on the Python Host only a janitor's run is exempt): put right in the build after this one.
+
 ## The soak so far
 
 Rounds 1 to 13 (15 Nov, 17:15 to 20:01): twelve completed and answered with their word; none lost, none
@@ -422,6 +446,10 @@ Rounds 94 to 97 (to 17:09 on 16 Nov) completed, on the builds of `47ff6794` and,
 all, 97 rounds over 23.9 hours on nineteen builds: 96 completed and answered with their word, the one of
 19:31 as told above; none lost, none doubled. Eight audits of the whole conversation, the last over 96
 messages: no message twice, no turn ended twice. The build of `0917e7a4` runs from 17:19.
+
+Rounds 98 to 100 (to 17:55 on 16 Nov) completed, on the build of `0917e7a4`. In all, 100 rounds over 24.7
+hours, a day and a night, on twenty builds: 99 completed and answered with their word, the one of 19:31 as
+told above; none lost, none doubled. The build of `afbf6959` runs from 18:01.
 
 ## What a round does not prove
 

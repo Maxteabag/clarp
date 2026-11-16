@@ -50,6 +50,10 @@ pub struct Message {
     /// aloud: the agent's tool is told so with this message.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unheard: bool,
+    /// The header of the call the agent is spoken to in, as it stood when the message came:
+    /// told to the agent's tool with this message, and no part of what the user said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]

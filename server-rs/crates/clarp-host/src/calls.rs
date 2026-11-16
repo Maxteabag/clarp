@@ -127,6 +127,69 @@ impl Desk {
     }
 }
 
+/// How many of the newest things of each agent's conversation are looked at for what was
+/// said in a call: more than the header quotes of all of them together.
+const LOOKED_AT: usize = 40;
+
+impl Desk {
+    /// What the agent of this session is told of its call with a turn that starts now: who
+    /// else is in it, and what was said since it last spoke. Empty when no call's latest
+    /// utterance went to it, or not lately.
+    pub async fn header(&self, app: &App, session: &str) -> String {
+        use clarp_actor::conversation::Which;
+        use clarp_kernel::calls::Said;
+        use clarp_kernel::conversation::Entry;
+        use clarp_speech::markup;
+
+        let found = self
+            .ask(app, |calls, at, _, _| {
+                calls.turn_of(session, at.now_ms).cloned()
+            })
+            .await;
+        let Ok(Some(call)) = found else {
+            return String::new();
+        };
+        // What was said in the call's agents' conversations since it began, by people and
+        // by the agents at the end of their turns, as a reader sees it, the oldest first.
+        let directory = app.fleet.directory();
+        let mut said: Vec<(i64, usize, String, bool, String)> = Vec::new();
+        for part in &call.participants {
+            let mut members = directory.members.iter();
+            let Some(member) = members.find(|member| member.record.agent_id == part.agent_id)
+            else {
+                continue;
+            };
+            let Ok(page) = member.agent.tail(LOOKED_AT, Which::WithoutAutomated).await else {
+                continue;
+            };
+            for row in page.entries {
+                if row.ts_ms < call.started_at || row.live {
+                    continue;
+                }
+                let (by_user, text) = match &row.entry {
+                    Entry::Message(message) => (true, &message.text),
+                    Entry::Reply(reply) if !row.commentary => (false, &reply.text),
+                    _ => continue,
+                };
+                let text = markup::clean_for_display(text, true);
+                if !text.is_empty() {
+                    said.push((row.ts_ms, said.len(), part.agent_id.clone(), by_user, text));
+                }
+            }
+        }
+        said.sort_by_key(|(at, place, ..)| (*at, *place));
+        let said: Vec<Said> = said
+            .iter()
+            .map(|(_, _, agent_id, by_user, text)| Said {
+                agent_id,
+                by_user: *by_user,
+                text,
+            })
+            .collect();
+        call.header(session, &said)
+    }
+}
+
 /// Who asks, as the calls know a caller: a phone by its id, or the administrator. A phone
 /// that may only read and send has no call.
 pub fn caller(principal: &Principal) -> Result<String, ApiError> {
