@@ -1864,14 +1864,18 @@ impl Worker {
 /// turn ended last. A change in any of it is told.
 fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>, String, u32) {
     let live = status.live.as_ref();
-    let tool = match live.map(|live| &live.activity) {
+    // What it does within its state: the tool it runs, or that it writes its answer now.
+    // An agent that goes from thinking to answering is thinking still by its state, and
+    // the apps are told all the same, as the Python Host tells them.
+    let doing = match live.map(|live| &live.activity) {
         Some(Activity::Tool { name }) => name.clone(),
+        Some(Activity::Responding) => wire::RESPONDING.to_string(),
         _ => String::new(),
     };
     (
         live.map(|live| live.turn),
         wire::state_name(&wire::state_kind(status)),
-        tool,
+        doing,
         status.last.as_ref().map(|last| last.id),
         status.label.clone(),
         // An attempt of the live turn failed and the turn is tried again: the apps are told
