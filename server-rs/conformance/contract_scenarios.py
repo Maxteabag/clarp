@@ -1466,4 +1466,35 @@ SCENARIOS.append({
     ],
 })
 
+HERALD = '/herald/settings'
+
+SCENARIOS.append({
+    'id': 'herald-settings',
+    'what': "how the owner sets the herald (an agent whose user is with another raises its hand before it is "
+            "heard): on unless turned off, how short a reply is that is said at once, and whether short replies "
+            "are; and what is no setting. (What the herald does with a clip is held by the Rust Host's tests "
+            "against the Python Host's own manager: the reference says nothing aloud in this harness.)",
+    'steps': [
+        get(HERALD, 'the herald as it comes'),
+        post(HERALD, {'disabled': True}, 'the herald turned off'),
+        post(HERALD, {'speak_if_short_chars': 0, 'short_reply_bypass_enabled': False}, 'no reply is short'),
+        get(HERALD, 'the herald as it was set'),
+        post(HERALD, {}, 'a change of nothing'),
+        post(HERALD, [], 'a change that is no object'),
+        post(HERALD, {'disabled': 'yes'}, 'a word for a truth'),
+        post(HERALD, {'disabled': 1}, 'a number for a truth'),
+        post(HERALD, {'speak_if_short_chars': True}, 'a truth for a number'),
+        post(HERALD, {'speak_if_short_chars': 12.5}, 'a number that is not whole'),
+        post(HERALD, {'speak_if_short_chars': '12'}, 'a text for a number'),
+        post(HERALD, {'speak_if_short_chars': -1}, 'fewer signs than none'),
+        post(HERALD, {'speak_if_short_chars': 2001}, 'more signs than may be'),
+        post(HERALD, {'short_reply_bypass_enabled': None}, 'nothing for a truth'),
+        post(HERALD, {'disabled': False, 'speak_if_short_chars': 9999}, 'one right and one wrong: nothing changes'),
+        post(HERALD, {'speak_if_short_chars': 2000, 'unknown': 1}, 'the most signs, and something nobody knows'),
+        post(HERALD, {'disabled': False, 'short_reply_bypass_enabled': True, 'speak_if_short_chars': 120},
+             'the herald as it came'),
+        get(HERALD, 'the herald at the end'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}
