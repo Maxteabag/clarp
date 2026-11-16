@@ -8286,21 +8286,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "oscar",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -8341,6 +8326,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "oscar",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
   },
   {
    "data": {

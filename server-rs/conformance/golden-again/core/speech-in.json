@@ -393,6 +393,243 @@
    "path": "/transcription-providers",
    "status": 200,
    "step": "who listens"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/transcription-results/utt-one",
+   "status": 200,
+   "step": "the answer is no longer wanted"
+  },
+  {
+   "body": {
+    "cached": false,
+    "hands_free": true,
+    "herald_consumed": false,
+    "orchestrator_skip_herald": false,
+    "text": "replay voice prompt",
+    "trace_id": "<id:7>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcribe",
+   "status": 200,
+   "step": "the same name for what is said next"
+  },
+  {
+   "body": {
+    "error": "invalid transcription id"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/transcription-results/has%20space",
+   "status": 400,
+   "step": "forget under a name that is none"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/transcription-results/utt-one",
+   "status": 200,
+   "step": "forgotten once more"
+  },
+  {
+   "body": {
+    "error": "language must be an ISO 639-1 code such as 'en' or 'no'"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "a language that is none"
+  },
+  {
+   "body": {
+    "error": "agent language set accepts at most three language codes"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "four languages for one agent"
+  },
+  {
+   "body": {
+    "error": "unknown transcription engine: nothing:of-the-kind"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "an engine nobody knows"
+  },
+  {
+   "body": {
+    "error": "agent_engines keys must be agent names"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "engines for nobody"
+  },
+  {
+   "body": {
+    "error": "agent_engines must be an object of agent -> engine"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "engines that are a list"
+  },
+  {
+   "body": {
+    "error": "engine and turn_taking must be strings"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "an engine that is a number"
+  },
+  {
+   "body": {
+    "error": "unknown turn-taking strategy: sometimes"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 400,
+   "step": "a way of taking turns that is none"
+  },
+  {
+   "body": {
+    "agent_engines": "<fields>",
+    "agent_languages": "<fields>",
+    "call_engines": "<text>",
+    "call_languages": "<text>",
+    "call_policy_error": "<text>",
+    "engine": "<text>",
+    "language": "<text>",
+    "long_form_model": "<text>",
+    "long_form_threshold_range": "<fields>",
+    "long_form_threshold_sec": "<number>",
+    "models": "<list>",
+    "ok": "<yes or no>",
+    "provider_turn_taking_available": "<yes or no>",
+    "providers": "<list>",
+    "retain_audio": "<yes or no>",
+    "stream_path": "<text>",
+    "turn_taking": "<text>",
+    "turn_taking_options": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "an agent gets a language and engines of its own"
+  },
+  {
+   "body": {
+    "agent_engines": "<fields>",
+    "agent_languages": "<fields>",
+    "call_engines": "<text>",
+    "call_languages": "<text>",
+    "call_policy_error": "<text>",
+    "engine": "<text>",
+    "language": "<text>",
+    "long_form_model": "<text>",
+    "long_form_threshold_range": "<fields>",
+    "long_form_threshold_sec": "<number>",
+    "models": "<list>",
+    "provider_turn_taking_available": "<yes or no>",
+    "providers": "<list>",
+    "retain_audio": "<yes or no>",
+    "stream_path": "<text>",
+    "turn_taking": "<text>",
+    "turn_taking_options": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "the settings with the agent in them"
+  },
+  {
+   "body": {
+    "agent_engines": "<fields>",
+    "agent_languages": "<fields>",
+    "call_engines": "<text>",
+    "call_languages": "<text>",
+    "call_policy_error": "<text>",
+    "engine": "<text>",
+    "language": "<text>",
+    "long_form_model": "<text>",
+    "long_form_threshold_range": "<fields>",
+    "long_form_threshold_sec": "<number>",
+    "models": "<list>",
+    "ok": "<yes or no>",
+    "provider_turn_taking_available": "<yes or no>",
+    "providers": "<list>",
+    "retain_audio": "<yes or no>",
+    "stream_path": "<text>",
+    "turn_taking": "<text>",
+    "turn_taking_options": "<list>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/transcription-providers",
+   "status": 200,
+   "step": "the agent is heard like every agent again"
   }
  ],
  "live": {
@@ -540,7 +777,7 @@
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#1@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:7>",
+    "notification_id": "pn-<id:8>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: replay voice prompt",
