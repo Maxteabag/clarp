@@ -176,15 +176,18 @@ class RustHost(replay.Host):
 
 
 class Events(replay.SSE):
-    """The plain event stream, as a client that does not ask for live items gets it."""
+    """The event stream: plain, as a client that does not ask for live items gets it, or, for
+    a scenario that watches turns as they run (`live`), with the live items of those agents
+    (`/events?live=`, docs/live-items.md)."""
 
-    def __init__(self, host):
+    def __init__(self, host, live=None):
         self.frames, self.errors = [], []
         self.ended = False
         self.last_at = time.monotonic()
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        request = urllib.request.Request(host.url + '/events', headers={'Authorization': f'Bearer {replay.TOKEN}'})
+        asked = '/events' if live is None else '/events?live=' + ','.join(live)
+        request = urllib.request.Request(host.url + asked, headers={'Authorization': f'Bearer {replay.TOKEN}'})
         self._resp = urllib.request.urlopen(request, timeout=60)
         self._thread = threading.Thread(target=self._read, daemon=True)
         self._thread.start()
@@ -339,7 +342,9 @@ def capture(make_host, scenario, root: Path) -> dict:
     try:
         # A scenario may bring the owner's settings its Host runs with (`config`).
         host.start(scenario.get('config'))
-        events = Events(host)
+        # A scenario that watches turns as they run names the agents it watches.
+        watched = tuple(scenario.get('sessions', (scenarios.AGENT,))) if scenario.get('live') else None
+        events = Events(host, watched)
         replay._poll('the stream connected', lambda: events.frames)
         for index, step in enumerate(scenario['steps']):
             try:

@@ -401,6 +401,58 @@ async fn janitors() -> Json<Value> {
     }))
 }
 
+/// Where the owner's choice of how much a tool's use is explained is kept.
+const DETAIL_LEVEL_KEY: &str = "tool_explanations.detail_level";
+/// What it is where nobody chose: balanced.
+const DETAIL_LEVEL: i64 = 2;
+
+/// Whether the use of a tool is explained in plain words on its row, and for which reader
+/// (`docs/live-items.md`, section 6). Nothing explains here yet, so it is off whatever was
+/// asked for: an app then shows the tool's own command on the row, which is there. The
+/// level is kept for the day something explains.
+pub(crate) fn explanations_told(app: &App) -> Value {
+    let directory = app.fleet.directory();
+    let kept = directory.setting(DETAIL_LEVEL_KEY);
+    let level = kept
+        .and_then(|level| level.trim().parse::<i64>().ok())
+        .map_or(DETAIL_LEVEL, |level| level.clamp(0, 4));
+    json!({ "enabled": false, "detail_level": level })
+}
+
+async fn explanations(State(app): State<App>) -> Json<Value> {
+    Json(explanations_told(&app))
+}
+
+/// `POST /tool-explanations/settings`: a change of a part of it. The rules and the words a
+/// change is refused in are the Python Host's; turning on what is not built is refused,
+/// and says so.
+async fn set_explanations(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let bad = |why: &str| ApiError::new(StatusCode::BAD_REQUEST, why);
+    let Ok(Value::Object(changes)) = serde_json::from_slice::<Value>(&body) else {
+        return Err(bad("object required"));
+    };
+    match changes.get("enabled") {
+        None | Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => {
+            return Err(bad("tool explanations are not built on this Host yet"));
+        }
+        Some(_) => return Err(bad("enabled must be true or false")),
+    }
+    if let Some(level) = changes.get("detail_level") {
+        // A whole number from 0 to 4, and nothing that only reads like one.
+        let whole = level.as_i64().filter(|level| (0..=4).contains(level));
+        let Some(level) = whole else {
+            return Err(bad("detail_level must be an integer from 0 to 4"));
+        };
+        let kept = vec![(DETAIL_LEVEL_KEY.to_string(), level.to_string())];
+        app.fleet.set(kept).await?;
+    }
+    Ok(Json(explanations_told(&app)))
+}
+
 async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
@@ -427,4 +479,8 @@ pub fn routes() -> Router<App> {
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
         .route("/agent-model-options", get(model_options))
+        .route(
+            "/tool-explanations/settings",
+            get(explanations).post(set_explanations),
+        )
 }
