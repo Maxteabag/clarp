@@ -870,8 +870,13 @@ queue, taken back or gone to run, the hold is over** without a resume, as the Py
 through the queue. The apps are told how the queue stands when a message is taken back; a hold that ended
 because its last message went to run is told with the news of that turn. Held by the kernel's tests (the
 order of any 120 commands, sending by hand among them, loses nothing and runs nothing twice), a Host test
-through a kill, and the scenario `the-queue-by-hand`. Not built yet: changing the words of a waiting
-message (`PUT /turn-queue/<id>`; not asked once in the three days counted).
+through a kill, and the scenario `the-queue-by-hand`. And the words of a waiting message are changed
+(`PUT /turn-queue/<id>` with `text`): the message is written anew where it waits, outside the conversation,
+its turn points at the words it has now (`Reword`, the journal's `Recorder::reword`), and it keeps its id and
+its place; the apps are told to read the queue again. Only what was left for later has words that can
+change. A message that was said while a turn ran waits its turn in the conversation on this Host, and what
+was said stands (409, in this Host's words). Held by the kernel's test, a Host test through a kill, and the
+scenario `the-queue-reworded`.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
