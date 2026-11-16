@@ -91,9 +91,13 @@ class SettingsRoutes:
         from lib.launch_paths import recover_user_path
         qs = self._query()
         raw = (qs.get("path", [""])[0] or "").strip()
+        # A path that ends in a slash asks what is in that directory. The
+        # recovered path is a pathlib.Path, which has no slash at its end, so
+        # the question is read before the path is recovered.
+        inside = raw.endswith("/")
         raw = str(recover_user_path(raw))
-        if raw.endswith("/"):
-            base, frag = raw[:-1] or "/", ""
+        if inside or raw.endswith("/"):
+            base, frag = raw.rstrip("/") or "/", ""
         else:
             base = os.path.dirname(raw) or "/"
             frag = os.path.basename(raw).lower()

@@ -85,11 +85,20 @@ def test_dirs_lists_matching_visible_subdirectories(running_server, tmp_path):
     for name in ("alpha", "Almond", "beta", ".hidden"):
         (root / name).mkdir(parents=True)
     (root / "afile").write_text("x")
-    # recover_user_path returns a pathlib.Path, which drops a trailing slash,
-    # so "dir/" completes the name "dir" in its parent rather than listing it.
+    # A path that ends in a slash lists what is in that directory (it used to
+    # complete the name "dir" in its parent: the recovered pathlib.Path had
+    # dropped the slash before the handler looked for it).
     query = urllib.parse.urlencode({"path": f"{root}/"})
     assert _call(base, "GET", f"/dirs?{query}") == (200, {
+        "base": str(root), "matches": [str(root / "Almond"), str(root / "alpha"), str(root / "beta")]})
+    # Without the slash it is still the name being completed, in its parent.
+    query = urllib.parse.urlencode({"path": f"{root}"})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, {
         "base": str(tmp_path), "matches": [str(root)]})
+    # A directory that is not there, asked for with a slash: nothing, and its own base.
+    query = urllib.parse.urlencode({"path": f"{root}/missing/"})
+    assert _call(base, "GET", f"/dirs?{query}") == (200, {
+        "base": str(root / "missing"), "matches": []})
     query = urllib.parse.urlencode({"path": f"{root}/al"})
     assert _call(base, "GET", f"/dirs?{query}") == (200, {
         "base": str(root), "matches": [str(root / "Almond"), str(root / "alpha")]})
