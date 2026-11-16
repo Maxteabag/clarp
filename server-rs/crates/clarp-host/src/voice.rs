@@ -1,0 +1,1167 @@
+//! Speech out at the Host's edge: what an agent says aloud becomes clips, and the apps fetch
+//! and play them.
+//!
+//! A reply marks what is for the ear, and each marked piece waits in the agent's log as a
+//! line ([`clarp_kernel::spoken`]). Here is the one that speaks them: it takes an agent's
+//! next line, has an engine say it into a file under the Host's data, and tells the apps
+//! where the clip is before its first byte is there, so that a listener hears the beginning
+//! of a long line while its end is still being made. One line of an agent at a time, in the
+//! order they were said; a few agents at once.
+//!
+//! Who speaks, and in which voice, is the owner's choice, read from his file each time
+//! ([`crate::owner`]) by the rules of [`clarp_kernel::said`]. The engines are behind one
+//! port ([`clarp_speech::speak`]): when the first cannot begin, the next does, and what was
+//! begun in one voice is never begun again in another. A line nothing on this Host can say
+//! is over before a clip is announced: no app waits for sound that never comes.
+//!
+//! What lasts is in the agent's log: the line, the clip it became, whether the clip is
+//! whole, what an app said of playing it. What is held here is only how far a clip that is
+//! being made has come. A Host that is started again holds nothing, and finds in the logs
+//! what it still owes the ear.
+//!
+//! The routes answer as the Python Host's do (`clip_stream.py`, `audio_growing.py`,
+//! `routes/voice_timeline.py`, `clip_records.py`, `message_audio.py`): the same statuses,
+//! words and headers.
+
+use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::path::{Path as FilePath, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
+use axum::body::{Body, Bytes};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use clarp_kernel::media::{self, Part};
+use clarp_kernel::python;
+use clarp_kernel::said::{self, Who};
+use clarp_kernel::spoken::{self, Line, LineState, Meant};
+use clarp_ports::clock::Clock;
+use clarp_speech::cartesia::Cartesia;
+use clarp_speech::gemini::{Gemini, Surface};
+use clarp_speech::speak::{Mute, Speaker, said_by_the_first_that_can};
+use futures_util::stream;
+use serde_json::{Map, Value, json};
+use tokio::sync::{Semaphore, mpsc, watch};
+use tokio::time::Instant;
+use toml::Table;
+
+use crate::agent::{Spoke, View};
+use crate::config::Config;
+use crate::edge::{ApiError, App};
+use crate::fleet::{AgentRecord, Directory, FleetHandle, Member};
+use crate::hub::Hub;
+use crate::media::header_text;
+use crate::owner::{self, OwnerFile};
+use crate::wire;
+
+/// How long a player waits for more of a clip that is being made, and for a clip to be
+/// whole (the Python Host's `CHUNK_WAIT_SEC` and `MAX_GROW_WAIT_SEC`).
+const WAITS: Duration = Duration::from_secs(30);
+
+/// How much of a clip is read and sent at a time.
+const CHUNK: usize = 64 * 1024;
+
+/// How many engines speak at once on this Host. An agent has one line spoken at a time;
+/// this is how many agents are spoken for together.
+const AT_ONCE: usize = 4;
+
+/// How often clips nobody will play again are cleared away.
+const SWEPT_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// How many bytes of clips are kept to be played again (`REPLAY_RETAIN_MAX_BYTES`).
+const KEPT_BYTES: u64 = 256 * 1024 * 1024;
+
+/// What is written of a line on a Host whose owner turned speech off.
+const SPEECH_OFF: &str = "speech out is turned off on this Host";
+
+/// The engines that speak which are built into this Host.
+const BUILT: [&str; 2] = [said::CARTESIA, said::GEMINI];
+
+/// The way to the one that speaks. Telling it never waits.
+#[derive(Clone)]
+pub struct Speaks {
+    tx: mpsc::UnboundedSender<String>,
+}
+
+impl Speaks {
+    /// An agent has something to say, or may have.
+    pub fn wake(&self, agent_id: &str) {
+        let _ = self.tx.send(agent_id.to_string());
+    }
+}
+
+/// Who was told to speak before the one that speaks runs: kept, and spoken once it does.
+pub struct Waiting {
+    rx: mpsc::UnboundedReceiver<String>,
+}
+
+/// The way to the one that speaks, and what waits for it.
+pub fn mouth() -> (Speaks, Waiting) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Speaks { tx }, Waiting { rx })
+}
+
+/// Everything the one that speaks is given.
+pub struct Works {
+    pub config: Arc<Config>,
+    pub fleet: FleetHandle,
+    pub hub: Arc<Hub>,
+    pub clock: Arc<dyn Clock + Send + Sync>,
+}
+
+/// Whether a clip that is being made is still being made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Made {
+    Making,
+    Whole,
+    Failed,
+}
+
+/// How far a clip that is being made has come.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Progress {
+    /// How many of its bytes are in its file.
+    bytes: u64,
+    made: Made,
+}
+
+/// A clip that is being made: its file grows, and whoever plays it is told when it has.
+struct Growing {
+    name: String,
+    path: PathBuf,
+    progress: watch::Sender<Progress>,
+}
+
+impl Growing {
+    fn now(&self) -> Progress {
+        *self.progress.borrow()
+    }
+}
+
+/// The one that speaks, and where its clips are.
+pub struct Mouth {
+    /// Where the owner's choices and keys are read.
+    owner: OwnerFile,
+    /// Where clips are kept: `<data>/audio`.
+    audio: PathBuf,
+    /// The language the agents of this Host speak.
+    language: String,
+    /// Stand-ins on this machine in place of the engines' own addresses. Empty: the real.
+    cartesia_at: String,
+    gemini_at: String,
+    /// The clips that are being made now, by their number.
+    growing: Mutex<HashMap<u64, Arc<Growing>>>,
+    /// The number of the newest clip. A clip's number is the moment it was begun, and no
+    /// two clips of this Host have the same.
+    newest: Mutex<u64>,
+    at_once: Semaphore,
+    fleet: FleetHandle,
+    hub: Arc<Hub>,
+    clock: Arc<dyn Clock + Send + Sync>,
+}
+
+impl Waiting {
+    /// Starts the one that speaks, on the Host's runtime, and answers the way to its clips.
+    pub fn run(mut self, works: Works) -> Arc<Mouth> {
+        let audio = works.config.data_dir.join("audio");
+        let mouth = Arc::new(Mouth {
+            owner: OwnerFile::new(works.config.speech_keys.clone()),
+            newest: Mutex::new(newest_clip(&audio)),
+            audio,
+            language: works.config.speech_language.clone(),
+            cartesia_at: works.config.cartesia_endpoint.clone(),
+            gemini_at: works.config.gemini_endpoint.clone(),
+            growing: Mutex::default(),
+            at_once: Semaphore::new(AT_ONCE),
+            fleet: works.fleet,
+            hub: works.hub,
+            clock: works.clock,
+        });
+        let speaking = mouth.clone();
+        tokio::spawn(async move {
+            while let Some(agent_id) = self.rx.recv().await {
+                tokio::spawn(speaking.clone().speak_for(agent_id));
+            }
+        });
+        let sweeping = mouth.clone();
+        tokio::spawn(async move {
+            loop {
+                let (audio, now) = (sweeping.audio.clone(), sweeping.clock.now_ms());
+                let _ = tokio::task::spawn_blocking(move || sweep(&audio, now)).await;
+                tokio::time::sleep(SWEPT_EVERY).await;
+            }
+        });
+        mouth
+    }
+}
+
+/// The largest number a clip in this directory has: no new clip gets one below it.
+fn newest_clip(audio: &FilePath) -> u64 {
+    let Ok(entries) = std::fs::read_dir(audio) else {
+        return 0;
+    };
+    let made = entries.flatten().filter_map(|entry| {
+        let name = entry.file_name().into_string().ok()?;
+        u64::try_from(said::clip_named(&name)?.0).ok()
+    });
+    made.max().unwrap_or(0)
+}
+
+/// Clears away the clips nobody will play again: the ones older than a line is kept in
+/// mind, and the oldest beyond what is kept in bytes.
+fn sweep(audio: &FilePath, now_ms: i64) {
+    let Ok(entries) = std::fs::read_dir(audio) else {
+        return;
+    };
+    let mut clips: Vec<(i64, u64, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let (made, _) = said::clip_named(&name)?;
+            Some((made, entry.metadata().ok()?.len(), entry.path()))
+        })
+        .collect();
+    clips.sort_by_key(|clip| std::cmp::Reverse(clip.0));
+    let mut kept = 0_u64;
+    for (made, bytes, path) in clips {
+        kept = kept.saturating_add(bytes);
+        if now_ms - made > spoken::KEPT_FOR_MS || kept > KEPT_BYTES {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Who says a line, as the owner's file and the agent decide it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Chosen {
+    /// The owner turned speech off: nothing is said, and nobody is told.
+    Silent,
+    /// Nothing on this Host can say it. `told`: the apps are told so; an agent that simply
+    /// has no voice stays silent without a word, as on the Python Host.
+    Nobody { why: String, told: bool },
+    /// These engines, tried in this order, each with the voice it speaks in.
+    By(Vec<(String, String)>),
+}
+
+/// Which engines say an agent's line, and in which voices: the engine the owner chose for
+/// it and the one he chose to be tried after, each when it is built into this Host, has a
+/// voice for the agent and has its key.
+fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) -> Chosen {
+    let voices = owner::voices(file);
+    let who = Who {
+        name: &record.persona,
+        persona: &record.persona,
+        session: &record.session,
+    };
+    let route = voices.route(who);
+    if route.provider == "none" {
+        return Chosen::Silent;
+    }
+    let stored = Some(record.voice_id.as_str()).filter(|voice| !voice.is_empty());
+    let clip = voices.for_clip(stored, who, &route);
+    let vertex = owner::gemini(file).vertex;
+    let voice_of = |provider: &str| -> Option<String> {
+        let voice = match provider {
+            said::CARTESIA => clip.cartesia.clone(),
+            said::GEMINI => {
+                let voice = clip.gemini.as_deref();
+                voice.map(|voice| voices.gemini_voice_at(voice, vertex))
+            }
+            said::ELEVENLABS => clip.elevenlabs.clone(),
+            _ => None,
+        };
+        voice.filter(|voice| !voice.is_empty())
+    };
+    let mut by: Vec<(String, String)> = Vec::new();
+    // Why the engine the owner chose cannot say it, when it cannot.
+    let mut first: Option<(String, bool)> = None;
+    for provider in [route.provider.as_str(), route.fallback.as_str()] {
+        if matches!(provider, "" | "none") || by.iter().any(|(known, _)| known == provider) {
+            continue;
+        }
+        let cannot = match voice_of(provider) {
+            None => {
+                let persona = python::text(&record.persona);
+                Some((
+                    format!("no {provider} voice configured for {persona}"),
+                    false,
+                ))
+            }
+            Some(_) if !BUILT.contains(&provider) => {
+                let why = format!("the engine {provider} is not built into this Host");
+                Some((why, true))
+            }
+            Some(_) if !has_key(provider) => {
+                Some((format!("the {provider} api_key is not configured"), true))
+            }
+            Some(voice) => {
+                by.push((provider.to_string(), voice));
+                None
+            }
+        };
+        first = first.or(cannot);
+    }
+    match (by.is_empty(), first) {
+        (false, _) => Chosen::By(by),
+        (true, Some((why, told))) => Chosen::Nobody { why, told },
+        (true, None) => Chosen::Silent,
+    }
+}
+
+/// The name of the key an engine needs, as the owner's file is asked for it.
+fn key_of(provider: &str, file: &Table) -> &'static str {
+    match provider {
+        said::CARTESIA => "cartesia",
+        said::GEMINI if owner::gemini(file).vertex => "vertex",
+        said::GEMINI => "gemini",
+        _ => "",
+    }
+}
+
+impl Mouth {
+    fn now_ms(&self) -> i64 {
+        self.clock.now_ms()
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Arc<Growing>>> {
+        self.growing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The clip with this number, when it is being made here or was a moment ago.
+    fn growing(&self, clip: u64) -> Option<Arc<Growing>> {
+        self.held().get(&clip).cloned()
+    }
+
+    /// The clip whose file has this name, while it is being made.
+    fn growing_named(&self, name: &str) -> Option<Arc<Growing>> {
+        let held = self.held();
+        let found = held.values().find(|growing| growing.name == name);
+        found
+            .filter(|growing| growing.now().made == Made::Making)
+            .cloned()
+    }
+
+    /// An engine of this Host, with its key read where the owner keeps it at the moment it
+    /// is needed.
+    fn engine(&self, file: &Table, provider: &str) -> Option<Box<dyn Speaker>> {
+        let keys = self.owner.clone();
+        let key = key_of(provider, file);
+        let read = Box::new(move || keys.key(key));
+        match provider {
+            said::CARTESIA => {
+                let engine = Cartesia::new(owner::cartesia_model(file), &self.language, read);
+                Some(Box::new(match self.cartesia_at.as_str() {
+                    "" => engine,
+                    stand_in => engine.at(stand_in),
+                }))
+            }
+            said::GEMINI => {
+                let choice = owner::gemini(file);
+                let surface = if choice.vertex {
+                    Surface::Vertex
+                } else {
+                    Surface::GeminiApi
+                };
+                let engine = Gemini::new(choice.model, surface, read);
+                Some(Box::new(match self.gemini_at.as_str() {
+                    "" => engine,
+                    stand_in => engine.at(stand_in),
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// A new clip of this agent's: its number, its name, and its file, which is empty.
+    fn new_clip(&self, session: &str) -> std::io::Result<(u64, String, PathBuf, std::fs::File)> {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&self.audio)?;
+        let mut newest = self.newest.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = u64::try_from(self.now_ms()).unwrap_or(0);
+        let mut number = now.max(*newest + 1);
+        loop {
+            let name = said::clip_name(Some(session), i64::try_from(number).unwrap_or(i64::MAX));
+            let path = self.audio.join(&name);
+            let made = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path);
+            match made {
+                Ok(file) => {
+                    *newest = number;
+                    return Ok((number, name, path, file));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => number += 1,
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Says an agent's lines for as long as it has one that waits. An agent's lines are
+    /// taken one at a time, so whoever else speaks for it meanwhile finds nothing to take.
+    async fn speak_for(self: Arc<Self>, agent_id: String) {
+        loop {
+            // A few at once: the rest wait here, before a line is taken, so that a line
+            // that was taken is one that is being said.
+            let _slot = self.at_once.acquire().await;
+            let directory = self.fleet.directory();
+            let mut members = directory.members.iter();
+            let Some(member) = members.find(|member| member.record.agent_id == agent_id) else {
+                return;
+            };
+            let Ok(Some(line)) = member.agent.claim_line().await else {
+                return;
+            };
+            let looked_at = directory.focus.as_deref() == Some(agent_id.as_str());
+            self.say(member, line, looked_at).await;
+        }
+    }
+
+    /// A line nothing said, or not all of it: it is over, and why is written. The apps are
+    /// told when their user should know.
+    async fn unsaid(&self, member: &Member, line: &Line, clip: Option<u64>, why: &str, told: bool) {
+        let ended = member
+            .agent
+            .line_ended(line.id.clone(), clip, Err(why.to_string()));
+        if matches!(ended.await, Ok(true)) && told {
+            self.hub
+                .publish(wire::tts_error(&member.record, why), self.now_ms());
+        }
+    }
+
+    /// Says one line: into a clip the apps are told of before its first byte is there.
+    async fn say(&self, member: &Member, line: Line, looked_at: bool) {
+        let record = &member.record;
+        let owners = self.owner.read().unwrap_or_default();
+        let has_key = |provider: &str| self.owner.key(key_of(provider, &owners)).is_some();
+        let by = match chosen(&owners, record, &has_key) {
+            Chosen::Silent => return self.unsaid(member, &line, None, SPEECH_OFF, false).await,
+            Chosen::Nobody { why, told } => {
+                return self.unsaid(member, &line, None, &why, told).await;
+            }
+            Chosen::By(by) => by,
+        };
+        let engines: Vec<(Box<dyn Speaker>, String, String)> = by
+            .iter()
+            .filter_map(|(provider, voice)| {
+                Some((
+                    self.engine(&owners, provider)?,
+                    voice.clone(),
+                    provider.clone(),
+                ))
+            })
+            .collect();
+        let text = said::announced(&line.text, line.first, &record.persona, looked_at);
+        let (clip, name, path, mut file) = match self.new_clip(&record.session) {
+            Ok(new) => new,
+            Err(error) => {
+                let why = format!("the clip's file could not be made: {error}");
+                return self.unsaid(member, &line, None, &why, true).await;
+            }
+        };
+        let start = Progress {
+            bytes: 0,
+            made: Made::Making,
+        };
+        let growing = Arc::new(Growing {
+            name: name.clone(),
+            path: path.clone(),
+            progress: watch::channel(start).0,
+        });
+        self.held().insert(clip, growing.clone());
+        // The apps are told where the clip is; then the line is written as having it. A
+        // line that is not this one's any more leaves a clip that is nobody's.
+        let announced = wire::audio(record, clip, &name, line.trace_id.as_deref());
+        let event_id = self.hub.publish(announced, self.now_ms());
+        let begun =
+            member
+                .agent
+                .line_begun(line.id.clone(), (clip, name), by[0].clone(), Some(event_id));
+        if !matches!(begun.await, Ok(true)) {
+            growing.progress.send_replace(Progress {
+                bytes: 0,
+                made: Made::Failed,
+            });
+            self.held().remove(&clip);
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        let sink = growing.clone();
+        let made = tokio::task::spawn_blocking(move || {
+            let listed: Vec<(&dyn Speaker, &str)> = engines
+                .iter()
+                .map(|(engine, voice, _)| (engine.as_ref(), voice.as_str()))
+                .collect();
+            let mut written = 0_u64;
+            let mut broken: Option<String> = None;
+            let said = said_by_the_first_that_can(&listed, &text, &mut |piece| {
+                if broken.is_some() {
+                    return;
+                }
+                match file.write_all(piece) {
+                    Ok(()) => {
+                        written += piece.len() as u64;
+                        sink.progress.send_replace(Progress {
+                            bytes: written,
+                            made: Made::Making,
+                        });
+                    }
+                    Err(error) => broken = Some(error.to_string()),
+                }
+            });
+            let spoke = match (said, broken) {
+                (_, Some(error)) => Err(format!("the clip could not be written: {error}")),
+                (Ok((place, _)), None) => Ok((engines[place].2.clone(), engines[place].1.clone())),
+                (Err(Mute::Unavailable(why) | Mute::Failed { why, .. }), None) => Err(why),
+            };
+            (spoke, written)
+        });
+        let (spoke, written) = match made.await {
+            Ok(made) => made,
+            Err(_) => (Err("the engine's thread ended".to_string()), 0),
+        };
+        // Whoever plays the clip as it grows hears at once that it grows no more.
+        growing.progress.send_replace(Progress {
+            bytes: written,
+            made: match spoke {
+                Ok(_) => Made::Whole,
+                Err(_) => Made::Failed,
+            },
+        });
+        match spoke {
+            Ok((provider, voice)) => {
+                let said = Spoke {
+                    bytes: written,
+                    provider,
+                    voice,
+                };
+                let _ = member
+                    .agent
+                    .line_ended(line.id.clone(), Some(clip), Ok(said))
+                    .await;
+            }
+            Err(why) => {
+                // A clip nothing came of is no file before anybody is told so.
+                if written == 0 {
+                    let _ = std::fs::remove_file(&path);
+                }
+                self.unsaid(member, &line, Some(clip), &why, true).await;
+            }
+        }
+        // From here on the clip is found by its line.
+        self.held().remove(&clip);
+    }
+}
+
+// ---- finding a clip ---------------------------------------------------------------------------
+
+/// The line that became the clip with this number, and whose it is, as the agents' logs
+/// have it.
+fn clip_of(directory: &Directory, clip: u64) -> Option<(Arc<Member>, Line)> {
+    directory.members.iter().find_map(|member| {
+        let view = member.agent.view();
+        let line = view.speech.by_clip(clip)?;
+        Some((member.clone(), line.clone()))
+    })
+}
+
+/// The line whose clip's file has this name, and whose it is.
+fn clip_named(directory: &Directory, name: &str) -> Option<(Arc<Member>, Line)> {
+    directory.members.iter().find_map(|member| {
+        let view = member.agent.view();
+        let line = view.speech.by_file(name)?;
+        Some((member.clone(), line.clone()))
+    })
+}
+
+// ---- a clip's bytes ---------------------------------------------------------------------------
+
+fn plain(status: StatusCode, text: &'static str) -> Response {
+    ApiError::plain(status, text).into_response()
+}
+
+/// What a file is, by its name.
+fn kind_of(path: &FilePath) -> &'static str {
+    match path.extension().and_then(|end| end.to_str()) {
+        Some("mp3") => "audio/mpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Up to `most` bytes of a file from `at` on.
+fn read_at(path: &FilePath, at: u64, most: usize) -> std::io::Result<Vec<u8>> {
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(at))?;
+    let mut read = Vec::with_capacity(most.min(CHUNK));
+    file.take(most as u64).read_to_end(&mut read)?;
+    Ok(read)
+}
+
+/// A file's bytes from `first` on, `length` of them, read and sent a part at a time.
+fn file_body(path: PathBuf, first: u64, length: u64) -> Body {
+    let parts = stream::unfold((first, length), move |(at, left)| {
+        let path = path.clone();
+        async move {
+            if left == 0 {
+                return None;
+            }
+            let most = usize::try_from(left).map_or(CHUNK, |left| left.min(CHUNK));
+            let read = tokio::task::spawn_blocking(move || read_at(&path, at, most)).await;
+            match read {
+                Ok(Ok(part)) if !part.is_empty() => {
+                    let sent = part.len() as u64;
+                    let rest = (at + sent, left.saturating_sub(sent));
+                    Some((Ok(Bytes::from(part)), rest))
+                }
+                // The file is shorter than it was, or cannot be read: the answer ends short
+                // of the length it promised, and the connection ends with it.
+                _ => {
+                    let short = std::io::Error::other("a clip's file ended early");
+                    Some((Err(short), (at, 0)))
+                }
+            }
+        }
+    });
+    Body::from_stream(parts)
+}
+
+/// An answer with these headers. A value that is no header's is left out.
+fn answer(status: StatusCode, said: Vec<(header::HeaderName, String)>, body: Body) -> Response {
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    for (name, value) in said {
+        if let Ok(value) = HeaderValue::from_str(&value) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    response
+}
+
+/// Some bytes of a clip's file, or all of them, with what a player needs to know of them.
+/// `of` is the whole clip's length as it is told: a number, or `*` while it still grows.
+fn part_of_file(path: PathBuf, part: Part, there: u64, of: &str) -> Response {
+    let (status, first, length) = match part {
+        Part::Whole => (StatusCode::OK, 0, there),
+        Part::Bytes { first, last } => (StatusCode::PARTIAL_CONTENT, first, last - first + 1),
+        Part::Missing => return no_such_part(of, false),
+    };
+    let mut said = vec![
+        (header::CONTENT_TYPE, kind_of(&path).to_string()),
+        (header::CONTENT_LENGTH, length.to_string()),
+        (header::ACCEPT_RANGES, "bytes".to_string()),
+    ];
+    if status == StatusCode::PARTIAL_CONTENT {
+        let last = first + length - 1;
+        said.push((header::CONTENT_RANGE, format!("bytes {first}-{last}/{of}")));
+    }
+    answer(status, said, file_body(path, first, length))
+}
+
+/// The part that was asked for begins where the clip has no byte. `as_a_file`: answered
+/// as the Python Host answers for any file it sends, which says a little more.
+fn no_such_part(of: &str, as_a_file: bool) -> Response {
+    let mut said = vec![
+        (header::CONTENT_RANGE, format!("bytes */{of}")),
+        (header::CONTENT_LENGTH, "0".to_string()),
+    ];
+    if as_a_file {
+        said.push((header::CONTENT_TYPE, "text/plain".to_string()));
+        said.push((header::ACCEPT_RANGES, "bytes".to_string()));
+    }
+    answer(StatusCode::RANGE_NOT_SATISFIABLE, said, Body::empty())
+}
+
+/// A file as the Python Host sends any file (`_send_file`): all of it, or the part a
+/// `Range` header asks for, read the way that Host reads one.
+fn send_file(path: PathBuf, range: &str) -> Response {
+    let total = match std::fs::symlink_metadata(&path) {
+        Ok(found) if found.is_file() => found.len(),
+        _ => return plain(StatusCode::NOT_FOUND, "not found"),
+    };
+    match media::byte_range(range, total) {
+        Part::Missing => no_such_part(&total.to_string(), true),
+        part => part_of_file(path, part, total, &total.to_string()),
+    }
+}
+
+/// A clip that is whole, as the Python Host serves one by its number: all of it, or the
+/// part a player asks for, read the way that Host reads it for a clip.
+fn send_clip(path: PathBuf, range: Option<(u64, Option<u64>)>) -> Response {
+    let Ok(found) = std::fs::metadata(&path) else {
+        return plain(StatusCode::INTERNAL_SERVER_ERROR, "stat failed");
+    };
+    let total = found.len();
+    part_of_file(
+        path,
+        said::clip_part(range, total),
+        total,
+        &total.to_string(),
+    )
+}
+
+/// A clip that is being made, from its first byte on, as its bytes come: for a player that
+/// takes sound as a stream. It ends when the clip is whole, when no engine will finish it,
+/// or when nothing came for too long.
+fn as_it_grows(growing: Arc<Growing>) -> Response {
+    let parts = stream::unfold(0_u64, move |at| {
+        let growing = growing.clone();
+        async move {
+            let mut heard = growing.progress.subscribe();
+            let until = Instant::now() + WAITS;
+            loop {
+                let progress = *heard.borrow_and_update();
+                if progress.bytes > at {
+                    let left = progress.bytes - at;
+                    let most = usize::try_from(left).map_or(CHUNK, |left| left.min(CHUNK));
+                    let path = growing.path.clone();
+                    let read = tokio::task::spawn_blocking(move || read_at(&path, at, most)).await;
+                    return match read {
+                        Ok(Ok(part)) if !part.is_empty() => {
+                            let next = at + part.len() as u64;
+                            Some((Ok::<Bytes, std::io::Error>(Bytes::from(part)), next))
+                        }
+                        _ => None,
+                    };
+                }
+                if progress.made != Made::Making {
+                    return None;
+                }
+                match tokio::time::timeout_at(until, heard.changed()).await {
+                    Ok(Ok(())) => {}
+                    _ => return None,
+                }
+            }
+        }
+    });
+    let said = vec![
+        (header::CONTENT_TYPE, "audio/mpeg".to_string()),
+        (header::CONNECTION, "close".to_string()),
+    ];
+    answer(StatusCode::OK, said, Body::from_stream(parts))
+}
+
+/// Waits until a clip that is being made has the byte `last`, or is over, or the wait is.
+/// Without a `last`, until it is over. Answers how far it has come.
+async fn enough(growing: &Growing, last: Option<u64>) -> Progress {
+    let mut heard = growing.progress.subscribe();
+    let until = Instant::now() + WAITS;
+    loop {
+        let progress = *heard.borrow_and_update();
+        let there = last.is_some_and(|last| progress.bytes > last);
+        if there || progress.made != Made::Making {
+            return progress;
+        }
+        match tokio::time::timeout_at(until, heard.changed()).await {
+            Ok(Ok(())) => {}
+            _ => return growing.now(),
+        }
+    }
+}
+
+/// A part of a clip that is being made, for a player that asks for parts: it is given as
+/// far as the clip has come, and told that how long the clip will be is not known yet.
+async fn part_as_it_grows(growing: Arc<Growing>, range: (u64, Option<u64>)) -> Response {
+    let progress = enough(&growing, range.1).await;
+    let of = match progress.made {
+        Made::Making => "*".to_string(),
+        _ => progress.bytes.to_string(),
+    };
+    match said::clip_part(Some(range), progress.bytes) {
+        Part::Missing => no_such_part(&of, false),
+        part => part_of_file(growing.path.clone(), part, progress.bytes, &of),
+    }
+}
+
+// ---- the routes -------------------------------------------------------------------------------
+
+pub fn routes() -> Router<App> {
+    Router::new()
+        .route("/audio/", get(nothing_named))
+        .route("/audio/{*name}", get(audio))
+        .route("/clips/ack", post(ack))
+        .route("/clips/recoverable", get(recoverable))
+        .route("/clips/message", get(of_message))
+        .route("/clips/{clip}/stream", get(clip_stream))
+        .route("/clips/{clip}/complete.mp3", get(clip_complete))
+}
+
+async fn nothing_named() -> Response {
+    plain(StatusCode::FORBIDDEN, "forbidden")
+}
+
+/// `GET /audio/<name>`: a clip by the name of its file. One that is being made is sent as
+/// it grows; one that is whole is sent as a file, in parts when a player asks for parts.
+async fn audio(State(app): State<App>, Path(name): Path<String>, headers: HeaderMap) -> Response {
+    // Nothing outside the place where clips are kept is anybody's to fetch.
+    if matches!(name.as_str(), "" | ".") || name.split('/').any(|part| part == "..") {
+        return plain(StatusCode::FORBIDDEN, "forbidden");
+    }
+    if name.contains(['/', '\0']) {
+        return plain(StatusCode::NOT_FOUND, "not found");
+    }
+    if let Some(growing) = app.mouth.growing_named(&name) {
+        return as_it_grows(growing);
+    }
+    send_file(app.mouth.audio.join(&name), &header_text(&headers, "range"))
+}
+
+/// `GET /clips/<number>/stream`: a clip by its number, in the shape the player asks for.
+/// While it is being made: as a stream, or the part that was asked for as far as the clip
+/// has come. Once it is over: its file.
+async fn clip_stream(
+    State(app): State<App>,
+    Path(clip): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(number) = python::int(&clip) else {
+        return plain(StatusCode::BAD_REQUEST, "bad clip id");
+    };
+    // A number no clip has is no clip.
+    let clip = u64::try_from(number).ok();
+    let range = said::clip_range(&header_text(&headers, "range"));
+    let growing = clip.and_then(|clip| app.mouth.growing(clip));
+    if let Some(growing) = &growing
+        && growing.now().made == Made::Making
+    {
+        return match range {
+            Some(range) => part_as_it_grows(growing.clone(), range).await,
+            None => as_it_grows(growing.clone()),
+        };
+    }
+    let path = growing.map(|growing| growing.path.clone()).or_else(|| {
+        let (_, line) = clip_of(&app.fleet.directory(), clip?)?;
+        Some(app.mouth.audio.join(line.clip?))
+    });
+    match path.filter(|path| path.is_file()) {
+        Some(path) => send_clip(path, range),
+        None => {
+            let said = vec![
+                (header::CONTENT_TYPE, "text/plain".to_string()),
+                (header::CONNECTION, "close".to_string()),
+            ];
+            answer(StatusCode::NOT_FOUND, said, Body::from("no such clip"))
+        }
+    }
+}
+
+/// `GET /clips/<number>/complete.mp3`: the whole clip, once it is whole. A player that
+/// cannot play a stream asks here and waits.
+async fn clip_complete(
+    State(app): State<App>,
+    Path(clip): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(number) = python::int(&clip) else {
+        return plain(StatusCode::BAD_REQUEST, "bad clip id");
+    };
+    let Ok(clip) = u64::try_from(number) else {
+        return plain(StatusCode::NOT_FOUND, "not found");
+    };
+    let range = header_text(&headers, "range");
+    let until = Instant::now() + WAITS;
+    loop {
+        if let Some(growing) = app.mouth.growing(clip) {
+            let mut heard = growing.progress.subscribe();
+            let over = heard.wait_for(|progress| progress.made != Made::Making);
+            let made = match tokio::time::timeout_at(until, over).await {
+                Ok(Ok(progress)) => progress.made,
+                _ => Made::Making,
+            };
+            return match made {
+                Made::Whole => send_file(growing.path.clone(), &range),
+                Made::Failed => plain(StatusCode::GONE, "clip failed"),
+                Made::Making => plain(StatusCode::GATEWAY_TIMEOUT, "clip not complete"),
+            };
+        }
+        let Some((_, line)) = clip_of(&app.fleet.directory(), clip) else {
+            return plain(StatusCode::NOT_FOUND, "not found");
+        };
+        let whole = match line.state {
+            LineState::Failed => return plain(StatusCode::GONE, "clip failed"),
+            LineState::Spoken => line.clip.map(|name| app.mouth.audio.join(name)),
+            _ => None,
+        };
+        if let Some(path) = whole.filter(|path| path.is_file()) {
+            return send_file(path, &range);
+        }
+        if Instant::now() >= until {
+            return plain(StatusCode::GATEWAY_TIMEOUT, "clip not complete");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn bad(why: &str) -> ApiError {
+    ApiError::new(StatusCode::BAD_REQUEST, why)
+}
+
+/// `POST /clips/ack` with `{clip_id, url, status, error}`: an app says what became of a
+/// clip in its hands: it has it, it holds it back, it plays it, it played it, it could not.
+async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    // No body at all is an empty one, as the Python Host reads it.
+    let said: Map<String, Value> = if body.is_empty() {
+        Map::new()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(Value::Object(said)) => said,
+            _ => return Err(bad("bad json")),
+        }
+    };
+    let text = |name: &str| said.get(name).and_then(Value::as_str).map_or("", str::trim);
+    let meant = spoken::clip_meant(said.get("clip_id")).map_err(|_| bad("bad clip_id"))?;
+    let status = text("status");
+    if !spoken::PLAYED.contains(&status) {
+        return Err(bad("bad status"));
+    }
+    let error = Some(text("error")).filter(|error| !error.is_empty());
+    let directory = app.fleet.directory();
+    let found = match meant {
+        Meant::Clip(clip) => clip_of(&directory, clip),
+        // By the name at the end of its address.
+        Meant::ByAddress => match text("url").rsplit('/').next() {
+            Some(name) if !name.is_empty() => clip_named(&directory, name),
+            _ => None,
+        },
+        Meant::NoClip => None,
+    };
+    let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?))) {
+        Some((member, clip)) => {
+            let error = error.map(str::to_string);
+            let played = member.agent.line_played(clip, status.to_string(), error);
+            played.await?
+        }
+        None => false,
+    };
+    Ok(Json(json!({ "ok": true, "updated": updated })))
+}
+
+/// The clips of the agents a request is about, with whose they are: every agent's, or one
+/// session's.
+fn lines_of(directory: &Directory, session: &str) -> Vec<(Arc<Member>, Arc<View>)> {
+    let members = directory.members.iter();
+    members
+        .filter(|member| session.is_empty() || member.record.session == session)
+        .map(|member| (member.clone(), member.agent.view()))
+        .collect()
+}
+
+/// `GET /clips/recoverable?session=`: the clips an app may have missed, as they were
+/// announced. An app that was not listening asks when it listens again.
+async fn recoverable(
+    State(app): State<App>,
+    Query(asked): Query<HashMap<String, String>>,
+) -> Json<Value> {
+    let session = asked.get("session").map_or("", |session| session.trim());
+    let directory = app.fleet.directory();
+    let views = lines_of(&directory, session);
+    let clips: Vec<(&AgentRecord, &Line)> = views
+        .iter()
+        .flat_map(|(member, view)| {
+            let lines = view.speech.lines().iter();
+            lines.map(move |line| (&member.record, line))
+        })
+        .filter(|(_, line)| line.clip_id.is_some())
+        .collect();
+    let lines: Vec<&Line> = clips.iter().map(|(_, line)| *line).collect();
+    let events: Vec<Value> = spoken::offered_again(&lines, app.clock.now_ms())
+        .into_iter()
+        .filter_map(|place| {
+            let (record, line) = clips[place];
+            wire::audio_of(record, line)
+        })
+        .collect();
+    Json(json!({ "events": events }))
+}
+
+/// `GET /clips/message?session=&message_id=`: the clips of one reply, to be played again.
+/// All of what the reply said aloud, or nothing: half of it is never played.
+async fn of_message(
+    State(app): State<App>,
+    Query(asked): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let given = |name: &str| asked.get(name).map_or("", |value| value.trim());
+    let (session, message) = (given("session"), given("message_id"));
+    let too_long = session.chars().count() > 256 || message.chars().count() > 1024;
+    if session.is_empty() || message.is_empty() || too_long {
+        return Err(bad("session and message_id required"));
+    }
+    let unavailable = || {
+        ApiError::new(
+            StatusCode::NOT_FOUND,
+            "Retained audio is unavailable for this message",
+        )
+    };
+    let member = app.member(session).ok_or_else(unavailable)?;
+    let view = member.agent.view();
+    let lines: Vec<&Line> = view.speech.of_reply(message).collect();
+    if lines.is_empty() || lines.len() > 128 {
+        return Err(unavailable());
+    }
+    let mut events = Vec::with_capacity(lines.len());
+    for line in lines {
+        let kept = line.state == LineState::Spoken
+            && line
+                .clip
+                .as_ref()
+                .is_some_and(|name| app.mouth.audio.join(name).is_file());
+        let event = kept.then(|| wire::audio_kept(&member.record, line));
+        events.push(event.flatten().ok_or_else(unavailable)?);
+    }
+    Ok(Json(json!({ "events": events })))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn record(persona: &str, voice_id: &str) -> AgentRecord {
+        AgentRecord {
+            agent_id: "a1".to_string(),
+            session: persona.to_lowercase(),
+            persona: persona.to_string(),
+            voice_id: voice_id.to_string(),
+            ..AgentRecord::default()
+        }
+    }
+
+    fn file(text: &str) -> Table {
+        text.parse().unwrap()
+    }
+
+    fn by(engines: &[(&str, &str)]) -> Chosen {
+        let engines = engines.iter();
+        Chosen::By(
+            engines
+                .map(|(provider, voice)| ((*provider).to_string(), (*voice).to_string()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn the_owner_chooses_who_speaks_and_the_agent_has_its_voice() {
+        let all = |_: &str| true;
+        let none = |_: &str| false;
+        // Gemini for everyone, Cartesia after it: both, each in the persona's voice.
+        let owners = file(
+            "[tts]\nprovider = \"gemini\"\nfallback = \"cartesia\"\n\
+             [gemini_tts]\nbackend = \"vertex\"\n\
+             [gemini_tts.voices]\nMaximus = \"voice_api\"\n\
+             [gemini_tts.vertex_voices]\nMaximus = \"voice_vertex\"\n\
+             [cartesia.voices]\nMaximus = \"c-maximus\"\n",
+        );
+        let maximus = record("Maximus", "");
+        assert_eq!(
+            chosen(&owners, &maximus, &all),
+            by(&[("gemini", "voice_vertex"), ("cartesia", "c-maximus")]),
+            "a voice designed at one of Google's doors is the same persona's at the other"
+        );
+        // The engine whose key is not there is passed over before anything is announced.
+        let only_cartesia = |provider: &str| provider == "cartesia";
+        assert_eq!(
+            chosen(&owners, &maximus, &only_cartesia),
+            by(&[("cartesia", "c-maximus")])
+        );
+        assert_eq!(
+            chosen(&owners, &maximus, &none),
+            Chosen::Nobody {
+                why: "the gemini api_key is not configured".to_string(),
+                told: true
+            }
+        );
+        // An agent nobody gave a voice stays silent without a word.
+        let nobody = record("Stranger", "");
+        assert_eq!(
+            chosen(&file("[tts]\nprovider = \"gemini\"\n"), &nobody, &all),
+            Chosen::Nobody {
+                why: "no gemini voice configured for 'Stranger'".to_string(),
+                told: false
+            }
+        );
+        // The voice an agent was given itself is the one it speaks in.
+        let stored = record("Stranger", "{\"cartesia\": \"c-own\"}");
+        assert_eq!(
+            chosen(&file(""), &stored, &all),
+            by(&[("cartesia", "c-own")]),
+            "Cartesia unless the owner says otherwise"
+        );
+        // The owner turned speech off.
+        assert_eq!(
+            chosen(&file("[tts]\nprovider = \"none\"\n"), &maximus, &all),
+            Chosen::Silent
+        );
+        // An engine this Host does not have: the next one speaks, or the apps are told.
+        let elsewhere = file(
+            "[tts]\nprovider = \"elevenlabs\"\nfallback = \"cartesia\"\n\
+             [cartesia.voices]\nMaximus = \"c-maximus\"\n",
+        );
+        let with_both = record("Maximus", "{\"elevenlabs\": \"e-own\"}");
+        assert_eq!(
+            chosen(&elsewhere, &with_both, &all),
+            by(&[("cartesia", "c-maximus")])
+        );
+        let alone = file("[tts]\nprovider = \"elevenlabs\"\n");
+        assert_eq!(
+            chosen(&alone, &with_both, &all),
+            Chosen::Nobody {
+                why: "the engine elevenlabs is not built into this Host".to_string(),
+                told: true
+            }
+        );
+        // One agent moved to another engine on purpose.
+        let moved = file(
+            "[tts]\nprovider = \"cartesia\"\n[tts.agents.maximus]\nprovider = \"gemini\"\n\
+             gemini_voice = \"Puck\"\n",
+        );
+        assert_eq!(chosen(&moved, &maximus, &all), by(&[("gemini", "Puck")]));
+    }
+
+    #[test]
+    fn clips_nobody_will_play_again_are_cleared_away() {
+        let dir = std::env::temp_dir().join(format!("clarp-voice-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let now = 1_763_280_000_000_i64;
+        let old = now - spoken::KEPT_FOR_MS - 1;
+        let names = [
+            said::clip_name(Some("maximus"), now - 5_000),
+            said::clip_name(Some("maximus"), old),
+            said::clip_name(None, now - 1_000),
+        ];
+        for name in &names {
+            std::fs::write(dir.join(name), b"sound").unwrap();
+        }
+        std::fs::write(dir.join("notes.txt"), b"not a clip").unwrap();
+        assert_eq!(newest_clip(&dir), u64::try_from(now - 1_000).unwrap());
+        sweep(&dir, now);
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        let mut kept = vec![names[0].clone(), names[2].clone(), "notes.txt".to_string()];
+        kept.sort();
+        assert_eq!(left, kept, "what is no clip is nobody's to clear away");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_part_of_a_file_is_read_where_it_is() {
+        let path = std::env::temp_dir().join(format!("clarp-voice-read-{}", std::process::id()));
+        std::fs::write(&path, b"0123456789").unwrap();
+        assert_eq!(read_at(&path, 0, 4).unwrap(), b"0123");
+        assert_eq!(read_at(&path, 8, 4).unwrap(), b"89");
+        assert_eq!(read_at(&path, 10, 4).unwrap(), b"");
+        assert_eq!(kind_of(&path), "application/octet-stream");
+        assert_eq!(kind_of(FilePath::new("1__a.mp3")), "audio/mpeg");
+        std::fs::remove_file(&path).unwrap();
+    }
+}

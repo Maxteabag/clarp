@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -5711,7 +5711,19 @@ fn fetch(
     headers: &[(&str, &str)],
     body: &[u8],
 ) -> Fetched {
-    let mut stream = TcpStream::connect(&host.address).unwrap();
+    fetch_at(&host.address, token, method, path, headers, body)
+}
+
+/// The same, of whoever listens at this address.
+fn fetch_at(
+    address: &str,
+    token: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Fetched {
+    let mut stream = TcpStream::connect(address).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(20)))
         .unwrap();
@@ -7613,4 +7625,547 @@ fn a_clip_is_heard_by_an_engine_over_the_network_with_a_key_read_where_the_owner
         (&able["available"], &able["models"]),
         (&json!(false), &json!([]))
     );
+}
+
+/// A stand-in for Cartesia on this machine. It answers every line with the same sound: the
+/// beginning at once, and the rest when it is let go, so that a clip can be fetched while it
+/// is being made. It can also be down.
+struct StandInVoice {
+    address: String,
+    /// The requests it took, each with its head and its body.
+    taken: Arc<Mutex<Vec<String>>>,
+    /// While this is set it holds the rest of the sound back.
+    held: Arc<AtomicBool>,
+    /// While this is set it answers that it is down.
+    down: Arc<AtomicBool>,
+}
+
+impl StandInVoice {
+    /// What it was asked to say, in the order it was asked.
+    fn asked(&self) -> Vec<Value> {
+        let taken = self.taken.lock().unwrap();
+        taken
+            .iter()
+            .map(|request| {
+                let body = request.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+                serde_json::from_str(body).unwrap_or(Value::Null)
+            })
+            .collect()
+    }
+}
+
+/// A whole request as it came over a connection: its head, and as much body as it says.
+fn whole_request(stream: &mut TcpStream) -> String {
+    let (mut seen, mut buffer) = (Vec::new(), [0u8; 4096]);
+    loop {
+        let text = String::from_utf8_lossy(&seen).to_string();
+        if let Some(at) = text.find("\r\n\r\n") {
+            let length = text.lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                let named = name.eq_ignore_ascii_case("content-length");
+                named.then(|| value.trim().parse::<usize>().ok())?
+            });
+            if seen.len() >= at + 4 + length.unwrap_or(0) {
+                return text;
+            }
+        }
+        match stream.read(&mut buffer) {
+            Ok(read) if read > 0 => seen.extend_from_slice(&buffer[..read]),
+            _ => return String::from_utf8_lossy(&seen).to_string(),
+        }
+    }
+}
+
+fn cartesia_stand_in(sound: Vec<u8>) -> StandInVoice {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let voice = StandInVoice {
+        address: format!("http://{}/tts/bytes", listener.local_addr().unwrap()),
+        taken: Arc::default(),
+        held: Arc::default(),
+        down: Arc::default(),
+    };
+    let (taken, held, down) = (voice.taken.clone(), voice.held.clone(), voice.down.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let request = whole_request(&mut stream);
+            taken.lock().unwrap().push(request);
+            if down.load(Ordering::SeqCst) {
+                let said = "the stand-in is down";
+                let reply = format!(
+                    "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{said}",
+                    said.len()
+                );
+                let _ = stream.write_all(reply.as_bytes());
+                continue;
+            }
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n",
+                sound.len()
+            );
+            let (beginning, rest) = sound.split_at(1_000);
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(beginning);
+            let _ = stream.flush();
+            while held.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let _ = stream.write_all(rest);
+        }
+    });
+    voice
+}
+
+/// What a body sent in chunks carries.
+fn unchunked(body: &[u8]) -> Vec<u8> {
+    let (mut out, mut rest) = (Vec::new(), body);
+    loop {
+        let Some(end) = rest.windows(2).position(|window| window == b"\r\n") else {
+            return out;
+        };
+        let size = String::from_utf8_lossy(&rest[..end]);
+        let size = usize::from_str_radix(size.trim(), 16).unwrap_or(0);
+        if size == 0 {
+            return out;
+        }
+        let from = end + 2;
+        out.extend_from_slice(&rest[from..from + size]);
+        rest = &rest[from + size + 2..];
+    }
+}
+
+#[test]
+fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
+    let place = Place::new("speech-out");
+    let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
+    let voice = cartesia_stand_in(sound.clone());
+    // The owner's own file, of the Python Host's kind: who speaks, with which key, and the
+    // voice of one persona. Nothing of it is copied.
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"key-in-the-owners-file\"\n\n\
+         [cartesia.voices]\nMaximus = \"voice-of-maximus\"\n",
+    )
+    .unwrap();
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    // No engine outside is reached, whatever keys the machine that runs this test has.
+    let world = [
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let session = host.new_agent("Maximus");
+    let heard = host.listen();
+    let told = |kind: &str| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let of_kind = heard.iter().filter(|event| event["type"] == kind);
+        of_kind.cloned().collect()
+    };
+    let get = |path: &str, range: Option<&str>| -> Fetched {
+        let headers: Vec<(&str, &str)> = range.map(|range| ("Range", range)).into_iter().collect();
+        fetch(&host, "", "GET", path, &headers, b"")
+    };
+    let answered = |session: &str, id: &str| {
+        let mine = format!("u-{id}");
+        wait_for("the answer", || {
+            let rows = host.turns(session);
+            let at = rows.iter().position(|row| row["id"] == mine);
+            at.is_some_and(|at| rows[at + 1..].iter().any(|row| row["role"] == "assistant"))
+                && host.state(session) == "done"
+        });
+    };
+
+    // Something that runs by itself asks the agent, and asks for the answer aloud. The agent
+    // marks a part of its answer for the ear. The engine is slow: the clip is announced
+    // before it is whole.
+    voice.held.store(true, Ordering::SeqCst);
+    let sent = host.post(
+        "/send",
+        json!({
+            "session": session, "text": "Looking. <speak>The build is green.</speak>",
+            "client_msg_id": "m1", "origin": "schedule", "synthesize_audio": true,
+        }),
+    );
+    wait_for("the clip to be announced", || !told("audio").is_empty());
+    let announced = told("audio")[0].clone();
+    let clip = announced["clip_id"].as_u64().unwrap();
+    let name = announced["name"].as_str().unwrap().to_string();
+    assert!(name.ends_with("__maximus.mp3"), "{name}");
+    assert_eq!(
+        announced,
+        json!({
+            "type": "audio", "url": format!("/audio/{name}"), "name": name,
+            "session": "maximus", "clip_id": clip, "agent_id": announced["agent_id"],
+            "persona": "Maximus", "trace_id": sent["trace_id"], "streamable": true,
+            "stream_url": format!("/clips/{clip}/stream"),
+            "complete_url": format!("/clips/{clip}/complete.mp3"),
+            "event_id": announced["event_id"],
+        })
+    );
+    assert!(
+        sent["trace_id"]
+            .as_str()
+            .is_some_and(|trace| !trace.is_empty())
+    );
+    // The engine was asked with the key from the owner's file, in the persona's voice, and
+    // for an agent nobody is looking at the line begins with who speaks.
+    wait_for("the engine to be asked", || !voice.asked().is_empty());
+    let request = voice.taken.lock().unwrap()[0].to_lowercase();
+    assert!(request.contains("x-api-key: key-in-the-owners-file"));
+    let asked = voice.asked()[0].clone();
+    assert_eq!(
+        (
+            &asked["transcript"],
+            &asked["voice"]["id"],
+            &asked["model_id"]
+        ),
+        (
+            &json!("Maximus here. The build is green."),
+            &json!("voice-of-maximus"),
+            &json!("sonic-3.5")
+        )
+    );
+
+    // While the clip is being made, a player that asks for a part is given it as far as the
+    // clip has come, and told that how long the clip will be is not known yet.
+    let stream = format!("/clips/{clip}/stream");
+    let part = get(&stream, Some("bytes=0-1"));
+    assert_eq!(
+        (
+            part.status,
+            part.header("content-range"),
+            part.header("content-type")
+        ),
+        (206, "bytes 0-1/*", "audio/mpeg")
+    );
+    assert_eq!(part.body, sound[..2]);
+    // An app says what becomes of the clip in its hands, by the number as it was told it.
+    let ack = |body: Value| host.ask("POST", "/clips/ack", Some(&body));
+    wait_for("the clip to be the line's", || {
+        let said = ack(json!({ "clip_id": clip.to_string(), "status": "play-start" }));
+        said == (200, json!({ "ok": true, "updated": true }))
+    });
+    // An app that was not listening asks what it missed, and is given the clip as it was
+    // announced.
+    let missed = host.get("/clips/recoverable?session=maximus");
+    assert_eq!(missed["events"], json!([announced]));
+    assert_eq!(
+        host.get("/clips/recoverable?session=nobody")["events"],
+        json!([])
+    );
+    // A player that takes a stream joins while the clip grows, and hears all of it.
+    let (address, path) = (host.address.clone(), stream.clone());
+    let (joined, has_joined) = std::sync::mpsc::channel();
+    let listening = std::thread::spawn(move || {
+        let mut stream = TcpStream::connect(&address).unwrap();
+        let request = format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
+        stream.write_all(request.as_bytes()).unwrap();
+        let (mut answer, mut buffer) = (Vec::new(), [0u8; 4096]);
+        let mut told = false;
+        loop {
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            answer.extend_from_slice(&buffer[..read]);
+            // Its head is here, and the first sound: it is listening.
+            if !told && answer.windows(4).any(|window| window == b"\r\n\r\n") {
+                told = true;
+                joined.send(()).unwrap();
+            }
+            if read == 0 {
+                return answer;
+            }
+        }
+    });
+    has_joined.recv_timeout(Duration::from_secs(20)).unwrap();
+    voice.held.store(false, Ordering::SeqCst);
+    let streamed = listening.join().unwrap();
+    let end = streamed.windows(4).position(|window| window == b"\r\n\r\n");
+    let (head, body) = streamed.split_at(end.unwrap() + 4);
+    let head = String::from_utf8_lossy(head).to_lowercase();
+    assert!(head.starts_with("http/1.1 200"), "{head}");
+    assert!(head.contains("transfer-encoding: chunked"), "{head}");
+    assert!(head.contains("content-type: audio/mpeg"), "{head}");
+    assert_eq!(unchunked(body), sound);
+
+    // A player that cannot play a stream waits for the whole clip.
+    let whole = get(&format!("/clips/{clip}/complete.mp3"), None);
+    assert_eq!(
+        (
+            whole.status,
+            whole.header("content-type"),
+            whole.header("accept-ranges"),
+            whole.header("cache-control")
+        ),
+        (200, "audio/mpeg", "bytes", "no-store")
+    );
+    assert_eq!(whole.body, sound);
+    // Once it is whole it is a file: all of it, or the part that is asked for.
+    let all = get(&stream, None);
+    assert_eq!((all.status, all.header("content-length")), (200, "6000"));
+    assert_eq!(all.body, sound);
+    let part = get(&stream, Some("bytes=2-5"));
+    assert_eq!(
+        (part.status, part.header("content-range")),
+        (206, "bytes 2-5/6000")
+    );
+    assert_eq!(part.body, sound[2..6]);
+    let tail = get(&stream, Some("bytes=5990-"));
+    assert_eq!(
+        (tail.status, tail.header("content-range"), tail.body.len()),
+        (206, "bytes 5990-5999/6000", 10)
+    );
+    let past = get(&stream, Some("bytes=6000-"));
+    assert_eq!(
+        (
+            past.status,
+            past.header("content-range"),
+            past.header("content-length")
+        ),
+        (416, "bytes */6000", "0")
+    );
+    // And by the name of its file, where it is kept for its owner alone.
+    let file = get(&format!("/audio/{name}"), None);
+    assert_eq!(
+        (file.status, file.header("content-type")),
+        (200, "audio/mpeg")
+    );
+    assert_eq!(file.body, sound);
+    let last = get(&format!("/audio/{name}"), Some("bytes=-4"));
+    assert_eq!(
+        (last.status, last.header("content-range")),
+        (206, "bytes 5996-5999/6000")
+    );
+    assert_eq!(last.body, sound[5996..]);
+    let kept = place.root.join("data/audio").join(&name);
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&kept).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    // Nothing else is anybody's to fetch there.
+    let nothing = get("/audio/nothing.mp3", None);
+    assert_eq!(
+        (nothing.status, nothing.text().as_str()),
+        (404, "not found")
+    );
+    for outside in [
+        "/audio/",
+        "/audio/..",
+        "/audio/../fleet.db",
+        "/audio/%2e%2e/fleet.db",
+    ] {
+        let refused = get(outside, None);
+        assert_eq!(
+            (refused.status, refused.text().as_str()),
+            (403, "forbidden"),
+            "{outside}"
+        );
+    }
+    for (path, status, said) in [
+        ("/clips/abc/stream", 400, "bad clip id"),
+        ("/clips/abc/complete.mp3", 400, "bad clip id"),
+        ("/clips/7/stream", 404, "no such clip"),
+        ("/clips/7/complete.mp3", 404, "not found"),
+    ] {
+        let refused = get(path, None);
+        assert_eq!(
+            (refused.status, refused.text().as_str()),
+            (status, said),
+            "{path}"
+        );
+    }
+
+    // The app played it to its end: it is not offered again. What an app says is checked.
+    assert_eq!(
+        ack(json!({ "clip_id": clip, "status": "play-ok" })),
+        (200, json!({ "ok": true, "updated": true }))
+    );
+    assert_eq!(
+        host.get("/clips/recoverable?session=maximus")["events"],
+        json!([])
+    );
+    assert_eq!(
+        ack(json!({ "clip_id": clip, "status": "played" })),
+        (400, json!({ "error": "bad status" }))
+    );
+    assert_eq!(
+        ack(json!({ "clip_id": "x", "status": "play-ok" })),
+        (400, json!({ "error": "bad clip_id" }))
+    );
+    assert_eq!(ack(json!([1])), (400, json!({ "error": "bad json" })));
+    assert_eq!(
+        ack(json!({ "clip_id": 7, "status": "play-ok" })),
+        (200, json!({ "ok": true, "updated": false }))
+    );
+    // Without a number, the clip is the one its address names.
+    let by_address = json!({ "url": format!("http://host/audio/{name}"), "status": "play-start" });
+    assert_eq!(ack(by_address).1["updated"], true);
+    assert_eq!(ack(json!({ "status": "play-start" })).1["updated"], false);
+
+    // The reply's clips can be played again: all of what it said aloud.
+    answered(&session, "m1");
+    let rows = host.turns(&session);
+    let reply = rows.iter().find(|row| row["role"] == "assistant").unwrap();
+    let reply = reply["id"].as_str().unwrap().to_string();
+    let again = host.get(&format!(
+        "/clips/message?session={session}&message_id={reply}"
+    ));
+    assert_eq!(again["events"].as_array().unwrap().len(), 1, "{again}");
+    let kept_clip = &again["events"][0];
+    assert_eq!(
+        (&kept_clip["type"], &kept_clip["clip_id"], &kept_clip["url"]),
+        (
+            &json!("audio"),
+            &json!(clip),
+            &json!(format!("/audio/{name}"))
+        )
+    );
+    let unknown = format!("/clips/message?session={session}&message_id=r-nothing");
+    assert_eq!(
+        host.ask("GET", &unknown, None),
+        (
+            404,
+            json!({ "error": "Retained audio is unavailable for this message" })
+        )
+    );
+    assert_eq!(
+        host.ask("GET", "/clips/message?session=maximus", None),
+        (400, json!({ "error": "session and message_id required" }))
+    );
+
+    // The user asks, and so looks at the agent: it does not say who speaks. Two parts for
+    // the ear are two clips, said in the order the agent said them.
+    host.send(
+        &session,
+        "<speak>One.</speak> and <speak>Two.</speak>",
+        "m2",
+    );
+    wait_for("both clips", || told("audio").len() == 3);
+    let numbers: Vec<u64> = told("audio")
+        .iter()
+        .map(|event| event["clip_id"].as_u64().unwrap())
+        .collect();
+    assert!(
+        numbers[0] < numbers[1] && numbers[1] < numbers[2],
+        "{numbers:?}"
+    );
+    for number in &numbers[1..] {
+        let whole = get(&format!("/clips/{number}/complete.mp3"), None);
+        assert_eq!(whole.status, 200);
+    }
+    let said: Vec<Value> = voice.asked()[1..]
+        .iter()
+        .map(|asked| asked["transcript"].clone())
+        .collect();
+    assert_eq!(said, [json!("One."), json!("Two.")]);
+
+    // A message whose answer is not to be said aloud: what the answer marks is read.
+    host.post(
+        "/send",
+        json!({
+            "session": session, "text": "<speak>Not aloud.</speak>", "client_msg_id": "m3",
+            "synthesize_audio": false,
+        }),
+    );
+    answered(&session, "m3");
+    // An agent nobody gave a voice stays silent without a word.
+    let stranger = host.new_agent("Stranger");
+    host.send(&stranger, "<speak>Unheard.</speak>", "s1");
+    answered(&stranger, "s1");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        (
+            told("audio").len(),
+            voice.asked().len(),
+            told("tts-error").len()
+        ),
+        (3, 3, 0)
+    );
+
+    // The engine is down: the clip that was announced is over, and the apps are told why
+    // nothing is heard.
+    voice.down.store(true, Ordering::SeqCst);
+    host.send(&session, "<speak>Into the void.</speak>", "m4");
+    wait_for("the failure to be told", || !told("tts-error").is_empty());
+    let failed = told("tts-error")[0].clone();
+    assert_eq!(
+        (
+            &failed["session"],
+            &failed["persona"],
+            &failed["message"],
+            &failed["error"]
+        ),
+        (
+            &json!("maximus"),
+            &json!("Maximus"),
+            &json!("Voice synthesis failed."),
+            &json!("HTTP 500: the stand-in is down")
+        )
+    );
+    let lost = told("audio")[3]["clip_id"].as_u64().unwrap();
+    let gone = get(&format!("/clips/{lost}/complete.mp3"), None);
+    assert_eq!((gone.status, gone.text().as_str()), (410, "clip failed"));
+    let gone = get(&format!("/clips/{lost}/stream"), None);
+    assert_eq!((gone.status, gone.text().as_str()), (404, "no such clip"));
+    // It is not offered again; the three that are whole and that no app played to the end
+    // are, the first among them because an app began to play it once more.
+    let offered: Vec<u64> = host.get("/clips/recoverable?session=maximus")["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["clip_id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(offered, numbers);
+    answered(&session, "m4");
+
+    // The Host is killed and started again: the clips are where they were, found by their
+    // numbers in the agent's log.
+    host.kill();
+    let host = place.start_in("", &args, &world);
+    let again = fetch(&host, "", "GET", &stream, &[("Range", "bytes=0-9")], b"");
+    assert_eq!(
+        (again.status, again.header("content-range")),
+        (206, "bytes 0-9/6000")
+    );
+    assert_eq!(again.body, sound[..10]);
+    let whole = fetch(
+        &host,
+        "",
+        "GET",
+        &format!("/clips/{clip}/complete.mp3"),
+        &[],
+        b"",
+    );
+    assert_eq!(whole.body, sound);
+    let gone = fetch(
+        &host,
+        "",
+        "GET",
+        &format!("/clips/{lost}/complete.mp3"),
+        &[],
+        b"",
+    );
+    assert_eq!(gone.status, 410);
+    let kept = host.get(&format!(
+        "/clips/message?session={session}&message_id={reply}"
+    ));
+    assert_eq!(kept["events"][0]["clip_id"], json!(clip));
+    // And a new clip gets a number no clip had.
+    voice.down.store(false, Ordering::SeqCst);
+    let heard = host.listen();
+    host.send(&session, "<speak>Back again.</speak>", "m5");
+    wait_for("the clip after the restart", || {
+        let heard = heard.lock().unwrap();
+        heard.iter().any(|event| event["type"] == "audio")
+    });
+    let newest = {
+        let heard = heard.lock().unwrap();
+        let event = heard.iter().find(|event| event["type"] == "audio").unwrap();
+        event["clip_id"].as_u64().unwrap()
+    };
+    assert!(newest > lost, "{newest} {lost}");
 }

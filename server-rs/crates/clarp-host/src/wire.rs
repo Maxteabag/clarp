@@ -13,6 +13,8 @@ use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::notify;
 use clarp_kernel::recovery;
+use clarp_kernel::said;
+use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
 use clarp_protocol::events::AgentStateKind;
@@ -556,6 +558,68 @@ pub fn artifact_updated(record: &AgentRecord, artifact_id: &str) -> Value {
         "session": record.session,
         "agent_id": record.agent_id,
         "artifact_id": artifact_id,
+    })
+}
+
+/// A clip of what an agent says aloud is there to be played: where a player gets it, as a
+/// file, as a stream while it is being made, and whole once it is. Told before the clip's
+/// first byte is there.
+pub fn audio(record: &AgentRecord, clip: u64, name: &str, trace_id: Option<&str>) -> Value {
+    json!({
+        "type": "audio",
+        "url": format!("/audio/{name}"),
+        "name": name,
+        "session": record.session,
+        "clip_id": clip,
+        "agent_id": record.agent_id,
+        "persona": record.persona,
+        "trace_id": trace_id,
+        "streamable": true,
+        "stream_url": format!("/clips/{clip}/stream"),
+        "complete_url": format!("/clips/{clip}/complete.mp3"),
+    })
+}
+
+/// The clip a line became, as it was announced, for an app that asks what it missed.
+/// `None`: the line has no clip.
+pub fn audio_of(record: &AgentRecord, line: &Line) -> Option<Value> {
+    let mut event = audio(
+        record,
+        line.clip_id?,
+        line.clip.as_deref()?,
+        line.trace_id.as_deref(),
+    );
+    if let (Some(fields), Some(event_id)) = (event.as_object_mut(), line.event_id) {
+        fields.insert("event_id".to_string(), json!(event_id));
+    }
+    Some(event)
+}
+
+/// The clip a line became, for an app that plays a reply again: where its file is, and
+/// when it was made (`message_audio.py`, `retained_events`).
+pub fn audio_kept(record: &AgentRecord, line: &Line) -> Option<Value> {
+    Some(json!({
+        "type": "audio",
+        "clip_id": line.clip_id?,
+        "session": record.session,
+        "agent_id": record.agent_id,
+        "persona": record.persona,
+        "trace_id": line.trace_id,
+        "ts": line.claimed_at_ms.unwrap_or(line.queued_at_ms),
+        "url": format!("/audio/{}", line.clip.as_deref()?),
+    }))
+}
+
+/// An agent could not be heard: a few words for the user, and what went wrong.
+pub fn tts_error(record: &AgentRecord, error: &str) -> Value {
+    let error: String = error.chars().take(300).collect();
+    json!({
+        "type": "tts-error",
+        "session": record.session,
+        "agent_id": record.agent_id,
+        "persona": record.persona,
+        "message": said::failure_told(&error),
+        "error": error,
     })
 }
 

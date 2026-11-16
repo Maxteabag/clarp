@@ -303,6 +303,8 @@ pub struct Works {
     pub pusher: Pusher,
     /// Where whole files are kept: what agents publish, and the pages of their reports.
     pub blobs: Arc<dyn Blobs>,
+    /// The way to the one that speaks.
+    pub speaks: crate::voice::Speaks,
 }
 
 enum Ask {
@@ -686,6 +688,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         jobs_checked_every: std::time::Duration::from_millis(works.config.jobs_checked_every_ms),
         pusher: works.pusher.clone(),
         blobs: works.blobs.clone(),
+        speaks: works.speaks.clone(),
     })
 }
 

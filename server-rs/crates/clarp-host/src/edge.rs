@@ -128,6 +128,8 @@ pub struct App {
     pub activity: Arc<Mutex<Leases>>,
     /// The engines that listen: what turns a clip of speech into text.
     pub ears: Arc<crate::heard::Ears>,
+    /// The one that speaks, and where the clips of what agents say aloud are.
+    pub mouth: Arc<crate::voice::Mouth>,
 }
 
 /// A request that cannot be met, as the Python Host says it: a status with `{"error": ...}`,
@@ -228,6 +230,7 @@ pub fn router(app: App) -> Router {
         .merge(push::routes())
         .merge(peers::routes())
         .merge(roster::routes())
+        .merge(crate::voice::routes())
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
 }
@@ -289,6 +292,7 @@ const LIMITED_POSTS: &[&str] = &[
     "/focus",
     "/upload",
     "/clog",
+    "/clips/ack",
 ];
 
 /// Whether this caller is kept from this request by its scope.

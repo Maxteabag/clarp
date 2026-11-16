@@ -96,6 +96,12 @@ class PythonHost(replay.Host):
 HEARD = scenarios.HEARD
 
 
+# What the reference Host's config says when a scenario brings none, and where the Rust Host is
+# given the same.
+SPEECH_OFF = '[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
+OWNERS_FILE = 'owner-config.toml'
+
+
 class RustHost(replay.Host):
     """The Rust Host behind the same fake Claude."""
 
@@ -105,6 +111,10 @@ class RustHost(replay.Host):
         for path in (provider / 'bin', self.root / 'workspace', self.root / 'home', self.root / 'tmp'):
             path.mkdir(parents=True)
         claude_shim(provider / 'bin' / 'claude')
+        # The owner's file of settings, of the reference Host's kind: what a scenario gives the
+        # reference Host as its config, this Host reads its owner's choices of speech from. With
+        # none, speech out is off on both (tests/replay/host.py, isolate).
+        (self.root / OWNERS_FILE).write_text(config or SPEECH_OFF)
         self.log = (self.root.parent / f'{self.root.name}.host.log').open('a')
         # The reference Host has its agents before it serves its first request. This one is given
         # the same agents and then started again, so that making them is not part of what a client
@@ -138,7 +148,8 @@ class RustHost(replay.Host):
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
              '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
-             '--whisper-python', sys.executable, '--whisper-worker', str(HERE.parent / 'tools' / 'whisper-worker.py')],
+             '--whisper-python', sys.executable, '--whisper-worker', str(HERE.parent / 'tools' / 'whisper-worker.py'),
+             '--speech-keys', str(self.root / OWNERS_FILE)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
             env=env, cwd=str(self.root), start_new_session=True)
         first = self.process.stderr.readline().decode(errors='replace')

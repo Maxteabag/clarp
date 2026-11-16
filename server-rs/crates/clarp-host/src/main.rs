@@ -98,6 +98,8 @@ async fn serve(config: Config) -> Result<(), String> {
     // What is to be pushed is taken from the first moment on; it goes out once the fleet,
     // which knows the phones, is there.
     let (pusher, to_push) = pusher::pusher();
+    // And so is who has something to say: said once the one that speaks runs.
+    let (speaks, to_speak) = clarp_host::voice::mouth();
     let works = Works {
         config: config.clone(),
         engine,
@@ -109,6 +111,7 @@ async fn serve(config: Config) -> Result<(), String> {
         tool_env: tool_env(&address.to_string(), &config.auth_token),
         pusher: pusher.clone(),
         blobs: blobs.clone(),
+        speaks,
     };
     let fleet = fleet::start(works, store)?;
     let desks = Arc::new(Mutex::new(Presence::new()));
@@ -121,11 +124,18 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
         server_id: server_id.clone(),
     })?;
+    let mouth = to_speak.run(clarp_host::voice::Works {
+        config: config.clone(),
+        fleet: fleet.clone(),
+        hub: hub.clone(),
+        clock: clock.clone(),
+    });
     let app = App {
         config: config.clone(),
         hub,
         fleet,
         clock,
+        mouth,
         server_id,
         revisions,
         pusher,
