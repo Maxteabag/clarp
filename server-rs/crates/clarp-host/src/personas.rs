@@ -17,12 +17,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use clarp_kernel::kept_portraits::{self as kept, Portrait};
 use clarp_kernel::personas::{self as rules, Owner};
+use clarp_kernel::python;
 use serde_json::{Map, Value, json};
 
 use crate::edge::{ApiError, App};
-use crate::fleet::{PersonaSaid, picture_name};
-use crate::media;
+use crate::fleet::{AgentRecord, Amend, PersonaSaid, picture_name};
+use crate::{ids, media};
 
 /// A request's body as the object it has to be. No body is an empty object.
 pub(crate) fn object(body: &Bytes) -> Result<Map<String, Value>, ApiError> {
@@ -136,30 +138,35 @@ async fn agent_avatar(
     media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
 }
 
-/// The most portraits an agent keeps, as the Python Host has it.
-const PORTRAITS_MOST: usize = 3;
-
-/// The id of the portrait that is the picture an agent wears, as the Python Host names one
-/// nobody chose from a gallery.
-fn worn_id(agent_id: &str, digest: &str) -> String {
-    format!(
-        "portrait_legacy_{agent_id}_{}",
-        digest.get(..24).unwrap_or(digest)
-    )
+/// The picture an agent wears, as a portrait can hold it: its digest, and what kind of
+/// picture its bytes begin as.
+fn worn(app: &App, record: &AgentRecord) -> Option<(String, &'static str)> {
+    let digest = record.avatar.as_deref()?;
+    let begins = app.blobs.read(&picture_name(digest), 0, 12).ok()?;
+    kept::picture_kind(&begins).map(|kind| (digest.to_string(), kind))
 }
 
-/// Whether these bytes begin as a picture a portrait can hold: PNG, JPEG, GIF or WebP.
-fn is_portrait(begins: &[u8]) -> bool {
-    begins.starts_with(b"\x89PNG\r\n\x1a\n")
-        || begins.starts_with(b"\xff\xd8\xff")
-        || begins.starts_with(b"GIF87a")
-        || begins.starts_with(b"GIF89a")
-        || (begins.len() >= 12 && &begins[..4] == b"RIFF" && &begins[8..12] == b"WEBP")
+/// Whether a portrait's bytes are kept. Every portrait's are kept under the name a picture
+/// of an agent is kept by, whatever file it was chosen from.
+fn there(app: &App) -> impl Fn(&Portrait) -> bool + '_ {
+    |portrait| matches!(app.blobs.len(&picture_name(&portrait.sha256)), Ok(Some(_)))
 }
 
-/// `GET /agent-portraits?session=`: the portraits an agent keeps. Here that is the picture
-/// it wears, when it has one of its own and that is a picture: choosing another from what
-/// it published is not built.
+/// What the apps are told of an agent's portraits, as its record has them now.
+fn told(app: &App, record: &AgentRecord, portraits: &[Portrait]) -> Value {
+    let worn = worn(app, record);
+    let digest = worn.as_ref().map(|(digest, _)| digest.as_str());
+    let whose = (record.session.as_str(), record.agent_id.as_str());
+    kept::told(whose, portraits, digest, there(app))
+}
+
+fn declined(why: kept::Refused) -> ApiError {
+    let status = StatusCode::from_u16(why.status).unwrap_or(StatusCode::BAD_REQUEST);
+    ApiError::new(status, why.why)
+}
+
+/// `GET /agent-portraits?session=`: the portraits an agent keeps, the one it wears first.
+/// Reading changes nothing: they are shown as the next change will find them.
 async fn portraits(
     State(app): State<App>,
     axum::extract::Query(asked): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -167,52 +174,132 @@ async fn portraits(
     let session = asked.get("session").map_or("", |said| said.trim());
     let directory = app.fleet.directory();
     let member = directory.by_session(session);
-    let member = member.ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
-    let record = &member.record;
-    let worn = record.avatar.as_deref().filter(|digest| {
-        let begins = app.blobs.read(&picture_name(digest), 0, 12);
-        begins.is_ok_and(|begins| is_portrait(&begins))
-    });
-    let listed: Vec<Value> = worn
-        .map(|digest| {
-            let id = worn_id(&record.agent_id, digest);
-            let version = rules::version(digest);
-            json!({
-                "portrait_id": id,
-                "media_asset_id": null,
-                "role": "primary",
-                "content_version": version,
-                "url": format!("/agent-portraits/{id}/content?v={version}"),
-                "source": "legacy_avatar",
-                "created_by": "legacy_avatar",
-                "created_at": record.created_at_ms,
-                "available": true,
-            })
-        })
-        .into_iter()
-        .collect();
-    Ok(Json(json!({
-        "contract": "agent-portraits.v1",
-        "session": record.session,
-        "agent_id": record.agent_id,
-        "primary_portrait_id": listed.first().map(|portrait| portrait["portrait_id"].clone()),
-        "portraits": listed,
-        "max_portraits": PORTRAITS_MOST,
-    })))
+    let record = &member
+        .ok_or_else(|| declined(kept::UNKNOWN_SESSION))?
+        .record;
+    let worn = worn(&app, record);
+    let wears = worn.as_ref().map(|(digest, kind)| (digest.as_str(), *kind));
+    let made = (record.agent_id.as_str(), record.created_at_ms);
+    let shown = kept::as_read(&record.portraits, made, wears, there(&app));
+    Ok(Json(told(&app, record, &shown)))
 }
 
-/// `GET /agent-portraits/<id>/content`: a portrait's picture.
+/// `GET /agent-portraits/<id>/content`: a portrait's picture. One that a change recorded
+/// is handed out as the kind of picture it is; the picture an agent wears that nothing
+/// has recorded yet as the file an agent's picture is kept as.
 async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: HeaderMap) -> Response {
     let directory = app.fleet.directory();
-    let worn = directory.members.iter().find_map(|member| {
-        let digest = member.record.avatar.as_deref()?;
-        (worn_id(&member.record.agent_id, digest) == id).then(|| digest.to_string())
-    });
-    let Some(digest) = worn else {
-        return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
-    };
     let range = media::header_text(&headers, "range");
-    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+    for member in &directory.members {
+        let record = &member.record;
+        let recorded = record.portraits.iter();
+        if let Some(found) = recorded.into_iter().find(|kept| kept.portrait_id == id) {
+            let name = picture_name(&found.sha256);
+            return media::send_kept(&app.blobs, name, &found.mime_type, &range);
+        }
+        if let Some(digest) = record.avatar.as_deref()
+            && kept::worn_id(&record.agent_id, digest) == id
+        {
+            return media::send_kept(&app.blobs, picture_name(digest), "image/jpeg", &range);
+        }
+    }
+    ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response()
+}
+
+/// `POST /agent-portraits` with `{action, session, ...}`: a picture the agent published is
+/// kept as one of its portraits (`add_media_asset` with `asset_id`), or one of its
+/// portraits is made the picture it wears (`select_primary` with `portrait_id`). Every
+/// change first finds the picture the agent wears among its portraits, or records it. The
+/// rules and the words are the Python Host's (`clarp_kernel::kept_portraits`).
+async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    // Nothing at all is an empty object, as on the Python Host.
+    let said = match serde_json::from_slice::<Value>(&body) {
+        _ if body.is_empty() => json!({}),
+        Ok(said @ Value::Object(_)) => said,
+        _ => return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json")),
+    };
+    let text = |key: &str| said[key].as_str().map(python::strip).unwrap_or_default();
+    let action = text("action");
+    if !matches!(action, "add_media_asset" | "select_primary") {
+        return Err(declined(kept::UNSUPPORTED));
+    }
+    let session = match text("session") {
+        "" => clarp_kernel::addressed::DEFAULT_SESSION,
+        session => session,
+    };
+    let directory = app.fleet.directory();
+    let member = directory.by_session(session).cloned();
+    let member = member.ok_or_else(|| declined(kept::UNKNOWN_SESSION))?;
+    let record = &member.record;
+    let worn = worn(&app, record);
+    let wears = worn.as_ref().map(|(digest, kind)| (digest.as_str(), *kind));
+    let made = (record.agent_id.as_str(), record.created_at_ms);
+    let mut rows = record.portraits.clone();
+    kept::before_a_change(&mut rows, made, wears, there(&app)).map_err(declined)?;
+    let now_worn = if action == "add_media_asset" {
+        let asset_id = text("asset_id");
+        let view = member.agent.view();
+        let own = view
+            .books
+            .media
+            .get(asset_id)
+            .filter(|asset| !asset.named_only);
+        let Some(asset) = own.cloned() else {
+            let elsewhere = !media::kept_under(&app, asset_id).is_empty();
+            return Err(declined(if elsewhere {
+                kept::ANOTHERS_ASSET
+            } else {
+                kept::NO_SUCH_ASSET
+            }));
+        };
+        // Its bytes are kept once more under the name an agent's picture is kept by, so
+        // that a portrait is found there whatever file it was chosen from.
+        let (from, blobs) = (asset.blob(), app.blobs.clone());
+        let to = picture_name(&asset.sha256);
+        let copied = tokio::task::spawn_blocking(move || {
+            let Some(size) = blobs.len(&from)? else {
+                return Ok(false);
+            };
+            let size = usize::try_from(size).unwrap_or(usize::MAX);
+            let bytes = blobs.read(&from, 0, size)?;
+            blobs.put(&to, &bytes).map(|()| true)
+        });
+        if !matches!(copied.await, Ok(Ok(true))) {
+            return Err(declined(kept::ASSET_GONE));
+        }
+        let published = Portrait {
+            portrait_id: format!("portrait_{}", ids::secret(18).replace('-', "_")),
+            media_asset_id: Some(asset.asset_id.clone()),
+            sha256: asset.sha256.clone(),
+            mime_type: asset.mime_type.clone(),
+            created_by: match asset.created_by.as_str() {
+                "" => "agent".to_string(),
+                by => by.to_string(),
+            },
+            created_at: asset.created_at,
+        };
+        kept::keep(&mut rows, published).map_err(declined)?;
+        None
+    } else {
+        let chosen = kept::chosen(&rows, text("portrait_id")).map_err(declined)?;
+        if !there(&app)(chosen) {
+            return Err(declined(kept::PORTRAIT_GONE));
+        }
+        Some(chosen.sha256.clone())
+    };
+    let selected = now_worn.is_some();
+    let change = Amend::Portraits {
+        kept: rows,
+        worn: now_worn,
+    };
+    let amended = app.fleet.amend(record.agent_id.clone(), change).await?;
+    let record = amended.map_err(|_| declined(kept::UNKNOWN_SESSION))?;
+    if selected {
+        // The agent wears another picture: the apps read their lists again.
+        let news = json!({ "type": "agent-roster", "kind": "portrait-selected", "session": record.session });
+        app.hub.publish(news, app.clock.now_ms());
+    }
+    Ok(Json(told(&app, &record, &record.portraits)))
 }
 
 /// `GET /notification-avatars/<agent>?v=&exp=&sig=`: the picture an agent has of its own,
@@ -252,14 +339,9 @@ async fn pushed_face(
     media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
 }
 
-async fn no_portraits() -> ApiError {
-    let why = "Choosing a portrait from what an agent published is not built on this Host yet";
-    ApiError::new(StatusCode::NOT_IMPLEMENTED, why)
-}
-
 pub fn routes() -> Router<App> {
     Router::new()
-        .route("/agent-portraits", get(portraits).post(no_portraits))
+        .route("/agent-portraits", get(portraits).post(change_portraits))
         .route("/agent-portraits/{id}/content", get(portrait))
         .route("/notification-avatars/{agent}", get(pushed_face))
         .route("/personas", post(create))
