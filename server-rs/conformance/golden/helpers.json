@@ -9142,46 +9142,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "event_id": "<eid:transcript-updated#1@37405d>",
-    "session": "helper-one",
-    "type": "transcript-updated"
-   },
-   "event": null,
-   "id": "<eid:transcript-updated#1@37405d>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "halfa",
-    "event_id": "<eid:queue-updated#1@72070e>",
-    "queue_depth": 0,
-    "queue_paused": false,
-    "queue_revision": 2,
-    "queue_started": true,
-    "session": "helper-one",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@72070e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "halfa",
-    "event_id": "<eid:agent-state#1@7169e8>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "helper-one",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@7169e8>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "session": "helper-one"
     },
@@ -9218,6 +9178,46 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@626a03>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "event_id": "<eid:transcript-updated#1@37405d>",
+    "session": "helper-one",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@37405d>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "halfa",
+    "event_id": "<eid:queue-updated#1@72070e>",
+    "queue_depth": 0,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": true,
+    "session": "helper-one",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@72070e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "halfa",
+    "event_id": "<eid:agent-state#1@7169e8>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "helper-one",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@7169e8>"
   },
   {
    "data": {

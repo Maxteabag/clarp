@@ -166,11 +166,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 18:01 (16 Nov) | the Host updated by the installer, `0917e7a4` to `afbf6959`: the build with the herald | 3 | every turn in its command (`sleep 40`) | held: the new build answered in the same millisecond, with all three |
 | 19:38 (16 Nov) | the Host updated by the installer, `afbf6959` to `a9c9f41e`: the build with calls. The first exercise whose agents are Codex agents | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 20:45 (16 Nov) | the Host updated by the installer, `a9c9f41e` to `99fe37a7`: the build with rings, the chip on a phone's lock screen, and schedules | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 21:52 (16 Nov) | the Host updated by the installer, `99fe37a7` to `6390a692`: the build with the connection relay, the door that trusts only what nobody handed on, and this Host's tools first in every bash | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Ninety-eight turns in twenty-eight
-exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and six of Codex
-in the two since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and one turns in twenty-nine
+exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and nine of Codex
+in the three since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -454,7 +455,11 @@ matter."" With rings turned off nobody rang (403, `agent calls are turned off`);
 every step. The apps were told of each change of the ring: ringing, answered.
 
 Not shown by that run: a ring by an agent's own tool from its own turn. The command ran, and not against
-this Host: see the next section. It is repeated when the repair is installed.
+this Host: see the next section. Repeated at 21:53 on the build of `6390a692`, with the repair installed:
+all twenty-eight checks, and among them an agent rang with its own tool from its own Codex turn, the user
+declined, the tool that had waited printed `declined`, the agent said so and found "Call: The user declined
+your call about: A check by the agent itself" in its conversation; the apps were told ringing, answered,
+ringing, declined. The Python Host's trail of rings had nothing new.
 
 ## Where the fence between the two Hosts did not hold
 
@@ -474,8 +479,44 @@ first and `bash -lc` names the Python Host's. The repair on this side is in `too
 given `BASH_ENV`, a file every bash reads after its profile, which puts this Host's tools first again. That
 closes `bash -lc`, also one started inside another shell. It does not close a login shell of another kind
 (`sh -lc`, zsh): there the profile's order stands, and only the tool that is found first can hand over. That
-hand-over is asked of the Python Host's wrappers. Until both are in place no agent of the owner's moves, and
-until this side's is installed no check here has an agent call a Clarp tool.
+hand-over is asked of the Python Host's wrappers, and settled with their owner the same evening (issue 388):
+a wrapper that finds itself in a turn that carries `CLARP_HOST_ADDR` runs `$CLARP_SHARE_DIR/tools/<its own
+name>`, or refuses with exit 69; it never goes on to the Python Host. Until both are in place no agent of the
+owner's moves.
+
+Installed with `6390a692` at 21:52 and measured in a Codex turn, by a probe that calls no tool: a plain
+shell, `bash -lc`, and a `bash -lc` inside another all find this Host's tools first; `sh -lc` still finds the
+Python Host's, as said. The turn carries `BASH_ENV`, `CLARP_HOST_ADDR` and this Host's `CLARP_SHARE_DIR` in
+all of them, which is what the hand-over reads.
+
+## Through the connection relay
+
+On 16 Nov 2026 at 21:54 the installed Host (`6390a692`) was told to use the relay (`tools/install-host
+--relay on --start`) under a name of the battle test's own, `elitebook-rust`, which whoever keeps the relay
+had made for it; no phone is paired under that name. It dialled by itself: connected after 143 ms, one line
+in the journal (`relayConnectionOpened`), and `clarp-host network relay status` showed the relay's address,
+the name, the address a phone would be paired with, and `connected`.
+
+At 21:57, by a check that acts as a phone and makes one device and one agent of its own and removes both,
+everything through the relay's public address: the device handed in its pairing code and was given a token
+of its own (201); it asked the Host and was answered; ten small requests, each on a connection of its own,
+took 0.05 to 0.07 seconds; a token nobody has was refused in a header and in an address (401), and so was
+the device's own token in an address, and no token at all; the stream of events opened (200,
+`text/event-stream`); the device sent a message to a Codex agent and read its answer ("relayed") through
+the relay, and twelve events of that turn came down the stream, the first 0.06 seconds after the send. Then
+the device was revoked: its stream ended in the same instant, and its token opened nothing any more (401).
+The administrator's token never left the machine: that it opens nothing through the relay is shown against
+a stand-in, by the Host's own test, with the same code.
+
+Two things the check itself ran into, neither the Host's. The relay's edge refuses the name Python's own
+client gives itself (403, `error code: 1010`), before a request reaches the relay: the check names itself
+otherwise. And the build gate of `6390a692` failed at its first attempt in one test, the herald's, which
+asserted that the voice engine had been asked at the moment a clip was announced; a clip is announced
+before its first byte is there. Alone the test passed five times of five; the second attempt of the same
+run on the same commit was green, and the test waits now.
+
+Not shown yet: a WebSocket through the relay (this Host has no WebSocket route), a loss of the connection
+on the real relay and the dial after it (shown against the stand-in), and the owner's own phone.
 
 ## A schedule
 
