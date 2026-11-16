@@ -25,6 +25,11 @@ df2b41e383ab  retried-turns: the reply of the turn after one that was tried twic
 32c484ab1cb3  agent-is-told: its second reply (computed: the defect shows at a later turn or does not, from run to run)
 5eeb25bb406d  agent-is-told: the second reply of the agent named as a persona (computed)
 fe87cf73356b  agent-is-told: its third reply (computed)
+6fea64081dc4  spoken-names: the fifth reply of the agent that was named
+846151482d24  spoken-names: its second reply (computed: the defect shows at a later turn or does not, from run to run)
+303d269e2fc9  spoken-names: its third reply (computed)
+fac440df5e13  spoken-names: its fourth reply (computed)
+260663bc767f  spoken-names: the second reply of the scenario's own agent (computed)
 
 # A notification's preview of what was said aloud does not show an emotion tag the engine
 # acts out (the Python Host shows "[sigh]" there: reference defect R10).
@@ -44,6 +49,9 @@ cbaf110bc254  roster-edits: last_completed_message at rest, after the turn of th
 e5de879ae9b8  retried-turns: last_completed_message at rest, after the turn that followed a retried one
 25f3ea0bd60d  agent-is-told: last_completed_message at rest, after the third turn of the agent with a way of speaking of its own
 61b7ecd94462  agent-is-told: the same of the agent named as a persona (computed)
+f632d0f86f1d  spoken-names: last_completed_message at rest, after the fifth turn of the agent that was named
+219fb876c501  spoken-names: the same in the snapshot after its second turn (computed)
+5935024d3eb3  spoken-names: the same of the scenario's own agent, after its second turn (computed)
 
 # The model that answered is shown after a turn that completed (the Python Host shows none
 # after some: reference defect R13).

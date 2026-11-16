@@ -26,7 +26,9 @@ pub const NEEDED: &str = "lat/lng required";
 pub const WHOSE: &str = "session required";
 
 /// A number as Python's `float()` takes one from what JSON carries: a number, a text that
-/// is one, a truth value. `Err` says what was given, where it was a text.
+/// is one, a truth value. `Err` says what was given, where it was a text. (Python also
+/// takes digits grouped with `_`, "1_0" for ten; no app writes a place that way, and here
+/// it is no number.)
 fn number(given: &Value) -> Result<f64, Option<String>> {
     match given {
         Value::Number(number) => number.as_f64().ok_or(None),
