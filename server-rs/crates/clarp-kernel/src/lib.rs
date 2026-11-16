@@ -16,6 +16,7 @@ pub mod failures;
 pub mod goals;
 pub mod heard;
 pub mod helpers;
+pub mod herald;
 pub mod jobs;
 pub mod journal;
 pub mod languages;
