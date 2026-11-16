@@ -16,6 +16,7 @@ dfcb5143ebc3  two-turns: the second reply
 9c9b8bbc7447  log-pages: the second reply, in the page a client with nothing gets
 00f5d90896a6  log-pages: the second reply, to a client that catches up
 cdeb37c253ec  turn-timer: the second reply, which answered a message that had waited
+86eb79e858d9  the-apps-own-ids: the third reply, which answered a message that had waited
 34052692aaba  who-is-told: the last reply
 f2243c3156c0  routine-turns: the last reply, in a page without automation
 80e273b5bd0a  routine-turns: the reply to a watcher's event
@@ -39,6 +40,7 @@ fac440df5e13  spoken-names: its fourth reply (computed)
 # Host still shows the user's message there, after a turn that had waited in the queue and
 # after plain turns that were not the agent's first: reference defect R12).
 d4b9221921eb  turn-timer: last_completed_message at rest, after the second turn
+0e41e546dac6  the-apps-own-ids: last_completed_message at rest, after the third turn
 1e31cfb83338  who-is-told: last_completed_message at rest, after turns nobody waited for
 3c21eb549be7  routine-turns: last_completed_message at rest, after routine turns
 631b42b31474  roster-edits: last_completed_message at rest, after the turn of the agent put away
