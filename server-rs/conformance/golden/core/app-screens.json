@@ -646,8 +646,11 @@
   },
   {
    "body": {
-    "ring": "<nothing>",
-    "settings": "<fields>"
+    "ring": null,
+    "settings": {
+     "enabled": true,
+     "show_reason": false
+    }
    },
    "headers": {
     "cache-control": "no-store",

@@ -3613,6 +3613,21 @@
   {
    "data": {
     "agent_id": "<id:2>",
+    "client_msg_id": "whodelta",
+    "event_id": "<eid:agent-state#2@cfc612>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "nova",
+    "trace_id": "<id:6>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@cfc612>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
     "detail": {
      "backend_session_id": "<id:10>",
      "dispatch": "claude",
@@ -3653,21 +3668,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#8@95ff8e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:2>",
-    "client_msg_id": "whodelta",
-    "event_id": "<eid:agent-state#2@cfc612>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "nova",
-    "trace_id": "<id:6>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#2@cfc612>"
   },
   {
    "data": {

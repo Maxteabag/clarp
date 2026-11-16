@@ -115,7 +115,15 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>"
+      "trace_id": "<id:1>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:1>",
+       "worked_ms": "<duration>"
+      }
      },
      {
       "automated": false,

@@ -165,11 +165,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 17:19 (16 Nov) | the Host updated by the installer, `341125e3` to `0917e7a4`: the build with the app's remaining screens, an agent's face in a push, a spoken message that finds its agent by its name, and a phone's place | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 18:01 (16 Nov) | the Host updated by the installer, `0917e7a4` to `afbf6959`: the build with the herald | 3 | every turn in its command (`sleep 40`) | held: the new build answered in the same millisecond, with all three |
 | 19:38 (16 Nov) | the Host updated by the installer, `afbf6959` to `a9c9f41e`: the build with calls. The first exercise whose agents are Codex agents | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 20:45 (16 Nov) | the Host updated by the installer, `a9c9f41e` to `99fe37a7`: the build with rings, the chip on a phone's lock screen, and schedules | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Ninety-five turns in twenty-seven
-exercises, none interrupted, lost or run twice: eighty-nine of Claude Code in twenty-six, and three of Codex
-in the one of 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. Ninety-eight turns in twenty-eight
+exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and six of Codex
+in the two since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -436,6 +437,56 @@ agent calls it, took the second off hold, and printed the Host's refusal of a na
 The call ended, and a message of the call that was over was refused as one (409, `call ended`, with the
 call's id). The apps were told of every change and of nothing else: start, route, hold, resume, end; a
 message that falls to the agent that already has the floor changes nothing and tells nothing.
+
+## A ring
+
+On 16 Nov 2026 at 20:46, on the build of `99fe37a7`, with real Codex turns and one short clip of the owner's
+own engine, by a check that makes two agents of its own and removes them. The Host said that agents can
+ring; rings were on, as a Host comes; nobody rang. No phone is registered with this Host, and the one who
+rang was told so: nothing sent, nothing failed. An agent rang by the owner's tools: the ring stood for 45
+seconds, its opening line had been voiced (a clip of 56,468 bytes, fetched), and a second agent that tried
+meanwhile was refused (409, `the user is already being called`). Answered as a live voice call it was
+refused (409, `live_mode_conflict`); answered plainly it started a call with the agent on the floor and
+handed back the line to play first, with its clip. The agent found a quiet word about both in its
+conversation. What the user said next went to it, and the answer of its real turn showed what its tool had
+been told: "I called to check the ring; my opening line was, "This is a check of the ring. Nothing is the
+matter."" With rings turned off nobody rang (403, `agent calls are turned off`); on again, the trail had
+every step. The apps were told of each change of the ring: ringing, answered.
+
+Not shown by that run: a ring by an agent's own tool from its own turn. The command ran, and not against
+this Host: see the next section. It is repeated when the repair is installed.
+
+## Where the fence between the two Hosts did not hold
+
+An agent on this Host is to reach this Host's tools by their names, and never the Python Host's, which act
+on that Host. Until 16 Nov the fence was the order of the path alone: this Host's tools come first on the
+path a turn's commands run with. At 20:46:17 a Codex agent of the check above ran `clarp-admin call ring`
+through a login shell (`bash -lc`, which a Codex model starts when it likes). A login shell runs the user's
+profile first; the profile on this machine puts `~/.local/bin` in front; the Python Host's `clarp-admin`
+is there, and it sets its own Host's environment before it runs, whatever the turn's said. The request went
+to the Python Host on elitebook. Measured there, with that Host's own tool and nothing changed: one entry in
+its trail of rings, refused, `agent required`. No ring was placed and no phone rang. A probe a few minutes
+later read that Host's ring status the same wrong way and wrote nothing. The release owner of the Python
+Host was told the same hour.
+
+Reproduced without any Host: with the turn's path, `bash -c 'type -a clarp-admin'` names this Host's tool
+first and `bash -lc` names the Python Host's. The repair on this side is in `tools/install-host`: a turn is
+given `BASH_ENV`, a file every bash reads after its profile, which puts this Host's tools first again. That
+closes `bash -lc`, also one started inside another shell. It does not close a login shell of another kind
+(`sh -lc`, zsh): there the profile's order stands, and only the tool that is found first can hand over. That
+hand-over is asked of the Python Host's wrappers. Until both are in place no agent of the owner's moves, and
+until this side's is installed no check here has an agent call a Clarp tool.
+
+## A schedule
+
+On 16 Nov 2026 at 20:49, on the build of `99fe37a7`, with one real Codex turn, by a check that makes an
+agent of its own and removes it. An expression that is none was refused in words (`Cron expression must
+have 5 fields, got 1: nonsense`). A schedule for every minute was made, 46 seconds before its minute, and
+was listed for its agent. When the minute came the agent was sent the prompt as something the Host sends by
+itself (`automation`), 12.8 seconds after the minute: the runner looks every fifteen. The agent answered
+with its word. The user was not moved to that agent. The schedule had moved on to its next minute before it
+sent. Turned off it had no next time; it had been sent once; removed, it was gone, and the Host had the
+agents and the schedules it had before.
 
 ## The soak so far
 

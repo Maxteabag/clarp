@@ -81,6 +81,11 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
    the checks that make agents of their own run on Codex. A Claude agent is used only where Claude Code itself is
    what is tested (what its tool is handed, how its session is taken up again), and then on Sonnet: not on Haiku,
    Fable or Opus. A test that cannot be done so is a question for Peter, never an exception.
+9. **Two Hosts never dial the connection relay under one name.** The relay gives a name's phones to whoever
+   dialled last. The Rust Host takes its relay from the file `--relay-config` names and from nowhere else; the
+   installed battle-test Host has a name of its own there, or none. `~/.config/clarp/relay.json` is the Python
+   Host's until the day of the switch. Never print or copy a `relay.json`, and never log the address a
+   connector dials: both carry the key.
 
 ## 4. Decisions already made (do not reopen without the lead)
 
@@ -749,6 +754,50 @@ schedules are kept whole with the fleet. A schedule is sent to the agent it was 
 Python Host has no feature that stands for schedules, and neither has this one: the apps call the routes.
 Found on the way and reported: the Python scheduler counts through a range far larger than its field
 (reference defect R24; fixed there the same day, PR 381).
+
+**The connection relay** (16 Nov 2026; the owner's requirement, through the Python Host's release owner: "when
+we switch to rust it will use relay"). A Host without a public address is reached through a relay: the Host
+keeps one outbound WebSocket to it, and what a phone asks at `<relay>/h/<host id>` comes down that socket as
+frames, each for one stream. The relay knows the Host by a name and a key; it does not know the phones: the
+Host checks them. The rules without the socket are the kernel's. `connector.rs`: what a frame is, what the
+connector does with each frame it is given, with which headers a request is handed to the Host, how an
+answer's head is written, when the relay is dialled again, which settings name a relay. `trust.rs`: which
+request is local, whose failure a failed authentication is, and when failures are answered with a wait. Both
+are the Python Host's own modules (`relay_connector.py`, `relay_settings.py`, `request_security.py`), held to
+them by what those modules answered (`tools/connector-vectors.py`): 12 frames, 41 sets of headers, 15 waits,
+89 settings, 22 files, 109 frames through 29 scripts, 22 peers, 88 requests, 22 sources and 82 counted
+failures.
+
+The Host's part is the socket and what serves a stream (`connector.rs` in `clarp-host`). **A relay's request
+is asked of the Host's own router from inside the Host.** The same routes, checks and answers as at the door,
+and no socket of its own: nothing about such a request says "this machine", so the administrator's token and
+the token of an agent's tools, which are taken from this machine only, are never taken from the relay. A
+phone presents the token of its pairing. An answer goes up as it comes, so a stream of events flows; a
+request the relay gives up is given up here. The door holds the same line for whatever a proxy on this
+machine hands on (`x-forwarded-*`, `tailscale-*`, `cf-*`, `forwarded`, `x-real-ip`, a page from elsewhere):
+the socket is this machine's and the request is not. A token in an address is taken from this machine only.
+Twenty failures a minute to say who one is, by a token or by a pairing code, are answered as failures; the
+next is told to wait (429 with `Retry-After`), each asker for itself, and who asks rightly never waits. A
+device whose pairing is revoked loses the streams of events it listens to at that moment.
+
+The Host is told of its relay by a file it is given by name (`--relay-config`): a config of the Python Host's
+kind, `[network] relay_enabled` in it and `relay.json` (mode 600) beside it. Both Hosts read the two files
+the same way, so the Host that takes the other's place keeps its name at the relay and the phones keep their
+pairing. Told of no file it dials nobody, and the file its keys of speech are read from is not that file
+(hard rule 9; `tools/install-host` refuses the Python Host's file while that Host runs under the name in
+it). The connector dials by itself, again 0.3 s after a session that was up, 1 to 30 s apart while the relay
+cannot be reached, and 5 s after another connector took its name; each session and each loss is one line in
+the journal with the Python connector's words and fields, and never the address that was dialled. The apps
+read `GET /network/relay`; `clarp-host network relay status` shows the same; `clarp-host pair --relay` and
+`POST /pairing/issue` with `relay` give the link whose address is the relay's for this Host. Tested against
+a stand-in for the relay on the loopback (`CLARP_RELAY_DIAL`, taken for an address of this machine only): a
+real Host process dials it, a phone is paired and served through it, the administrator's token is refused
+there, a stream of events flows and ends at a revocation, and the Host dials again after a loss.
+Not built with it: no route of this Host is a WebSocket yet, so a phone that asks for one through the relay
+is told what the Python connector tells it of a Host that could not open one; each such route is built
+against one port that a socket at the door and the relay's tunnel both carry. Not done yet: a run through
+the relay itself, which needs a name of the battle test's own. Found on the way and reported: the Python
+connector dropped the apps' own headers (reference defect R25; fixed there within the hour, PR 383).
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can

@@ -675,6 +675,21 @@
   {
    "data": {
     "agent_id": "<id:5>",
+    "client_msg_id": "one",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -716,21 +731,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "one",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
