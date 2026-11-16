@@ -980,6 +980,13 @@ SCENARIOS.append({
         get('/controller-actions', 'what a button of a controller can run'),
         get('/controller-actions/audit', 'what was defined and run'),
         get('/controller-actions/audit?limit=many', 'an audit of no number of rows'),
+        # The faces agents are shown with: the pictures a Host ships. The snapshot above says
+        # where each agent's is; here one is fetched as anybody may fetch it.
+        get('/static/avatars/rachel.png', 'the picture of a name'),
+        {**get('/static/avatars/rachel.png', 'a part of the picture'), 'headers': {'Range': 'bytes=0-7'}},
+        {**get('/static/avatars/rachel.png', 'the picture, for one who has it'), 'headers': {'If-None-Match': '*'}},
+        get('/static/avatars/default-claude.png', 'the picture of a kind of tool'),
+        get('/static/avatars/nobody-of-the-kind.png', 'a picture that is not there'),
         # What a user attaches: kept once under the id the app gave it, and answered with where.
         attached('synthetic attachment one', 'the user attaches a file'),
         attached('synthetic attachment one', 'the same file again'),
