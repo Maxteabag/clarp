@@ -252,8 +252,16 @@ pub fn router(app: App) -> Router {
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::faces::routes())
+        // What is no route of this Host, by its path or by its method, is answered as the
+        // Python Host answers it: to whoever may ask at all.
+        .fallback(no_route)
+        .method_not_allowed_fallback(no_route)
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
+}
+
+async fn no_route() -> ApiError {
+    ApiError::plain(StatusCode::NOT_FOUND, "not found")
 }
 
 // ---- who may ask ----------------------------------------------------------------------------
