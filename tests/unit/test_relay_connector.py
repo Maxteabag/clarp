@@ -6,6 +6,8 @@ import struct
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
 from websockets.frames import Close
 
+import pytest
+
 from lib import relay_connector
 from lib.relay_connector import Connector, close_details, forward_request_headers, frame, reconnect_delay
 
@@ -38,6 +40,33 @@ def test_no_other_clarp_claim_comes_in_through_the_relay():
     assert not any(k.lower().startswith(('tailscale-', 'cf-', 'x-forwarded-')) for k in headers)
     # The list is these three and no other.
     assert relay_connector.APP_HEADERS == {'x-clarp-client', 'x-clarp-call-id', 'x-clarp-interaction-id'}
+
+
+@pytest.mark.parametrize("name", [
+    "x y", " X-Clarp-Turn", "\tX-Clarp-Turn", "X-Clarp-Turn ", "X-A: b\r\nX-Clarp-Turn", "X-A\nX-Clarp-Transport",
+    "X-Clärp-Turn", "x-clarp-client:", "", "X-A\x00", "X-(A)", "X-A,B"])
+def test_a_name_that_is_not_an_http_header_name_refuses_the_request(name):
+    with pytest.raises(relay_connector.UnforwardableHeader):
+        forward_request_headers({'Authorization': 'Bearer device', name: '1'}, '127.0.0.1:7682', 0)
+
+
+@pytest.mark.parametrize("value", ["a\r\nX-Clarp-Turn: t", "a\nb", "a\rb", "a\x00b", "a\x7fb", "\x1b[0m", 5, None, ["a"]])
+def test_a_value_with_a_control_character_or_that_is_no_text_refuses_the_request(value):
+    with pytest.raises(relay_connector.UnforwardableHeader):
+        forward_request_headers({'Authorization': 'Bearer device', 'X-Thing': value}, '127.0.0.1:7682', 0)
+
+
+def test_ordinary_names_and_values_still_pass_and_the_mark_is_written_first():
+    phone = {'Authorization': 'Bearer device', 'User-Agent': 'Clarp/141 (iPhone; iOS 19.1)', 'Accept': '*/*',
+             'Accept-Language': 'nb-NO,nb;q=0.9', 'Content-Type': 'application/json; charset=utf-8',
+             'X-Custom_Name.1': 'a\tb', 'If-None-Match': 'W/"abc"', 'Cookie': 'a=b; c=d',
+             'x-forwarded-for': '192.0.2.10'}
+    headers = forward_request_headers(phone, '127.0.0.1:7682', 4)
+    assert list(headers)[0] == 'X-Clarp-Transport' and headers['X-Clarp-Transport'] == 'relay'
+    for name in ('Authorization', 'User-Agent', 'Accept', 'Accept-Language', 'Content-Type', 'X-Custom_Name.1',
+                 'If-None-Match', 'Cookie'):
+        assert headers[name] == phone[name]
+    assert headers['X-Forwarded-For'] == '192.0.2.10' and headers['Content-Length'] == '4'
 
 
 def test_relay_asks_for_gzip_only_when_the_relay_passes_encoded_bodies_through():
