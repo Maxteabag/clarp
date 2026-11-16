@@ -17,6 +17,29 @@ def test_relay_always_marks_both_authenticated_and_anonymous_requests_remote():
         assert headers['Accept-Encoding'] == 'identity'
 
 
+def test_an_app_through_the_relay_still_says_who_it_is_and_which_call_a_clip_is_in():
+    phone = {'Authorization': 'Bearer device', 'User-Agent': 'Clarp/141',
+             'X-Clarp-Client': 'ios 141 contract 64', 'x-clarp-call-id': 'call-1',
+             'X-Clarp-Interaction-ID': '0f3a-77'}
+    headers = forward_request_headers(phone, '127.0.0.1:7682', 0)
+    assert headers['X-Clarp-Client'] == 'ios 141 contract 64'
+    assert headers['x-clarp-call-id'] == 'call-1'
+    assert headers['X-Clarp-Interaction-ID'] == '0f3a-77'
+    assert headers['X-Clarp-Transport'] == 'relay'
+
+
+def test_no_other_clarp_claim_comes_in_through_the_relay():
+    claimed = {'X-Clarp-Transport': 'local', 'x-clarp-transport': 'local', 'X-Clarp-Turn': 'turn-1',
+               'x-clarp-turn': 'turn-1', 'X-Clarp-Peer': 'laptopstudio', 'X-Clarp-Anything-New': '1',
+               'X-Clarp-Client-': 'x', 'X-Clarp-Call-Id-2': 'x', 'X-Forwarded-Proto': 'http',
+               'Tailscale-User-Login': 'someone', 'CF-Connecting-IP': '203.0.113.9'}
+    headers = forward_request_headers(claimed, '127.0.0.1:7682', 0)
+    assert {k: v for k, v in headers.items() if k.lower().startswith('x-clarp-')} == {'X-Clarp-Transport': 'relay'}
+    assert not any(k.lower().startswith(('tailscale-', 'cf-', 'x-forwarded-')) for k in headers)
+    # The list is these three and no other.
+    assert relay_connector.APP_HEADERS == {'x-clarp-client', 'x-clarp-call-id', 'x-clarp-interaction-id'}
+
+
 def test_relay_asks_for_gzip_only_when_the_relay_passes_encoded_bodies_through():
     phone = {'Accept-Encoding': 'gzip, deflate, br'}
     # A Worker that re-encodes per Content-Encoding would double-gzip.
