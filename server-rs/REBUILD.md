@@ -480,7 +480,10 @@ time and the model's library is not this Host's code; a worker that says why it 
 is started again by the next clip, and none is left behind. The worker is this Host's own program
 (`tools/whisper-worker.py`); what runs it is a Python that has the library, which on the owner's machines is
 the Python Host's own, used where it is with the model's files that machine has already (`tools/install-host`
-finds both; measured on elitebook: faster-whisper 1.2.1, the model `small.en`). **A key is read where the
+finds both; measured on elitebook: faster-whisper 1.2.1, the model `small.en`). That Python lives in a
+directory the Python Host makes anew when it is updated, so the installer is run again after such an update,
+as it is after that Host changed its tools; until then the engine says that its worker could not be started,
+and a clip is refused with those words. **A key is read where the
 owner keeps it**: the key of an engine over the network is looked up in the Python Host's own config each
 time a clip is to be heard (`--speech-keys`), so a key that is changed there is the key used next, and no key
 is copied into this Host or kept by it. The apps are told which engines there are and which one hears a clip
