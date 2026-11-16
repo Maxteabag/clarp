@@ -9,6 +9,7 @@ pub mod activity;
 pub mod addressed;
 pub mod agent;
 pub mod artifacts;
+pub mod calls;
 pub mod conversation;
 pub mod devices;
 pub mod difflib;
