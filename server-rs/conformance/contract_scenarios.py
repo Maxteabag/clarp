@@ -1044,6 +1044,10 @@ SCENARIOS.append({
         spoken('the same clip, not said hands-free', **{**UTTERANCE, 'X-Hands-Free': '0'}),
         spoken('a clip nobody named'),
         spoken('a clip under another name', **{**UTTERANCE, 'X-Transcription-ID': 'utt-two'}),
+        # The app has sent what was said and will not ask for the answer again.
+        {'op': 'delete', 'path': '/transcription-results/utt-one', 'name': 'the answer is no longer wanted'},
+        spoken('the same name for what is said next', clip='synthetic-audio-bytes-two', **UTTERANCE),
+        {'op': 'delete', 'path': '/transcription-results/has%20space', 'name': 'forget under a name that is none'},
         spoken('a name that is none', **{'X-Transcription-ID': 'has space'}),
         spoken('an engine nobody installed', **{'X-Transcription-Model': 'nothing-of-the-kind'}),
         spoken('the engine of the Host by its plain name', **{'X-Transcription-Model': 'server-default'}),
