@@ -12,6 +12,11 @@ def seed(count):
     db.conn().executemany("""INSERT INTO messages
         (message_id,agent_id,backend_session_id,seq,role,text,revision,updated_at)
         VALUES (?,?,?,1,'user','synthetic',1,1000)""", [(a,a,a) for a in ids])
+    # As on a real database: the writer of a row raised its conversation's
+    # head to the row's revision, and the message clock has given that number.
+    db.conn().executemany("INSERT INTO conversation_heads (agent_id,backend_session_id,revision) VALUES (?,?,1)",
+                          [(a,a) for a in ids])
+    db.conn().execute("UPDATE message_clock SET revision = MAX(revision, 1)")
     return ids
 
 
