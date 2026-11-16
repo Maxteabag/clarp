@@ -1223,11 +1223,15 @@ PICTURE, ANOTHER = 'YSBtYWRlLXVwIHBpY3R1cmU=', 'YW5vdGhlciBwaWN0dXJl'
 # Nothing makes a picture for a persona in these rooms: on the Python Host that is asked for.
 UNDRAWN = {'generate_avatar': False}
 
+# An agent made as a persona in these rooms: nothing of it is said that its persona can say.
+MAKE_AS = {'backend': 'claude', 'cwd': '{workspace}', 'synthesize_audio': False}
+
 SCENARIOS.append({
     'id': 'personas',
     'what': 'the owner makes a persona, changes it and removes it; a persona is given a voice nobody has when its '
             'maker names none; it has a picture of its own; of a persona that is built in only the look changes; '
-            'and what is refused',
+            'an agent made as a persona takes on what the persona has, and keeps it; and what is refused',
+    'sessions': (AGENT, 'pictured', 'voiced'),
     'steps': [
         {**post(PERSONAS, {'name': '  Scout  ', 'avatar_symbol': 'star', **UNDRAWN,
                            'personality': 'Personality: synthetic and curious.'}, 'a persona is made'),
@@ -1268,7 +1272,25 @@ SCENARIOS.append({
              'a built-in persona is given a picture'),
         get('/persona-avatars/builtin-rachel', 'the picture of a built-in persona'),
         get('/persona-avatars/builtin-mike', 'the picture of a built-in persona that has a symbol'),
-        # The owner removes one of his own, and nothing else.
+        # An agent made as a persona takes on what the persona has: its voice, its way of
+        # speaking, its symbol, its picture. What the request says of the agent comes first.
+        {**post('/agents', {**MAKE_AS, 'name': 'Pictured', 'session': 'pictured'},
+                'an agent made as a persona of the owner'), 'save': {'pictured_agent': 'agent.agent_id'}},
+        get('/avatars/{pictured_agent}', 'the picture an agent has from its persona'),
+        get('/avatars/pictured', 'the same, by the name of its session'),
+        {**get('/avatars/pictured', 'a part of it'), 'headers': {'Range': 'bytes=-7'}},
+        get('/avatars/nobody-of-the-kind', 'the picture of an agent that is not there'),
+        get(f'/avatars/{AGENT}', 'the picture of an agent that has none of its own'),
+        *who('synthetic told as a persona', 'whopictured', 'pictured'),
+        post('/agents', {**MAKE_AS, 'name': 'Voiced', 'session': 'voiced', 'voice_id': '{}', 'avatar_symbol': 'leaf',
+                         'personality': '  Personality: synthetic and its own.  ', 'avatar_base64': PICTURE},
+             'an agent made as a persona, with a voice, a symbol, a way of speaking and a picture of its own'),
+        get('/avatars/voiced', 'the picture an agent was given'),
+        *who('synthetic told its own way', 'whovoiced', 'voiced'),
+        # The owner removes one of his own, and nothing else. An agent that was made as it stays
+        # who it is.
+        {'op': 'delete', 'path': '/personas/Pictured', 'name': 'the persona an agent was made as is removed'},
+        get('/avatars/pictured', 'the picture of the agent afterwards'),
         {'op': 'delete', 'path': '/personas/Scout%20Two', 'name': 'a persona is removed'},
         {'op': 'delete', 'path': '/personas/Scout%20Two', 'name': 'a persona that was removed'},
         {'op': 'delete', 'path': '/personas/Mike', 'name': 'a built-in persona is not removed'},
