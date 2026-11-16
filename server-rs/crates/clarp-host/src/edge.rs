@@ -329,6 +329,10 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     if path.starts_with("/paired-devices") || path.starts_with("/pairing/issue") {
         return true;
     }
+    // What is on this machine's disk, by a path the caller chooses.
+    if matches!(path, "/dirs" | "/past-sessions") {
+        return true;
+    }
     if method == Method::GET || method == Method::HEAD {
         return false;
     }
@@ -1812,6 +1816,8 @@ mod tests {
             (Method::GET, "/paired-devices", true),
             (Method::POST, "/paired-devices/revoke", true),
             (Method::POST, "/pairing/issue", true),
+            (Method::GET, "/dirs", true),
+            (Method::GET, "/past-sessions", true),
         ] {
             assert_eq!(
                 out_of_scope(&limited, &method, path),

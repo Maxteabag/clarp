@@ -109,6 +109,64 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
+/// A path as a person types it on a phone, as a path on this machine: `~` is the home of
+/// whoever runs this Host, nothing is that home too, and a path under `/home` that is not
+/// there is tried under that home (`/home/projects/site` for `~/projects/site`: the name of
+/// the account is what a phone's user leaves out). Written without what does not count: a
+/// slash at its end, two slashes in a row, a part that is only a dot.
+pub fn typed_path(asked: &str, home: &Path) -> PathBuf {
+    let asked = asked.trim();
+    let named = match asked.strip_prefix('~') {
+        _ if asked.is_empty() => home.to_path_buf(),
+        Some("") => home.to_path_buf(),
+        Some(under) if under.starts_with('/') => home.join(under.trim_start_matches('/')),
+        _ => PathBuf::from(asked),
+    };
+    let named: PathBuf = named.components().collect();
+    if named.exists() || !named.is_absolute() {
+        return named;
+    }
+    match named.strip_prefix("/home") {
+        Ok(under) if home.join(under).exists() => home.join(under),
+        _ => named,
+    }
+}
+
+/// The directories a path that is being typed can go on with, twenty at most: for a path
+/// that ends in a slash the directories in it, for any other the directories beside it
+/// whose names begin as its last part does, whatever the case of the letters. What begins
+/// with a dot is left out. Answers where it looked, and what it found there, by name.
+pub fn directories(asked: &str, home: &Path) -> (String, Vec<String>) {
+    let typed = typed_path(asked, home);
+    let inside = asked.trim().ends_with('/') || typed == Path::new("/");
+    let (base, begins) = if inside {
+        (typed, String::new())
+    } else {
+        let last = typed
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase());
+        let beside = typed
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty());
+        (
+            beside.map_or_else(|| PathBuf::from("/"), Path::to_path_buf),
+            last.unwrap_or_default(),
+        )
+    };
+    let mut names: Vec<String> = std::fs::read_dir(&base)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| !name.starts_with('.') && name.to_lowercase().starts_with(&begins))
+        .collect();
+    names.sort();
+    let found = names.iter().map(|name| base.join(name));
+    let found = found.filter(|path| path.is_dir()).take(20);
+    let found = found.map(|path| path.display().to_string()).collect();
+    (base.display().to_string(), found)
+}
+
 /// The directory an agent works in, by what was asked for it: `~` is the home of whoever
 /// runs this Host, nothing is the Host's own directory for agents, and so is a directory
 /// that is not there. Nothing is refused, as on the Python Host: an app sends `~` when its
@@ -332,6 +390,78 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Config, String> {
         Config::from_args(args.iter().map(|arg| (*arg).to_string()))
+    }
+
+    #[test]
+    fn a_path_that_is_being_typed_is_answered_with_the_directories_it_can_go_on_with() {
+        let root = std::env::temp_dir().join(format!("clarp-dirs-{}", std::process::id()));
+        let home = root.join("home");
+        for name in [
+            "projects/site",
+            "projects/shop",
+            "Pictures",
+            ".hidden",
+            "plans",
+        ] {
+            std::fs::create_dir_all(home.join(name)).unwrap();
+        }
+        std::fs::write(home.join("projects/notes.txt"), b"x").unwrap();
+        std::fs::write(home.join("paper"), b"x").unwrap();
+        let at = |path: &str| match path {
+            "" => root.display().to_string(),
+            path => root.join(path).display().to_string(),
+        };
+        let asked = |asked: &str| directories(asked, &home);
+        // What the Python Host answers (run on the same tree with its own function).
+        assert_eq!(asked(""), (at(""), vec![at("home")]));
+        assert_eq!(asked("~"), (at(""), vec![at("home")]));
+        let with_p = vec![at("home/Pictures"), at("home/plans"), at("home/projects")];
+        assert_eq!(asked("~/p"), (at("home"), with_p));
+        assert_eq!(asked("~/projects"), (at("home"), vec![at("home/projects")]));
+        let in_projects = vec![at("home/projects/shop"), at("home/projects/site")];
+        assert_eq!(
+            asked(" ~/projects/s "),
+            (at("home/projects"), in_projects.clone())
+        );
+        assert_eq!(
+            asked("~/nothing/x"),
+            (at("home/nothing"), Vec::<String>::new())
+        );
+        assert_eq!(asked("/").0, "/");
+        assert!(asked("/").1.contains(&"/usr".to_string()));
+        // A path that ends in a slash asks what is in the directory. (The Python Host answers
+        // it with the directory itself: reference defect R22.)
+        assert_eq!(
+            asked("~/projects/"),
+            (at("home/projects"), in_projects.clone())
+        );
+        assert_eq!(
+            asked(&format!("{}/", at("home/projects"))),
+            (at("home/projects"), in_projects)
+        );
+        let in_home = vec![at("home/Pictures"), at("home/plans"), at("home/projects")];
+        assert_eq!(asked("~/"), (at("home"), in_home));
+        // The name of the account is what a phone's user leaves out: tried under the home.
+        assert_eq!(
+            typed_path("/home/projects/site", &home),
+            home.join("projects/site")
+        );
+        assert_eq!(
+            typed_path("/home/nothing/there", &home),
+            PathBuf::from("/home/nothing/there")
+        );
+        assert_eq!(
+            typed_path("relative/path/", &home),
+            PathBuf::from("relative/path")
+        );
+        // No more than twenty.
+        for count in 0..25 {
+            std::fs::create_dir_all(home.join(format!("many/d{count:02}"))).unwrap();
+        }
+        let many = asked("~/many/");
+        assert_eq!(many.1.len(), 20);
+        assert_eq!(many.1.first(), Some(&at("home/many/d00")));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
