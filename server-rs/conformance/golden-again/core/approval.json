@@ -548,7 +548,7 @@
        "turn_started_ms": null
       },
       "mcp_servers": [],
-      "model": "",
+      "model": "replay-fake",
       "muted": false,
       "parent_agent_id": null,
       "persona": "Claire",
