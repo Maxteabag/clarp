@@ -164,10 +164,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 16:10 (16 Nov) | the Host updated by the installer, `47ff6794` to `341125e3`: the build with the personas the owner makes, agents made as them, the files where an agent works and the screens of what this Host has not | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 17:19 (16 Nov) | the Host updated by the installer, `341125e3` to `0917e7a4`: the build with the app's remaining screens, an agent's face in a push, a spoken message that finds its agent by its name, and a phone's place | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 18:01 (16 Nov) | the Host updated by the installer, `0917e7a4` to `afbf6959`: the build with the herald | 3 | every turn in its command (`sleep 40`) | held: the new build answered in the same millisecond, with all three |
+| 19:38 (16 Nov) | the Host updated by the installer, `afbf6959` to `a9c9f41e`: the build with calls. The first exercise whose agents are Codex agents | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Ninety-two turns in twenty-six
-exercises, none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. Ninety-five turns in twenty-seven
+exercises, none interrupted, lost or run twice: eighty-nine of Claude Code in twenty-six, and three of Codex
+in the one of 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -420,6 +422,21 @@ note is the model's, and the proof that the note is handed over is the test with
 what it is handed. And the build held the note back from an agent its user had muted, which is a mistake of
 this Host's (on the Python Host only a janitor's run is exempt): put right in the build after this one.
 
+## A call
+
+On 16 Nov 2026 at 19:38, on the build of `a9c9f41e`, with real Codex turns, by a check that makes two
+agents of its own and removes them. The Host said that it has calls. A call was started for a phone with
+both agents by their names, one as it is written and one in small letters: the first had the floor, the
+second was asked in, the apps were told, and the first agent found a quiet word about it in its
+conversation. A message of the call for the second agent went to it and was answered ("pong"); it was in
+the call from then on and had the floor. It was put on hold and the floor went back. A message of the call
+for the agent on hold went to the one on the floor, and the answer of that agent's real turn showed what its
+tool had been told of the call: "Corvin is on hold; he last said "pong."" The agents' own tool, called as an
+agent calls it, took the second off hold, and printed the Host's refusal of a name nobody has with exit 1.
+The call ended, and a message of the call that was over was refused as one (409, `call ended`, with the
+call's id). The apps were told of every change and of nothing else: start, route, hold, resume, end; a
+message that falls to the agent that already has the floor changes nothing and tells nothing.
+
 ## The soak so far
 
 Rounds 1 to 13 (15 Nov, 17:15 to 20:01): twelve completed and answered with their word; none lost, none
@@ -462,6 +479,11 @@ messages: no message twice, no turn ended twice. The build of `0917e7a4` runs fr
 Rounds 98 to 100 (to 17:55 on 16 Nov) completed, on the build of `0917e7a4`. In all, 100 rounds over 24.7
 hours, a day and a night, on twenty builds: 99 completed and answered with their word, the one of 19:31 as
 told above; none lost, none doubled. The build of `afbf6959` runs from 18:01.
+
+Round 101 (18:09) completed, the last on the Claude agent. From round 102 (18:23) the soak writes to a Codex
+agent of its own, as told above. Rounds 102 to 107 (to 19:38 on 16 Nov) completed, on the build of
+`afbf6959`. In all, 107 rounds over 26.4 hours on twenty builds: 106 completed and answered with their word,
+the one of 19:31 on the 15th as told above; none lost, none doubled. The build of `a9c9f41e` runs from 19:38.
 
 ## What a round does not prove
 

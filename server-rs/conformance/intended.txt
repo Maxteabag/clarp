@@ -158,3 +158,19 @@ f357d30076fb  live-items: the answer's live item names the row the conversation 
 a807b17a302e  live-items: the notification names the row of the answer
 b35c53b1f0b2  live-items: what was said before the first tool names the row the conversation has
 f4fe4a319b70  live-items: the same, where the item is first sent
+
+# The reference speaks in its own test harness though speech is off: the harness gives it a
+# stand-in engine (`FakeTTSEngine`, tests/replay/host.py) that writes a clip for whatever it is
+# asked, whatever `[tts] provider` says. So the opening line of a ring is "voiced" there for an
+# agent that has the word for no voice (`{}`: every agent made through `POST /agents`), and not
+# for one written into its table without one. Outside its harness the reference voices nothing
+# with speech off (`TTSEngine.synthesize`: "server audio is disabled"), as this Host does. The
+# ring of the scenario's second agent: as it is placed, read, declined and read again, and its
+# two events.
+319d7d85aff2  rings: the second agent's ring has no clip of its opening line, as it is placed
+9d85da0cc7b2  rings: the same ring as it is declined
+39ef785409c1  rings: the same, declined already
+0b86bef7cccb  rings: the same, in the refusal of an answer after it was declined
+4f6c44ebe464  rings: the same, taken back after it was declined
+024c2d132b22  rings: the event that it rings
+7932b1936451  rings: the event that it was declined
