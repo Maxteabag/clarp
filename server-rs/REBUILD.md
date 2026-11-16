@@ -860,14 +860,19 @@ Python Host says them before anything was read, one janitor as one it has not, a
 tools as a Host answers where explaining is off. What a fresh Python Host answers there was asked of it
 first, by a run of the one scenario (`-f scenarios=`, five minutes instead of twenty-two): it corrected one
 answer that reading its source had got wrong (a janitor that is not there is `Agent not found`). Counted
-the other way, by what was done and not by what was read (requests that change something and were taken,
-86 routes in the three days): after this, the Host does everything that was done there but two things. One
-was a janitor's own settings (twice). The other, choosing the picture an agent wears from what it published
-(`POST /agent-portraits`, six times), is built next: an agent keeps up to three portraits, a picture it
-published is kept as one, and one of them is made the picture it wears, by the rules of the Python Host's
-`agent_portraits.py` (`kept_portraits.rs` in the kernel; the portraits are kept with the agent's record,
-and every portrait's bytes under the name an agent's picture is kept by). Still asked and not there: a
-fork of an agent.
+the other way, by what was done and not by what was read (requests that change something and were taken):
+three things were done there that this Host did not do. Choosing the picture an agent wears from what it
+published (`POST /agent-portraits`, six times) was built the same night: an agent keeps up to three
+portraits, a picture it published is kept as one, and one of them is made the picture it wears, by the
+rules of the Python Host's `agent_portraits.py` (`kept_portraits.rs` in the kernel; the portraits are kept
+with the agent's record, and every portrait's bytes under the name an agent's picture is kept by). The two
+that are left: a janitor's own settings (four requests) and a fork of an agent into helpers that start from
+its conversation (`POST /agents/<session>/fork`, three times). The first count of that night named only the
+janitor's settings: it listed the routes by how often they were used, and a path with an id in it that the
+count did not recognise as one filled the list before the forks came. The count is a tool now
+(`server-rs/tools/count-load`), which names an id of any kind as one thing: on 17 Nov, three days of
+elitebook's log were 167,364 requests over 139 routes, all but 41 of them to a route this Host has, and of
+what was done there seven requests have no route here, the four and the three above.
 
 Reading for the queue's routes found what no run had: **the phone's ids for its messages begin with `u-`**,
 the mark a message's id has in a conversation (`"u-" + id` in the phone app's source, and so in the log:
