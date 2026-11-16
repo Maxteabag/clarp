@@ -10383,6 +10383,42 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     assert_eq!(read("/oracle/delegations"), json!({ "delegations": [] }));
     assert_eq!(read("/oracle/calls/status"), json!({ "delegations": [] }));
 
+    // The tools' logins, read off the tools' own files, and how much of their accounts is
+    // used, which this Host does not read.
+    for path in ["/backend-auth", "/backend-auth?harnesses=all"] {
+        let logins = read(path);
+        let tools: Vec<&str> = logins["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(tools, ["claude", "codex"], "{path}");
+        assert_eq!(logins["tasks"]["claude"]["status"], "idle");
+        let every = path.ends_with("all");
+        assert_eq!(
+            logins["backends"][0].get("can_login").is_some(),
+            every,
+            "{path}"
+        );
+    }
+    let usage = read("/backend-usage?refresh=1");
+    assert_eq!(usage["schema_version"], 1);
+    assert_eq!(usage["computer_id"], read("/server-info")["server_id"]);
+    assert_eq!(usage["limit_events"], json!([]));
+    let rows = usage["backends"].as_array().unwrap().iter();
+    for (row, tool) in rows.zip(["claude", "codex"]) {
+        assert_eq!(
+            (&row["backend"], &row["freshness"]),
+            (&json!(tool), &json!("unknown"))
+        );
+        assert!(
+            row["used_percentage"].is_null() && row["windows"] == json!({}),
+            "{row}"
+        );
+        assert_eq!(usage["providers"][tool]["source"]["kind"], "unavailable");
+    }
+
     // What cannot be read as asked, in the Python Host's words.
     for (path, status, why) in [
         (
@@ -10441,6 +10477,8 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/oracle/contact", json!({ "session": echo })),
         ("/oracle/handoff", json!({ "session": echo })),
         ("/oracle/v2/calls/control", json!({ "action": "end" })),
+        ("/backend-auth/login", json!({ "backend": "claude" })),
+        ("/backend-auth/logout", json!({ "backend": "claude" })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
         let why = said["error"].as_str().unwrap_or("");
