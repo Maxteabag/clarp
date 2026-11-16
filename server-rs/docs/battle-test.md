@@ -140,9 +140,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 21:44 | the Host updated by the installer, `d0788034` to `6b06bb21` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 22:15 | the Host updated by the installer, `6b06bb21` to `bcb9a916` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 23:59 | the Host updated by the installer, `bcb9a916` to `d3b9193c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 2 ms, with all three |
+| 00:32 (16 Nov) | the Host updated by the installer, `d3b9193c` to `4eebf671` | 3 | every turn in its command (`sleep 40`) | held: the new build had all three |
+| 06:28 (16 Nov) | the Host updated by the installer, `4eebf671` to `14bb3f1c` | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 07:08 (16 Nov) | the Host updated by the installer, `14bb3f1c` to `3175ffcc`: the build that shows a message of the agent as one row with its tools' cards, taken over in the middle of three turns the build before had begun | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 66 ms, with all three. Each of the three turns shows its command twice: once as the build before wrote it (a row by itself, never closed: `recorded`), once as the new build wrote it when it took the turn over (on the row of its message, `ok`). A turn that begins on the new build shows it once |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. Fifty-six turns in fourteen exercises,
+completed, answered with its word, and its command ran exactly once. Sixty-five turns in seventeen exercises,
 none interrupted, lost or run twice. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 

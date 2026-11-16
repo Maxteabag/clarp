@@ -285,6 +285,7 @@ impl CodexInterpreter {
                         turn: self.turn,
                         text: text.to_string(),
                         trace_id: None,
+                        ..Reply::default()
                     }));
                     self.moved(Activity::Thinking, out);
                 } else {
@@ -322,6 +323,7 @@ impl CodexInterpreter {
                         output: None,
                         started_at_ms: t,
                         ended_at_ms: None,
+                        ..ToolCall::default()
                     });
                 if call.status != ToolStatus::Running {
                     return; // told twice
@@ -351,6 +353,7 @@ impl CodexInterpreter {
                     output: None,
                     started_at_ms: t,
                     ended_at_ms: None,
+                    ..ToolCall::default()
                 };
                 self.tools.insert(id.to_string(), call.clone());
                 out.push(Signal::Tool(call));
@@ -359,20 +362,13 @@ impl CodexInterpreter {
         }
     }
 
-    fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, t: i64, out: &mut Vec<Signal>) {
+    fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, out: &mut Vec<Signal>) {
         if self.ended {
             return;
         }
         self.ended = true;
-        // A tool that was still running when the process went did not finish.
-        for call in self.tools.values_mut() {
-            if call.status == ToolStatus::Running {
-                call.status = ToolStatus::Error;
-                call.output = Some("The turn ended before this tool finished.".to_string());
-                call.ended_at_ms = Some(t);
-                out.push(Signal::Tool(call.clone()));
-            }
-        }
+        // A tool that still runs when the process goes is left as it is: what becomes of
+        // it follows from how the turn ended, which is the Host's to say.
         let outcome = if let Some(signal) = signal {
             RunOutcome::Interrupted {
                 reason: format!("codex was ended by signal {signal}"),
@@ -406,7 +402,7 @@ impl Interpreter for CodexInterpreter {
             Entry::Out(line) => self.on_line(line, record.t, out),
             Entry::Err(line) => self.stderr.push(line),
             Entry::Shim(ShimEvent::Exited { code, signal }) => {
-                self.on_exit(*code, *signal, record.t, out);
+                self.on_exit(*code, *signal, out);
             }
             Entry::Shim(_) | Entry::Hook { .. } => {}
         }
@@ -549,7 +545,8 @@ mod tests {
                     id: "r-m1-item_1".to_string(),
                     turn: 3,
                     text: "One file.".to_string(),
-                    trace_id: None
+                    trace_id: None,
+                    ..Reply::default()
                 }),
                 Signal::Moved(Activity::Thinking),
                 Signal::Usage {

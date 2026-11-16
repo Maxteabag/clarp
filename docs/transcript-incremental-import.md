@@ -335,7 +335,10 @@ A sixth is off unless switched on, and needs `carry_live_rows`:
   to the row's (`message_text._related`: one text begins with the other,
   markup stripped, neither empty). A tail's batch is the replies from the
   boundary on, so the two differ only when a reply before the boundary has
-  the trace and related words. With the switch on only that is refused.
+  the trace and related words. With the switch on only that is refused, and
+  the journal names it by a word of its own, `live_row_shows_old_reply`;
+  `live_row_of_old_reply` stays the refusal by the trace alone (no words
+  were kept for the row's turn), so the two can be counted apart.
 
   It matters when a running turn spans the boundary. A context compaction
   leaves a user record inside the turn; the next full import puts the
@@ -350,7 +353,9 @@ A sixth is off unless switched on, and needs `carry_live_rows`:
   the import compares what the transcript said. So the full import keeps
   them in the store carry it captures at the boundary (`reply_words`): for
   the three newest turns before the boundary, each reply's words as its
-  batch names them, and as stored when the two differ, up to 64 KB in all.
+  batch names them, and as stored when the two differ, up to 64 KB in all,
+  counted as the checkpoint stores them: JSON in ASCII, where a letter that
+  is not ASCII takes six bytes.
   A live row of a turn the carry did not keep (an older turn, one with more
   words than fit, a carry captured while the switch was off) is refused as
   before. A conversation with a turn the stream owns keeps the full import,
@@ -363,7 +368,8 @@ without `carry_live_rows` a streamed reply's live row), a new `/send` row
 with words said before (every heartbeat, once), and the Oracle rows. A refusal logs which rows stood in the
 way, as fixed words: `transcriptCarryInputsChanged what=row_live,turn_of_old_row`
 (`row_send`, `row_live`, `row_final`, `row_transcript`, `row_other`,
-`row_other_session`, `send_said_before`, `live_row_of_old_reply`, `turn_rows`,
+`row_other_session`, `send_said_before`, `live_row_of_old_reply`,
+`live_row_shows_old_reply`, `turn_rows`,
 `turn_settled_out_of_reach`,
 `turn_before_boundary`, `turn_of_old_row`, `latest_user_row`, `oracle_rows`). The rules apply to a
 frontier the process holds and to one taken from the store alike, so also
@@ -454,7 +460,10 @@ last one costs a read of the whole file. It is checked:
   row a tail had left wrong, and move the boundary up to the last turn. So
   every `audit_full_every`-th due audit of a conversation (8) is still the
   full import; the checkpoint counts the audits by digest since its last
-  full import, and a full import for any reason starts the count again.
+  full import, and a full import for any reason starts the count again. The
+  count is a key beside the parser's carry, not the store's: it moves at
+  every audit by digest, a changed value is written whole, and the store's
+  carry can hold 64 KB of words.
   Off by default;
 - at every tail when `digest_every_tail = true` in `[transcript_shadow]`,
   which is how every tail worked before.
@@ -540,6 +549,30 @@ ran (`no_safe_boundary_tail_differs`, then `full_no_frontier
 reason=bootstrap_refused` at every import). With
 `boundary_skips_dropped_records = true` a candidate is a record that, parsed
 alone, is a user turn. Off by default.
+
+A tail read its range (from the boundary to the end of the file) four
+times: to hash the part an earlier import read and compare it with the
+checkpoint's (`tail_rewritten`), to look for a record that reaches before
+the boundary, to parse it, and to hash all of it for the next checkpoint.
+The boundary moves only at a full import, so the range grows with every
+tail, up to `max_tail_bytes`. With `tail_hashes_while_parsing = true` the
+two hashes are taken from the parse: the reader the parser is handed hashes
+the bytes it passes on, and gives the digest of the earlier import's part on
+the way past its last byte. A tail then reads its range twice. The parse's
+digests are used only when the file did not change while it was parsed: the
+same inode, size, modification time and change time as when the reader
+opened it, and the size the import began with. Then what the parser was
+handed is the file, and a read would give the same digests; otherwise the
+range is read as before (what the change time does not see is said under
+`full_digest_while_parsing`, below, and holds here too).
+
+The earlier import's part is compared after the parse instead of before it.
+A rewrite of those bytes is the same full import, found one parse later; in
+a process's first tail, which reads every imported byte before it parses,
+that read finds it first and names it `imported_bytes`. One thing is found
+that was not: such a rewrite landing while the tail runs, in a way the other
+checks let pass, was missed until the audit, because the part had been read
+before it; now this tail is the full import. Off by default.
 
 `decide` returns a reason for a full import when there is no checkpoint, the
 parser version or backend differs, the inode or device changed (rotation or a

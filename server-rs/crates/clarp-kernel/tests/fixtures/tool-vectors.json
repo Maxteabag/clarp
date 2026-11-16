@@ -16029,5 +16029,7474 @@
     "file_path": ""
    }
   }
+ ],
+ "cards": [
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "old_string": "A line.",
+    "new_string": "Another line."
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "synthetic/notes.md",
+    "action": "editing file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "A line.",
+    "new": "Another line.",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "old_string": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+    "new_string": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word x",
+    "replace_all": true
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "synthetic/notes.md",
+    "action": "editing file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word …",
+    "new": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word …",
+    "replace_all": true
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": 7,
+    "old_string": null,
+    "new_string": [
+     "a"
+    ],
+    "replace_all": "yes"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "7",
+    "action": "editing file",
+    "file_path": 7,
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": true
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "MultiEdit",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "edits": [
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     },
+     {
+      "old_string": "a",
+      "new_string": "b"
+     }
+    ]
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "MultiEdit",
+    "summary": "synthetic/notes.md · 12 edits",
+    "action": "editing file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "edits": [
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     },
+     {
+      "old": "a",
+      "new": "b"
+     }
+    ],
+    "edit_count": 12
+   }
+  },
+  {
+   "name": "MultiEdit",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "edits": [
+     {
+      "old_string": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+      "new_string": "short"
+     },
+     {}
+    ]
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "MultiEdit",
+    "summary": "synthetic/notes.md · 2 edits",
+    "action": "editing file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "edits": [
+     {
+      "old": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word …",
+      "new": "short"
+     },
+     {
+      "old": "",
+      "new": ""
+     }
+    ],
+    "edit_count": 2
+   }
+  },
+  {
+   "name": "MultiEdit",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "edits": null
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "MultiEdit",
+    "summary": "synthetic/notes.md · 0 edits",
+    "action": "editing file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "edits": [],
+    "edit_count": 0
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "/synthetic/new.md",
+    "content": "# New\n\nA line.\n"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "synthetic/new.md",
+    "action": "writing file",
+    "file_path": "/synthetic/new.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": "# New\n\nA line.\n"
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "/synthetic/new.md",
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "synthetic/new.md",
+    "action": "writing file",
+    "file_path": "/synthetic/new.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word …"
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "content": 5
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/synthetic/notes.md"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "synthetic/notes.md",
+    "action": "reading file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "offset": 10,
+    "limit": 20
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "synthetic/notes.md",
+    "action": "reading file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": 10,
+    "limit": 20
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "offset": " 12 ",
+    "limit": "20"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "synthetic/notes.md",
+    "action": "reading file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": 12,
+    "limit": 20
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "offset": "[160, 175]",
+    "limit": true
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "synthetic/notes.md",
+    "action": "reading file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "offset": 1.5,
+    "limit": null
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "synthetic/notes.md",
+    "action": "reading file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/synthetic/notes.md",
+    "offset": -3,
+    "limit": "1_000"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "synthetic/notes.md",
+    "action": "reading file",
+    "file_path": "/synthetic/notes.md",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": -3,
+    "limit": 1000
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "echo synthetic",
+    "description": "Print a synthetic line"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Print a synthetic line",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "echo synthetic",
+    "description": "Print a synthetic line"
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "description": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "word word word word word word word word word word word word word word word word word word word word word word word word...",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…",
+    "description": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": [
+     "echo"
+    ],
+    "description": 5
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "5",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": 5
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": ""
+   }
+  },
+  {
+   "name": "Grep",
+   "input": {
+    "pattern": "synthetic",
+    "path": "/synthetic",
+    "output_mode": "files_with_matches"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Grep",
+    "summary": "synthetic in synthetic",
+    "action": "searching code",
+    "file_path": "/synthetic",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "pattern": "synthetic",
+    "path": "/synthetic",
+    "glob": null,
+    "output_mode": "files_with_matches"
+   }
+  },
+  {
+   "name": "Grep",
+   "input": {
+    "pattern": "synthetic",
+    "glob": "*.md"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Grep",
+    "summary": "synthetic in .",
+    "action": "searching code",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "pattern": "synthetic",
+    "path": null,
+    "glob": "*.md",
+    "output_mode": null
+   }
+  },
+  {
+   "name": "Glob",
+   "input": {
+    "pattern": "**/*.rs",
+    "path": 5
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Glob",
+    "summary": "**/*.rs in 5",
+    "action": "finding files",
+    "file_path": "5",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "pattern": "**/*.rs",
+    "path": 5,
+    "glob": null,
+    "output_mode": null
+   }
+  },
+  {
+   "name": "Glob",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Glob",
+    "summary": "files in .",
+    "action": "finding files",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "pattern": null,
+    "path": null,
+    "glob": null,
+    "output_mode": null
+   }
+  },
+  {
+   "name": "TodoWrite",
+   "input": {
+    "todos": [
+     {
+      "content": "Write it",
+      "status": "in_progress",
+      "activeForm": "Writing it"
+     },
+     {
+      "content": "Test it"
+     },
+     {}
+    ]
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "TodoWrite",
+    "summary": "Write it",
+    "action": "updating plan",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "todos": [
+     {
+      "content": "Write it",
+      "status": "in_progress"
+     },
+     {
+      "content": "Test it",
+      "status": ""
+     },
+     {
+      "content": "",
+      "status": ""
+     }
+    ]
+   }
+  },
+  {
+   "name": "TodoWrite",
+   "input": {
+    "todos": null
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "TodoWrite",
+    "summary": "0 items",
+    "action": "updating plan",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "todos": []
+   }
+  },
+  {
+   "name": "mcp__synthetic__lookup",
+   "input": {
+    "query": "synthetic",
+    "limit": 3,
+    "filters": {
+     "kind": "note"
+    }
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp__synthetic__lookup",
+    "summary": "synthetic",
+    "action": "mcp__synthetic__lookup",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "query": "synthetic",
+     "limit": "3"
+    }
+   }
+  },
+  {
+   "name": "mcp__synthetic__lookup",
+   "input": {
+    "flag": true,
+    "nothing": null,
+    "ratio": 1.5,
+    "list": [
+     1
+    ],
+    "long": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp__synthetic__lookup",
+    "summary": "True",
+    "action": "mcp__synthetic__lookup",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "flag": "True",
+     "nothing": "None",
+     "ratio": "1.5",
+     "long": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word …"
+    }
+   }
+  },
+  {
+   "name": "WebFetch",
+   "input": {
+    "url": "https://example.org/a",
+    "prompt": "What does it say?"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "WebFetch",
+    "summary": "https://example.org/a",
+    "action": "reading web page",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "url": "https://example.org/a",
+     "prompt": "What does it say?"
+    }
+   }
+  },
+  {
+   "name": "Agent",
+   "input": {
+    "description": "Look into it",
+    "prompt": "Look into the synthetic thing.",
+    "subagent_type": "general"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Agent",
+    "summary": "Look into it",
+    "action": "Agent",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "description": "Look into it",
+     "prompt": "Look into the synthetic thing.",
+     "subagent_type": "general"
+    }
+   }
+  },
+  {
+   "name": "UnknownTool",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "UnknownTool",
+    "summary": "Using UnknownTool",
+    "action": "UnknownTool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "UnknownTool",
+   "input": null,
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "UnknownTool",
+    "summary": "Using UnknownTool",
+    "action": "UnknownTool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "npm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "npm test",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "npm test",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cargo build --release"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cargo build --release",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cargo build --release",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "  make   test  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "make   test",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "  make   test  ",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "pytest -q tests/unit"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "pytest -q tests/unit",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "pytest -q tests/unit",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "python3 script.py --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "python3 script.py --flag",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "python3 script.py --flag",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc 'npm test'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc 'npm test'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc 'npm test'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "/bin/bash -lc 'cargo test'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "/bin/bash -lc 'cargo test'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "/bin/bash -lc 'cargo test'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "zsh -lc 'ls -la src'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "zsh -lc 'ls -la src'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "zsh -lc 'ls -la src'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "sh -lc 'cat README.md'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "sh -lc 'cat README.md'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "sh -lc 'cat README.md'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc 'echo '\"'\"'quoted'\"'\"' && ls'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc 'echo '\"'\"'quoted'\"'\"' && ls'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc 'echo '\"'\"'quoted'\"'\"' && ls'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -c \"npm test\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -c \"npm test\"",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -c \"npm test\"",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc npm"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc npm",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc npm",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg foo"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg foo",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg foo",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg -n \"needle in hay\" src/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg -n \"needle in hay\" src/",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg -n \"needle in hay\" src/",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg --files"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg --files",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg --files",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg --files crates/clarp-host"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg --files crates/clarp-host",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg --files crates/clarp-host",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg -l TODO ."
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg -l TODO .",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg -l TODO .",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "grep -rn pattern server/lib"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "grep -rn pattern server/lib",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "grep -rn pattern server/lib",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "grep pattern"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "grep pattern",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "grep pattern",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "grep"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "grep",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "grep",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "git grep -n turn_started_at"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "git grep -n turn_started_at",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "git grep -n turn_started_at",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "git ls-files"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "git ls-files",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "git ls-files",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "git ls-files server-rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "git ls-files server-rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "git ls-files server-rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "git status"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "git status",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "git status",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "git"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "git",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "git",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "git log --oneline -3"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "git log --oneline -3",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "git log --oneline -3",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ls",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ls",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls -la"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ls -la",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ls -la",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls -la /var/tmp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ls -la /var/tmp",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ls -la /var/tmp",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "find . -name \"*.rs\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "find . -name \"*.rs\"",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "find . -name \"*.rs\"",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "find"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "find",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "find",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "fd goals crates"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "fd goals crates",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "fd goals crates",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "fd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "fd",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "fd",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat README.md"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat README.md",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat README.md",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat a.txt b.txt a.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat a.txt b.txt a.txt",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat a.txt b.txt a.txt",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "sed -n 1,40p server/lib/artifacts.py"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "sed -n 1,40p server/lib/artifacts.py",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "sed -n 1,40p server/lib/artifacts.py",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "nl -ba src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "nl -ba src/main.rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "nl -ba src/main.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "head -20 Cargo.toml"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "head -20 Cargo.toml",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "head -20 Cargo.toml",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "tail -f /var/log/syslog"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "tail -f /var/log/syslog",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "tail -f /var/log/syslog",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "tail"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "tail",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "tail",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "head -c 100"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "head -c 100",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "head -c 100",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cd server-rs && rg wake crates"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cd server-rs && rg wake crates",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cd server-rs && rg wake crates",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "pwd && ls -la"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "pwd && ls -la",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "pwd && ls -la",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cd x; cat a.rs; cat b.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cd x; cat a.rs; cat b.rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cd x; cat a.rs; cat b.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat a.rs && cat b.rs && cat a.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat a.rs && cat b.rs && cat a.rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat a.rs && cat b.rs && cat a.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "true; pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "true; pwd",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "true; pwd",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "pwd",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "pwd",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat a.rs && npm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat a.rs && npm test",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat a.rs && npm test",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "npm test && cat a.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "npm test && cat a.rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "npm test && cat a.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cd /tmp && true && pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cd /tmp && true && pwd",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cd /tmp && true && pwd",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "echo \"unbalanced"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "echo \"unbalanced",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "echo \"unbalanced",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "echo 'unbalanced"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "echo 'unbalanced",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "echo 'unbalanced",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "echo trailing\\"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "echo trailing\\",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "echo trailing\\",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "echo a\\ b c"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "echo a\\ b c",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "echo a\\ b c",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "echo \"a \\\"b\\\" c\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "echo \"a \\\"b\\\" c\"",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "echo \"a \\\"b\\\" c\"",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat 'file with spaces.txt'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat 'file with spaces.txt'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat 'file with spaces.txt'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat \"quoted path/file.rs\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat \"quoted path/file.rs\"",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat \"quoted path/file.rs\"",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat ./relative"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat ./relative",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat ./relative",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat .hidden"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat .hidden",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat .hidden",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat noext"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat noext",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat noext",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg \"a b\" \"c d/e.f\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg \"a b\" \"c d/e.f\"",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg \"a b\" \"c d/e.f\"",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "grep -e x -e y file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "grep -e x -e y file.txt",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "grep -e x -e y file.txt",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls -la -- -odd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ls -la -- -odd",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ls -la -- -odd",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "find /a/b -type f"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "find /a/b -type f",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "find /a/b -type f",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "python3 - <<EOF\nprint(1)\nEOF"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "python3 - <<EOF\nprint(1)\nEOF",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "python3 - <<EOF\nprint(1)\nEOF",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "npm run build\nnpm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "npm run build\nnpm test",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "npm run build\nnpm test",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "\n\n  second line first\nthird"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "second line first\nthird",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "\n\n  second line first\nthird",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "npm test yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "npm test yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "npm test yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.r...",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "   "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "   ",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ünïcödé --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ünïcödé --flag",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ünïcödé --flag",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat ünï/cödé.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat ünï/cödé.txt",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat ünï/cödé.txt",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls\ttabbed"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ls\ttabbed",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ls\ttabbed",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg\tfoo\tsrc"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg\tfoo\tsrc",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg\tfoo\tsrc",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "/usr/bin/rg foo"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "/usr/bin/rg foo",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "/usr/bin/rg foo",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "./node_modules/.bin/jest"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "./node_modules/.bin/jest",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "./node_modules/.bin/jest",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "sudo rg foo"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "sudo rg foo",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "sudo rg foo",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "env X=1 npm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "env X=1 npm test",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "env X=1 npm test",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "FOO=bar cat x.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "FOO=bar cat x.txt",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "FOO=bar cat x.txt",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat x.txt | wc -l"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat x.txt | wc -l",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat x.txt | wc -l",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "rg foo | head"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "rg foo | head",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "rg foo | head",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls > out.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "ls > out.txt",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "ls > out.txt",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "cat a.rs;"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "cat a.rs;",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "cat a.rs;",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": ";cat a.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": ";cat a.rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": ";cat a.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "&& cat a.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "&& cat a.rs",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "&& cat a.rs",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc 'cd server-rs && rg wake crates'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc 'cd server-rs && rg wake crates'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc 'cd server-rs && rg wake crates'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc 'cat a.rs; cat b.rs'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc 'cat a.rs; cat b.rs'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc 'cat a.rs; cat b.rs'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc ''"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc ''",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc ''",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash  -lc  'npm test'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash  -lc  'npm test'",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash  -lc  'npm test'",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc 'npm test' extra"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc 'npm test' extra",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc 'npm test' extra",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "bash -lc \"rg foo src\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "bash -lc \"rg foo src\"",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "bash -lc \"rg foo src\"",
+    "description": ""
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "npm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "npm test",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "npm test"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "npm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "npm test",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "npm test"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "npm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "npm test",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "npm test",
+    "summary": "Using npm test",
+    "action": "npm test",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "python3 script.py --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "python3 script.py --flag",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "python3 script.py --flag"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "python3 script.py --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "python3 script.py --flag",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "python3 script.py --flag"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "python3 script.py --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "python3 script.py --flag",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "python3 script.py --flag",
+    "summary": "Using python3 script.py --flag",
+    "action": "python3 script.py --flag",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "sh -lc 'cat README.md'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "sh -lc 'cat README.md'",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "sh -lc 'cat README.md'"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "sh -lc 'cat README.md'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "sh -lc 'cat README.md'",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "sh -lc 'cat README.md'"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "sh -lc 'cat README.md'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "sh -lc 'cat README.md'",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "sh -lc 'cat README.md'",
+    "summary": "Using sh -lc 'cat README.md'",
+    "action": "sh -lc 'cat README.md'",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "bash -lc"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "bash -lc",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "bash -lc"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "bash -lc"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "bash -lc",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "bash -lc"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "bash -lc"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "bash -lc",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "bash -lc",
+    "summary": "Using bash -lc",
+    "action": "bash -lc",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "rg --files"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "rg --files",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "rg --files"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "rg --files"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "rg --files",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "rg --files"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "rg --files"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "rg --files",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "rg --files",
+    "summary": "Using rg --files",
+    "action": "rg --files",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "grep pattern"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "grep pattern",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "grep pattern"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "grep pattern"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "grep pattern",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "grep pattern"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "grep pattern"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "grep pattern",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "grep pattern",
+    "summary": "Using grep pattern",
+    "action": "grep pattern",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "git ls-files server-rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "git ls-files server-rs",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "git ls-files server-rs"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "git ls-files server-rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "git ls-files server-rs",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "git ls-files server-rs"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "git ls-files server-rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "git ls-files server-rs",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "git ls-files server-rs",
+    "summary": "Using git ls-files server-rs",
+    "action": "git ls-files server-rs",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "ls"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "ls",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "ls"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "ls"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "ls",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "ls"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "ls"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "ls",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "ls",
+    "summary": "Using ls",
+    "action": "ls",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "find"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "find",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "find"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "find"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "find",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "find"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "find"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "find",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "find",
+    "summary": "Using find",
+    "action": "find",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "cat"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "cat",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "cat"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "cat"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "cat",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "cat"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "cat"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "cat",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cat",
+    "summary": "Using cat",
+    "action": "cat",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "head -20 Cargo.toml"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "head -20 Cargo.toml",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "head -20 Cargo.toml"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "head -20 Cargo.toml"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "head -20 Cargo.toml",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "head -20 Cargo.toml"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "head -20 Cargo.toml"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "head -20 Cargo.toml",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "head -20 Cargo.toml",
+    "summary": "Using head -20 Cargo.toml",
+    "action": "head -20 Cargo.toml",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "cd server-rs && rg wake crates"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "cd server-rs && rg wake crates",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "cd server-rs && rg wake crates"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "cd server-rs && rg wake crates"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "cd server-rs && rg wake crates",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "cd server-rs && rg wake crates"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "cd server-rs && rg wake crates"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "cd server-rs && rg wake crates",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cd server-rs && rg wake crates",
+    "summary": "Using cd server-rs && rg wake crates",
+    "action": "cd server-rs && rg wake crates",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "true; pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "true; pwd",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "true; pwd"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "true; pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "true; pwd",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "true; pwd"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "true; pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "true; pwd",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "true; pwd",
+    "summary": "Using true; pwd",
+    "action": "true; pwd",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "cd /tmp && true && pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "cd /tmp && true && pwd",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "cd /tmp && true && pwd"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "cd /tmp && true && pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "cd /tmp && true && pwd",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "cd /tmp && true && pwd"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "cd /tmp && true && pwd"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "cd /tmp && true && pwd",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cd /tmp && true && pwd",
+    "summary": "Using cd /tmp && true && pwd",
+    "action": "cd /tmp && true && pwd",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "echo a\\ b c"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "echo a\\ b c",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "echo a\\ b c"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "echo a\\ b c"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "echo a\\ b c",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "echo a\\ b c"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "echo a\\ b c"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "echo a\\ b c",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "echo a\\ b c",
+    "summary": "Using echo a\\ b c",
+    "action": "echo a\\ b c",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "cat ./relative"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "cat ./relative",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "cat ./relative"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "cat ./relative"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "cat ./relative",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "cat ./relative"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "cat ./relative"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "cat ./relative",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cat ./relative",
+    "summary": "Using cat ./relative",
+    "action": "cat ./relative",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "grep -e x -e y file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "grep -e x -e y file.txt",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "grep -e x -e y file.txt"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "grep -e x -e y file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "grep -e x -e y file.txt",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "grep -e x -e y file.txt"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "grep -e x -e y file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "grep -e x -e y file.txt",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "grep -e x -e y file.txt",
+    "summary": "Using grep -e x -e y file.txt",
+    "action": "grep -e x -e y file.txt",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "npm run build\nnpm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "npm run build\nnpm test",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "npm run build\nnpm test"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "npm run build\nnpm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "npm run build\nnpm test",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "npm run build\nnpm test"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "npm run build\nnpm test"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "npm run build\nnpm test",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "npm run build\nnpm test",
+    "summary": "Using npm run build\nnpm test",
+    "action": "npm run build\nnpm test",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/...",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/...",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs",
+    "summary": "Using cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs",
+    "action": "cat z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/z/file.rs",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "ünïcödé --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "ünïcödé --flag",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "ünïcödé --flag"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "ünïcödé --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "ünïcödé --flag",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "ünïcödé --flag"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "ünïcödé --flag"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "ünïcödé --flag",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "ünïcödé --flag",
+    "summary": "Using ünïcödé --flag",
+    "action": "ünïcödé --flag",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "/usr/bin/rg foo"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "/usr/bin/rg foo",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "/usr/bin/rg foo"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "/usr/bin/rg foo"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "/usr/bin/rg foo",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "/usr/bin/rg foo"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "/usr/bin/rg foo"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "/usr/bin/rg foo",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "/usr/bin/rg foo",
+    "summary": "Using /usr/bin/rg foo",
+    "action": "/usr/bin/rg foo",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "FOO=bar cat x.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "FOO=bar cat x.txt",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "FOO=bar cat x.txt"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "FOO=bar cat x.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "FOO=bar cat x.txt",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "FOO=bar cat x.txt"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "FOO=bar cat x.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "FOO=bar cat x.txt",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "FOO=bar cat x.txt",
+    "summary": "Using FOO=bar cat x.txt",
+    "action": "FOO=bar cat x.txt",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "cat a.rs;"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "cat a.rs;",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "cat a.rs;"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "cat a.rs;"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "cat a.rs;",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "cat a.rs;"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "cat a.rs;"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "cat a.rs;",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cat a.rs;",
+    "summary": "Using cat a.rs;",
+    "action": "cat a.rs;",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "bash -lc 'cat a.rs; cat b.rs'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "bash -lc 'cat a.rs; cat b.rs'",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "bash -lc 'cat a.rs; cat b.rs'"
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "bash -lc 'cat a.rs; cat b.rs'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "bash -lc 'cat a.rs; cat b.rs'",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "bash -lc 'cat a.rs; cat b.rs'"
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "bash -lc 'cat a.rs; cat b.rs'"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "bash -lc 'cat a.rs; cat b.rs'",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "bash -lc 'cat a.rs; cat b.rs'",
+    "summary": "Using bash -lc 'cat a.rs; cat b.rs'",
+    "action": "bash -lc 'cat a.rs; cat b.rs'",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": "bash -lc \"rg foo src\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "bash -lc \"rg foo src\"",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "cmd": "bash -lc \"rg foo src\""
+    }
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {
+    "command": "bash -lc \"rg foo src\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "bash -lc \"rg foo src\"",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {
+     "command": "bash -lc \"rg foo src\""
+    }
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "command": "bash -lc \"rg foo src\""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "bash -lc \"rg foo src\"",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "bash -lc \"rg foo src\"",
+    "summary": "Using bash -lc \"rg foo src\"",
+    "action": "bash -lc \"rg foo src\"",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "command": [
+     "bash",
+     "-lc",
+     "rg foo src"
+    ]
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "Using shell",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "command": [
+     "npm",
+     "test"
+    ]
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "Using shell",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {
+    "cmd": [
+     "cat",
+     "a.rs"
+    ]
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "Using shell",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": 12
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "12",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": null
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "command": "",
+    "description": ""
+   }
+  },
+  {
+   "name": "bash",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "bash",
+    "summary": "Running shell command",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "shell",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "shell",
+    "summary": "Using shell",
+    "action": "shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "exec_command",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "exec_command",
+    "summary": "Using exec_command",
+    "action": "exec_command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "local_shell",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "local_shell",
+    "summary": "Using local_shell",
+    "action": "local_shell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "run_terminal_command",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "run_terminal_command",
+    "summary": "Using run_terminal_command",
+    "action": "run_terminal_command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "run_command",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "run_command",
+    "summary": "Using run_command",
+    "action": "run_command",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "command_execution",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "command_execution",
+    "summary": "Using command_execution",
+    "action": "command_execution",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "terminal",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "terminal",
+    "summary": "Using terminal",
+    "action": "terminal",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Read",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "NotebookRead",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "NotebookRead",
+    "summary": "Using NotebookRead",
+    "action": "NotebookRead",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "view",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "view",
+    "summary": "Using view",
+    "action": "view",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "read_file",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "read_file",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Grep",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Grep",
+    "summary": "code in .",
+    "action": "searching code",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "pattern": null,
+    "path": null,
+    "glob": null,
+    "output_mode": null
+   }
+  },
+  {
+   "name": "Glob",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Glob",
+    "summary": "files in .",
+    "action": "finding files",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "pattern": null,
+    "path": null,
+    "glob": null,
+    "output_mode": null
+   }
+  },
+  {
+   "name": "search",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "search",
+    "summary": "Using search",
+    "action": "search",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "codebase_search",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "codebase_search",
+    "summary": "Using codebase_search",
+    "action": "codebase_search",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "LS",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "LS",
+    "summary": "Using LS",
+    "action": "LS",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "list",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "list",
+    "summary": "Using list",
+    "action": "list",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "list_dir",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "list_dir",
+    "summary": "Using list_dir",
+    "action": "list_dir",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "MultiEdit",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "MultiEdit",
+    "summary": "0 edits",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "edits": [],
+    "edit_count": 0
+   }
+  },
+  {
+   "name": "NotebookEdit",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "NotebookEdit",
+    "summary": "Using NotebookEdit",
+    "action": "NotebookEdit",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "apply_patch",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "apply_patch",
+    "summary": "Using apply_patch",
+    "action": "apply_patch",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "patch",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "patch",
+    "summary": "Using patch",
+    "action": "patch",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "str_replace",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "str_replace",
+    "summary": "Using str_replace",
+    "action": "str_replace",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Write",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "create",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "create",
+    "summary": "Using create",
+    "action": "create",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "write_file",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "write_file",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "WebFetch",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "WebFetch",
+    "summary": "web page",
+    "action": "reading web page",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "WebSearch",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "WebSearch",
+    "summary": "the web",
+    "action": "searching web",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "web_search",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "web_search",
+    "summary": "the web",
+    "action": "searching web",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "fetch",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "fetch",
+    "summary": "Using fetch",
+    "action": "fetch",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "web_search_call",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "web_search_call",
+    "summary": "Using web_search_call",
+    "action": "web_search_call",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "TodoWrite",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "TodoWrite",
+    "summary": "0 items",
+    "action": "updating plan",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "todos": []
+   }
+  },
+  {
+   "name": "update_plan",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "update_plan",
+    "summary": "Using update_plan",
+    "action": "update_plan",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "TodoRead",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "TodoRead",
+    "summary": "Using TodoRead",
+    "action": "TodoRead",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Task",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Task",
+    "summary": "Using Task",
+    "action": "Task",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Agent",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Agent",
+    "summary": "Using Agent",
+    "action": "Agent",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "file_change",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "file_change",
+    "summary": "Using file_change",
+    "action": "file_change",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "patch_apply",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "patch_apply",
+    "summary": "Using patch_apply",
+    "action": "patch_apply",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "mcp_tool_call",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp_tool_call",
+    "summary": "Using mcp_tool_call",
+    "action": "mcp_tool_call",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "image_view",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "image_view",
+    "summary": "Using image_view",
+    "action": "image_view",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "image_generation",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "image_generation",
+    "summary": "Using image_generation",
+    "action": "image_generation",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "dynamic_tool_call",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "dynamic_tool_call",
+    "summary": "Using dynamic_tool_call",
+    "action": "dynamic_tool_call",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "collab_tool_call",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "collab_tool_call",
+    "summary": "Using collab_tool_call",
+    "action": "collab_tool_call",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "collab_agent_tool_call",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "collab_agent_tool_call",
+    "summary": "Using collab_agent_tool_call",
+    "action": "collab_agent_tool_call",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "mcp__github__create_issue",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp__github__create_issue",
+    "summary": "Using mcp__github__create_issue",
+    "action": "mcp__github__create_issue",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "mcp__server",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp__server",
+    "summary": "Using mcp__server",
+    "action": "mcp__server",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "MCP__Upper__Tool",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "MCP__Upper__Tool",
+    "summary": "Using MCP__Upper__Tool",
+    "action": "MCP__Upper__Tool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "mcp:server:tool",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp:server:tool",
+    "summary": "Using mcp:server:tool",
+    "action": "mcp:server:tool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "mcp__",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "mcp__",
+    "summary": "Using mcp__",
+    "action": "mcp__",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Unknown",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Unknown",
+    "summary": "Using Unknown",
+    "action": "Unknown",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "some.tool",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "some.tool",
+    "summary": "Using some.tool",
+    "action": "some.tool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "server.tool",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "server.tool",
+    "summary": "Using server.tool",
+    "action": "server.tool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "",
+    "summary": "Using tool",
+    "action": "tool",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "   ",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "   ",
+    "summary": "Using    ",
+    "action": "   ",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Tool With Spaces",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Tool With Spaces",
+    "summary": "Using Tool With Spaces",
+    "action": "Tool With Spaces",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "path/like/name",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "path/like/name",
+    "summary": "Using path/like/name",
+    "action": "path/like/name",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "rg foo src",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "rg foo src",
+    "summary": "Using rg foo src",
+    "action": "rg foo src",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "cat a.rs",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "cat a.rs",
+    "summary": "Using cat a.rs",
+    "action": "cat a.rs",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "npm test",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "npm test",
+    "summary": "Using npm test",
+    "action": "npm test",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "ExitPlanMode",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "ExitPlanMode",
+    "summary": "Using ExitPlanMode",
+    "action": "ExitPlanMode",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "KillShell",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "KillShell",
+    "summary": "Using KillShell",
+    "action": "KillShell",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "BashOutput",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "BashOutput",
+    "summary": "Using BashOutput",
+    "action": "BashOutput",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+   "input": {},
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+    "summary": "Using uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+    "action": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "input": {}
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "src/main.rs",
+    "action": "reading file",
+    "file_path": "/home/user/project/src/main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "src/main.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "src/main.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "src/main.rs",
+    "action": "reading file",
+    "file_path": "src/main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "src/main.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "src/main.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "main.rs",
+    "action": "reading file",
+    "file_path": "main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "main.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "main.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "/",
+    "action": "reading file",
+    "file_path": "/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "/",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "/",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "d/e.txt",
+    "action": "reading file",
+    "file_path": "a/b/c/d/e.txt",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "d/e.txt",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "d/e.txt",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "x/file.txt",
+    "action": "reading file",
+    "file_path": "C:\\Users\\x\\file.txt",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "x/file.txt",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "x/file.txt",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "dir",
+    "action": "reading file",
+    "file_path": "dir/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "dir",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "dir",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "var/tmp",
+    "action": "reading file",
+    "file_path": "/var/tmp/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "var/tmp",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "var/tmp",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "cödé/file.rs",
+    "action": "reading file",
+    "file_path": "ünï/cödé/file.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "cödé/file.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "cödé/file.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...",
+    "action": "reading file",
+    "file_path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "b/c.rs",
+    "action": "reading file",
+    "file_path": "a//b///c.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "b/c.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "b/c.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "file_path": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "spaced/path.rs",
+    "action": "reading file",
+    "file_path": "  spaced/path.rs  ",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "filePath": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "spaced/path.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "path": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "spaced/path.rs",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Read",
+   "input": {
+    "notebook_path": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Read",
+    "summary": "Reading file",
+    "action": "reading file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "offset": null,
+    "limit": null
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "src/main.rs",
+    "action": "editing file",
+    "file_path": "/home/user/project/src/main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "src/main.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "src/main.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "src/main.rs",
+    "action": "editing file",
+    "file_path": "src/main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "src/main.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "src/main.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "main.rs",
+    "action": "editing file",
+    "file_path": "main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "main.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "main.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "/",
+    "action": "editing file",
+    "file_path": "/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "/",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "/",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "d/e.txt",
+    "action": "editing file",
+    "file_path": "a/b/c/d/e.txt",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "d/e.txt",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "d/e.txt",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "x/file.txt",
+    "action": "editing file",
+    "file_path": "C:\\Users\\x\\file.txt",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "x/file.txt",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "x/file.txt",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "dir",
+    "action": "editing file",
+    "file_path": "dir/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "dir",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "dir",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "dir/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "var/tmp",
+    "action": "editing file",
+    "file_path": "/var/tmp/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "var/tmp",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "var/tmp",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "/var/tmp/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "cödé/file.rs",
+    "action": "editing file",
+    "file_path": "ünï/cödé/file.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "cödé/file.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "cödé/file.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "ünï/cödé/file.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...",
+    "action": "editing file",
+    "file_path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp...",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "b/c.rs",
+    "action": "editing file",
+    "file_path": "a//b///c.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "b/c.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "b/c.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "a//b///c.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "file_path": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "spaced/path.rs",
+    "action": "editing file",
+    "file_path": "  spaced/path.rs  ",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "filePath": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "spaced/path.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "path": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "spaced/path.rs",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Edit",
+   "input": {
+    "notebook_path": "  spaced/path.rs  "
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Edit",
+    "summary": "Editing file",
+    "action": "editing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "old": "",
+    "new": "",
+    "replace_all": false
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "src/main.rs",
+    "action": "writing file",
+    "file_path": "/home/user/project/src/main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "src/main.rs",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "src/main.rs",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "notebook_path": "/home/user/project/src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "src/main.rs",
+    "action": "writing file",
+    "file_path": "src/main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "src/main.rs",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "src/main.rs",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "notebook_path": "src/main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "main.rs",
+    "action": "writing file",
+    "file_path": "main.rs",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "main.rs",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "main.rs",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "notebook_path": "main.rs"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "/",
+    "action": "writing file",
+    "file_path": "/",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "/",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "/",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "notebook_path": "/"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "notebook_path": ""
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "d/e.txt",
+    "action": "writing file",
+    "file_path": "a/b/c/d/e.txt",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "d/e.txt",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "d/e.txt",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "notebook_path": "a/b/c/d/e.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "Writing file",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "file_path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "x/file.txt",
+    "action": "writing file",
+    "file_path": "C:\\Users\\x\\file.txt",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "filePath": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "x/file.txt",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Write",
+   "input": {
+    "path": "C:\\Users\\x\\file.txt"
+   },
+   "id": "toolu_synthetic",
+   "card": {
+    "name": "Write",
+    "summary": "x/file.txt",
+    "action": "writing file",
+    "file_path": "",
+    "status": "recorded",
+    "id": "toolu_synthetic",
+    "content": ""
+   }
+  },
+  {
+   "name": "Bash",
+   "input": {
+    "command": "ls"
+   },
+   "id": "",
+   "card": {
+    "name": "Bash",
+    "summary": "ls",
+    "action": "running command",
+    "file_path": "",
+    "status": "recorded",
+    "command": "ls",
+    "description": ""
+   }
+  }
+ ],
+ "results": [
+  {
+   "content": "synthetic\n",
+   "text": "synthetic\n"
+  },
+  {
+   "content": "",
+   "text": ""
+  },
+  {
+   "content": "   ",
+   "text": "   "
+  },
+  {
+   "content": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+   "text": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+  },
+  {
+   "content": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+   "text": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr…"
+  },
+  {
+   "content": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+   "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word …"
+  },
+  {
+   "content": null,
+   "text": ""
+  },
+  {
+   "content": 5,
+   "text": ""
+  },
+  {
+   "content": true,
+   "text": ""
+  },
+  {
+   "content": [],
+   "text": ""
+  },
+  {
+   "content": {},
+   "text": ""
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "one synthetic result"
+    }
+   ],
+   "text": "one synthetic result"
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "first"
+    },
+    {
+     "type": "text",
+     "text": ""
+    },
+    {
+     "type": "text",
+     "text": "third"
+    }
+   ],
+   "text": "first\nthird"
+  },
+  {
+   "content": [
+    {
+     "type": "image",
+     "source": {}
+    },
+    {
+     "type": "text",
+     "text": "beside an image"
+    }
+   ],
+   "text": "beside an image"
+  },
+  {
+   "content": [
+    {
+     "content": "held as content"
+    },
+    "a plain string",
+    5,
+    null,
+    {
+     "text": 7
+    }
+   ],
+   "text": "held as content\na plain string\n7"
+  },
+  {
+   "content": [
+    {
+     "type": "text",
+     "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ],
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+  }
  ]
 }

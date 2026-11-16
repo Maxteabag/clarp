@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 
 use clarp_kernel::media::{
     Asset, FILES, IMAGES, MAX_BYTES, Part, Refused, byte_range, detect_mime, extension, image_size,
-    is_image, is_taken, markdown_alt, read, safe_name, unquoted,
+    is_image, is_taken, markdown_alt, read, safe_name, unquoted, upload_directory, upload_id,
+    upload_name,
 };
 use serde_json::Value;
 
@@ -43,6 +44,24 @@ fn the_kinds_that_are_taken_are_the_python_hosts() {
 }
 
 #[test]
+fn an_upload_is_kept_under_its_agents_name_and_its_own_id_as_the_python_host_keeps_it() {
+    let vectors = vectors();
+    for vector in vectors["sessions"].as_array().unwrap() {
+        assert_eq!(
+            upload_directory(vector["session"].as_str().unwrap()),
+            vector["safe"].as_str().unwrap(),
+            "{vector}"
+        );
+    }
+    let ids = vectors["upload_ids"].as_array().unwrap();
+    assert!(ids.len() >= 10);
+    for vector in ids {
+        let ours = upload_id(vector["given"].as_str().unwrap());
+        assert_eq!(ours, vector["id"].as_str(), "{vector}");
+    }
+}
+
+#[test]
 fn a_file_is_named_as_the_python_host_names_it() {
     let vectors = vectors();
     let names = vectors["names"].as_array().unwrap();
@@ -58,6 +77,14 @@ fn a_file_is_named_as_the_python_host_names_it() {
             wrong.push(format!(
                 "{raw:?} as {declared:?}: {ours:?}, the Python Host: {}",
                 vector["safe"]
+            ));
+        }
+        // And as what a user attached.
+        let ours = upload_name(raw, declared);
+        if ours != vector["upload"].as_str().unwrap() {
+            wrong.push(format!(
+                "{raw:?} as {declared:?}, attached: {ours:?}, the Python Host: {}",
+                vector["upload"]
             ));
         }
     }

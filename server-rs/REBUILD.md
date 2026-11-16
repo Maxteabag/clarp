@@ -413,6 +413,88 @@ fault that had nothing to do with forms: a fraction of seventeen digits could be
 fractions are read exactly now (`float_roundtrip`). Not there: what a form's page logs of its use
 (`html_form_events`), and the reply spoken.
 
+**What an app asks of any Host** (16 Nov 2026). The load was counted on the live Host's own log: in three
+days its clients made 147,704 requests over 469 routes, and 69.3 per cent of them went to routes this Host
+had. The phone app gates few of its calls on what a Host lists (read in its source: dreaming, the car
+controller's actions, push grants, the archived list, live items and activities, one provider of speech, the
+home terminal); everything else it asks of every Host it is paired with. So a phone paired with this Host
+would have been answered "no such route" three times in ten. What it asks regardless is answered now
+(`apps.rs`). With what is so, where this Host keeps it: `GET /status` (whether the Host is up and an agent
+is in a turn), `POST /focus` (which agent the user is looking at: the focus the Host keeps already),
+`POST /application-activity` (whether the app is in front and when it was last touched: held for 45 seconds
+by the Python Host's rules, `activity.rs`), `POST /upload` (a file a user attaches to what they say: kept
+under the agent's name, and once under an id the app gives; the names on the disk are the Python Host's,
+held by 259 recorded names), `POST /clog` (the lines of the app's own log, which an app keeps and sends again
+until a Host takes them: 26,442 calls in the three days; kept in one file that does not grow without end,
+because they say why something did not work on a phone). And with a list that is empty, in the Python Host's
+own fields, where this Host keeps nothing of the kind: teams, janitors, what the Host does by itself, what
+transcribes, the voices, the catalogue of models. Held end to end (`tests/host.rs`) and by the scenario
+`app-asks`, whose first run wrote down what the Python Host answers before any of this was written. Still
+asked and not there: speech itself (`/transcribe`, the clips of a spoken reply), portraits, and the screens of
+settings (usage, logins, updates).
+
+**A message of the agent is one row, with a card for each tool it calls** (16 Nov 2026). The Python Host
+shows a turn's tool work as cards on the rows of the agent's messages; this Host had a row of its own for every
+use of a tool, with what the tool was given and gave back, whole. Now a conversation is rows of four kinds: a
+message to the agent, a message of the agent, a word of the Host, a row an agent brought along. **A row's item
+is written once and stands where the row stands. What happens to a row afterwards is a part that names it**
+(`Entry::part_of`): the use of a tool its message calls (written when it starts and when it ends), that tool
+work came after it in the same turn, how its turn ended. Three things follow, and each was wrong or costly
+before. A page is counted in rows (a tool's use was two items and a page of fifty held thirty-eight rows). The
+place of a row is found by its id, whatever happened to it since. And whoever asks what is newer is given a
+row again whenever a part of it was written, as it is now: a row is read with its parts (`conversation.rs` in
+`clarp-actor`), and carries the revision of the newest. The Claude reader tells a message when it is whole (it
+stops, another begins, one of its calls is answered, the process ends) and its tools' uses after it; a message
+that only calls tools is a row that says nothing. What was said before tool work was said along the way
+(`phase: commentary`), what is said after it is the agent's final word, and a row that says nothing has no
+phase: the Python Host's rule (`message_writes._row_phases`), written by the actor when the work comes, from
+what the log says the turn has said, so that an attempt before or a restart in between loses nothing. A card
+is the Python Host's (`tools::card`, held by 433 recorded cards and 16 results): the tool's name, what was
+asked of it in the words of its kind, `recorded` while it runs, `ok` or `error` with the first 300 signs of
+what came back, and `interrupted` when its turn was interrupted under it, which the Host writes, not each
+tool's reader. What a tool was given whole and gave back whole stays on the Host. The short form an app asks
+for (`include_tool_details=0`) and the details of one row (`/message-tool-details`) are made of the same
+cards. With this every row a turn writes carries the turn's trace, and the feature `log_turn_summary` is
+listed. Held by the scenario `tool-turns` (five messages with six uses: the first turn is the same on both
+Hosts in every field), by the actor's own tests with Claude Code's stream (a restart in the middle of a
+turn, a kill with a tool running) and by a recorded turn of the real CLI. Still rows by themselves: the calls
+of a tool whose reader does not group them into messages (Codex, until its cells are built) and every call a
+log already holds.
+
+**A person speaks, and the Host turns the clip into text** (16 Nov 2026). The owner speaks to his agents:
+on the live elitebook Host, in seven days, 198 clips were turned into text (127 by the Host's own engine, 71 by
+ElevenLabs Scribe) and a fifth of what the user said was said aloud. An app records a clip and hands it to
+`POST /transcribe`; the Host answers with the text and the trace the message will travel under, and the app
+sends that text itself. The request and its answer are the Python Host's, rule for rule (`clarp-kernel`
+`heard.rs`, held by 500 recorded answers of that Host's own functions): what a job may be called, when two
+requests are the same job, which engine a clip goes to, which of an engine's pieces are kept, what an engine
+invents on silence and is thrown away, the refusals in the same words. **A request that comes again is
+answered with what was answered before**: the answer is kept under the job's name for thirty days, beside
+the Host's data, and no engine runs twice for one thing said, also across a restart. Nothing of a clip is
+kept. **The engines are behind one port** (`clarp-speech`, `listen.rs`: a clip in, pieces of text out, or
+why not), with two behind it. One is reached over the network (ElevenLabs Scribe, `scribe.rs`: the Python
+Host's request). The other is the Host's own (`whisper.rs`): a worker process that keeps a Whisper model
+loaded and hears one clip at a time, on the Python Host's own protocol of lines, so that the model is asked
+exactly as that Host asks it. It is a process of its own because hearing a long clip is minutes of processor
+time and the model's library is not this Host's code; a worker that says why it failed stays, one that dies
+is started again by the next clip, and none is left behind. The worker is this Host's own program
+(`tools/whisper-worker.py`); what runs it is a Python that has the library, which on the owner's machines is
+the Python Host's own, used where it is with the model's files that machine has already (`tools/install-host`
+finds both; measured on elitebook: faster-whisper 1.2.1, the model `small.en`). That Python lives in a
+directory the Python Host makes anew when it is updated, so the installer is run again after such an update,
+as it is after that Host changed its tools; until then the engine says that its worker could not be started,
+and a clip is refused with those words. **A key is read where the
+owner keeps it**: the key of an engine over the network is looked up in the Python Host's own config each
+time a clip is to be heard (`--speech-keys`), so a key that is changed there is the key used next, and no key
+is copied into this Host or kept by it. The apps are told which engines there are and which one hears a clip
+nobody named one for (`/transcription-capabilities`, `/transcription-providers`). Held end to end with a
+stand-in worker and a stand-in for ElevenLabs on the loopback (`tests/host.rs`: no test reaches an engine
+outside), by the scenario `speech-in`, and once by hand with the real model on a made-up clip. Not there:
+the vocabulary an engine is asked to listen for beyond what this Host's agents are called, the judge that
+tells an invented "Okay." from one that was said (the list throws both away), a stronger engine for long
+recordings, an agent's own language or engine, the record of each thing said (`/voice-events`), changing
+these settings from an app, and calls.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as

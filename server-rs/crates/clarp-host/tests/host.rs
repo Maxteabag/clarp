@@ -1916,13 +1916,18 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
         host.state(&session) == "done"
     });
     let turns = host.turns(&session);
+    // The tool's use is a card on the row of the message that called it.
     let tool = turns
         .iter()
-        .find(|turn| turn["kind"] == "tool")
+        .find(|turn| {
+            turn["tools"]
+                .as_array()
+                .is_some_and(|tools| !tools.is_empty())
+        })
         .expect("the tool call is in the conversation");
     assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
     assert!(
-        tool["tools"][0]["output"]
+        tool["tools"][0]["result"]
             .as_str()
             .unwrap()
             .contains("spool-survived")
@@ -2054,7 +2059,7 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
         .expect("the command is in the conversation");
     assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
     assert!(
-        tool["tools"][0]["output"]
+        tool["tools"][0]["result"]
             .as_str()
             .unwrap()
             .contains("spool-survived")
@@ -6843,4 +6848,769 @@ fn the_user_is_shown_what_agents_made_a_page_at_a_time() {
     let info = host.get("/server-info");
     let features = info["capabilities"]["features"].as_array().unwrap();
     assert!(features.contains(&json!("attention_index")), "{info}");
+}
+
+#[test]
+fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
+    let place = Place::new("apps");
+    let token = "apps-token";
+    let host = place.start_with_token(token);
+    let (first, second) = (host.new_agent("First"), host.new_agent("Second"));
+    let focus = |host: &Host| host.get("/agents/snapshot")["focus"].clone();
+    let agent_id = |host: &Host, session: &str| -> Value {
+        let agents = host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let found = agents
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .unwrap();
+        found["agent_id"].clone()
+    };
+
+    // Which agent the user looks at: said, it is the focus. Nobody is nothing to look at,
+    // and no error either.
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({ "session": second })));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(focus(&host), agent_id(&host, &second));
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({ "session": first })));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(focus(&host), agent_id(&host, &first));
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({ "session": "nobody-here" })));
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(
+        focus(&host),
+        agent_id(&host, &first),
+        "the focus stays where it was"
+    );
+    let (status, said) = host.ask("POST", "/focus", Some(&json!({})));
+    assert_eq!((status, &said["error"]), (400, &json!("session required")));
+    let raw = fetch(&host, token, "POST", "/focus", &[], b"not json");
+    assert_eq!(raw.status, 400);
+    assert!(raw.text().contains("bad json"), "{}", raw.text());
+
+    // Whether the app is in front: a report holds for the copy of the app that made it, and
+    // one that is not newer than the last changes nothing.
+    let copy = "0a1b2c3d-0000-4000-8000-0000000000aa";
+    let report = |sequence: i64, more: Value| -> Value {
+        let mut report = json!({ "instance_id": copy, "sequence": sequence, "foreground": true,
+                                 "input_age_ms": 1_000, "sent_at_ms": now_ms() });
+        report
+            .as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        report
+    };
+    let send = |host: &Host, token: &str, body: &Value| {
+        host.ask_as(token, "POST", "/application-activity", Some(body))
+    };
+    let (status, said) = send(&host, token, &report(1, json!({})));
+    assert_eq!((status, &said), (200, &json!({ "accepted": true })));
+    let (status, said) = send(&host, token, &report(1, json!({ "foreground": false })));
+    assert_eq!((status, &said), (200, &json!({ "accepted": false })));
+    let (status, said) = send(&host, token, &report(2, json!({ "foreground": false })));
+    assert_eq!((status, &said), (200, &json!({ "accepted": true })));
+    for (wrong, why) in [
+        (json!({ "sent_at_ms": 1 }), "stale activity report"),
+        (
+            json!({ "instance_id": "not-an-id" }),
+            "instance_id must be a UUID",
+        ),
+        (json!({ "sequence": 0 }), "invalid principal or sequence"),
+        (
+            json!({ "foreground": "yes" }),
+            "invalid foreground or input age",
+        ),
+    ] {
+        let (status, said) = send(&host, token, &report(3, wrong));
+        assert_eq!((status, &said["error"]), (400, &json!(why)));
+    }
+    let raw = fetch(&host, token, "POST", "/application-activity", &[], b"[1]");
+    assert_eq!(raw.status, 400);
+    assert!(raw.text().contains("object required"), "{}", raw.text());
+    // A device speaks for a person when it has full scope, and only then.
+    let (full, _) = pair(&host, "phone", "full");
+    let (limited, _) = pair(&host, "watch", "limited");
+    let (status, said) = send(&host, &full, &report(1, json!({})));
+    assert_eq!(
+        (status, &said),
+        (200, &json!({ "accepted": true })),
+        "a device counts for itself"
+    );
+    let (status, _) = send(&host, &limited, &report(1, json!({})));
+    assert_eq!(status, 403);
+    // A device with limited scope may still say what its user looks at.
+    let (status, said) = host.ask_as(
+        &limited,
+        "POST",
+        "/focus",
+        Some(&json!({ "session": second })),
+    );
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    assert_eq!(focus(&host), agent_id(&host, &second));
+
+    // The lines of an app's own log are taken, one or several, and kept under the data
+    // directory, a line for each: what a phone could not do is read there.
+    let (status, said) = host.ask(
+        "POST",
+        "/clog",
+        Some(&json!({ "event": "synthetic-event", "detail": "a line\nbroken in two" })),
+    );
+    assert_eq!((status, &said), (200, &json!({ "ok": true })));
+    let several = json!({ "events": [
+        { "event": "synthetic-one", "detail": { "k": 1 } }, { "event": "synthetic-two" },
+    ] });
+    let (status, said) = host.ask_as(&limited, "POST", "/clog", Some(&several));
+    assert_eq!(
+        (status, &said),
+        (200, &json!({ "ok": true })),
+        "any device hands over its lines"
+    );
+    let raw = fetch(&host, token, "POST", "/clog", &[], b"[1]");
+    assert_eq!(raw.status, 400);
+    let log =
+        std::fs::read_to_string(place.root.join("data").join("logs").join("apps.log")).unwrap();
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines.len(), 3, "{log}");
+    assert!(
+        lines[0].ends_with(" app synthetic-event a line broken in two"),
+        "{log}"
+    );
+    assert!(lines[1].ends_with(" app synthetic-one {\"k\":1}"), "{log}");
+    assert!(lines[2].ends_with(" app synthetic-two "), "{log}");
+
+    // Whether the Host is up, and whether an agent is in a turn.
+    let up = host.get("/status");
+    assert_eq!(
+        (
+            &up["session"],
+            &up["busy"],
+            &up["runtime"]["available"],
+            &up["runtime"]["active_turns"]
+        ),
+        (&json!(""), &json!(false), &json!(true), &json!(0))
+    );
+    assert_eq!(
+        (&up["deployed_version"], &up["release_id"]),
+        (&json!("development"), &json!("development"))
+    );
+    let idle = host.get(&format!("/status?session={first}"));
+    assert_eq!(
+        (&idle["session"], &idle["busy"]),
+        (&json!(first), &json!(false))
+    );
+    assert_eq!(host.get("/status?session=nobody-here")["busy"], false);
+    // The lists an app's screens are made of, for what this Host keeps nothing of: each is
+    // a list, and empty, in the fields an app reads.
+    assert_eq!(host.get("/teams"), json!({ "teams": [] }));
+    assert_eq!(
+        host.get("/automation-settings"),
+        json!({ "special_treatment": false })
+    );
+    let janitors = host.get("/janitors");
+    assert_eq!(
+        (&janitors["janitors"], &janitors["runtime_available"]),
+        (&json!([]), &json!(false))
+    );
+    let transcribes = host.get("/transcription-capabilities");
+    assert_eq!(
+        (&transcribes["available"], &transcribes["models"]),
+        (&json!(false), &json!([]))
+    );
+    let providers = host.get("/transcription-providers");
+    for field in [
+        "engine",
+        "turn_taking",
+        "retain_audio",
+        "turn_taking_options",
+        "providers",
+        "models",
+    ] {
+        assert!(!providers[field].is_null(), "an app's reader needs {field}");
+    }
+    // Who offers engines over the network is listed as the contract lists it; on a Host
+    // that has no key for any of them, none can be used.
+    let offered: Vec<(&str, bool)> = providers["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|provider| {
+            (
+                provider["id"].as_str().unwrap(),
+                provider["available"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        offered,
+        [
+            ("deepgram", false),
+            ("elevenlabs", false),
+            ("cartesia", false),
+            ("google", false)
+        ]
+    );
+    assert_eq!(
+        (&providers["engine"], &providers["language"]),
+        (&json!("local"), &json!("en"))
+    );
+    let voices = host.get("/voice-catalog");
+    assert_eq!(
+        (&voices["provider"], &voices["voice_available"]),
+        (&json!("none"), &json!(false))
+    );
+    let models = host.get("/agent-model-options");
+    assert_eq!(
+        (&models["schema_version"], &models["providers"]),
+        (&json!(2), &json!({}))
+    );
+    assert!(models["observed_at"].is_string() && models["freshness"].is_string());
+
+    // On a Host that asks for no token, nobody is known to be a person.
+    let open_place = Place::new("apps-open");
+    let open = open_place.start();
+    let (status, said) = open.ask("POST", "/application-activity", Some(&report(1, json!({}))));
+    assert_eq!(
+        (status, &said["error"]),
+        (401, &json!("authentication required"))
+    );
+}
+
+#[test]
+fn a_user_attaches_a_file_to_what_they_say() {
+    let place = Place::new("upload");
+    let token = "upload-token";
+    let host = place.start_with_token(token);
+    let (first, second) = (host.new_agent("First"), host.new_agent("Second"));
+    let png = b"\x89PNG\r\n\x1a\nnot much of an image".to_vec();
+    let send = |token: &str, headers: &[(&str, &str)], body: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/upload", headers, body);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+    let uploads = place.root.join("data").join("uploads");
+
+    // A file for an agent that is named: kept under the agent's name, under a name that is
+    // safe, and answered with where it is, for the app to put into the message.
+    let named = [
+        ("X-Session", first.as_str()),
+        ("X-File-Name", "holiday%20photo%201.png"),
+        ("Content-Type", "image/png"),
+    ];
+    let (status, said) = send(token, &named, &png);
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["ok"], &said["name"], &said["size"], &said["session"]),
+        (
+            &json!(true),
+            &json!("holiday_photo_1.png"),
+            &json!(png.len()),
+            &json!(first)
+        )
+    );
+    let path = std::path::PathBuf::from(said["path"].as_str().unwrap());
+    assert!(
+        path.is_absolute() && path.starts_with(std::fs::canonicalize(&uploads).unwrap()),
+        "{path:?}"
+    );
+    assert_eq!(path.parent().unwrap().file_name().unwrap(), first.as_str());
+    let file = path.file_name().unwrap().to_str().unwrap().to_string();
+    assert!(
+        file.len() == 8 + 1 + "holiday_photo_1.png".len() && file.ends_with("-holiday_photo_1.png"),
+        "{file}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), png);
+    // Sent again without an id of its own, it is another file.
+    let (_, again) = send(token, &named, &png);
+    assert_ne!(again["path"], said["path"]);
+
+    // Under an id the app gave it, a file is kept once: sent again, it is the same file.
+    let with_id = [
+        ("X-Session", first.as_str()),
+        ("X-File-Name", "notes"),
+        ("Content-Type", "text/markdown"),
+        ("X-Upload-ID", "share-0001"),
+    ];
+    let (status, kept) = send(token, &with_id, b"# Notes\n");
+    assert_eq!(status, 200, "{kept}");
+    assert_eq!(
+        kept["name"], "notes.md",
+        "a name without an ending is given its kind's"
+    );
+    let kept_path = kept["path"].as_str().unwrap().to_string();
+    let kept_file = std::path::Path::new(&kept_path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        kept_file.starts_with("u-")
+            && kept_file.ends_with("-notes.md")
+            && kept_file.len() == 2 + 24 + 1 + 8,
+        "{kept_file}"
+    );
+    let (status, replayed) = send(token, &with_id, b"# Notes\n");
+    assert_eq!((status, &replayed["path"]), (200, &json!(kept_path)));
+    let files = |agent: &str| files_under(&uploads.join(agent));
+    assert_eq!(files(&first), 3, "two without an id, one under its id");
+    let (status, other) = send(token, &with_id, b"# Other notes\n");
+    assert_eq!(status, 409, "{other}");
+    assert_eq!(other["error"], "upload id reused for different content");
+    let bad_id = [("X-Session", first.as_str()), ("X-Upload-ID", "two words")];
+    let (status, refused) = send(token, &bad_id, b"x");
+    assert_eq!(
+        (status, &refused["error"]),
+        (400, &json!("invalid upload id"))
+    );
+
+    // For no agent that is named, it is for the one the user is looking at; called nothing,
+    // it is called after its kind.
+    host.post("/focus", json!({ "session": second }));
+    let (status, unnamed) = send(token, &[("Content-Type", "image/png")], &png);
+    assert_eq!(status, 200, "{unnamed}");
+    assert_eq!(
+        (&unnamed["session"], &unnamed["name"]),
+        (&json!(second), &json!("upload.png"))
+    );
+    assert_eq!(files(&second), 1);
+    // Nothing is no file; and a device that may only chat may attach to what it says.
+    let (status, empty) = send(token, &named, b"");
+    assert_eq!((status, &empty["error"]), (400, &json!("bad size")));
+    let (limited, _) = pair(&host, "watch", "limited");
+    let (status, said) = send(&limited, &named, &png);
+    assert_eq!(status, 200, "{said}");
+
+    // After the Host was killed the file is there, and its id is still its own.
+    host.kill();
+    let host = place.start_with_token(token);
+    let answer = fetch(&host, token, "POST", "/upload", &with_id, b"# Notes\n");
+    let replayed: Value = serde_json::from_slice(&answer.body).unwrap();
+    assert_eq!((answer.status, &replayed["path"]), (200, &json!(kept_path)));
+    assert_eq!(std::fs::read(&kept_path).unwrap(), b"# Notes\n");
+}
+
+/// A worker of the Host's own engine that hears nothing and answers as the real one does:
+/// for a clip, how many bytes it has. A clip of one byte is silence, on which an engine
+/// invents thanks; a clip of two bytes breaks it.
+const WHISPER_STAND_IN: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"op":"load"'*) echo '{"event":"ready"}' ;;
+    *'"op":"transcribe"'*)
+      id=${line#*\"id\":\"}; id=${id%%\"*}
+      path=${line#*\"path\":\"}; path=${path%%\"*}
+      bytes=$(wc -c < "$path" | tr -d ' ')
+      case "$bytes" in
+        1) echo "{\"id\":\"$id\",\"segments\":[{\"text\":\" Thank you.\",\"no_speech_prob\":0.1}]}" ;;
+        2) echo "{\"id\":\"$id\",\"error\":\"synthetic failure\"}" ;;
+        *) echo "{\"id\":\"$id\",\"segments\":[{\"text\":\" Open the log of $bytes bytes.\",\"no_speech_prob\":0.1},{\"text\":\" (noise)\",\"no_speech_prob\":0.9}]}" ;;
+      esac ;;
+    *'"op":"quit"'*) exit 0 ;;
+  esac
+done
+"#;
+
+#[test]
+fn a_person_speaks_and_the_clip_becomes_text() {
+    let place = Place::new("speech-in");
+    let worker = place.root.join("whisper-stand-in.sh");
+    std::fs::write(&worker, WHISPER_STAND_IN).unwrap();
+    let token = "speech-token";
+    let engine = [
+        "--whisper-python",
+        "sh",
+        "--whisper-worker",
+        worker.to_str().unwrap(),
+    ];
+    // Whatever key the machine that runs this test has of its own, this Host has none: no
+    // test reaches an engine outside.
+    let no_key = [("ELEVEN_API_KEY", "")];
+    let host = place.start_in(token, &engine, &no_key);
+    let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/transcribe", headers, clip);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+    // The engine loads its model when the Host starts. Until it has, a clip is told so.
+    wait_for("the engine to have loaded its model", || {
+        let (status, said) = hear(&[], b"a clip");
+        assert!(
+            status == 200 || (status == 503 && said["error"] == "whisper model loading"),
+            "{status} {said}"
+        );
+        status == 200
+    });
+
+    // A clip becomes text: what the engine was sure was speech, with the trace the message
+    // will travel under when the app sends it.
+    let named = [
+        ("Content-Type", "audio/mp4"),
+        ("X-Transcription-ID", "utt-1"),
+        ("X-Hands-Free", "1"),
+    ];
+    let (status, said) = hear(&named, b"a clip of speech");
+    assert_eq!(status, 200, "{said}");
+    let fields: Vec<&str> = said
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            "text",
+            "ends_terminal",
+            "trace_id",
+            "herald_consumed",
+            "hands_free",
+            "orchestrator_skip_herald",
+            "vocab_run_id",
+            "cached"
+        ]
+    );
+    assert_eq!(said["text"], "Open the log of 16 bytes.");
+    assert_eq!(
+        (&said["ends_terminal"], &said["hands_free"], &said["cached"]),
+        (&json!(true), &json!(true), &json!(false))
+    );
+    let trace = said["trace_id"].as_str().unwrap().to_string();
+    assert!(trace.len() == 16 && trace.bytes().all(|byte| byte.is_ascii_hexdigit()));
+
+    // The same request again, because its answer was lost on the way: answered with what
+    // was answered, the same trace, and said to be so.
+    let (status, again) = hear(&named, b"a clip of speech");
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(
+        (&again["cached"], &again["trace_id"], &again["text"]),
+        (&json!(true), &json!(trace), &said["text"])
+    );
+    // Another clip under the same name is refused, and so is the same clip said another way.
+    let (status, refused) = hear(&named, b"another clip");
+    assert_eq!(
+        (status, &refused["error"]),
+        (409, &json!("transcription id reused for different audio"))
+    );
+    let (status, _) = hear(&named[..2], b"a clip of speech");
+    assert_eq!(status, 409, "hands-free or not is part of what was asked");
+    // A clip without a name is nobody's twice: each is heard, each has a trace of its own.
+    let (_, one) = hear(&[], b"a clip of speech");
+    let (_, two) = hear(&[], b"a clip of speech");
+    assert_eq!(
+        (&one["cached"], &two["cached"]),
+        (&json!(false), &json!(false))
+    );
+    assert_ne!(one["trace_id"], two["trace_id"]);
+    assert_eq!(one["hands_free"], false);
+
+    // What an engine invents on silence is nobody's message: the text is empty.
+    let (status, silent) = hear(&[], b"1");
+    assert_eq!(
+        (status, &silent["text"], &silent["ends_terminal"]),
+        (200, &json!(""), &json!(false))
+    );
+    // An engine that fails says why, and the next clip is heard.
+    let (status, failed) = hear(&[], b"22");
+    assert_eq!(
+        (status, &failed["error"]),
+        (500, &json!("synthetic failure"))
+    );
+    assert_eq!(hear(&[], b"a clip").0, 200);
+
+    // The Host's own engine by each of its names; and what there is none for.
+    for model in ["faster-whisper:small.en", "server-default", "local"] {
+        let (status, said) = hear(&[("X-Transcription-Model", model)], b"a clip");
+        assert_eq!(
+            (status, &said["text"]),
+            (200, &json!("Open the log of 6 bytes.")),
+            "{model}"
+        );
+    }
+    for (model, status, why) in [
+        (
+            "faster-whisper:medium",
+            400,
+            "transcription model not installed: faster-whisper:medium",
+        ),
+        (
+            "nothing-of-the-kind",
+            400,
+            "transcription model not installed: nothing-of-the-kind",
+        ),
+        (
+            "deepgram:nova-3",
+            400,
+            "transcription model not installed: deepgram:nova-3",
+        ),
+        (
+            "elevenlabs:scribe_v9",
+            500,
+            "unknown transcription engine: elevenlabs:scribe_v9",
+        ),
+        (
+            "elevenlabs:scribe_v2",
+            500,
+            "elevenlabs API key is not configured",
+        ),
+    ] {
+        let (answered, said) = hear(&[("X-Transcription-Model", model)], b"a clip");
+        assert_eq!((answered, &said["error"]), (status, &json!(why)), "{model}");
+    }
+    // What is no clip, and what is no name for a job.
+    assert_eq!(hear(&[], b""), (400, json!({ "error": "bad size" })));
+    assert_eq!(
+        hear(&[("X-Transcription-ID", "has space")], b"a clip"),
+        (400, json!({ "error": "invalid transcription id" }))
+    );
+    // A clip that says it belongs to a call is a call's or nothing, and there are no calls.
+    let (status, call) = hear(&[("X-Clarp-Call-Id", "call-1")], b"a clip");
+    assert_eq!((status, &call["ok"]), (409, &json!(false)));
+    // Without the token nothing is heard.
+    assert_eq!(
+        fetch(&host, "", "POST", "/transcribe", &[], b"a clip").status,
+        401
+    );
+
+    // What the apps are told there is to ask for.
+    let (_, able) = host.ask_as(token, "GET", "/transcription-capabilities", None);
+    assert_eq!(
+        (&able["available"], &able["default_model"], &able["engine"]),
+        (
+            &json!(true),
+            &json!("faster-whisper:small.en"),
+            &json!("local")
+        )
+    );
+    assert_eq!(
+        able["models"],
+        json!([{ "id": "faster-whisper:small.en", "name": "Small En", "provider": "faster-whisper",
+                 "model": "small.en", "weight": "medium" }])
+    );
+
+    // Nothing of a clip is kept, and of the answers only the one that has a name.
+    assert_eq!(files_under(&place.root.join("run").join("heard")), 0);
+    assert_eq!(
+        files_under(&place.root.join("data").join("transcriptions")),
+        1
+    );
+    // The answer outlives the Host: the same request after a restart is answered as before.
+    host.kill();
+    let host = place.start_in(token, &engine, &no_key);
+    let answer = fetch(
+        &host,
+        token,
+        "POST",
+        "/transcribe",
+        &named,
+        b"a clip of speech",
+    );
+    let after: Value = serde_json::from_slice(&answer.body).unwrap();
+    assert_eq!(
+        (answer.status, &after["cached"], &after["trace_id"]),
+        (200, &json!(true), &json!(trace))
+    );
+
+    // The app has sent what was said, and says it will not ask for the answer again: it is
+    // forgotten. The same name is then free for whatever is said under it next.
+    let kept = place.root.join("data").join("transcriptions");
+    let forget = |job: &str| {
+        let path = format!("/transcription-results/{job}");
+        host.ask_as(token, "DELETE", &path, None)
+    };
+    assert_eq!(forget("utt-1"), (200, json!({ "ok": true })));
+    assert_eq!(files_under(&kept), 0);
+    assert_eq!(
+        forget("utt-1"),
+        (200, json!({ "ok": true })),
+        "nothing to forget is no error"
+    );
+    assert_eq!(
+        forget("has%20space"),
+        (400, json!({ "error": "invalid transcription id" }))
+    );
+    wait_for("the engine to have loaded its model again", || {
+        fetch(&host, token, "POST", "/transcribe", &[], b"a clip").status == 200
+    });
+    let answer = fetch(&host, token, "POST", "/transcribe", &named, b"another clip");
+    let anew: Value = serde_json::from_slice(&answer.body).unwrap();
+    assert_eq!(
+        (answer.status, &anew["cached"]),
+        (200, &json!(false)),
+        "{anew}"
+    );
+    assert_ne!(anew["trace_id"], json!(trace));
+}
+
+/// A stand-in for ElevenLabs on the loopback: takes requests one after another, keeps what
+/// each sent, and answers every one with the same words.
+fn scribe_stand_in(answer: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!(
+        "http://{}/v1/speech-to-text",
+        listener.local_addr().unwrap()
+    );
+    let taken: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let keeps = taken.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let (mut seen, mut buffer) = (Vec::new(), [0u8; 4096]);
+            let (head_end, length) = loop {
+                let Ok(read) = stream.read(&mut buffer) else {
+                    break (0, 0);
+                };
+                seen.extend_from_slice(&buffer[..read]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some(at) = text.find("\r\n\r\n") {
+                    let length = text.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        let named = name.eq_ignore_ascii_case("content-length");
+                        named.then(|| value.trim().parse::<usize>().ok())?
+                    });
+                    break (at + 4, length.unwrap_or(0));
+                }
+                if read == 0 {
+                    break (0, 0);
+                }
+            };
+            while seen.len() < head_end + length {
+                let Ok(read) = stream.read(&mut buffer) else {
+                    break;
+                };
+                if read == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&buffer[..read]);
+            }
+            keeps
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&seen).to_string());
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{answer}",
+                answer.len()
+            );
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    (address, taken)
+}
+
+#[test]
+fn a_clip_is_heard_by_an_engine_over_the_network_with_a_key_read_where_the_owner_keeps_it() {
+    let place = Place::new("speech-cloud");
+    let (address, taken) = scribe_stand_in(r#"{"text":" Open the door. ","words":[{"end":1.5}]}"#);
+    // The owner's own file of keys, of the Python Host's kind. Nothing of it is copied.
+    let keys = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &keys,
+        "[server]\nport = 7682\n\n[elevenlabs]\napi_key = \"key-in-the-owners-file\"\n",
+    )
+    .unwrap();
+    let token = "cloud-token";
+    let host = place.start_in(
+        token,
+        &[
+            "--speech-keys",
+            keys.to_str().unwrap(),
+            "--transcription-engine",
+            "elevenlabs:scribe_v2",
+        ],
+        // The only key is the one in the file, whatever the machine that runs this test has.
+        &[
+            ("CLARP_SCRIBE_ENDPOINT", address.as_str()),
+            ("ELEVEN_API_KEY", ""),
+        ],
+    );
+    host.new_agent("Maximus");
+    let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/transcribe", headers, clip);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+
+    // This Host has no engine of its own: the one chosen for it hears what nobody named an
+    // engine for, and is asked to listen for what the agents here are called.
+    let (status, said) = hear(&[("Content-Type", "audio/mp4")], b"made-up audio");
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["text"], &said["ends_terminal"]),
+        (&json!("Open the door."), &json!(true))
+    );
+    let request = taken.lock().unwrap().last().cloned().unwrap();
+    let lower = request.to_lowercase();
+    assert!(
+        lower.contains("xi-api-key: key-in-the-owners-file"),
+        "the key is read from the file"
+    );
+    assert!(request.contains("name=\"model_id\"\r\n\r\nscribe_v2\r\n"));
+    assert!(request.contains("name=\"language_code\"\r\n\r\nen\r\n"));
+    assert!(
+        request.contains("name=\"keyterms\"\r\n\r\nMaximus\r\n"),
+        "{request}"
+    );
+    assert!(
+        request
+            .contains("filename=\"audio.m4a\"\r\nContent-Type: audio/mp4\r\n\r\nmade-up audio\r\n")
+    );
+    // By its name too.
+    let (status, _) = hear(
+        &[("X-Transcription-Model", "elevenlabs:scribe_v2")],
+        b"clip",
+    );
+    assert_eq!(status, 200);
+    assert_eq!(taken.lock().unwrap().len(), 2);
+    // The Host's own engine is asked for by name, and there is none.
+    let (status, none) = hear(&[("X-Transcription-Model", "local")], b"clip");
+    assert_eq!(
+        (status, &none["error"]),
+        (503, &json!("server transcription disabled"))
+    );
+
+    // What the apps are told: the engine that can be used, and which hears by default.
+    let (_, able) = host.ask_as(token, "GET", "/transcription-capabilities", None);
+    assert_eq!(
+        (&able["available"], &able["default_model"], &able["engine"]),
+        (&json!(true), &json!(""), &json!("elevenlabs:scribe_v2"))
+    );
+    assert_eq!(
+        able["models"],
+        json!([{ "id": "elevenlabs:scribe_v2", "name": "ElevenLabs Scribe v2", "provider": "elevenlabs",
+                 "model": "scribe_v2", "weight": "cloud", "available": true,
+                 "credential": "ELEVEN_API_KEY", "turn_detection": "native", "biasing": "keyterms",
+                 "budget": { "unit": "terms", "capacity": 100, "max_term_chars": 49 } }])
+    );
+    let (_, settings) = host.ask_as(token, "GET", "/transcription-providers", None);
+    let usable: Vec<&str> = settings["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|provider| provider["available"] == true)
+        .map(|provider| provider["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(usable, ["elevenlabs"]);
+    assert_eq!(settings["models"].as_array().unwrap().len(), 5);
+
+    // The owner takes the key away. Now this Host has nothing to listen with, and says so
+    // to whatever is asked of it; nothing is sent anywhere.
+    std::fs::write(&keys, "[elevenlabs]\napi_key = \"\"\n").unwrap();
+    for headers in [
+        &[("X-Transcription-Model", "elevenlabs:scribe_v2")][..],
+        &[],
+    ] {
+        let (status, none) = hear(headers, b"clip");
+        assert_eq!(
+            (status, &none["error"]),
+            (503, &json!("server transcription disabled"))
+        );
+    }
+    assert_eq!(taken.lock().unwrap().len(), 2);
+    let (_, able) = host.ask_as(token, "GET", "/transcription-capabilities", None);
+    assert_eq!(
+        (&able["available"], &able["models"]),
+        (&json!(false), &json!([]))
+    );
 }

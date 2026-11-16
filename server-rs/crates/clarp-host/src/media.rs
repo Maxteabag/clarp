@@ -50,7 +50,7 @@ pub fn routes() -> Router<App> {
 
 /// A header's value as text, without the space around it. Bytes that are no plain signs
 /// are read one for one, as the Python Host reads a header.
-fn header_text(headers: &HeaderMap, name: &str) -> String {
+pub(crate) fn header_text(headers: &HeaderMap, name: &str) -> String {
     let value = headers.get(name).map(HeaderValue::as_bytes).unwrap_or(b"");
     let text: String = value.iter().map(|byte| char::from(*byte)).collect();
     text.trim().to_string()

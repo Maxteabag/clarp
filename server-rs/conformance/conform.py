@@ -92,6 +92,10 @@ class PythonHost(replay.Host):
         return self
 
 
+# What the reference Host's stand-in for an engine that listens hears in every clip.
+HEARD = scenarios.HEARD
+
+
 class RustHost(replay.Host):
     """The Rust Host behind the same fake Claude."""
 
@@ -114,6 +118,11 @@ class RustHost(replay.Host):
                 raise replay.StepFailed(f'the Rust Host did not make the agent {session} ({status})')
         self._end()
         self._launch()
+        # The reference Host's stand-in for an engine that listens is there from its first
+        # moment. This Host's is a worker that says when it is ready: it is waited for here, so
+        # that a model being loaded is not part of what a client sees of a scenario.
+        clip = {'bytes': 'is the engine there', 'content_type': 'audio/webm'}
+        replay._poll('the engine that listens', lambda: self.request('POST', '/transcribe', None, clip)[0] != 503)
         return self
 
     def _launch(self):
@@ -121,10 +130,15 @@ class RustHost(replay.Host):
         env = replay.child_env()
         env.update({'HOME': str(self.root / 'home'), 'TMPDIR': str(self.root / 'tmp'),
                     'CLARP_HOST_TOKEN': replay.TOKEN, 'CLARP_CLAUDE_PROGRAM': str(provider / 'bin' / 'claude'),
-                    'CLARP_QA_PROVIDER_ROOT': str(provider)})
+                    'CLARP_QA_PROVIDER_ROOT': str(provider),
+                    # Speech in: the Host's own worker with no model in it, which hears in every
+                    # clip what the reference Host's stand-in hears (tests/replay/host.py). No key
+                    # of an engine outside is in this Host's world.
+                    'CLARP_WHISPER_FAKE_SAYS': HEARD, 'ELEVEN_API_KEY': ''})
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
-             '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0'],
+             '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
+             '--whisper-python', sys.executable, '--whisper-worker', str(HERE.parent / 'tools' / 'whisper-worker.py')],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
             env=env, cwd=str(self.root), start_new_session=True)
         first = self.process.stderr.readline().decode(errors='replace')
@@ -236,6 +250,10 @@ def run_step(host, events, step, http, variables, clock=None):
             path_values[name] = urllib.parse.quote(str(dig(last, dotted, name)), safe='')
         path = replay.fill(step['path'], path_values)
         body = replay.fill(step.get('body'), variables)
+        # A body may say when it is sent (`body_now`: the names of its fields): an app says
+        # when it sent what it says, and a Host does not take what is old.
+        for name in step.get('body_now') or ():
+            body = {**(body or {}), name: int(time.time() * 1000)}
         if step.get('body_from_last'):
             body = {**(body or {}), **{name: dig(last, dotted, name)
                                        for name, dotted in step['body_from_last'].items()}}
@@ -351,7 +369,41 @@ NOT_BUILT = {
         'fields': ('avatar_url', 'model_avatar_url', 'personas'),
         'events': (),
     },
+    # What `GET /status` says of the Python Host's own way of telling whether a turn's process
+    # is still its own (budgets, a gate, counts of probes): no client reads it, and the Rust
+    # Host has no such machinery to tell of.
+    'the probes of the Python Host': {
+        'fields': ('delivery_admission',),
+        'events': (),
+    },
+    # Which run of the vocabulary a clip was heard with (`vocab_run_id` in the answer to
+    # `POST /transcribe`): the Rust Host asks an engine to listen for what its agents are called
+    # and keeps no runs of a vocabulary.
+    'the vocabulary an engine is asked to listen for': {
+        'fields': ('vocab_run_id',),
+        'events': (),
+    },
 }
+# What the reference Host's stand-in for an engine that listens says by fiat, whatever was heard
+# (`StubSTT(ends_terminal=True)` in tests/replay/host.py): whether what was said ends as a
+# sentence ends. A real engine's answer reads it off the text, and so does the Rust Host's;
+# that rule is held by the speech vectors (crates/clarp-kernel/tests/speech_vectors.rs), not here.
+BY_FIAT = {'/transcribe': ('ends_terminal',)}
+
+
+def by_fiat(path, body):
+    """A body without what the reference's stand-in decides by itself."""
+    said = BY_FIAT.get(path, ())
+    if not said or not isinstance(body, dict):
+        return body
+    return {key: value for key, value in body.items() if key not in said}
+# The lists an app's screens are made of, for what the Rust Host keeps nothing of yet: janitors,
+# what speech there is, the models an agent can be given. It answers each as the Python Host
+# answers a list, and empty, so that an app shows nothing there instead of an error. What is
+# compared of such an answer is what an app's reader needs of it: the status, and every field
+# with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
+NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/voice-catalog',
+                      '/agent-model-options'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
@@ -418,6 +470,32 @@ def without_features(value):
     if isinstance(value, dict):
         return {key: without_features(item) for key, item in value.items() if key not in NOT_YET_FIELDS}
     return value
+
+
+def outline(body):
+    """An answer as the names of its fields and the kind of each: what a reader of it needs."""
+    def kind(value):
+        if isinstance(value, bool):
+            return '<yes or no>'
+        if isinstance(value, (int, float)):
+            return '<number>'
+        if isinstance(value, str):
+            return '<text>'
+        if isinstance(value, list):
+            return '<list>'
+        if isinstance(value, dict):
+            return '<fields>'
+        return '<nothing>'
+    return {key: kind(value) for key, value in body.items()} if isinstance(body, dict) else kind(body)
+
+
+def kept_where(body):
+    """The answer to a file a user attached, with where it is kept as the agent's directory and
+    the file's name: under which directory a Host keeps its uploads is the Host's own, and the
+    agent reads the file from wherever the answer says."""
+    if not isinstance(body, dict) or not isinstance(body.get('path'), str):
+        return body
+    return {**body, 'path': '<uploads>/' + '/'.join(body['path'].split('/')[-2:])}
 
 
 def own_particulars(body):
@@ -512,6 +590,11 @@ def core(raw: dict) -> dict:
     Host does not have yet, with revisions as their order, with the ids of the agent's rows as
     the order they are first read in, and with each Host's own version as just "a version"."""
     http = [{**exchange, 'body': own_particulars(without_features(exchange['body']))} for exchange in raw['http']]
+    http = [{**exchange, 'body': outline(exchange['body'])} if exchange.get('path') in NOT_KEPT and exchange.get('status') == 200
+            else exchange for exchange in http]
+    http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange
+            for exchange in http]
+    http = [{**exchange, 'body': by_fiat(exchange.get('path'), exchange['body'])} for exchange in http]
     sse = []
     for frame in raw['sse']:
         data = frame.get('data')

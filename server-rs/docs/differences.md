@@ -17,15 +17,13 @@ conformance run compares them (`NOT_YET` in `conformance/conform.py`).
 
 The Rust Host lists a feature when everything the feature names is built and held to the Python
 Host (`FEATURES` in `crates/clarp-host/src/edge.rs`, each with the contract number that
-introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 15 Nov 2026 these are:
-`pairing`, `turn_queue_resume`, `background_jobs`, `background_job_cancel_generation`,
+introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 16 Nov 2026 these are:
+`pairing`, `turn_queue_resume`, `log_turn_summary`, `background_jobs`, `background_job_cancel_generation`,
 `durable_task_goals`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`,
 `artifact_pins`, `decision_lifecycle`, `text_input_requests`, `push_grants`, `push_unregister`,
 `desktop_send_quiet_push`, `snapshot_without_archived`, `helper_agents`, `media`, `html_reports`,
 `html_report_revisions`, `html_form_network`, `attention_index`. Everything else in the Python Host's list is absent, also where a part
-of it is built (`goal_updater`: a criterion can be set aside, the Goal keeper is not there;
-`log_turn_summary`: rows carry the turn's end, an answer that tool work follows is not yet marked
-as commentary).
+of it is built (`goal_updater`: a criterion can be set aside, the Goal keeper is not there).
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
@@ -33,6 +31,20 @@ Parts of the contract that no feature stands for, which the Rust Host sends empt
 | Part | What is empty | Planned |
 |---|---|---|
 | Portraits and the persona catalogue | `avatar_url` and `model_avatar_url` of an agent; `personas` in the snapshot | Stage 3. An agent that moves keeps its portrait from then on |
+| The probes of the Python Host | `delivery_admission` in `GET /status`: the budgets, the gate and the counts of the Python Host's own way of telling whether a turn's process is still its own | Never: this Host has no such machinery, and no client reads the block |
+
+The lists an app's screens are made of, for what the Rust Host keeps nothing of yet (`NOT_KEPT` in
+`conformance/conform.py`). An app asks for them of every Host it is paired with, whatever the Host
+says it has, so each is answered as the Python Host answers a list, and empty: an app shows nothing
+there, where a route that is not there would be an error on its screen. The run compares the status
+and every field with its kind.
+
+| Route | What the Python Host has there | What the Rust Host answers | Planned |
+|---|---|---|---|
+| `GET /janitors` | its seven janitors, their templates, triggers and providers | no janitors, `runtime_available: false` | When janitors are built |
+| `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that transcribe, the providers and their models | nothing that transcribes (`available: false`, no engine, no models); where a turn of speech ends is still found on the phone | Speech in |
+| `GET /voice-catalog` | the providers of speech and their voices | no provider, no voices, `voice_available: false` | Speech out |
+| `GET /agent-model-options` | every backend with its models, what each supports and how it is signed in | no backends listed. An agent's model is set by name (`POST /agent-llm`) | The catalogue of models |
 
 ## Compared as what a client may rely on
 
@@ -56,14 +68,14 @@ it covers that exact difference and nothing else.
 |---|---|---|---|
 | A plain send that has to wait | changes the queue and announces nothing (defect R5) | announces it with `queue-updated`, like a send with `queue_if_busy` | Every device shows the same queue, not only the one that sent |
 | The preview of a notification for a spoken reply | shows an emotion tag the engine acts out, `[sigh]` (defect R10) | does not | A notification shows the reply as every other place shows it |
-| `phase` of the reply that closes a later turn | `null` when the turn before had settled, `final` otherwise (defect R6) | `final` | A reply that closes a completed turn is the agent's final word in it, whenever it is read |
+| What the conversation shows of a turn that follows a settled one | only the rows written while the turn ran: what the agent said, with `phase: null`, without the cards of its tools and without the messages that only call tools (defect R6). The first turn of a conversation has all of it | every turn the same: a row for each message of the agent, a card for each tool it calls, `commentary` for what was said before tool work and `final` for what was said after it | What a turn did is shown whichever turn it was. The scenario `tool-turns` has two turns for this: the first is the same on both Hosts in every field |
 | `last_completed_message` after a later turn of an agent: one that had waited in the queue, or a plain one that was not its first | the user's message, though the agent has answered it (defect R12) | the agent's answer | A list of chats shows what the agent last said, whichever way the turn began |
 | `model` in an agent's row after a turn that completed | empty after some turns (defect R13) | the model that answered | An app shows which model an agent runs on; a turn that completed has said it |
 | `pinned` in the answer to the discard of a pinned artifact | `true`, beside `pinned_at: null` (defect R15) | `false` | A discard unpins. The answer says what is now true |
 | A reply, to a client that catches up by revision | given again after the next message arrived: the Host wrote it a second time (defect R16) | given once | A row that did not change is not sent again |
 | `live_activity` in an agent's row after its first turn | missing until the next turn, in some runs (defect R17) | there: at rest, since the turn's end | An app's line for an agent says what the agent last did, whichever turn that was |
+| What a Host says it listens with (`GET /transcription-capabilities`) | with an engine of its own: which engine hears a clip nobody named one for (`engine`), where a turn of speech ends (`turn_taking`), what could be installed (`catalog`). The reference Host of the suite has a stand-in for an engine and answers with four fields only | always the fields of a Host with an engine of its own | An app reads the same fields from every Host. Registered for the two scenarios that ask |
 | What a tool that died left on stderr, as the state of the failed turn gives it (`detail.error`) | as the tool wrote it, with the end of its last line | the same words without the line's end | The words are what failed, the line's end is how a terminal was told. `detail.provider_message` and the row under the message carry them without it on both Hosts |
-| `phase` of the last thing a turn said before it failed | `final` | none | A turn that failed has no final word: the row below says why it ended |
 
 ## Differences the conformance corpus does not reach
 
@@ -89,6 +101,11 @@ it covers that exact difference and nothing else.
 | `POST /tools/media` | not there | the same as `POST /media`, for the token a turn is given for its agent's tools | That token opens `/tools/` and nothing else, and publishing a file is a tool's act |
 | A file one agent published and another agent shows, after the second has moved to this Host (`clarp-host import`) | does not arise: the files of all agents are in one table | kept in the log of the agent that shows it too, marked as one that came along: fetched under its id, not in that agent's gallery, and no artifact of that agent is made of it. An id stands for one file on the Host: another file under it is refused | An agent's log holds what the agent needs to be shown whole. The file is kept once on the disk, whoever names it |
 | An artifact that names a published file, after its agent's session has another name | not found for this session: the file is looked up by the session name it was published under | found: an agent's files are in the agent's own log | A file belongs to the agent that published it, whatever the agent is called |
+| Where a file a user attaches is kept (`POST /upload`) | under the Host's own directory of uploads, by the agent's name | under this Host's data directory (`uploads/<agent>/`), by the agent's name | Each Host's own place. The answer says where, and the agent's tool reads the file from there. The names on the disk and the record of an upload's id are the same |
+| A file a user attaches when no agent is named and none is looked at | for the agent the Host is configured to default to | kept under `unknown`, and answered without a session | This Host has no agent it falls back to |
+| The lines of an app's own log (`POST /clog`) | written to the Host's event log when its diagnostics take them; on a Host that was not told to, answered `captured: false`, and the app keeps them | kept as lines in `logs/apps.log` under the data directory, 16 MiB of them and the 16 before, and answered without `captured` | They say why something did not work on a phone. An app keeps its lines until a Host has taken them, so a Host that takes none is asked again and again |
+| `GET /status` without a session | names the agent the Host is configured to default to | names none | This Host has no agent it falls back to |
+| What an app reports of itself (`POST /application-activity`) | kept in the settings table for 45 seconds | kept in memory for 45 seconds | No report outlives a restart usefully |
 | The name of a list of Updates (`snapshot_revision` of `GET /attention/inbox`) and the cursor a page ends with | a digest of the rows as its table has them; a cursor is that name and a place, in base 64 | a digest of the same fields as this Host has them; a cursor of the same shape | Each Host's own: a client hands a cursor back and compares names, and reads neither. The run compares whether two pages are of one list and whether a page has more after it. A cursor of one Host is stale on the other |
 | A countdown in Updates | shown where its clock stands | not shown | Countdowns are not built |
 | An artifact with a `podcast` in its payload | read as an episode (`podcast_live`) | refused: podcast episodes are not available on this Host yet | Not built. What is not there says so |
@@ -102,4 +119,17 @@ it covers that exact difference and nothing else.
 | A report whose revision is published again as it is, or as it once was | answered with the report as it stands, and announced as changed (`artifact-updated`) | answered the same, and nothing is announced | Nothing changed |
 | A report's revision that names no version | `revision-` and the 32 hex digits of a random UUID | `revision-` and 32 random hex digits | Random on both |
 | A goal's updater (`updater` in a plan: whether a janitor keeps the goal's bookkeeping, which, when it last ran, its last receipt) | as the janitor left it | off, with nothing in it | Janitors are not on this Host. A goal that moves here is the same goal in everything else (rehearsed on 15 Nov with 18 real plans) |
+| Which words an engine that listens is asked to listen for | a vocabulary compiled for the clip: packs of names and terms, ranked, cut to what the engine takes | what the agents on this Host are called, forty at most | The vocabulary is not built. Names are what an engine gets wrong first |
+| Whether a text an engine heard is something it invented on silence | a judge is asked where one is configured (a model that answers with a likelihood); else a list of phrases | the list of phrases, which is the Python Host's | The judge is not built. The list cannot tell an invented "Okay." from one that was said, and throws both away, on both Hosts |
+| A long recording | goes to a stronger engine where one is set for long recordings (`long_form_model`) | to the engine every clip goes to | Not built. The setting is empty on a Host that never chose one |
+| An agent with a language or an engine of its own | heard in that language, by that engine, with its fallbacks | heard like every agent: the Host's language, the Host's engine | Not built |
+| A cloud engine the contract lists other than ElevenLabs Scribe (Deepgram, Cartesia, Google) | used where its key is there | refused: `transcription model not installed` | One engine over the network is built: the one the owner uses |
+| A clip asked of `server-default` or `local` by name | refused as not installed, unless a model is registered under that name | heard by the Host's own engine | Those are the names an app has for "whatever this Host listens with" |
+| A Host that has no engine of its own and a key for an engine over the network | refuses every clip: `server transcription disabled` | hears with that engine when it is named, or chosen as the Host's default | An engine that is there is used |
+| The record of each thing said (`/voice-events`) and a kept copy of the clip (`retain_audio`) | kept | not kept: nothing of a clip stays on the Host | Not built |
+| A clip that says it belongs to a call (`X-Clarp-Call-Id`) | heard by the call's rules | refused, 409 | Calls are not built. A clip of a call is never taken as said in a chat |
+| Changing the settings of speech in from an app (`POST /transcription-providers`), installing and removing models | there | not there: the Host is told at its start which engine it has and which hears by default | Not built |
+| The calls of a tool whose reader does not group them into messages (Codex) | cells on the rows of the agent's messages (`display_cells`) | a row for each call (`kind: tool`), with the card of the call | Codex's cells are not built yet. Its calls are shown, each by its card, and carry the turn's trace |
+| A call of the tool that starts a sub-agent inside the agent's own process (`Agent`, `Task`) | a cell (`display_cells`, kind `subagents`) with what the sub-agent was asked, what it did line by line from its own transcript, and what came back | a card like any other tool's: the name, what was asked, what came back | Not built. What a sub-agent says is already kept out of the agent's own rows on both Hosts |
+| A tool that had not returned when its turn failed or its process went without an end | `recorded` | `recorded` | The same. Before 16 Nov 2026 this Host said `error` with a sentence of its own; now only an interrupted turn changes what its tools left unfinished (`interrupted`, on both Hosts) |
 

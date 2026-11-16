@@ -14,6 +14,7 @@ mismatch is a full import, as it always was.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -189,12 +190,23 @@ def test_an_unchanged_file_is_not_this_switchs_business(tmp_path, backend):
 # ---- every Nth audit is still the full import (audit_full_every) ----------------------
 
 def _by_digest(database):
-    """The checkpoint's count of audits by digest since its last full import."""
+    """The checkpoint's count of audits by digest since its last full import.
+    It lives beside the parser's carry, the small one of the checkpoint's two."""
     with sqlite3.connect(database) as connection:
-        [(count,)] = connection.execute(
-            "SELECT json_extract(store_carry_json, '$.audits_by_digest') "
+        [(count, in_store)] = connection.execute(
+            "SELECT json_extract(parser_carry_json, '$.audits_by_digest'), "
+            "json_extract(store_carry_json, '$.audits_by_digest') "
             "FROM transcript_import_checkpoints")
+    assert in_store is None
     return count
+
+
+def _carries(database):
+    """(the store's carry, the parser's carry) as the checkpoint stores them."""
+    with sqlite3.connect(database) as connection:
+        [found] = connection.execute(
+            "SELECT store_carry_json, parser_carry_json FROM transcript_import_checkpoints")
+    return found
 
 
 def _ticks(tmp_path, backend, how, last, *, other=None):
@@ -287,6 +299,47 @@ def test_with_the_other_switches_on_the_audits_are_the_same(tmp_path, backend):
     assert said == [
         (TAIL, ["added"], []), (TAIL, ["all"], []), (TAIL, ["added"], []), (TAIL, ["all"], []),
         (TAIL, ["added"], []), (FULL, [], ["saved"])]
+
+
+@BACKENDS
+def test_an_audit_by_digest_does_not_write_the_stores_carry_again(tmp_path, backend):
+    """The count moves at every audit by digest. In the store's carry that
+    wrote the whole carry each time, and with the words of
+    ``carry_live_rows_by_words`` a carry is up to 64 KB (review of #353). The
+    store's carry is byte for byte what the full import left; the count is a
+    key beside the parser's carry, which the parser's scans do not read."""
+    how = _how(True, audit_every=1, audit_full_every=4, carry_live_rows=True,
+               carry_live_rows_by_words=True)
+    reference, candidate, transcript = _world(tmp_path, backend, records=40)
+    with harness.PersistentLane(reference, transcript, backend, "reference") as full:
+        with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
+            full.tick(0)
+            actual.tick(0, faults=how)
+            store, parser = _carries(candidate)
+            assert '"reply_words"' in store and "audits_by_digest" not in parser
+            seen = []
+            for tick in range(1, 7):
+                _append(transcript, backend, 40 + tick)
+                full.tick(tick)
+                report = actual.tick(tick, faults=how)
+                harness.assert_product_equal(reference, candidate)
+                now_store, now_parser = _carries(candidate)
+                assert now_store == store                # not one byte of it written anew
+                seen.append(("audited_by_digest" in _retentions(report), _by_digest(candidate)))
+                # Without the count the parser's carry is what the boundary left.
+                kept = json.loads(now_parser)
+                kept.pop("audits_by_digest", None)
+                assert kept == json.loads(parser)
+    assert seen == [(False, None), (True, 1), (False, 1), (True, 2), (False, 2), (True, 3)]
+
+
+def test_the_count_is_not_something_the_parsers_scans_read():
+    """The reference scans take what they need from the parser's carry by
+    name; a key they do not know changes nothing they find."""
+    from lib import transcript_incremental as inc
+    assert inc._AUDITS_BY_DIGEST == "audits_by_digest"
+    for backend in harness.BACKENDS:
+        assert inc._AUDITS_BY_DIGEST not in inc.parser_carry(backend, [], {}, None)
 
 
 def test_the_switch_is_off_until_switched_on():

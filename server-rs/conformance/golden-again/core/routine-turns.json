@@ -475,7 +475,7 @@
       "id": "<row:4>",
       "kind": null,
       "origin": "watcher",
-      "phase": "final",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
