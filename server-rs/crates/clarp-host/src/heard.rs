@@ -415,9 +415,11 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         .map_err(|why| refuse(StatusCode::BAD_REQUEST, why))?;
     let fingerprint = heard::fingerprint(&audio, &content_type, &requested, hands_free);
     if headers.contains_key("x-clarp-call-id") {
-        // A clip that names its call is a call's, or nothing: it is never taken as said in
-        // a chat. This Host has no calls yet.
-        let none = json!({ "ok": false, "error": "calls are not available on this Host yet" });
+        // A clip that names its call is heard by its call's own rules, or not at all: it is
+        // never taken as said in a chat. This Host has calls, and not yet rules of their own
+        // for how each is heard; an app sends such a clip only to a Host that says it has.
+        let why = "how the clips of a call are heard is not built on this Host yet";
+        let none = json!({ "ok": false, "error": why });
         return Err((StatusCode::CONFLICT, none));
     }
 
@@ -780,7 +782,9 @@ async fn set_providers(
         settings.push((TURN_TAKING_KEY.to_string(), strategy));
     }
     if named("call_languages").is_some() || named("call_engines").is_some() {
-        return Err(bad("calls are not available on this Host yet"));
+        return Err(bad(
+            "how the clips of a call are heard is not built on this Host yet",
+        ));
     }
     app.fleet.set(settings).await?;
     let mut told = status(&app);

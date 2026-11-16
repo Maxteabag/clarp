@@ -9,8 +9,14 @@
 //!
 //! The routes answer as the Python Host's do (`server/lib/routes/calls.py`,
 //! `docs/group-calls.md`): the same statuses, bodies and words.
+//!
+//! And rings: an agent calls its owner ([`clarp_kernel::rings`], `docs/agent-rings.md`). The
+//! phone shows an incoming call; answering starts a call with that agent, whose opening
+//! line, voiced when the ring was placed, is heard first. A ring and the call it becomes
+//! are one desk's, because an answer changes both.
 
 use std::collections::{BTreeMap, HashMap};
+use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -19,7 +25,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use clarp_kernel::calls::{ADMINISTRATOR, Asker, At, Call, Calls, Contact, Effects, Refused};
-use serde_json::Value;
+use clarp_kernel::rings::{self, Rings};
+use serde_json::{Value, json};
 
 use crate::agent::Unavailable;
 use crate::edge::{ApiError, App, Principal};
@@ -33,10 +40,57 @@ const KIND: &str = "call";
 /// What a phone without full scope is told.
 const FULL_ONLY: &str = "Group calls require full-device authentication";
 
-/// The calls of this Host. `None` until they were read where they are kept.
+/// The kind of thing the rings are, and the names their parts are kept under.
+const RINGS: &str = "ring";
+const RINGS_KEPT: &str = "rings";
+const AUDIT_KEPT: &str = "audit";
+const SETTINGS_KEPT: &str = "settings";
+const VOIP_KEPT: &str = "voip";
+
+/// How long after a ring is overdue its timer looks: by then it is overdue for certain.
+const TIMER_SLACK: Duration = Duration::from_millis(500);
+/// How long the one who placed a ring waits to hear what became of its push. The ring
+/// rings either way.
+const PUSH_WAIT: Duration = Duration::from_secs(25);
+
+/// The calls and the rings of this Host.
+struct Books {
+    calls: Calls,
+    rings: Rings,
+}
+
+/// The desk of calls and rings. Its books are `None` until they were read where they are
+/// kept.
 #[derive(Default)]
 pub struct Desk {
-    calls: tokio::sync::Mutex<Option<Calls>>,
+    books: tokio::sync::Mutex<Option<Books>>,
+    /// One ring is placed at a time: from the moment it is admitted until it rings, while
+    /// its opening line is voiced. Reading and answering wait for nobody's voice.
+    placing: tokio::sync::Mutex<()>,
+    /// The rings whose agents wait to hear how they ended (`clarp-admin call ring --wait`):
+    /// by the call of the tool that placed each, with the moment it was called.
+    waited_for: std::sync::Mutex<HashMap<String, (String, i64)>>,
+}
+
+/// How long a tool that waits for its ring is remembered when it never asks again.
+const WAIT_KEPT_MS: i64 = 5 * 60 * 1000;
+
+/// What a request on the rings is given beside the books: the moment, the agents a name
+/// may mean, any agent by its id, and a new id.
+pub struct With<'a> {
+    pub at: At<'a>,
+    pub roster: &'a [Contact],
+    pub known: &'a dyn Fn(&str) -> Option<rings::Caller>,
+    pub new_id: &'a str,
+}
+
+impl With<'_> {
+    fn people(&self) -> rings::People<'_> {
+        rings::People {
+            roster: self.roster,
+            known: self.known,
+        }
+    }
 }
 
 /// The agents that may be asked into a call: the ones an app shows as contacts.
@@ -65,7 +119,26 @@ impl Desk {
         app: &App,
         ask: impl FnOnce(&mut Calls, At, (&[Contact], &str), &mut Effects) -> T,
     ) -> Result<T, Unavailable> {
-        let mut held = self.calls.lock().await;
+        let mut held = self.books.lock().await;
+        let books = Self::read(&mut held, app).await?;
+        let directory = app.fleet.directory();
+        let roster = roster(&directory);
+        let at = At {
+            now_ms: app.clock.now_ms(),
+            host_id: &app.server_id,
+        };
+        let mut out = Effects::default();
+        let answer = ask(&mut books.calls, at, (&roster, &ids::hex(16)), &mut out);
+        Self::done(app, &directory, &books.calls, out, at.now_ms).await?;
+        Ok(answer)
+    }
+
+    /// The books, read where they are kept when this is the first request since the Host
+    /// started. A ring that rang when the Host stopped is given its timer again.
+    async fn read<'a>(
+        held: &'a mut Option<Books>,
+        app: &App,
+    ) -> Result<&'a mut Books, Unavailable> {
         if held.is_none() {
             let mut books: BTreeMap<String, Vec<Call>> = BTreeMap::new();
             for (principal, kept) in app.fleet.kept_all(KIND).await? {
@@ -74,36 +147,264 @@ impl Desk {
                     books.insert(principal, calls);
                 }
             }
-            *held = Some(Calls::kept(books));
+            // And of the rings what can be read: the rest begins anew.
+            let kept: HashMap<String, Vec<u8>> =
+                app.fleet.kept_all(RINGS).await?.into_iter().collect();
+            let read = |name: &str| -> Value {
+                let kept = kept.get(name).map(|kept| serde_json::from_slice(kept));
+                kept.and_then(Result::ok).unwrap_or(Value::Null)
+            };
+            let list = |name: &str| match read(name) {
+                Value::Array(list) => list,
+                _ => Vec::new(),
+            };
+            let rung = serde_json::from_value(read(RINGS_KEPT)).unwrap_or_default();
+            let rings = Rings::kept(
+                rung,
+                list(AUDIT_KEPT),
+                &read(SETTINGS_KEPT),
+                list(VOIP_KEPT),
+            );
+            if let Some(ring) = rings.ringing() {
+                timer(app, ring.expires_at);
+            }
+            *held = Some(Books {
+                calls: Calls::kept(books),
+                rings,
+            });
         }
-        let Some(calls) = held.as_mut() else {
-            return Err(Unavailable("the calls could not be read".to_string()));
-        };
-        let directory = app.fleet.directory();
-        let roster = roster(&directory);
-        let at = At {
-            now_ms: app.clock.now_ms(),
-            host_id: &app.server_id,
-        };
-        let mut out = Effects::default();
-        let answer = ask(calls, at, (&roster, &ids::hex(16)), &mut out);
+        held.as_mut()
+            .ok_or_else(|| Unavailable("the calls could not be read".to_string()))
+    }
+
+    /// What a request did to the calls beside its answer: kept, told, noted.
+    async fn done(
+        app: &App,
+        directory: &Directory,
+        calls: &Calls,
+        out: Effects,
+        now_ms: i64,
+    ) -> Result<(), Unavailable> {
         for principal in &out.changed {
             let kept = serde_json::to_vec(calls.of(principal)).unwrap_or_default();
             app.fleet.keep(KIND, principal.clone(), Some(kept)).await?;
         }
         for event in out.events {
-            app.hub.publish(event, at.now_ms);
+            app.hub.publish(event, now_ms);
         }
         for notice in out.notices {
-            let mut members = directory.members.iter();
-            if let Some(member) = members.find(|member| member.record.agent_id == notice.agent_id) {
-                let _ = member
-                    .agent
-                    .note(format!("call:{}", notice.id), notice.text)
-                    .await;
+            note(directory, &notice.agent_id, &notice.id, notice.text).await;
+        }
+        Ok(())
+    }
+
+    /// One request on the rings. `ask` is given the rings, the calls an answer starts one
+    /// in, what a request needs to know, and where to put what it does beside its answer.
+    /// What it did is done before this answers: kept, told, noted; and the phones are told
+    /// on the side, except of what `waited_for` picks: that push is handed back, for the
+    /// one who placed a ring and waits to hear what became of it.
+    async fn ask_rings<T>(
+        &self,
+        app: &App,
+        ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
+    ) -> Result<(T, Vec<rings::Pushed>), Unavailable> {
+        let mut held = self.books.lock().await;
+        let books = Self::read(&mut held, app).await?;
+        let directory = app.fleet.directory();
+        let roster = roster(&directory);
+        let now_ms = app.clock.now_ms();
+        let (mut out, mut of_calls) = (rings::Effects::default(), Effects::default());
+        // What the request is given lives no longer than the request: nothing of it waits
+        // with what is done afterwards.
+        let answer = {
+            let known = |agent_id: &str| -> Option<rings::Caller> {
+                let mut members = directory.members.iter();
+                let member = members.find(|member| member.record.agent_id == agent_id)?;
+                let record = &member.record;
+                Some(rings::Caller {
+                    session: record.session.clone(),
+                    persona: record.persona.clone(),
+                    agent_id: record.agent_id.clone(),
+                    muted: record.muted,
+                    can_call: record.archived_at_ms.is_none() && record.deleted_at_ms.is_none(),
+                })
+            };
+            let with = With {
+                at: At {
+                    now_ms,
+                    host_id: &app.server_id,
+                },
+                roster: &roster,
+                known: &known,
+                new_id: &ids::hex(16),
+            };
+            ask(
+                &mut books.rings,
+                &mut books.calls,
+                &with,
+                (&mut out, &mut of_calls),
+            )
+        };
+        // What a call says of itself comes before what the ring says of its answer.
+        Self::done(app, &directory, &books.calls, of_calls, now_ms).await?;
+        let rings = &books.rings;
+        let keeps = [
+            (
+                out.changed.rings,
+                RINGS_KEPT,
+                serde_json::to_vec(rings.rings()),
+            ),
+            (
+                out.changed.audit,
+                AUDIT_KEPT,
+                serde_json::to_vec(rings.audit()),
+            ),
+            (
+                out.changed.settings,
+                SETTINGS_KEPT,
+                serde_json::to_vec(&rings.settings()),
+            ),
+            (
+                out.changed.voip,
+                VOIP_KEPT,
+                serde_json::to_vec(rings.voip()),
+            ),
+        ];
+        for (changed, name, kept) in keeps {
+            if changed {
+                app.fleet
+                    .keep(RINGS, name.to_string(), Some(kept.unwrap_or_default()))
+                    .await?;
             }
         }
+        for event in out.events {
+            app.hub.publish(event, now_ms);
+        }
+        for notice in out.notices {
+            note(&directory, &notice.agent_id, &notice.id, notice.text).await;
+        }
+        Ok((answer, out.pushes))
+    }
+
+    /// The owner's phones are told of what became of rings, on the side.
+    async fn push(&self, app: &App, pushes: Vec<rings::Pushed>) {
+        if pushes.is_empty() {
+            return;
+        }
+        let show_reason = self.shows_reason().await;
+        for pushed in pushes {
+            app.pusher.rung(crate::pusher::Rung {
+                ring: pushed.ring,
+                kind: pushed.kind,
+                show_reason,
+            });
+        }
+    }
+
+    async fn shows_reason(&self) -> bool {
+        let held = self.books.lock().await;
+        held.as_ref()
+            .is_some_and(|books| books.rings.shows_reason())
+    }
+
+    /// A request on the rings that places none: asked, done, and the phones told on the side.
+    pub async fn rings<T>(
+        &self,
+        app: &App,
+        ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
+    ) -> Result<T, Unavailable> {
+        let (answer, pushes) = self.ask_rings(app, ask).await?;
+        self.push(app, pushes).await;
         Ok(answer)
+    }
+
+    /// An agent rings its owner (`POST /calls/ring`, `clarp-admin call ring`). `turn_agent_id`
+    /// is the agent whose turn asks, which rings as itself only; empty for the owner's own
+    /// tools, which name the agent. The ring is admitted, its opening line is voiced in the
+    /// agent's own voice, and then it rings: the phones are pushed and the one who asked is
+    /// told what became of that.
+    pub async fn ring(
+        &self,
+        app: &App,
+        turn_agent_id: &str,
+        said: &Value,
+    ) -> Result<Result<Value, Refused>, Unavailable> {
+        let _one_at_a_time = self.placing.lock().await;
+        let (agent, reason, line) = (
+            text(said, "agent"),
+            text(said, "reason"),
+            text(said, "opening_line"),
+        );
+        let asked = rings::Asked {
+            turn_agent_id,
+            agent: &agent,
+            reason: &reason,
+            opening_line: &line,
+            conversation_mode: &said["conversation_mode"],
+            event_context: &said["event_context"],
+            opening_mode: said.get("opening_mode"),
+        };
+        let admitted = self.rings(app, |rings, _, with, (out, _)| {
+            rings.admit(&asked, with.people(), with.at.now_ms, out)
+        });
+        let admitted = match admitted.await? {
+            Ok(admitted) => admitted,
+            Err(refused) => return Ok(Err(refused)),
+        };
+        // Said in the agent's own voice now, so that answering plays it at once. When
+        // nothing here can say it, the ring rings all the same and the phone shows the line.
+        let voiced = match app.member(&admitted.caller().session) {
+            Some(member) => {
+                let said = app
+                    .mouth
+                    .said_outside_a_turn(&member.record, admitted.opening());
+                said.await
+            }
+            None => None,
+        };
+        let voiced = voiced.map_or_else(String::new, |name| format!("/audio/{name}"));
+        let placed = self.ask_rings(app, |rings, _, with, (out, _)| {
+            rings.place(admitted, &voiced, with.new_id, with.at.now_ms, out)
+        });
+        let (ring, pushes) = placed.await?;
+        timer(app, ring.expires_at);
+        // The phones are pushed, and the one who rang hears what became of it. No phone
+        // takes a call through a key of this Host's own: the push is the incoming call.
+        let show_reason = self.shows_reason().await;
+        let mut counted = crate::pusher::Counted::default();
+        let mut still_going = false;
+        for pushed in pushes {
+            let rung = crate::pusher::Rung {
+                ring: pushed.ring,
+                kind: pushed.kind,
+                show_reason,
+            };
+            if pushed.kind == "ring" {
+                let told = app.pusher.rung_and_told(rung);
+                match tokio::time::timeout(PUSH_WAIT, told).await {
+                    Ok(Ok(told)) => counted = told,
+                    // The pusher is gone with the Host; nothing was sent.
+                    Ok(Err(_)) => {}
+                    // A push service that takes its time: the ring rings, and the one who
+                    // rang is not kept waiting for the count.
+                    Err(_) => {
+                        still_going = true;
+                        counted.enabled = !app.config.push_relay.is_empty();
+                    }
+                }
+            } else {
+                app.pusher.rung(rung);
+            }
+        }
+        let mut delivery = json!({ "voip": { "enabled": false, "sent": 0, "failed": 0 } });
+        if let (Some(delivery), Value::Object(counted)) = (delivery.as_object_mut(), counted.told())
+        {
+            delivery.extend(counted);
+            if still_going {
+                delivery.insert("pending".to_string(), json!(true));
+            }
+        }
+        Ok(Ok(Rings::rung(&ring, delivery, app.clock.now_ms())))
     }
 
     /// Where a message that carries a call goes: the session of the agent that takes it.
@@ -125,6 +426,67 @@ impl Desk {
             .await?;
         Ok(routed.map(|routed| routed["session"].as_str().unwrap_or("").to_string()))
     }
+}
+
+impl Desk {
+    /// The ring a call of an agent's tool placed and waits for, when it placed one.
+    pub fn waited_for(&self, tool_call: &str) -> Option<String> {
+        let waits = self.waited_for.lock().ok()?;
+        waits.get(tool_call).map(|(ring_id, _)| ring_id.clone())
+    }
+
+    /// A call of an agent's tool waits for this ring, from now on.
+    pub fn wait_for(&self, tool_call: &str, ring_id: &str, now_ms: i64) {
+        if let Ok(mut waits) = self.waited_for.lock() {
+            waits.retain(|_, (_, since)| now_ms - *since < WAIT_KEPT_MS);
+            waits.insert(tool_call.to_string(), (ring_id.to_string(), now_ms));
+        }
+    }
+
+    /// The call of the tool has its answer: it waits no more.
+    pub fn waited(&self, tool_call: &str) {
+        if let Ok(mut waits) = self.waited_for.lock() {
+            waits.remove(tool_call);
+        }
+    }
+}
+
+/// A quiet word in an agent's conversation about its call or its ring, written once.
+async fn note(directory: &Directory, agent_id: &str, id: &str, text: String) {
+    let mut members = directory.members.iter();
+    if let Some(member) = members.find(|member| member.record.agent_id == agent_id) {
+        let _ = member.agent.note(format!("call:{id}"), text).await;
+    }
+}
+
+/// The Host has started: what it kept of calls and rings is read now. A ring that rang when
+/// the Host stopped is given its timer again; one that is overdue by now is missed now.
+pub fn resume(app: &App) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        let desk = app.calls.clone();
+        let _ = desk
+            .rings(&app, |rings, _, with, (out, _)| {
+                rings.timer(with.at.now_ms, out)
+            })
+            .await;
+    });
+}
+
+/// When a ring is overdue, it is missed: the apps, the phones and the agent are told then,
+/// and not only when somebody next looks.
+fn timer(app: &App, expires_at: i64) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        let left = u64::try_from(expires_at - app.clock.now_ms()).unwrap_or(0);
+        tokio::time::sleep(Duration::from_millis(left) + TIMER_SLACK).await;
+        let desk = app.calls.clone();
+        let _ = desk
+            .rings(&app, |rings, _, with, (out, _)| {
+                rings.timer(with.at.now_ms, out)
+            })
+            .await;
+    });
 }
 
 /// How many of the newest things of each agent's conversation are looked at for what was
@@ -231,7 +593,12 @@ fn by(app: &App, said: &Value) -> String {
     member.map_or_else(String::new, |member| member.record.session.clone())
 }
 
+/// What a request says. Nothing at all is an empty object, as on the Python Host; what is
+/// no object is told so by whoever asks for one.
 fn body(bytes: &Bytes) -> Value {
+    if bytes.is_empty() {
+        return json!({});
+    }
     serde_json::from_slice(bytes).unwrap_or(Value::Null)
 }
 
@@ -339,13 +706,197 @@ async fn change(
     answered(asked.await)
 }
 
+// ---- rings ---------------------------------------------------------------------------------
+
+/// Who asks about a ring, and what the request says: an object, or the refusal.
+fn ring_asked(principal: &Principal, bytes: &Bytes) -> Result<(String, Value), ApiError> {
+    let caller = caller(principal)?;
+    let said = body(bytes);
+    if !said.is_object() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
+    }
+    Ok((caller, said))
+}
+
+/// `POST /calls/ring` with `{reason, opening_line, agent}`: the owner's own tools ring for
+/// the agent they name. (An agent rings as itself with its own tool, `clarp-admin call ring`.)
+async fn ring(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    bytes: Bytes,
+) -> Response {
+    let said = match ring_asked(&principal, &bytes) {
+        Ok((_, said)) => said,
+        Err(refused) => return refused.into_response(),
+    };
+    let desk = app.calls.clone();
+    answered(desk.ring(&app, "", &said).await)
+}
+
+/// `GET /calls/ring`: the ring that rings now, or with `?ring_id=` that one, and the
+/// owner's switches.
+async fn ring_look(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Query(asked): Query<HashMap<String, String>>,
+) -> Response {
+    if let Err(refused) = caller(&principal) {
+        return refused.into_response();
+    }
+    let ring_id = asked.get("ring_id").cloned().unwrap_or_default();
+    let desk = app.calls.clone();
+    let looked = desk.rings(&app, |rings, _, with, (out, _)| {
+        rings.look(&ring_id, with.at.now_ms, out)
+    });
+    answered(looked.await)
+}
+
+/// `POST /calls/ring/answer` with `{ring_id}`: the user takes the call. A call starts with
+/// the agent on the floor, and the answer hands back the opening line to play first.
+async fn ring_answer(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    bytes: Bytes,
+) -> Response {
+    let (caller, said) = match ring_asked(&principal, &bytes) {
+        Ok(asked) => asked,
+        Err(refused) => return refused.into_response(),
+    };
+    let ring_id = text(&said, "ring_id");
+    let asked = rings::Answer {
+        principal: &caller,
+        ring_id: &ring_id,
+        conversation_mode: &said["conversation_mode"],
+        opening_mode: said.get("opening_mode"),
+    };
+    let desk = app.calls.clone();
+    let taken = desk.rings(&app, |rings, calls, with, effects| {
+        rings.answer(calls, &asked, (with.roster, with.new_id), with.at, effects)
+    });
+    answered(taken.await)
+}
+
+/// `POST /calls/ring/decline` with `{ring_id}`: the user does not take the call.
+async fn ring_decline(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    bytes: Bytes,
+) -> Response {
+    let (caller, said) = match ring_asked(&principal, &bytes) {
+        Ok(asked) => asked,
+        Err(refused) => return refused.into_response(),
+    };
+    let ring_id = text(&said, "ring_id");
+    let desk = app.calls.clone();
+    let declined = desk.rings(&app, |rings, _, with, (out, _)| {
+        rings.decline((&caller, &ring_id), with.at.now_ms, out)
+    });
+    answered(declined.await)
+}
+
+/// `POST /calls/ring/cancel` with `{ring_id}`: the ring is taken back before the user
+/// answers, by the owner's own tools. (An agent takes back its own with its own tool.)
+async fn ring_cancel(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    bytes: Bytes,
+) -> Response {
+    let said = match ring_asked(&principal, &bytes) {
+        Ok((_, said)) => said,
+        Err(refused) => return refused.into_response(),
+    };
+    let ring_id = text(&said, "ring_id");
+    let desk = app.calls.clone();
+    let cancelled = desk.rings(&app, |rings, _, with, (out, _)| {
+        rings.cancel(("", &ring_id), with.at.now_ms, out)
+    });
+    answered(cancelled.await)
+}
+
+/// `GET /calls/ring/settings`: the owner's switches for rings, and the newest of the trail.
+async fn ring_settings(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+) -> Response {
+    if let Err(refused) = caller(&principal) {
+        return refused.into_response();
+    }
+    let desk = app.calls.clone();
+    let shown = desk.rings(&app, |rings, _, _, _| Ok(rings.shown()));
+    answered(shown.await)
+}
+
+/// `POST /calls/ring/settings` with `{enabled}` or `{show_reason}`: the owner turns rings
+/// on or off, or says whether a locked phone shows why an agent calls.
+async fn ring_settings_change(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    bytes: Bytes,
+) -> Response {
+    let said = match ring_asked(&principal, &bytes) {
+        Ok((_, said)) => said,
+        Err(refused) => return refused.into_response(),
+    };
+    let desk = app.calls.clone();
+    let changed = desk.rings(&app, |rings, _, with, (out, _)| {
+        rings.change(&said, with.at.now_ms, out)
+    });
+    answered(changed.await)
+}
+
+/// `POST /calls/ring/voip-token` with `{token, environment}`: a phone leaves the token an
+/// incoming call would be pushed to. It is kept; this Host has no key of its own to push a
+/// call with, so a ring reaches the phone as a notification that breaks through Focus.
+async fn ring_voip_token(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    bytes: Bytes,
+) -> Response {
+    let (caller, said) = match ring_asked(&principal, &bytes) {
+        Ok(asked) => asked,
+        Err(refused) => return refused.into_response(),
+    };
+    let (token, environment) = (text(&said, "token"), text(&said, "environment"));
+    let desk = app.calls.clone();
+    let left = desk.rings(&app, |rings, _, with, (out, _)| {
+        let modes = &said["supported_conversation_modes"];
+        rings.voip_token(&caller, (&token, &environment, modes), with.at.now_ms, out)
+    });
+    answered(left.await)
+}
+
+/// What of rings this Host does not have: a ring held as a live voice call, one that
+/// listens first, a phone's own switch. Said in words, and nothing is done.
+async fn not_this_ring() -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_IMPLEMENTED,
+        "This Host rings as an ordinary call only: no live voice call, no listening first, no \
+         switch for one phone",
+    )
+}
+
 pub fn routes() -> Router<App> {
     // A route for each change there is: anything else under `/calls/` is no route, as on
     // the Python Host.
     let changes = [
         "add", "remove", "hold", "resume", "switch", "transfer", "end",
     ];
-    let router = Router::new().route("/calls", get(snapshot).post(start));
+    let router = Router::new()
+        .route("/calls", get(snapshot).post(start))
+        .route("/calls/ring", get(ring_look).post(ring))
+        .route("/calls/ring/answer", post(ring_answer))
+        .route("/calls/ring/decline", post(ring_decline))
+        .route("/calls/ring/cancel", post(ring_cancel))
+        .route(
+            "/calls/ring/settings",
+            get(ring_settings).post(ring_settings_change),
+        )
+        .route("/calls/ring/voip-token", post(ring_voip_token))
+        .route(
+            "/calls/ring/{*rest}",
+            get(not_this_ring).post(not_this_ring),
+        )
+        .route("/calls/live", post(not_this_ring));
     changes.iter().fold(router, |router, action| {
         let (path, action) = (format!("/calls/{action}"), (*action).to_string());
         let change = move |app: State<App>, principal: Extension<Principal>, bytes: Bytes| {

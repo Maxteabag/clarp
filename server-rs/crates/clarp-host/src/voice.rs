@@ -848,6 +848,27 @@ impl Mouth {
     /// The herald's clip for an agent: its name and its file. `None`: nothing on this Host
     /// can say it now.
     async fn herald_clip(&self, record: &AgentRecord) -> Option<(String, PathBuf)> {
+        let text = herald::words(&record.persona, &record.session);
+        self.clip_of(record, text, HERALD_FILE).await
+    }
+
+    /// A line an agent says outside any turn, in its own voice, as a clip of its own: the
+    /// name of its file, which `/audio/<name>` hands out. A ring's opening line is one: it
+    /// is voiced when the ring is placed, so that answering plays it at once. `None`:
+    /// nothing on this Host can say it now.
+    pub async fn said_outside_a_turn(&self, record: &AgentRecord, text: &str) -> Option<String> {
+        let made = self.clip_of(record, text.to_string(), "").await;
+        made.map(|(name, _)| name)
+    }
+
+    /// A clip of `text` in an agent's voice, under a name that begins with `prefix`: its
+    /// name and its file.
+    async fn clip_of(
+        &self,
+        record: &AgentRecord,
+        text: String,
+        prefix: &'static str,
+    ) -> Option<(String, PathBuf)> {
         let owners = self.owners();
         let has_key = |provider: &str| self.has_key(provider, &owners);
         let Chosen::By(by) = chosen(&owners, record, &has_key) else {
@@ -857,7 +878,6 @@ impl Mouth {
             .iter()
             .filter_map(|(provider, voice)| Some((self.engine(&owners, provider)?, voice.clone())))
             .collect();
-        let text = herald::words(&record.persona, &record.session);
         let (audio, session, now) = (self.audio.clone(), record.session.clone(), self.now_ms());
         let made = tokio::task::spawn_blocking(move || -> Option<(String, PathBuf)> {
             let listed: Vec<(&dyn Speaker, &str)> = engines
@@ -878,10 +898,7 @@ impl Mouth {
                 .ok()?;
             // A name of its own: the moment it was made, and the next when that is taken.
             for later in 0..100 {
-                let name = format!(
-                    "{HERALD_FILE}{}",
-                    said::clip_name(Some(&session), now + later)
-                );
+                let name = format!("{prefix}{}", said::clip_name(Some(&session), now + later));
                 let path = audio.join(&name);
                 let file = std::fs::OpenOptions::new()
                     .write(true)
