@@ -400,8 +400,51 @@ async fn no_skills() -> ApiError {
     not_built("Keeping skills installed is")
 }
 
+/// `GET /harness-providers?harness=`: the providers of models a harness can be signed in
+/// to. This Host runs no harness that takes one: none is installed, none is listed.
+async fn model_providers(Query(asked): Asked) -> Json<Value> {
+    let harness = match asked.get("harness").map(|said| said.trim()) {
+        Some(named) if !named.is_empty() => named,
+        _ => "opencode",
+    };
+    Json(json!({
+        "catalogue_available": false, "harness": harness, "installed": false,
+        "providers": [], "store_harness": harness, "tasks": {},
+    }))
+}
+
+/// `GET /harness-providers/models?provider=`: no provider is known here.
+async fn models_of_provider(Query(asked): Asked) -> ApiError {
+    let provider = asked.get("provider").map_or("", |said| said.trim());
+    bad(&format!("unknown provider {provider}"))
+}
+
+async fn no_model_providers() -> ApiError {
+    not_built("Signing a harness in to a provider of models is")
+}
+
+/// What an app can ask to have done to an agent that this Host cannot do yet: its
+/// conversation made shorter, servers of its own for its tool.
+async fn no_compaction() -> ApiError {
+    not_built("Compacting a conversation from an app is")
+}
+
+async fn no_servers() -> ApiError {
+    not_built("Giving a tool servers of its own is")
+}
+
+async fn no_teams() -> ApiError {
+    not_built("Teams are")
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/harness-providers", get(model_providers))
+        .route("/harness-providers/models", get(models_of_provider))
+        .route("/harness-providers/{action}", post(no_model_providers))
+        .route("/compact", post(no_compaction))
+        .route("/agent-mcp", post(no_servers))
+        .route("/team-nudging", post(no_teams))
         .route("/server-update", get(software).post(no_update))
         .route("/managed-skills", get(skills).post(no_skills))
         .route("/backend-auth", get(logins))
