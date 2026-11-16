@@ -21,6 +21,7 @@ pub mod config;
 pub mod edge;
 pub mod fleet;
 pub mod goaltool;
+pub mod heard;
 pub mod hub;
 pub mod ids;
 pub mod joblog;

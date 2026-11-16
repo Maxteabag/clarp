@@ -56,6 +56,27 @@ pub struct Config {
     /// This Host's own credential at the relay, for phones that gave it no grant of their
     /// own. Empty: only phones with a grant are reached.
     pub push_credential: String,
+    /// The interpreter that runs the worker of the Host's own engine that listens: a Python
+    /// that has `faster-whisper`. Empty: this Host has no engine of its own.
+    pub whisper_python: String,
+    /// The worker's script. Unless it is named: `whisper-worker.py` in `libexec` beside the
+    /// directory the Host's program is in, where an installation puts it.
+    pub whisper_worker: PathBuf,
+    /// The model the Host's own engine runs, as the apps name it (`small.en`).
+    pub whisper_model: String,
+    /// What the worker loads for it: the same name, or a directory that holds the model.
+    pub whisper_source: String,
+    /// How the model's numbers are kept in memory (`int8`).
+    pub whisper_compute: String,
+    /// The language that is spoken to this Host's agents (`en`). Empty: the engines find it.
+    pub speech_language: String,
+    /// A file of the Python Host's kind in which the keys of engines reached over the
+    /// network are looked up when a clip is to be heard. Nothing of it is copied.
+    pub speech_keys: Option<PathBuf>,
+    /// The engine that hears a clip nobody named one for: `local`, or a cloud engine's name.
+    pub transcription_engine: String,
+    /// Another address for ElevenLabs Scribe: a stand-in on this machine. Empty: the real one.
+    pub scribe_endpoint: String,
 }
 
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
@@ -63,9 +84,12 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--launcher direct|systemd] [--shim PATH] \
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--accounts none|follow] [--logins-checked-every-ms N] \
-[--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N]
+[--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
+[--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
+[--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
 The token the apps must present is read from CLARP_HOST_TOKEN, and this Host's credential at
-the push relay, when it has one, from CLARP_PUSH_CREDENTIAL.";
+the push relay, when it has one, from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
+over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY.";
 
 fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
@@ -99,6 +123,14 @@ impl Config {
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
         let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
         let mut push_relay = String::new();
+        let mut whisper_python = String::new();
+        let mut whisper_worker = None;
+        let mut whisper_model = "small.en".to_string();
+        let mut whisper_source = None;
+        let mut whisper_compute = "int8".to_string();
+        let mut speech_language = "en".to_string();
+        let mut speech_keys = None;
+        let mut transcription_engine = "local".to_string();
         while let Some(arg) = args.next() {
             let mut value = |what: &str| args.next().ok_or(format!("{arg} needs {what}"));
             match arg.as_str() {
@@ -153,6 +185,14 @@ impl Config {
                         .parse()
                         .map_err(|_| "--helper-archive-grace-ms needs a number".to_string())?;
                 }
+                "--whisper-python" => whisper_python = value("a path")?,
+                "--whisper-worker" => whisper_worker = Some(PathBuf::from(value("a path")?)),
+                "--whisper-model" => whisper_model = value("a name")?,
+                "--whisper-source" => whisper_source = Some(value("a name or a directory")?),
+                "--whisper-compute" => whisper_compute = value("a kind")?,
+                "--speech-language" => speech_language = value("a language")?,
+                "--speech-keys" => speech_keys = Some(PathBuf::from(value("a file")?)),
+                "--transcription-engine" => transcription_engine = value("a name")?,
                 other => return Err(format!("unknown argument {other}")),
             }
         }
@@ -167,6 +207,24 @@ impl Config {
                 .and_then(|exe| exe.parent().map(|dir| dir.join("clarp-shim")))
                 .unwrap_or_else(|| PathBuf::from("clarp-shim"))
         });
+        // The worker of the Host's own engine is installed in `libexec`, one directory up.
+        let whisper_worker = whisper_worker.unwrap_or_else(|| {
+            let beside = std::env::current_exe().ok().and_then(|exe| {
+                let installed = exe.parent()?.parent()?;
+                Some(installed.join("libexec").join("whisper-worker.py"))
+            });
+            beside.unwrap_or_else(|| PathBuf::from("whisper-worker.py"))
+        });
+        // A stand-in for an engine over the network is on this machine, or it is none.
+        let scribe_endpoint = std::env::var("CLARP_SCRIBE_ENDPOINT").unwrap_or_default();
+        let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"];
+        if !scribe_endpoint.is_empty()
+            && !local.iter().any(|begin| scribe_endpoint.starts_with(begin))
+        {
+            return Err(format!(
+                "CLARP_SCRIBE_ENDPOINT {scribe_endpoint}: an address on this machine"
+            ));
+        }
         Ok(Self {
             run_dir,
             listen: listen
@@ -200,6 +258,15 @@ impl Config {
             data_dir,
             push_relay,
             push_credential: std::env::var("CLARP_PUSH_CREDENTIAL").unwrap_or_default(),
+            whisper_source: whisper_source.unwrap_or_else(|| whisper_model.clone()),
+            whisper_python,
+            whisper_worker,
+            whisper_model,
+            whisper_compute,
+            speech_language,
+            speech_keys,
+            transcription_engine,
+            scribe_endpoint,
         })
     }
 }

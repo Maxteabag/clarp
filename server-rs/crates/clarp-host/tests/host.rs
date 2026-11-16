@@ -7029,9 +7029,31 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     ] {
         assert!(!providers[field].is_null(), "an app's reader needs {field}");
     }
+    // Who offers engines over the network is listed as the contract lists it; on a Host
+    // that has no key for any of them, none can be used.
+    let offered: Vec<(&str, bool)> = providers["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|provider| {
+            (
+                provider["id"].as_str().unwrap(),
+                provider["available"].as_bool().unwrap(),
+            )
+        })
+        .collect();
     assert_eq!(
-        (&providers["engine"], &providers["providers"]),
-        (&json!(""), &json!([]))
+        offered,
+        [
+            ("deepgram", false),
+            ("elevenlabs", false),
+            ("cartesia", false),
+            ("google", false)
+        ]
+    );
+    assert_eq!(
+        (&providers["engine"], &providers["language"]),
+        (&json!("local"), &json!("en"))
     );
     let voices = host.get("/voice-catalog");
     assert_eq!(
@@ -7167,4 +7189,398 @@ fn a_user_attaches_a_file_to_what_they_say() {
     let replayed: Value = serde_json::from_slice(&answer.body).unwrap();
     assert_eq!((answer.status, &replayed["path"]), (200, &json!(kept_path)));
     assert_eq!(std::fs::read(&kept_path).unwrap(), b"# Notes\n");
+}
+
+/// A worker of the Host's own engine that hears nothing and answers as the real one does:
+/// for a clip, how many bytes it has. A clip of one byte is silence, on which an engine
+/// invents thanks; a clip of two bytes breaks it.
+const WHISPER_STAND_IN: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"op":"load"'*) echo '{"event":"ready"}' ;;
+    *'"op":"transcribe"'*)
+      id=${line#*\"id\":\"}; id=${id%%\"*}
+      path=${line#*\"path\":\"}; path=${path%%\"*}
+      bytes=$(wc -c < "$path" | tr -d ' ')
+      case "$bytes" in
+        1) echo "{\"id\":\"$id\",\"segments\":[{\"text\":\" Thank you.\",\"no_speech_prob\":0.1}]}" ;;
+        2) echo "{\"id\":\"$id\",\"error\":\"synthetic failure\"}" ;;
+        *) echo "{\"id\":\"$id\",\"segments\":[{\"text\":\" Open the log of $bytes bytes.\",\"no_speech_prob\":0.1},{\"text\":\" (noise)\",\"no_speech_prob\":0.9}]}" ;;
+      esac ;;
+    *'"op":"quit"'*) exit 0 ;;
+  esac
+done
+"#;
+
+#[test]
+fn a_person_speaks_and_the_clip_becomes_text() {
+    let place = Place::new("speech-in");
+    let worker = place.root.join("whisper-stand-in.sh");
+    std::fs::write(&worker, WHISPER_STAND_IN).unwrap();
+    let token = "speech-token";
+    let engine = [
+        "--whisper-python",
+        "sh",
+        "--whisper-worker",
+        worker.to_str().unwrap(),
+    ];
+    // Whatever key the machine that runs this test has of its own, this Host has none: no
+    // test reaches an engine outside.
+    let no_key = [("ELEVEN_API_KEY", "")];
+    let host = place.start_in(token, &engine, &no_key);
+    let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/transcribe", headers, clip);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+    // The engine loads its model when the Host starts. Until it has, a clip is told so.
+    wait_for("the engine to have loaded its model", || {
+        let (status, said) = hear(&[], b"a clip");
+        assert!(
+            status == 200 || (status == 503 && said["error"] == "whisper model loading"),
+            "{status} {said}"
+        );
+        status == 200
+    });
+
+    // A clip becomes text: what the engine was sure was speech, with the trace the message
+    // will travel under when the app sends it.
+    let named = [
+        ("Content-Type", "audio/mp4"),
+        ("X-Transcription-ID", "utt-1"),
+        ("X-Hands-Free", "1"),
+    ];
+    let (status, said) = hear(&named, b"a clip of speech");
+    assert_eq!(status, 200, "{said}");
+    let fields: Vec<&str> = said
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            "text",
+            "ends_terminal",
+            "trace_id",
+            "herald_consumed",
+            "hands_free",
+            "orchestrator_skip_herald",
+            "vocab_run_id",
+            "cached"
+        ]
+    );
+    assert_eq!(said["text"], "Open the log of 16 bytes.");
+    assert_eq!(
+        (&said["ends_terminal"], &said["hands_free"], &said["cached"]),
+        (&json!(true), &json!(true), &json!(false))
+    );
+    let trace = said["trace_id"].as_str().unwrap().to_string();
+    assert!(trace.len() == 16 && trace.bytes().all(|byte| byte.is_ascii_hexdigit()));
+
+    // The same request again, because its answer was lost on the way: answered with what
+    // was answered, the same trace, and said to be so.
+    let (status, again) = hear(&named, b"a clip of speech");
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(
+        (&again["cached"], &again["trace_id"], &again["text"]),
+        (&json!(true), &json!(trace), &said["text"])
+    );
+    // Another clip under the same name is refused, and so is the same clip said another way.
+    let (status, refused) = hear(&named, b"another clip");
+    assert_eq!(
+        (status, &refused["error"]),
+        (409, &json!("transcription id reused for different audio"))
+    );
+    let (status, _) = hear(&named[..2], b"a clip of speech");
+    assert_eq!(status, 409, "hands-free or not is part of what was asked");
+    // A clip without a name is nobody's twice: each is heard, each has a trace of its own.
+    let (_, one) = hear(&[], b"a clip of speech");
+    let (_, two) = hear(&[], b"a clip of speech");
+    assert_eq!(
+        (&one["cached"], &two["cached"]),
+        (&json!(false), &json!(false))
+    );
+    assert_ne!(one["trace_id"], two["trace_id"]);
+    assert_eq!(one["hands_free"], false);
+
+    // What an engine invents on silence is nobody's message: the text is empty.
+    let (status, silent) = hear(&[], b"1");
+    assert_eq!(
+        (status, &silent["text"], &silent["ends_terminal"]),
+        (200, &json!(""), &json!(false))
+    );
+    // An engine that fails says why, and the next clip is heard.
+    let (status, failed) = hear(&[], b"22");
+    assert_eq!(
+        (status, &failed["error"]),
+        (500, &json!("synthetic failure"))
+    );
+    assert_eq!(hear(&[], b"a clip").0, 200);
+
+    // The Host's own engine by each of its names; and what there is none for.
+    for model in ["faster-whisper:small.en", "server-default", "local"] {
+        let (status, said) = hear(&[("X-Transcription-Model", model)], b"a clip");
+        assert_eq!(
+            (status, &said["text"]),
+            (200, &json!("Open the log of 6 bytes.")),
+            "{model}"
+        );
+    }
+    for (model, status, why) in [
+        (
+            "faster-whisper:medium",
+            400,
+            "transcription model not installed: faster-whisper:medium",
+        ),
+        (
+            "nothing-of-the-kind",
+            400,
+            "transcription model not installed: nothing-of-the-kind",
+        ),
+        (
+            "deepgram:nova-3",
+            400,
+            "transcription model not installed: deepgram:nova-3",
+        ),
+        (
+            "elevenlabs:scribe_v9",
+            500,
+            "unknown transcription engine: elevenlabs:scribe_v9",
+        ),
+        (
+            "elevenlabs:scribe_v2",
+            500,
+            "elevenlabs API key is not configured",
+        ),
+    ] {
+        let (answered, said) = hear(&[("X-Transcription-Model", model)], b"a clip");
+        assert_eq!((answered, &said["error"]), (status, &json!(why)), "{model}");
+    }
+    // What is no clip, and what is no name for a job.
+    assert_eq!(hear(&[], b""), (400, json!({ "error": "bad size" })));
+    assert_eq!(
+        hear(&[("X-Transcription-ID", "has space")], b"a clip"),
+        (400, json!({ "error": "invalid transcription id" }))
+    );
+    // A clip that says it belongs to a call is a call's or nothing, and there are no calls.
+    let (status, call) = hear(&[("X-Clarp-Call-Id", "call-1")], b"a clip");
+    assert_eq!((status, &call["ok"]), (409, &json!(false)));
+    // Without the token nothing is heard.
+    assert_eq!(
+        fetch(&host, "", "POST", "/transcribe", &[], b"a clip").status,
+        401
+    );
+
+    // What the apps are told there is to ask for.
+    let (_, able) = host.ask_as(token, "GET", "/transcription-capabilities", None);
+    assert_eq!(
+        (&able["available"], &able["default_model"], &able["engine"]),
+        (
+            &json!(true),
+            &json!("faster-whisper:small.en"),
+            &json!("local")
+        )
+    );
+    assert_eq!(
+        able["models"],
+        json!([{ "id": "faster-whisper:small.en", "name": "Small En", "provider": "faster-whisper",
+                 "model": "small.en", "weight": "medium" }])
+    );
+
+    // Nothing of a clip is kept, and of the answers only the one that has a name.
+    assert_eq!(files_under(&place.root.join("run").join("heard")), 0);
+    assert_eq!(
+        files_under(&place.root.join("data").join("transcriptions")),
+        1
+    );
+    // The answer outlives the Host: the same request after a restart is answered as before.
+    host.kill();
+    let host = place.start_in(token, &engine, &no_key);
+    let answer = fetch(
+        &host,
+        token,
+        "POST",
+        "/transcribe",
+        &named,
+        b"a clip of speech",
+    );
+    let after: Value = serde_json::from_slice(&answer.body).unwrap();
+    assert_eq!(
+        (answer.status, &after["cached"], &after["trace_id"]),
+        (200, &json!(true), &json!(trace))
+    );
+}
+
+/// A stand-in for ElevenLabs on the loopback: takes requests one after another, keeps what
+/// each sent, and answers every one with the same words.
+fn scribe_stand_in(answer: &'static str) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!(
+        "http://{}/v1/speech-to-text",
+        listener.local_addr().unwrap()
+    );
+    let taken: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let keeps = taken.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let (mut seen, mut buffer) = (Vec::new(), [0u8; 4096]);
+            let (head_end, length) = loop {
+                let Ok(read) = stream.read(&mut buffer) else {
+                    break (0, 0);
+                };
+                seen.extend_from_slice(&buffer[..read]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some(at) = text.find("\r\n\r\n") {
+                    let length = text.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        let named = name.eq_ignore_ascii_case("content-length");
+                        named.then(|| value.trim().parse::<usize>().ok())?
+                    });
+                    break (at + 4, length.unwrap_or(0));
+                }
+                if read == 0 {
+                    break (0, 0);
+                }
+            };
+            while seen.len() < head_end + length {
+                let Ok(read) = stream.read(&mut buffer) else {
+                    break;
+                };
+                if read == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&buffer[..read]);
+            }
+            keeps
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&seen).to_string());
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{answer}",
+                answer.len()
+            );
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    (address, taken)
+}
+
+#[test]
+fn a_clip_is_heard_by_an_engine_over_the_network_with_a_key_read_where_the_owner_keeps_it() {
+    let place = Place::new("speech-cloud");
+    let (address, taken) = scribe_stand_in(r#"{"text":" Open the door. ","words":[{"end":1.5}]}"#);
+    // The owner's own file of keys, of the Python Host's kind. Nothing of it is copied.
+    let keys = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &keys,
+        "[server]\nport = 7682\n\n[elevenlabs]\napi_key = \"key-in-the-owners-file\"\n",
+    )
+    .unwrap();
+    let token = "cloud-token";
+    let host = place.start_in(
+        token,
+        &[
+            "--speech-keys",
+            keys.to_str().unwrap(),
+            "--transcription-engine",
+            "elevenlabs:scribe_v2",
+        ],
+        // The only key is the one in the file, whatever the machine that runs this test has.
+        &[
+            ("CLARP_SCRIBE_ENDPOINT", address.as_str()),
+            ("ELEVEN_API_KEY", ""),
+        ],
+    );
+    host.new_agent("Maximus");
+    let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/transcribe", headers, clip);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+
+    // This Host has no engine of its own: the one chosen for it hears what nobody named an
+    // engine for, and is asked to listen for what the agents here are called.
+    let (status, said) = hear(&[("Content-Type", "audio/mp4")], b"made-up audio");
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["text"], &said["ends_terminal"]),
+        (&json!("Open the door."), &json!(true))
+    );
+    let request = taken.lock().unwrap().last().cloned().unwrap();
+    let lower = request.to_lowercase();
+    assert!(
+        lower.contains("xi-api-key: key-in-the-owners-file"),
+        "the key is read from the file"
+    );
+    assert!(request.contains("name=\"model_id\"\r\n\r\nscribe_v2\r\n"));
+    assert!(request.contains("name=\"language_code\"\r\n\r\nen\r\n"));
+    assert!(
+        request.contains("name=\"keyterms\"\r\n\r\nMaximus\r\n"),
+        "{request}"
+    );
+    assert!(
+        request
+            .contains("filename=\"audio.m4a\"\r\nContent-Type: audio/mp4\r\n\r\nmade-up audio\r\n")
+    );
+    // By its name too.
+    let (status, _) = hear(
+        &[("X-Transcription-Model", "elevenlabs:scribe_v2")],
+        b"clip",
+    );
+    assert_eq!(status, 200);
+    assert_eq!(taken.lock().unwrap().len(), 2);
+    // The Host's own engine is asked for by name, and there is none.
+    let (status, none) = hear(&[("X-Transcription-Model", "local")], b"clip");
+    assert_eq!(
+        (status, &none["error"]),
+        (503, &json!("server transcription disabled"))
+    );
+
+    // What the apps are told: the engine that can be used, and which hears by default.
+    let (_, able) = host.ask_as(token, "GET", "/transcription-capabilities", None);
+    assert_eq!(
+        (&able["available"], &able["default_model"], &able["engine"]),
+        (&json!(true), &json!(""), &json!("elevenlabs:scribe_v2"))
+    );
+    assert_eq!(
+        able["models"],
+        json!([{ "id": "elevenlabs:scribe_v2", "name": "ElevenLabs Scribe v2", "provider": "elevenlabs",
+                 "model": "scribe_v2", "weight": "cloud", "available": true,
+                 "credential": "ELEVEN_API_KEY", "turn_detection": "native", "biasing": "keyterms",
+                 "budget": { "unit": "terms", "capacity": 100, "max_term_chars": 49 } }])
+    );
+    let (_, settings) = host.ask_as(token, "GET", "/transcription-providers", None);
+    let usable: Vec<&str> = settings["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|provider| provider["available"] == true)
+        .map(|provider| provider["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(usable, ["elevenlabs"]);
+    assert_eq!(settings["models"].as_array().unwrap().len(), 5);
+
+    // The owner takes the key away. Now this Host has nothing to listen with, and says so
+    // to whatever is asked of it; nothing is sent anywhere.
+    std::fs::write(&keys, "[elevenlabs]\napi_key = \"\"\n").unwrap();
+    for headers in [
+        &[("X-Transcription-Model", "elevenlabs:scribe_v2")][..],
+        &[],
+    ] {
+        let (status, none) = hear(headers, b"clip");
+        assert_eq!(
+            (status, &none["error"]),
+            (503, &json!("server transcription disabled"))
+        );
+    }
+    assert_eq!(taken.lock().unwrap().len(), 2);
+    let (_, able) = host.ask_as(token, "GET", "/transcription-capabilities", None);
+    assert_eq!(
+        (&able["available"], &able["models"]),
+        (&json!(false), &json!([]))
+    );
 }

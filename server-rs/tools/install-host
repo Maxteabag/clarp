@@ -4,7 +4,8 @@
 # unit. Nothing here compiles.
 #
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH]
-#                                [--push-relay URL|off] [--start] [--files-only]
+#                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
+#                                [--transcription-engine NAME] [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
 #   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
@@ -26,11 +27,24 @@
 #                  with an account selector: this Host never changes a login itself), `none`
 #                  where nobody does and the turn ends and says so. Default: `follow` when the
 #                  Python Host on this machine has a selector, else `none`
+#   --whisper      the Python that runs the Host's own engine that listens (speech to text): one
+#                  that has faster-whisper. Default: the Python Host's own on this machine, when it
+#                  has the library; it is run where it is, with the model that Host is set to and
+#                  the model's files that are on this machine already. `off`, or no such Python:
+#                  this Host has no engine of its own
+#   --speech-keys  the file in which the keys of engines reached over the network (ElevenLabs) are
+#                  looked up each time a clip is to be heard. Default: the Python Host's own
+#                  config, when it is there. Nothing of it is copied or kept: a key the owner
+#                  changes there is the key this Host uses next. `off`: only the Host's own
+#                  environment (ELEVEN_API_KEY in ~/.config/clarp-host/env) is asked
+#   --transcription-engine   the engine that hears a clip no app named one for: `local` (the
+#                  Host's own, the default) or a cloud engine's name (elevenlabs:scribe_v2)
 #   --start        enable the unit and start it, or restart it when it runs (turns that are running
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
-# What an installation was told (--listen, --name, --claude, --codex, --push-relay) is kept with
+# What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
+# --speech-keys, --transcription-engine) is kept with
 # it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
 # --start: a relay that was turned off stays off. What is said now replaces what was kept, and
 # `default` forgets it (--push-relay default).
@@ -53,7 +67,7 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--push-relay|--accounts) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
         *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--accounts follow|none] [--start] [--files-only]" >&2; exit 2 ;;
@@ -71,7 +85,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|push-relay|accounts) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|push-relay|accounts|whisper|speech-keys|transcription-engine) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -112,6 +126,47 @@ if [ -z "$accounts" ]; then
     if grep -q '^[a-z]*_account_switch_command' "$python_config" 2>/dev/null; then accounts=follow; else accounts=none; fi
 fi
 case "$accounts" in follow|none) ;; *) echo "install-host: --accounts $accounts: follow or none" >&2; exit 2 ;; esac
+# Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the
+# Python Host's own interpreter on this machine, where it is, unless another is named. Which
+# model it runs is the one that Host is set to (its name and how its numbers are kept are read
+# from that Host's config, nothing else), loaded from the files this machine has already.
+whisper="${chosen[whisper]:-}"
+if [ -z "$whisper" ]; then
+    candidate="$(sed -n 1p "$python_share/current/SERVICE_PYTHON" 2>/dev/null || true)"
+    if [ -n "$candidate" ] && "$candidate" -c 'import faster_whisper' > /dev/null 2>&1; then whisper="$candidate"; else whisper=off; fi
+fi
+whisper_model=small.en; whisper_compute=int8; whisper_source=""
+if [ "$whisper" != off ]; then
+    [ -x "$whisper" ] || { echo "install-host: --whisper $whisper: not a program" >&2; exit 2; }
+    set_to="$("$whisper" -c 'import sys, tomllib
+try:
+    w = tomllib.load(open(sys.argv[1], "rb")).get("whisper", {})
+except Exception:
+    w = {}
+print(str(w.get("model") or "small.en"), str(w.get("compute") or "int8"))' "$python_config" 2>/dev/null || true)"
+    read -r model_named compute_named <<< "${set_to:-small.en int8}"
+    case "$model_named" in ''|*[!A-Za-z0-9._-]*) ;; *) whisper_model="$model_named" ;; esac
+    case "$compute_named" in ''|*[!A-Za-z0-9_]*) ;; *) whisper_compute="$compute_named" ;; esac
+    models="${HF_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}"
+    for kept_as in "models--Systran--faster-whisper-$whisper_model" "models--mobiuslabsgmbh--faster-whisper-$whisper_model"; do
+        for snapshot in "$models/$kept_as"/snapshots/*/; do
+            [ -f "${snapshot}model.bin" ] && whisper_source="${snapshot%/}"
+        done
+    done
+fi
+# Where the keys of engines over the network are looked up when a clip is to be heard.
+speech_keys="${chosen[speech-keys]:-}"
+if [ -z "$speech_keys" ]; then
+    if [ -f "$python_config" ]; then speech_keys="$python_config"; else speech_keys=off; fi
+fi
+[ "$speech_keys" = off ] && speech_keys=""
+transcription_engine="${chosen[transcription-engine]:-local}"
+case "$transcription_engine" in *[!A-Za-z0-9:._-]*|'') echo "install-host: --transcription-engine $transcription_engine: a name" >&2; exit 2 ;; esac
+speech=""
+if [ "$whisper" != off ]; then
+    speech=" --whisper-python \"$whisper\" --whisper-worker \"$share/libexec/whisper-worker.py\" --whisper-model $whisper_model --whisper-compute $whisper_compute${whisper_source:+ --whisper-source \"$whisper_source\"}"
+fi
+speech="$speech${speech_keys:+ --speech-keys \"$speech_keys\"} --transcription-engine $transcription_engine"
 open_files="$(python_unit LimitNOFILE)"
 case "$open_files" in ''|*[!0-9]*) open_files=65536 ;; esac
 arenas="$(python_unit Environment | tr ' ' '\n' | sed -n 's/^MALLOC_ARENA_MAX=//p' | head -1)"
@@ -214,6 +269,10 @@ tools=$((tools + 1))
 # on the checkout it was installed from.
 install -m 755 "$here/tools/soak" "$share/libexec/.soak.new"
 mv -f "$share/libexec/.soak.new" "$share/libexec/soak"
+# The worker of the Host's own engine that listens: this Host's own program, run by the Python
+# named above.
+install -m 644 "$here/tools/whisper-worker.py" "$share/libexec/.whisper-worker.py.new"
+mv -f "$share/libexec/.whisper-worker.py.new" "$share/libexec/whisper-worker.py"
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 
@@ -259,7 +318,7 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${push_relay:+ --push-relay $push_relay}
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${push_relay:+ --push-relay $push_relay}$speech
 Restart=on-failure
 RestartSec=2
 
@@ -275,6 +334,17 @@ if [ "$accounts" = follow ]; then
 else
     echo "a turn whose account is out ends and says so (nobody on this machine changes logins)"
 fi
+if [ "$whisper" != off ]; then
+    echo "speech in: its own engine, the model $whisper_model ($whisper_compute), run by $whisper${whisper_source:+ from the files in $whisper_source}"
+else
+    echo "speech in: no engine of its own (no Python with faster-whisper was found or named)"
+fi
+if [ -n "$speech_keys" ]; then
+    echo "keys of engines over the network are looked up in $speech_keys when they are needed, and copied nowhere"
+else
+    echo "keys of engines over the network are looked up in this Host's own environment only"
+fi
+echo "a clip no app names an engine for is heard by: $transcription_engine"
 [ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
 echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
 echo "the agents' own tools: $tools names in $share/tools"

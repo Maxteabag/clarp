@@ -387,8 +387,8 @@ async fn status(
 /// the Python Host says a list, and empty. An app that reads them shows nothing there,
 /// where an answer of "no such route" would be an error on its screen.
 ///
-/// Teams, janitors and what the Host does by itself are not built. Neither is speech: no
-/// engine transcribes here, and no voice speaks. Which models an agent can be given is a
+/// Teams, janitors and what the Host does by itself are not built, and no voice speaks
+/// here yet (what listens is in `heard.rs`). Which models an agent can be given is a
 /// catalogue this Host does not keep yet; an agent's model is set by name (`/agent-llm`).
 async fn teams() -> Json<Value> {
     Json(json!({ "teams": [] }))
@@ -403,24 +403,6 @@ async fn janitors() -> Json<Value> {
 
 async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
-}
-
-async fn transcription_capabilities() -> Json<Value> {
-    Json(json!({ "adapters": [], "available": false, "default_model": "", "models": [] }))
-}
-
-async fn transcription_providers() -> Json<Value> {
-    Json(json!({
-        "agent_engines": {}, "agent_languages": {}, "call_engines": "", "call_languages": "",
-        "call_policy_error": "", "engine": "", "language": "", "long_form_model": "",
-        "long_form_threshold_range": { "max": 3600, "min": 1 }, "long_form_threshold_sec": 30,
-        "models": [], "provider_turn_taking_available": false, "providers": [],
-        "retain_audio": false, "stream_path": "", "turn_taking": "native",
-        // Where a turn of speech ends is found on the phone itself: that much is there.
-        "turn_taking_options": [
-            { "available": true, "id": "native", "name": "Native (on-device VAD + Smart Turn)" },
-        ],
-    }))
 }
 
 async fn voice_catalog() -> Json<Value> {
@@ -450,11 +432,6 @@ pub fn routes() -> Router<App> {
         .route("/teams", get(teams))
         .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
-        .route(
-            "/transcription-capabilities",
-            get(transcription_capabilities),
-        )
-        .route("/transcription-providers", get(transcription_providers))
         .route("/voice-catalog", get(voice_catalog))
         .route("/agent-model-options", get(model_options))
 }

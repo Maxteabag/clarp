@@ -132,6 +132,14 @@ async fn serve(config: Config) -> Result<(), String> {
         desks,
         blobs,
         activity: Arc::default(),
+        ears: {
+            // The engines that listen. The Host's own loads its model from now on; answers
+            // nobody will ask for again are forgotten on the side.
+            let ears = Arc::new(clarp_host::heard::Ears::new(&config));
+            let old = ears.clone();
+            tokio::task::spawn_blocking(move || old.forget_old());
+            ears
+        },
     };
     // Where someone else puts another account in place when one is out, turns that wait for
     // an account are tried as soon as the tool's login has changed.
