@@ -9,7 +9,9 @@
 
 use std::collections::BTreeMap;
 
-use clarp_kernel::calls::{Asker, At, Calls, Contact, Effects, KEPT_ENDED, MOST, STALE_MS, named};
+use clarp_kernel::calls::{
+    Asker, At, Call, Calls, Contact, Effects, KEPT_ENDED, MOST, STALE_MS, Said, named,
+};
 use serde_json::{Value, json};
 
 fn vectors() -> Value {
@@ -257,6 +259,56 @@ fn a_call_goes_the_way_it_goes_on_the_python_host_step_by_step() {
 }
 
 #[test]
+fn an_agent_of_a_call_is_told_of_it_what_the_python_host_tells_it() {
+    let vectors = vectors();
+    let moments = vectors["headers"].as_array().unwrap();
+    let (mut told, mut silent) = (0, 0);
+    for moment in moments {
+        let name = moment["name"].as_str().unwrap();
+        // The calls as the Python Host keeps them, read as they are.
+        let kept: Vec<Call> = serde_json::from_value(moment["calls"].clone()).unwrap();
+        let calls = Calls::kept(BTreeMap::from([("device_a".to_string(), kept)]));
+        let now_ms = moment["now"].as_i64().unwrap();
+        let talk = moment["talk"].as_array().unwrap();
+        // What was said, as a reader sees it: on one line. (The Host takes the voice markup
+        // off as well; there is none in what is made up here.)
+        let shown: Vec<String> = talk
+            .iter()
+            .map(|row| {
+                let words: Vec<&str> = row[2].as_str().unwrap().split_whitespace().collect();
+                words.join(" ")
+            })
+            .collect();
+        let said: Vec<Said> = talk
+            .iter()
+            .zip(&shown)
+            .map(|(row, text)| Said {
+                agent_id: row[0].as_str().unwrap(),
+                by_user: row[1] == "user",
+                text,
+            })
+            .collect();
+        for (session, theirs) in moment["told"].as_object().unwrap() {
+            let ours = match calls.turn_of(session, now_ms) {
+                Some(call) => call.header(session, &said),
+                None => String::new(),
+            };
+            assert_eq!(
+                ours,
+                theirs.as_str().unwrap(),
+                "{name}: what {session} is told"
+            );
+            told += usize::from(!ours.is_empty());
+            silent += usize::from(ours.is_empty());
+        }
+    }
+    assert!(
+        moments.len() >= 13 && told >= 9 && silent >= 40,
+        "{told} told, {silent} not"
+    );
+}
+
+#[test]
 fn a_phones_calls_are_kept_and_read_back_as_they_were() {
     let vectors = vectors();
     let roster = roster(&vectors);
@@ -285,7 +337,7 @@ fn a_phones_calls_are_kept_and_read_back_as_they_were() {
     assert_eq!(out.changed.iter().collect::<Vec<_>>(), ["device_a"]);
     // What is kept is the call with what the Host keeps for itself beside what it tells.
     let kept = serde_json::to_string(calls.of("device_a")).unwrap();
-    let read: Vec<clarp_kernel::calls::Call> = serde_json::from_str(&kept).unwrap();
+    let read: Vec<Call> = serde_json::from_str(&kept).unwrap();
     let again = Calls::kept(BTreeMap::from([("device_a".to_string(), read)]));
     assert_eq!(again, calls);
     let call = &again.of("device_a")[0];
