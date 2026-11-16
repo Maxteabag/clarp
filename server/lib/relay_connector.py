@@ -114,13 +114,22 @@ def response_encoding(meta_headers: dict, *, passthrough: bool) -> str:
     return 'gzip' if 'gzip' in offered else 'identity'
 
 
+# What an app says about itself, which a phone through the relay must be able to
+# say as it does on every other route: its version (the outdated-app verdict),
+# the call a clip belongs to (/transcribe) and the interaction a request is part
+# of. Every other X-Clarp-* header is a claim the Host makes or checks itself
+# (X-Clarp-Transport, X-Clarp-Turn, X-Clarp-Peer) and never comes in from outside.
+APP_HEADERS = frozenset({'x-clarp-client', 'x-clarp-call-id', 'x-clarp-interaction-id'})
+
+
 def forward_request_headers(meta_headers: dict, local_netloc: str, body_len: int,
                             *, passthrough_encoding: bool = False) -> dict:
     lower = {k.lower(): v for k, v in meta_headers.items()}
     connection_headers = {s.strip().lower() for s in lower.get('connection', '').split(',')}
     headers = {k: v for k, v in meta_headers.items()
                if k.lower() not in HOP | connection_headers | {'accept-encoding', 'forwarded', 'x-real-ip'}
-               and not k.lower().startswith(('x-forwarded-', 'x-clarp-', 'tailscale-', 'cf-', 'sec-websocket'))}
+               and not k.lower().startswith(('x-forwarded-', 'tailscale-', 'cf-', 'sec-websocket'))
+               and (not k.lower().startswith('x-clarp-') or k.lower() in APP_HEADERS)}
     headers.update({'Host': local_netloc,
                     'Accept-Encoding': response_encoding(meta_headers, passthrough=passthrough_encoding),
                     'X-Clarp-Transport': 'relay'})
