@@ -5002,7 +5002,10 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
     // when the message says so, and that answers otherwise.
     let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
     let script = [
-        "#!/bin/sh\nread message\ncase \"$message\" in\n*limit*)\n",
+        "#!/bin/sh\nread message\n",
+        // The user's words, without what the Host says after them.
+        "message=$(printf '%s' \"$message\" | sed 's/<system-reminder>.*//')\n",
+        "case \"$message\" in\n*limit*)\n",
         init,
         "printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}'\n",
         "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
@@ -5180,6 +5183,8 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
     let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
     let script = [
         "#!/bin/sh\nread message\n",
+        // The user's words, without what the Host says after them.
+        "message=$(printf '%s' \"$message\" | sed 's/<system-reminder>.*//')\n",
         "key=$(printf '%s' \"$message\" | cksum | cut -d' ' -f1)\n",
         &format!("file=\"{}/$key\"\n", counts.display()),
         "before=$(cat \"$file\" 2>/dev/null || echo 0)\n",
@@ -8723,15 +8728,18 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
         );
     }
 
-    // The old settings screen's list, with what the agent is called.
+    // The old settings screen's list, with what the agent is called and what the persona
+    // of that name is like: its way of speaking, without the word that opens the clause.
     let old = host.get(&format!("/voices?for={echo}"));
     assert_eq!(
-        (
-            old["voices"].as_array().unwrap().len(),
-            &old["persona"],
-            &old["bio"]
-        ),
-        (29, &json!("Echo"), &json!(""))
+        (old["voices"].as_array().unwrap().len(), &old["persona"]),
+        (29, &json!("Echo"))
+    );
+    let like = old["bio"].as_str().unwrap();
+    assert!(like.starts_with("a bat-themed android;"), "{like}");
+    assert_eq!(
+        format!("Personality: {like}"),
+        clarp_kernel::personas::personality("Echo")
     );
 
     // A preview of a voice is made once and kept: the second asking costs nothing.
@@ -8833,9 +8841,11 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
 /// A stand-in for Claude Code that streams a turn the way Claude Code does: it thinks, says
 /// what it will do, calls a tool that takes as long as the message says, and answers. The
 /// message names the turn (`one`, `two`), so that no two turns use an id twice. What it
-/// reads is the message as Claude Code is given it: a line of JSON.
+/// reads is the message as Claude Code is given it: a line of JSON, of which it takes the
+/// user's words and not what the Host says after them.
 const STAND_IN_STREAMS: &str = r#"#!/bin/sh
 read message
+message=$(printf '%s' "$message" | sed 's/<system-reminder>.*//')
 case "$message" in *one*) tag=one;; *two*) tag=two;; *) tag=other;; esac
 case "$message" in *slow*) pause=6;; *long*) pause=60;; *) pause=0;; esac
 say() { printf '%s\n' "$1"; }
@@ -9366,4 +9376,230 @@ fn an_agent_is_shown_with_a_face_and_anybody_may_fetch_the_picture() {
     let host = place.start_with("secret", &[]);
     assert_eq!(host.get("/agents/snapshot")["agents"][0]["avatar_url"], "");
     assert_eq!(fetch(&host, "", "GET", &face, &[], b"").status, 404);
+}
+
+#[test]
+fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
+    let place = Place::new("told");
+    let (args, lines) = (place.root.join("args"), place.root.join("lines"));
+    let claude = place.root.join("claude");
+    // A stand-in for Claude Code that writes down what it was started with and what it was
+    // handed, sign for sign, and answers.
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!("printf '%s\\n' \"$message\" >> \"{}\"\n", lines.display()),
+        &format!(
+            "{{ printf '%s\\n' \"$@\"; echo ----; }} >> \"{}\"\n",
+            args.display()
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    // What the tool was last started with as who the agent is, and what it was last handed:
+    // the user's words, and what the Host says after them.
+    let last = || -> (String, String, String) {
+        let started = std::fs::read_to_string(&args).unwrap();
+        let launch = started.trim_end().trim_end_matches("----").trim_end();
+        let launch: Vec<&str> = launch.rsplit("----\n").next().unwrap().lines().collect();
+        let at = launch
+            .iter()
+            .position(|arg| *arg == "--append-system-prompt");
+        let identity = at.map_or("<none>", |at| launch[at + 1]).to_string();
+        let handed = std::fs::read_to_string(&lines).unwrap();
+        let handed: Value = serde_json::from_str(handed.lines().last().unwrap()).unwrap();
+        let content = handed["message"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2, "{handed}");
+        let text = |at: usize| content[at]["text"].as_str().unwrap().to_string();
+        (identity, text(0), text(1))
+    };
+    let turns = std::cell::Cell::new(0);
+    let ask = |session: &str, text: &str, aloud: bool| -> (String, String, String) {
+        turns.set(turns.get() + 1);
+        let before = std::fs::read_to_string(&lines).map_or(0, |lines| lines.lines().count());
+        host.post(
+            "/send",
+            json!({
+                "session": session, "text": text, "synthesize_audio": aloud,
+                "client_msg_id": format!("m{}", turns.get()),
+            }),
+        );
+        wait_for("the turn's answer", || {
+            let handed = std::fs::read_to_string(&lines).map_or(0, |lines| lines.lines().count());
+            handed > before && host.state(session) == "done"
+        });
+        last()
+    };
+
+    // An agent named as a persona this Host has built in speaks as that persona does. A
+    // turn whose answer is only read is told to use the Host's tools and whose turn it is,
+    // after the user's own words and marked as not theirs.
+    let made = host.post("/agents", json!({ "name": "Mike", "backend": "claude" }));
+    let mike = made["session"].as_str().unwrap().to_string();
+    let (identity, words, said) = ask(&mike, "first", false);
+    assert!(
+        identity.starts_with("You are Mike. Personality: "),
+        "{identity}"
+    );
+    let mikes_way = identity.trim_start_matches("You are Mike. ").to_string();
+    assert_eq!(words, "first");
+    assert!(
+        said.starts_with("<system-reminder>\nYou are running inside Clarp."),
+        "{said}"
+    );
+    assert!(said.ends_with("\n</system-reminder>"), "{said}");
+    let whose = format!("This turn belongs to Mike (Clarp session {mike}).");
+    assert!(said.contains(&whose), "{said}");
+    assert!(
+        !said.contains("<speak>"),
+        "a turn nobody listens to is not told how to speak"
+    );
+
+    // An agent made with a way of speaking of its own has that one.
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Zed", "backend": "claude", "personality": "  Personality: dry.  " }),
+    );
+    let zed = made["session"].as_str().unwrap().to_string();
+    let (identity, _, _) = ask(&zed, "first", false);
+    assert_eq!(identity, "You are Zed. Personality: dry.");
+
+    // How human voices sound, and how much an agent says while it works: asked, set, and
+    // refused in the Python Host's words.
+    let usual = json!({ "default": 5, "agents": {}, "min": 0, "max": 10 });
+    assert_eq!(host.get("/voice-humanness"), usual);
+    let set = host.post(
+        "/voice-humanness",
+        json!({ "default": 0, "agents": { " MIKE ": 8 } }),
+    );
+    let after = json!({ "default": 0, "agents": { "mike": 8 }, "min": 0, "max": 10 });
+    assert_eq!(set, after);
+    let refused = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    assert_eq!(
+        refused("/voice-humanness", json!({ "default": 11 })),
+        (400, json!({ "error": "default must be an integer 0-10" }))
+    );
+    assert_eq!(
+        refused("/voice-humanness", json!([1])),
+        (400, json!({ "error": "object required" }))
+    );
+    assert_eq!(host.get("/voice-humanness"), after);
+    let level = host.post(
+        "/agent-voice-verbosity",
+        json!({ "session": mike, "voice_verbosity": 2 }),
+    );
+    assert_eq!(level["voice_verbosity"], 2);
+    assert_eq!(
+        (&level["ok"], &level["session"]),
+        (&json!(true), &json!(mike))
+    );
+    assert_eq!(level["options"].as_array().unwrap().len(), 4);
+    assert_eq!(level["options"][2], json!({ "level": 2, "label": "Steps" }));
+    for (body, status, why) in [
+        (json!({ "voice_verbosity": 1 }), 400, "session required"),
+        (json!({ "session": mike }), 400, "voice_verbosity required"),
+        (
+            json!({ "session": mike, "voice_verbosity": "2" }),
+            400,
+            "voice_verbosity must be an integer",
+        ),
+        (
+            json!({ "session": mike, "voice_verbosity": 2.0 }),
+            400,
+            "voice_verbosity must be an integer",
+        ),
+        (
+            json!({ "session": mike, "voice_verbosity": true }),
+            400,
+            "voice_verbosity must be an integer",
+        ),
+        (
+            json!({ "session": mike, "voice_verbosity": 4 }),
+            400,
+            "voice_verbosity out of range",
+        ),
+        (
+            json!({ "session": "nobody", "voice_verbosity": 1 }),
+            404,
+            "no such agent",
+        ),
+    ] {
+        let (answered, told) = refused("/agent-voice-verbosity", body.clone());
+        assert_eq!(
+            (answered, told["error"].as_str()),
+            (status, Some(why)),
+            "{body}"
+        );
+    }
+    let (_, out_of_range) = refused(
+        "/agent-voice-verbosity",
+        json!({ "session": mike, "voice_verbosity": -1 }),
+    );
+    assert_eq!(
+        (&out_of_range["min"], &out_of_range["max"]),
+        (&json!(0), &json!(3))
+    );
+
+    // A turn whose answer is read aloud is told how to speak, at the agent's own level
+    // and with how much it is to say while it works; another agent at the Host's level.
+    let (_, _, said) = ask(&mike, "second", true);
+    assert!(
+        said.contains("<speak>") && said.contains("Humanness: 8/10."),
+        "{said}"
+    );
+    assert!(said.contains("Narration level: steps."), "{said}");
+    let (_, _, said) = ask(&zed, "second", true);
+    assert!(
+        said.contains("Humanness: 0/10.") && !said.contains("Narration level"),
+        "{said}"
+    );
+
+    // Under another name the agent speaks as it did, and its turn is its own by that name.
+    host.post(
+        "/agent-rename",
+        json!({ "session": mike, "name": "Michael" }),
+    );
+    let (identity, _, said) = ask(&mike, "third", false);
+    assert_eq!(identity, format!("You are Michael. {mikes_way}"));
+    let whose = format!("This turn belongs to Michael (Clarp session {mike}).");
+    assert!(said.contains(&whose), "{said}");
+
+    // The owner turns the ways of speaking off: a name, and nothing more.
+    let on = json!({ "settings": { "enabled": true } });
+    assert_eq!(host.get("/personalities/settings"), on);
+    let off = host.post("/personalities/settings", json!({ "enabled": 0 }));
+    assert_eq!(off, json!({ "ok": true, "settings": { "enabled": false } }));
+    assert_eq!(
+        refused("/personalities/settings", json!([true])),
+        (400, json!({ "error": "bad json" }))
+    );
+    let (identity, _, _) = ask(&zed, "third", false);
+    assert_eq!(identity, "You are Zed.");
+
+    // All of it is the Host's to keep: a Host that was killed tells the same.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    assert_eq!(host.get("/voice-humanness"), after);
+    assert_eq!(
+        host.get("/personalities/settings"),
+        json!({ "settings": { "enabled": false } })
+    );
+    let before = std::fs::read_to_string(&lines).unwrap().lines().count();
+    host.post(
+        "/send",
+        json!({ "session": mike, "text": "fourth", "client_msg_id": "after", "synthesize_audio": true }),
+    );
+    wait_for("the turn's answer", || {
+        std::fs::read_to_string(&lines).unwrap().lines().count() > before
+            && host.state(&mike) == "done"
+    });
+    let (identity, words, said) = last();
+    assert_eq!(identity, "You are Michael.");
+    assert_eq!(words, "fourth");
+    assert!(
+        said.contains("Humanness: 8/10.") && said.contains("Narration level: steps."),
+        "{said}"
+    );
 }

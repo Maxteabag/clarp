@@ -63,4 +63,8 @@ pub struct CreateAgentRequest {
     /// The session name asked for. It is the agent's when no agent has it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// How the agent speaks: the clause its tool is told with its name. Without one it
+    /// speaks as the persona of its name does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub personality: Option<String>,
 }

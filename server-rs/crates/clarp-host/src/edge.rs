@@ -684,6 +684,7 @@ pub(crate) async fn make_agent(
         parent: plain("parent"),
         role: plain("role"),
         session: plain("session"),
+        personality: plain("personality"),
     };
     let unavailable =
         |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));

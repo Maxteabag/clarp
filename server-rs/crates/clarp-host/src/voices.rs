@@ -127,11 +127,14 @@ async fn settings_voices(
     let directory = app.fleet.directory();
     let agents = agents_of(&directory);
     let persona = agents.iter().find(|agent| agent.session == current);
+    let persona = persona.map_or("", |agent| agent.name);
+    // What the persona of that name is like: its way of speaking, without the word that
+    // opens the clause an agent's tool is told.
+    let way = clarp_kernel::personas::personality(persona);
     Json(json!({
         "voices": voices::settings_voices(&agents, current),
-        // What a persona is like is told once personas are built.
-        "bio": "",
-        "persona": persona.map_or("", |agent| agent.name),
+        "bio": way.strip_prefix("Personality: ").unwrap_or(way),
+        "persona": persona,
     }))
 }
 
