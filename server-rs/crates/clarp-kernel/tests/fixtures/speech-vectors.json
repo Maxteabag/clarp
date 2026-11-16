@@ -1,0 +1,4297 @@
+{
+ "catalogue": {
+  "cloud": [
+   {
+    "credential": "DEEPGRAM_API_KEY",
+    "id": "deepgram",
+    "kind": "cloud",
+    "models": [
+     {
+      "biasing": "keyterm",
+      "id": "deepgram:nova-3",
+      "model": "nova-3",
+      "name": "Deepgram Nova-3"
+     }
+    ],
+    "name": "Deepgram",
+    "streaming": true,
+    "turn_detection": "own",
+    "turn_detection_model": "flux-general-en"
+   },
+   {
+    "credential": "ELEVEN_API_KEY",
+    "id": "elevenlabs",
+    "kind": "cloud",
+    "models": [
+     {
+      "biasing": "keyterms",
+      "id": "elevenlabs:scribe_v2",
+      "model": "scribe_v2",
+      "name": "ElevenLabs Scribe v2"
+     }
+    ],
+    "name": "ElevenLabs Scribe",
+    "streaming": true,
+    "turn_detection": "native",
+    "turn_detection_model": ""
+   },
+   {
+    "credential": "CARTESIA_API_KEY",
+    "id": "cartesia",
+    "kind": "cloud",
+    "models": [
+     {
+      "biasing": "keyterms",
+      "id": "cartesia:ink-2",
+      "model": "ink-2",
+      "name": "Cartesia Ink-2"
+     },
+     {
+      "biasing": "none",
+      "id": "cartesia:ink-whisper",
+      "model": "ink-whisper",
+      "name": "Cartesia Ink-Whisper"
+     }
+    ],
+    "name": "Cartesia Ink",
+    "streaming": true,
+    "turn_detection": "native",
+    "turn_detection_model": ""
+   },
+   {
+    "credential": "GOOGLE_APPLICATION_CREDENTIALS",
+    "id": "google",
+    "kind": "cloud",
+    "models": [
+     {
+      "biasing": "none",
+      "id": "google:chirp_3",
+      "model": "chirp_3",
+      "name": "Google Chirp 3"
+     }
+    ],
+    "name": "Google Chirp",
+    "streaming": false,
+    "turn_detection": "native",
+    "turn_detection_model": ""
+   }
+  ],
+  "local": [
+   {
+    "download_bytes": 148000000,
+    "id": "faster-whisper:base.en",
+    "languages": [
+     "en"
+    ],
+    "model": "base.en",
+    "name": "Base English",
+    "platforms": [
+     "linux"
+    ],
+    "provider": "faster-whisper",
+    "weight": "light"
+   },
+   {
+    "download_bytes": 488000000,
+    "id": "faster-whisper:small.en",
+    "languages": [
+     "en"
+    ],
+    "model": "small.en",
+    "name": "Small English",
+    "platforms": [
+     "linux"
+    ],
+    "provider": "faster-whisper",
+    "recommended": true,
+    "weight": "medium"
+   },
+   {
+    "download_bytes": 488000000,
+    "id": "faster-whisper:small",
+    "languages": [
+     "multilingual"
+    ],
+    "model": "small",
+    "name": "Small Multilingual",
+    "platforms": [
+     "linux"
+    ],
+    "provider": "faster-whisper",
+    "weight": "medium"
+   },
+   {
+    "download_bytes": 1530000000,
+    "id": "faster-whisper:medium",
+    "languages": [
+     "multilingual"
+    ],
+    "model": "medium",
+    "name": "Medium",
+    "platforms": [
+     "linux"
+    ],
+    "provider": "faster-whisper",
+    "weight": "heavy"
+   },
+   {
+    "download_bytes": 1620000000,
+    "id": "faster-whisper:large-v3-turbo",
+    "languages": [
+     "multilingual"
+    ],
+    "model": "large-v3-turbo",
+    "name": "Large v3 Turbo",
+    "platforms": [
+     "linux"
+    ],
+    "provider": "faster-whisper",
+    "weight": "very-heavy"
+   },
+   {
+    "download_bytes": 148000000,
+    "id": "whisper.cpp:base.en",
+    "languages": [
+     "en"
+    ],
+    "model": "base.en",
+    "name": "whisper.cpp Base English",
+    "platforms": [
+     "macos"
+    ],
+    "provider": "whisper.cpp",
+    "weight": "light"
+   },
+   {
+    "download_bytes": 488000000,
+    "id": "whisper.cpp:small.en",
+    "languages": [
+     "en"
+    ],
+    "model": "small.en",
+    "name": "whisper.cpp Small English",
+    "platforms": [
+     "macos"
+    ],
+    "provider": "whisper.cpp",
+    "weight": "medium"
+   }
+  ],
+  "recommended": "faster-whisper:small.en"
+ },
+ "eleven_file_names": [
+  {
+   "content_type": "audio/webm",
+   "name": "audio.webm"
+  },
+  {
+   "content_type": "audio/mp4",
+   "name": "audio.m4a"
+  },
+  {
+   "content_type": "audio/m4a",
+   "name": "audio.m4a"
+  },
+  {
+   "content_type": "audio/x-m4a",
+   "name": "audio.m4a"
+  },
+  {
+   "content_type": "audio/wav",
+   "name": "audio.wav"
+  },
+  {
+   "content_type": "audio/x-wav",
+   "name": "audio.wav"
+  },
+  {
+   "content_type": "audio/ogg",
+   "name": "audio.ogg"
+  },
+  {
+   "content_type": "audio/ogg; codecs=opus",
+   "name": "audio.ogg"
+  },
+  {
+   "content_type": "audio/mpeg",
+   "name": "audio.mp3"
+  },
+  {
+   "content_type": "audio/mp3",
+   "name": "audio.mp3"
+  },
+  {
+   "content_type": "AUDIO/WAV",
+   "name": "audio.wav"
+  },
+  {
+   "content_type": "Audio/MP4",
+   "name": "audio.m4a"
+  },
+  {
+   "content_type": "",
+   "name": "audio.webm"
+  },
+  {
+   "content_type": "application/octet-stream",
+   "name": "audio.webm"
+  },
+  {
+   "content_type": "audio/webm;codecs=opus",
+   "name": "audio.webm"
+  },
+  {
+   "content_type": "video/mp4",
+   "name": "audio.m4a"
+  },
+  {
+   "content_type": "audio/wave",
+   "name": "audio.wav"
+  },
+  {
+   "content_type": "audio/flac",
+   "name": "audio.webm"
+  }
+ ],
+ "ends_terminal": [
+  {
+   "ends": false,
+   "text": ""
+  },
+  {
+   "ends": true,
+   "text": " "
+  },
+  {
+   "ends": true,
+   "text": "Done."
+  },
+  {
+   "ends": false,
+   "text": "Done"
+  },
+  {
+   "ends": true,
+   "text": "Done!"
+  },
+  {
+   "ends": true,
+   "text": "Done?"
+  },
+  {
+   "ends": true,
+   "text": "Done. "
+  },
+  {
+   "ends": true,
+   "text": "Done.\n"
+  },
+  {
+   "ends": false,
+   "text": "Done…"
+  },
+  {
+   "ends": false,
+   "text": "Done.\""
+  },
+  {
+   "ends": true,
+   "text": "ok?!"
+  },
+  {
+   "ends": true,
+   "text": "."
+  },
+  {
+   "ends": false,
+   "text": "a.b"
+  },
+  {
+   "ends": true,
+   "text": "ünï."
+  },
+  {
+   "ends": false,
+   "text": "Done. And more"
+  },
+  {
+   "ends": true,
+   "text": "3."
+  },
+  {
+   "ends": true,
+   "text": "..."
+  },
+  {
+   "ends": true,
+   "text": "Done ! "
+  }
+ ],
+ "fingerprints": [
+  {
+   "audio_hex": "",
+   "content_type": "audio/webm",
+   "fingerprint": "7bf438f9f90651e69b98762f6c3413f40f6a04f2a93d673dae5461b381ee60a5",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/webm",
+   "fingerprint": "0493a08fc6d2cc4bf7fd3a794ea45aa390c91aa1583e241896dabf9e21775f6d",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/webm",
+   "fingerprint": "56d2996da83aa222508357ef6e0c067c7e52ad681016e2b5bf308e44ccadd378",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/webm",
+   "fingerprint": "13e044b89021e1ee0f944e9d75d5a7f588b67b8310657881dd34ab980804af8e",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/webm",
+   "fingerprint": "04d3f270ea3b6a52043413ae213ee5173316a37323f530aa45cef0feb06ef00c",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/webm",
+   "fingerprint": "ab32f10af665fe96c970d88149512774cf91778a7bc90c85fd1f9490b3824994",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/wav",
+   "fingerprint": "33833881ae6796957918937a8989be3e935da67f6876ac6736516ced827c269d",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/wav",
+   "fingerprint": "312fafec4b7ffd299666b71ad297c657784cb7235e259a999f9973ebc7e8638f",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/wav",
+   "fingerprint": "eac4f0501c0a602f41c5de5c724d0cb11e53b6fe2a0f1580fb55831cbfe50817",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "",
+   "content_type": "audio/wav",
+   "fingerprint": "365b3951f4236fab109be8c747d718a66becbfc5085d85a52e554423451a731f",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "b0e88837f019e0f09904d010ff6ef5f09812288c8e2eb8eb013f90f7ddc62c51",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "e16f8b8af72e5197fdafd77bd4ec11b3ce5349a5ada7669200146566269705f8",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "cff022bd4765567572eb87f0b7d8b24593b505a778b9193a31bc2fc4f7183e25",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "a824e9f0c5c9b613a35637fb76341f25aecf787437883fcb9fda39ffb436416e",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "ac3a317a4732d3257f1cd0536920a19286255941806017d96d69b23855616b0e",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "e47bc09b6c7743df7e096aa89d70634c7e836edadfbfc5ab524ff105fc9ba01e",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "3fbbc9608e830c8e0e50741f37fd08a021a051d5c623e68612df46b5a445b890",
+   "hands_free": false,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/webm",
+   "fingerprint": "0a396ddac40ba44364750ce5500376101ba367687adb2f05f5dba1678a2c6356",
+   "hands_free": true,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/wav",
+   "fingerprint": "f35f3e5d5a1eb6a6a8da90c9c9d65d57e8d4c73504f4ef85e6bcbc0b594c7067",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/wav",
+   "fingerprint": "330d152379a31912bd846877b64c6c19bfbeb314733a3eb0d4afa0eba250097f",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/wav",
+   "fingerprint": "579b280eb938e72c0f1f506a8d3691ac514656a6b03c1ed8bbf9655638aa7a08",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/wav",
+   "fingerprint": "e04cbd6bb3e106b19541a14ae1e5bebd91e5e1d8a50bcaf3d8ec5093c0ba59f7",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/wav",
+   "fingerprint": "8f40ff705af86942e5ae3e0cd738be299c4952f3ba827c170cc4bceeaa1cd413",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "audio/wav",
+   "fingerprint": "15789de46d96995613e55a60b6c424e9e84462ae222c8af947141ac5d1ce7900",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "",
+   "fingerprint": "a91b7f2ab93de821abeec1750258e4d4f5f09831b0a11dda47e89ddf6944d819",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "",
+   "fingerprint": "7a669ca9da624a771902063163263fd49069067f7f830fee6fb8c10e41a6004e",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "",
+   "fingerprint": "28f5ca53db44d4f116148c55832c0b45e3fa4a25302722e7d7e197046edff396",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "00",
+   "content_type": "",
+   "fingerprint": "f9d8e704f699929e8a7cc46261fd18fa1ee0a440a58e568d65ee569becbc0873",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/webm",
+   "fingerprint": "9b9d2d89d10a6571373b5f2339a00055aff7348d0203f4a5aa6708682b1c3d4b",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/webm",
+   "fingerprint": "3ba93ef4971228056e091d3b714c0743dacfe1d68918ab531c0a4c0d5edeca23",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "8e7d8b6b50faae219407a13abd43f0993bdd509cada7599e0b0f23ced7bc0d8e",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "3283a5b3d2649640cbbee2b61f47f2900c5973710ca9d694d134dcf671898c99",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "ed73ef0a0386b82c4bfb614663d6163c9293178da181fd10f9288788b3a1ae18",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "73d68308798c0815d9a215a633307a833101cc5745e0c8bbde53182886b4b864",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "7428585a557a9fb07d910511e23f3425033c13ca1309a184ce6ca2fde0d32f24",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "bf571201817e097144e72fb76361ae4436f452c14d538763109e6eb9aa89d980",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "d7c0b35f8a862633d6cfd18158ffbb3ab7aeacb2bfdc0ba2b86b16a67db66899",
+   "hands_free": false,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/wav",
+   "fingerprint": "96eb694c8bdbf9a3331c9b6baa90862598c6112b09d36f6c6a9c85f69951acc2",
+   "hands_free": true,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "",
+   "fingerprint": "f8a0e5d0b839da52f317a41ab7101b20d688664efe2fa4bddcf88d8b724ab692",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "",
+   "fingerprint": "0fe600c6610608825d25f41386be3705317ea33ab621860d1bf6371085196756",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "",
+   "fingerprint": "36c82c431671c33fef024e0136d06a1aa7a3882f89ff66b2f47966b22e45cd26",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "",
+   "fingerprint": "14fbe60a932e7d6402791a8c928097e859ed156869eecc6acf7323a30bc9da0f",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "",
+   "fingerprint": "22b97dc316f0db39612012b9daf51cf2d9dd2448a8af92f4684646be479deac7",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "",
+   "fingerprint": "54c4412c8f83d11b18b1b8179538716fd83b794c6c6bf00ba6031b86e5a01444",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/mp4; codecs=mp4a",
+   "fingerprint": "8d6682de6d3997a0b980ced6438e072f0b40c0dfbcd2d7eed212fce666a750a7",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "524946462e2e2e2e57415645666d7420",
+   "content_type": "audio/mp4; codecs=mp4a",
+   "fingerprint": "ceaeb613931ef4d38b872ab13fa34f96983d356c84a3964aa1bdd4e8995b309f",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/webm",
+   "fingerprint": "247b10e56253eb3d13c7f67ed949210d1ad7c6fa154f9f2dda78926abe03b33d",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/webm",
+   "fingerprint": "bc9f8ec7787f2097e6c1c9edb4a87c6798ece1f1eba98b8d6e98c6fd765e8478",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/webm",
+   "fingerprint": "cfbc34fda983dcfbbd32392dc8c15fc7c2010c92b3b359b9da6b2160cd7f67dc",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/webm",
+   "fingerprint": "d7c385e211aec3f62d980ad1812cb2404a52d9f59b012283af65a19af1f78683",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/wav",
+   "fingerprint": "1d291f3ed29a866a42804217d3cc2c86ab841f2b5b835b0362f2ba9faf43b833",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/wav",
+   "fingerprint": "5929ade0353f422b46cd3a3ac8e5d720c28d5a3aa2f272a4569cb1ee7640c710",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "01ca598d05c246bc709be9adc07ebd714abd02b36085d736ede293779c97ff9b",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "3509af4dedb77fa85882d329acc023a59fe75a2c5454f1a7a27e073241af11f1",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "f2fc62cf7b024426fa9a3127ad10e5b11209a23f673364ced34ef08f3d948520",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "c575d911d2d79cdb3bda7bb6218746c5f177bd16c1105b9307540a11e3645408",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "1bd907d301c0c756d4f7619869b7b89831b3d015ebab29041790aa740cac31c8",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "48adee7d364c0c3df83ab284fd39f2a8cd08695a0a63409c8539cfe6b9ca8a5b",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "7c5afe9520438e907c96f2b7e371d95c419f4eb8e88ac75dda3444c0c0a1cfaf",
+   "hands_free": false,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "",
+   "fingerprint": "e686c4f30b1f4edd7615944982e42b34d81eaf3dcdab70853beb99d78ab8416e",
+   "hands_free": true,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/mp4; codecs=mp4a",
+   "fingerprint": "2264ac2ec80a554a3cdb0288d65f0b3f4def992b5c212f36bad6ec5b0d93fac2",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/mp4; codecs=mp4a",
+   "fingerprint": "a49f7582beb88fbdf4d1842eade0da40f8d59a38b4876495396ff6a9937b0ce0",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/mp4; codecs=mp4a",
+   "fingerprint": "7fa6e0ae9437e07f4d57ad202535fcf2d1aecde16785d42e4973479676c90fe4",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "audio/mp4; codecs=mp4a",
+   "fingerprint": "291f7196bb0d9dab9e6b621ff3966e4b9e59f899d770973ada4ae1904af60b8e",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "b92fb1b0cafac37987e1151811fbda8f8436960593af9389af9a64990e3bf45a",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "d8a3b2a45640943425ba662aaef57211d7e1918356d80967fd118e7f25a070b9",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "047058d543ff94e2c19160a9784bc84fd5d2e46370b6409a731c14f9ed1dbe2f",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "bfb2bc4905b59d34c71d9892523109ecb9c268cf1815d51c9ae5efc126000040",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "6ae94822c8d1f4bfb496c2df9d8787af4cd9556cd4e1024d828fb4a1b8d273bf",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "acba4d1c615043fe9090b13ef2739b7c5b08e42a65926370c29f3feb20268a4e",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "9a578cf57c34670109190806ebef68f4785fa06895808d201fa6407c51456c06",
+   "hands_free": false,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+   "content_type": "ünï/cödé",
+   "fingerprint": "17600d64e83839f7ac05b3c3f6f32ac5c0ebf78b9621ac28f7f9baa3fac92960",
+   "hands_free": true,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/webm",
+   "fingerprint": "81a521e6e1debef1a54c09629b32b71c8eeb357d2e9c60f436bcd8a7bf758b5f",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/webm",
+   "fingerprint": "b162db8b5d0e2b4f215503dae378973884a6b188214532ef810012b202a46072",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/webm",
+   "fingerprint": "8104f8a6bd164886cc3bca096a5aa2d735a024e9933a904cd96d4014982a1ddf",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/webm",
+   "fingerprint": "84330cde3658d9624ad14691eaffce064b4be140ae03910ea7c685f65ede9f0c",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/webm",
+   "fingerprint": "cf6080813b8f7c60c13fa8accfa6d75b8ea3b33a383ab807718b73cdd049badb",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/webm",
+   "fingerprint": "e25772d640e692003be0b1f64e847e10497d906df29a8a8243f8a34913d5c1fc",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/wav",
+   "fingerprint": "816c432084f2ea693901d420bfca49134746245394fc6eb8bdfa96eb40e979d6",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/wav",
+   "fingerprint": "689acaf118fa5863752e3272605f7b52cdf22140a4d1be92d2883ed59670f6f2",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/wav",
+   "fingerprint": "4f144fe0575afdb6195f490db778eeaa9a07cd59d69a4ff039f96aadc1f485f5",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c6970206f6e65",
+   "content_type": "audio/wav",
+   "fingerprint": "19837343da665a9d1cf522b001c97b0ed34735964a82bb04f2ae1ca2de534848",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "fff2754b8f3f1837938bc290fb883c7105c5e9984f021f16e789a56aef4b0cc1",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "97ee63514402bb3c939923664fdce6b35068a6b2b0d995aeb9410e4ef131a433",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "3f5aabdc83c9f4e7c4d930c4e709b3e960fb082a7852bdc98b456c9b3e06f0ac",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "905250bced07e840d428c5350d570543685d815bdf5241a87834fe65442ca885",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "4736e3afcb4893935dba27bbdca37d37538bffa149ec3391abede6f2728306c4",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "79ae7fd3e0ecf15b062db298370aecfbc7f0ac3e67b497bbc6bf35c8bc6d1120",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "2fb5b08d65c171a1f25fe24a9b55f63dd8537aadd67d6878da7cf1aa1da6ea23",
+   "hands_free": false,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/webm",
+   "fingerprint": "316409fbcb82414783c16e2979a827ec45c956d34e48bcefa9fa09f103362e7d",
+   "hands_free": true,
+   "model": "faster-whisper:small.en"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/wav",
+   "fingerprint": "d9b63fcd9a69a12e72f777a620e3dc5da1989bc21e6e4fc30e1edacc1a88cb2c",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/wav",
+   "fingerprint": "5c821a6a2f56b5a6b3c1c6acd22ce561e90a318e847276b9801da763c8e374e7",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/wav",
+   "fingerprint": "2ebba07fefd990a0b4c0cb62153f4d42e00f5a25b68683322eb25d5a310920fa",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/wav",
+   "fingerprint": "be3c4a8a11af81c072450b4122f311fe212d513c8993a9bb75efb67496c0b483",
+   "hands_free": true,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/wav",
+   "fingerprint": "e48c1d2d55f41963ea1b5e3e499b19298390c57e00958c70308adc48c2abe626",
+   "hands_free": false,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "audio/wav",
+   "fingerprint": "e7fecbfa30491f2397e82bdf59cdcb6e97a0e51e895777525e3f159de6e87c6a",
+   "hands_free": true,
+   "model": "elevenlabs:scribe_v2"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "",
+   "fingerprint": "897088e218964341c5d83e0c38b844cc5ae583c8d3d01568b68de70adec9e217",
+   "hands_free": false,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "",
+   "fingerprint": "00053421b2021af9ec24b1c089e00fdb915b16d22f29fa8a405533dd46c76a65",
+   "hands_free": true,
+   "model": ""
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "",
+   "fingerprint": "3dc94a5a912bded6d1f5327d72e51021250840a76f005546ee04ac93294741d6",
+   "hands_free": false,
+   "model": "server-default"
+  },
+  {
+   "audio_hex": "636c69702074776f",
+   "content_type": "",
+   "fingerprint": "2c7d0b534c6745a7c103c5f96eec366a66f3aaa68c06d3ea237c2da6721b83d1",
+   "hands_free": true,
+   "model": "server-default"
+  }
+ ],
+ "invented": {
+  "phrases": [
+   "(applause)",
+   "(music)",
+   ".",
+   "..",
+   "...",
+   "[applause]",
+   "[music]",
+   "a",
+   "and",
+   "bye",
+   "bye bye",
+   "don't forget to subscribe",
+   "good evening",
+   "good morning",
+   "good night",
+   "goodbye",
+   "goodnight",
+   "have a good night",
+   "hm",
+   "hmm",
+   "hope you enjoyed it",
+   "i hope you enjoyed",
+   "i hope you enjoyed it",
+   "i hope you enjoyed this video",
+   "i'll see you in the next one",
+   "like and subscribe",
+   "like comment and subscribe",
+   "mm-hmm",
+   "mmm",
+   "music",
+   "ok",
+   "okay",
+   "please",
+   "please subscribe",
+   "please transfer",
+   "see you",
+   "see you in the next video",
+   "see you next time",
+   "subscribe",
+   "thank you",
+   "thank you for watching",
+   "thank you so much",
+   "thank you very much",
+   "thanks",
+   "thanks a lot",
+   "thanks for watching",
+   "thanks so much",
+   "the",
+   "uh-huh",
+   "uhm",
+   "um",
+   "yeah",
+   "you",
+   "you know",
+   "you know what i mean",
+   "♪",
+   "♪ ♪",
+   "♪♪"
+  ],
+  "texts": [
+   {
+    "invented": true,
+    "text": ""
+   },
+   {
+    "invented": true,
+    "text": " "
+   },
+   {
+    "invented": true,
+    "text": "."
+   },
+   {
+    "invented": true,
+    "text": "..."
+   },
+   {
+    "invented": true,
+    "text": ". . ."
+   },
+   {
+    "invented": true,
+    "text": "Thank you."
+   },
+   {
+    "invented": true,
+    "text": "thank you"
+   },
+   {
+    "invented": true,
+    "text": "THANK YOU!"
+   },
+   {
+    "invented": true,
+    "text": " Thank you very much. "
+   },
+   {
+    "invented": true,
+    "text": "Thank you very much. I hope you enjoyed it."
+   },
+   {
+    "invented": false,
+    "text": "Thank you. Please open the file."
+   },
+   {
+    "invented": true,
+    "text": "Okay."
+   },
+   {
+    "invented": false,
+    "text": "Okay, do it."
+   },
+   {
+    "invented": false,
+    "text": "okay okay"
+   },
+   {
+    "invented": true,
+    "text": "Yeah."
+   },
+   {
+    "invented": false,
+    "text": "Yeah, that one."
+   },
+   {
+    "invented": true,
+    "text": "you"
+   },
+   {
+    "invented": true,
+    "text": "You."
+   },
+   {
+    "invented": true,
+    "text": "You?"
+   },
+   {
+    "invented": true,
+    "text": "you know"
+   },
+   {
+    "invented": true,
+    "text": "You know what I mean?"
+   },
+   {
+    "invented": true,
+    "text": "Bye!"
+   },
+   {
+    "invented": true,
+    "text": "Bye bye."
+   },
+   {
+    "invented": false,
+    "text": "bye-bye"
+   },
+   {
+    "invented": true,
+    "text": "Goodbye. See you next time."
+   },
+   {
+    "invented": true,
+    "text": "See you."
+   },
+   {
+    "invented": false,
+    "text": "See you tomorrow."
+   },
+   {
+    "invented": true,
+    "text": "[Music]"
+   },
+   {
+    "invented": true,
+    "text": "[music]"
+   },
+   {
+    "invented": true,
+    "text": "(music)"
+   },
+   {
+    "invented": true,
+    "text": "♪"
+   },
+   {
+    "invented": true,
+    "text": "♪♪"
+   },
+   {
+    "invented": true,
+    "text": "♪ ♪"
+   },
+   {
+    "invented": true,
+    "text": "[ Applause ]"
+   },
+   {
+    "invented": true,
+    "text": "(laughter)"
+   },
+   {
+    "invented": true,
+    "text": "[BLANK_AUDIO]"
+   },
+   {
+    "invented": true,
+    "text": "(speaking in foreign language)"
+   },
+   {
+    "invented": true,
+    "text": "[lyd fra mikrofon]"
+   },
+   {
+    "invented": false,
+    "text": "(a) (b)"
+   },
+   {
+    "invented": false,
+    "text": "(a)(b)"
+   },
+   {
+    "invented": false,
+    "text": "(unclosed"
+   },
+   {
+    "invented": false,
+    "text": "unopened)"
+   },
+   {
+    "invented": false,
+    "text": "(nested (inside))"
+   },
+   {
+    "invented": false,
+    "text": "[mixed)"
+   },
+   {
+    "invented": false,
+    "text": "(line\nbreak)"
+   },
+   {
+    "invented": false,
+    "text": "Run the tests (all of them)."
+   },
+   {
+    "invented": true,
+    "text": "(Run the tests.)"
+   },
+   {
+    "invented": true,
+    "text": "(Run the tests)"
+   },
+   {
+    "invented": false,
+    "text": "[Run] the tests"
+   },
+   {
+    "invented": true,
+    "text": "Please."
+   },
+   {
+    "invented": true,
+    "text": "please"
+   },
+   {
+    "invented": true,
+    "text": "Please transfer."
+   },
+   {
+    "invented": false,
+    "text": "Please run it."
+   },
+   {
+    "invented": true,
+    "text": "Subscribe."
+   },
+   {
+    "invented": true,
+    "text": "Don't forget to subscribe."
+   },
+   {
+    "invented": false,
+    "text": "Like, comment and subscribe."
+   },
+   {
+    "invented": true,
+    "text": "like comment and subscribe"
+   },
+   {
+    "invented": true,
+    "text": "Mm-hmm."
+   },
+   {
+    "invented": true,
+    "text": "Uh-huh"
+   },
+   {
+    "invented": true,
+    "text": "Um..."
+   },
+   {
+    "invented": true,
+    "text": "Hmm."
+   },
+   {
+    "invented": true,
+    "text": "hm"
+   },
+   {
+    "invented": true,
+    "text": "Mmm"
+   },
+   {
+    "invented": true,
+    "text": "and"
+   },
+   {
+    "invented": true,
+    "text": "And."
+   },
+   {
+    "invented": true,
+    "text": "The."
+   },
+   {
+    "invented": true,
+    "text": "A"
+   },
+   {
+    "invented": true,
+    "text": "a."
+   },
+   {
+    "invented": false,
+    "text": "and the a"
+   },
+   {
+    "invented": true,
+    "text": "And. The. A."
+   },
+   {
+    "invented": true,
+    "text": "Thanks!"
+   },
+   {
+    "invented": true,
+    "text": "Thanks a lot!"
+   },
+   {
+    "invented": true,
+    "text": "Thanks so much. Bye."
+   },
+   {
+    "invented": true,
+    "text": "Good night."
+   },
+   {
+    "invented": true,
+    "text": "Goodnight!"
+   },
+   {
+    "invented": false,
+    "text": "Good morning. Open the log."
+   },
+   {
+    "invented": true,
+    "text": "Good morning."
+   },
+   {
+    "invented": true,
+    "text": "Good evening?"
+   },
+   {
+    "invented": true,
+    "text": "I'll see you in the next one."
+   },
+   {
+    "invented": true,
+    "text": "I hope you enjoyed this video. Thanks for watching!"
+   },
+   {
+    "invented": false,
+    "text": "Thanks for watching — bye."
+   },
+   {
+    "invented": true,
+    "text": "— thank you —"
+   },
+   {
+    "invented": true,
+    "text": "–okay–"
+   },
+   {
+    "invented": true,
+    "text": "-ok-"
+   },
+   {
+    "invented": true,
+    "text": "ok!?"
+   },
+   {
+    "invented": true,
+    "text": "OK?!"
+   },
+   {
+    "invented": true,
+    "text": "  Thank you  .  "
+   },
+   {
+    "invented": true,
+    "text": "Thank you\n"
+   },
+   {
+    "invented": true,
+    "text": "thank you,"
+   },
+   {
+    "invented": true,
+    "text": ", thank you ,"
+   },
+   {
+    "invented": false,
+    "text": "Thank  you."
+   },
+   {
+    "invented": false,
+    "text": "thank\tyou"
+   },
+   {
+    "invented": false,
+    "text": "Tack."
+   },
+   {
+    "invented": false,
+    "text": "Takk."
+   },
+   {
+    "invented": false,
+    "text": "Ja."
+   },
+   {
+    "invented": false,
+    "text": "ünï cödé"
+   },
+   {
+    "invented": false,
+    "text": "İ"
+   },
+   {
+    "invented": false,
+    "text": "Maximus, status."
+   },
+   {
+    "invented": false,
+    "text": "Status?"
+   },
+   {
+    "invented": false,
+    "text": "One. Two. Three."
+   },
+   {
+    "invented": false,
+    "text": "one"
+   },
+   {
+    "invented": false,
+    "text": "1"
+   },
+   {
+    "invented": true,
+    "text": "!"
+   },
+   {
+    "invented": true,
+    "text": "?"
+   },
+   {
+    "invented": true,
+    "text": "!?"
+   },
+   {
+    "invented": true,
+    "text": "?!."
+   },
+   {
+    "invented": true,
+    "text": " . "
+   },
+   {
+    "invented": true,
+    "text": "\u001cthank you\u001f"
+   },
+   {
+    "invented": true,
+    "text": " okay "
+   },
+   {
+    "invented": true,
+    "text": " thanks "
+   },
+   {
+    "invented": false,
+    "text": "thank you​"
+   },
+   {
+    "invented": true,
+    "text": "Thank you. [Music]"
+   },
+   {
+    "invented": false,
+    "text": "[Music] Thank you."
+   },
+   {
+    "invented": false,
+    "text": "[Music] Run it."
+   },
+   {
+    "invented": false,
+    "text": "(music) (applause)"
+   },
+   {
+    "invented": true,
+    "text": "music"
+   },
+   {
+    "invented": true,
+    "text": "Music."
+   },
+   {
+    "invented": false,
+    "text": "The music is too loud."
+   },
+   {
+    "invented": true,
+    "text": "Yeah. Okay. Thanks."
+   },
+   {
+    "invented": false,
+    "text": "Yeah okay thanks"
+   }
+  ]
+ },
+ "job_ids": [
+  {
+   "answer": "",
+   "given": null
+  },
+  {
+   "answer": "",
+   "given": ""
+  },
+  {
+   "answer": "",
+   "given": "   "
+  },
+  {
+   "answer": "a",
+   "given": "a"
+  },
+  {
+   "answer": "job-1",
+   "given": "job-1"
+  },
+  {
+   "answer": "A.b_c-9",
+   "given": "A.b_c-9"
+  },
+  {
+   "answer": "padded",
+   "given": " padded "
+  },
+  {
+   "answer": "job",
+   "given": "\tjob\n"
+  },
+  {
+   "answer": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "given": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "given": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "has space",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "slash/in",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "ünï",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "job:1",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "job+1",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "job=1",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "answer": ".",
+   "given": "."
+  },
+  {
+   "answer": "..",
+   "given": ".."
+  },
+  {
+   "answer": "-",
+   "given": "-"
+  },
+  {
+   "answer": "_",
+   "given": "_"
+  },
+  {
+   "answer": "UPPER",
+   "given": "UPPER"
+  },
+  {
+   "answer": "0",
+   "given": "0"
+  },
+  {
+   "given": "a\nb",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "answer": "a.b.c",
+   "given": "a.b.c"
+  },
+  {
+   "answer": "4b0c5e0e-7a53-4d31-9c58-4f0f3b5b2f11",
+   "given": "4b0c5e0e-7a53-4d31-9c58-4f0f3b5b2f11"
+  },
+  {
+   "answer": "utt_1794800000000_3",
+   "given": "utt_1794800000000_3"
+  },
+  {
+   "given": "😀",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "tab\tinside",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "%41",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  },
+  {
+   "given": "a,b",
+   "message": "invalid transcription id",
+   "refused": "ValueError"
+  }
+ ],
+ "joined": [
+  {
+   "joined": "",
+   "segments": []
+  },
+  {
+   "joined": "Hello there.",
+   "segments": [
+    {
+     "no_speech_prob": 0.0,
+     "text": " Hello there."
+    }
+   ]
+  },
+  {
+   "joined": "Hello there.",
+   "segments": [
+    {
+     "no_speech_prob": 0.1,
+     "text": " Hello"
+    },
+    {
+     "no_speech_prob": 0.2,
+     "text": " there."
+    }
+   ]
+  },
+  {
+   "joined": "kept kept too.",
+   "segments": [
+    {
+     "no_speech_prob": 0.59,
+     "text": " kept"
+    },
+    {
+     "no_speech_prob": 0.6,
+     "text": " dropped"
+    },
+    {
+     "no_speech_prob": 0.5999,
+     "text": " kept too."
+    }
+   ]
+  },
+  {
+   "joined": "",
+   "segments": [
+    {
+     "no_speech_prob": 0.9,
+     "text": " dropped"
+    },
+    {
+     "no_speech_prob": 1.0,
+     "text": " also dropped"
+    }
+   ]
+  },
+  {
+   "joined": "spaces    around",
+   "segments": [
+    {
+     "no_speech_prob": 0.0,
+     "text": "  spaces  "
+    },
+    {
+     "no_speech_prob": 0.0,
+     "text": "  around  "
+    }
+   ]
+  },
+  {
+   "joined": "no leading spacejoined",
+   "segments": [
+    {
+     "no_speech_prob": 0.0,
+     "text": "no leading space"
+    },
+    {
+     "no_speech_prob": 0.0,
+     "text": "joined"
+    }
+   ]
+  },
+  {
+   "joined": "ünï cödé.",
+   "segments": [
+    {
+     "no_speech_prob": 0.0,
+     "text": " ünï"
+    },
+    {
+     "no_speech_prob": 0.3,
+     "text": " cödé."
+    }
+   ]
+  },
+  {
+   "joined": "",
+   "segments": [
+    {
+     "no_speech_prob": 0.0,
+     "text": ""
+    },
+    {
+     "no_speech_prob": 0.0,
+     "text": " "
+    },
+    {
+     "no_speech_prob": 0.0,
+     "text": "\n"
+    }
+   ]
+  },
+  {
+   "joined": "Two.",
+   "segments": [
+    {
+     "no_speech_prob": 0.61,
+     "text": " One."
+    },
+    {
+     "no_speech_prob": 0.0,
+     "text": " Two."
+    },
+    {
+     "no_speech_prob": 0.7,
+     "text": " Three."
+    }
+   ]
+  },
+  {
+   "joined": "unsure of nothing.",
+   "segments": [
+    {
+     "text": " unsure of nothing."
+    }
+   ]
+  }
+ ],
+ "plans": [
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": true
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": true
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": true
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "deepgram:nova-3",
+   "requested": "",
+   "wants_cloud_engine": true
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "deepgram:nova-3",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": true
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "deepgram:nova-3",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": true
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "server-default",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "server-default",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "server-default",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "server-default",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "server-default",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "server-default",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "elevenlabs:scribe_v2",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "elevenlabs:scribe_v2",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "elevenlabs:scribe_v2",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "faster-whisper:medium",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": "faster-whisper:medium",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "faster-whisper:medium",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": "faster-whisper:medium",
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": null,
+   "agent_engines": [],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "faster-whisper:medium",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "google:chirp_3",
+   "agent_engines": [
+    "google:chirp_3"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "google:chirp_3",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "elevenlabs:scribe_v2",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": false,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  },
+  {
+   "agent_engine": "elevenlabs:scribe_v2",
+   "agent_engines": [
+    "elevenlabs:scribe_v2",
+    "deepgram:nova-3",
+    "local"
+   ],
+   "cloud_engine": "deepgram:nova-3",
+   "escalated_from": null,
+   "fallbacks": [
+    "deepgram:nova-3",
+    "local"
+   ],
+   "in_call": true,
+   "long_model": "google:chirp_3",
+   "model": "elevenlabs:scribe_v2",
+   "requested": "faster-whisper:medium",
+   "wants_cloud_engine": false
+  }
+ ],
+ "providers": [
+  {
+   "cloud": false,
+   "model": "",
+   "provider": ""
+  },
+  {
+   "cloud": false,
+   "model": "local",
+   "provider": ""
+  },
+  {
+   "cloud": false,
+   "model": "server-default",
+   "provider": ""
+  },
+  {
+   "cloud": true,
+   "model": "elevenlabs:scribe_v2",
+   "provider": "elevenlabs"
+  },
+  {
+   "cloud": true,
+   "model": "ElevenLabs:Scribe_v2",
+   "provider": "elevenlabs"
+  },
+  {
+   "cloud": true,
+   "model": " deepgram :nova-3",
+   "provider": "deepgram"
+  },
+  {
+   "cloud": false,
+   "model": "faster-whisper:small.en",
+   "provider": "faster-whisper"
+  },
+  {
+   "cloud": false,
+   "model": "whisper.cpp:base.en",
+   "provider": "whisper.cpp"
+  },
+  {
+   "cloud": true,
+   "model": "google:chirp_3",
+   "provider": "google"
+  },
+  {
+   "cloud": true,
+   "model": "cartesia:ink-2",
+   "provider": "cartesia"
+  },
+  {
+   "cloud": false,
+   "model": "unknown:model",
+   "provider": "unknown"
+  },
+  {
+   "cloud": false,
+   "model": ":",
+   "provider": ""
+  },
+  {
+   "cloud": false,
+   "model": "a:b:c",
+   "provider": "a"
+  },
+  {
+   "cloud": false,
+   "model": "nocolon",
+   "provider": ""
+  }
+ ],
+ "terms": [
+  {
+   "payload": "",
+   "terms": []
+  },
+  {
+   "payload": "a",
+   "terms": [
+    "a"
+   ]
+  },
+  {
+   "payload": "a, b, c",
+   "terms": [
+    "a",
+    "b",
+    "c"
+   ]
+  },
+  {
+   "payload": " a ,b,, c ,",
+   "terms": [
+    "a",
+    "b",
+    "c"
+   ]
+  },
+  {
+   "payload": ",",
+   "terms": []
+  },
+  {
+   "payload": "Clarp, Maximus, ünï cödé",
+   "terms": [
+    "Clarp",
+    "Maximus",
+    "ünï cödé"
+   ]
+  },
+  {
+   "payload": "one term only",
+   "terms": [
+    "one term only"
+   ]
+  },
+  {
+   "payload": "a,b",
+   "terms": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "payload": " , , ",
+   "terms": []
+  }
+ ],
+ "truthy": [
+  {
+   "given": null,
+   "yes": false
+  },
+  {
+   "given": "",
+   "yes": false
+  },
+  {
+   "given": "1",
+   "yes": true
+  },
+  {
+   "given": "true",
+   "yes": true
+  },
+  {
+   "given": "TRUE",
+   "yes": true
+  },
+  {
+   "given": " yes ",
+   "yes": true
+  },
+  {
+   "given": "On",
+   "yes": true
+  },
+  {
+   "given": "on",
+   "yes": true
+  },
+  {
+   "given": "0",
+   "yes": false
+  },
+  {
+   "given": "false",
+   "yes": false
+  },
+  {
+   "given": "no",
+   "yes": false
+  },
+  {
+   "given": "off",
+   "yes": false
+  },
+  {
+   "given": "y",
+   "yes": false
+  },
+  {
+   "given": "t",
+   "yes": false
+  },
+  {
+   "given": "2",
+   "yes": false
+  },
+  {
+   "given": "True\n",
+   "yes": true
+  },
+  {
+   "given": "ja",
+   "yes": false
+  }
+ ],
+ "whole": [
+  {
+   "answer": null,
+   "given": null
+  },
+  {
+   "answer": null,
+   "given": ""
+  },
+  {
+   "answer": 0,
+   "given": "0"
+  },
+  {
+   "answer": 12,
+   "given": "12"
+  },
+  {
+   "answer": 12,
+   "given": " 12 "
+  },
+  {
+   "answer": 12,
+   "given": "12.9"
+  },
+  {
+   "answer": -12,
+   "given": "-12.9"
+  },
+  {
+   "answer": 1000,
+   "given": "1e3"
+  },
+  {
+   "answer": 1794800000000,
+   "given": "1794800000000"
+  },
+  {
+   "answer": 1794800000000,
+   "given": "1794800000000.75"
+  },
+  {
+   "answer": null,
+   "given": "abc"
+  },
+  {
+   "answer": null,
+   "given": "1,5"
+  },
+  {
+   "answer": null,
+   "given": "0x10"
+  },
+  {
+   "answer": 7,
+   "given": "+7"
+  },
+  {
+   "answer": 0,
+   "given": "-0"
+  },
+  {
+   "answer": 1000,
+   "given": "1_000"
+  },
+  {
+   "answer": null,
+   "given": "nan"
+  },
+  {
+   "answer": null,
+   "given": "  "
+  },
+  {
+   "answer": null,
+   "given": "12abc"
+  },
+  {
+   "answer": 0,
+   "given": ".5"
+  },
+  {
+   "answer": 5,
+   "given": "5."
+  }
+ ],
+ "written_by": "server-rs/tools/speech-vectors.py with Python 3.13"
+}

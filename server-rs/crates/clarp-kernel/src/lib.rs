@@ -12,6 +12,7 @@ pub mod conversation;
 pub mod devices;
 pub mod failures;
 pub mod goals;
+pub mod heard;
 pub mod helpers;
 pub mod jobs;
 pub mod journal;
