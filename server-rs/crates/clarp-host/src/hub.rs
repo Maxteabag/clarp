@@ -67,6 +67,11 @@ pub struct Hub {
     epoch: String,
     /// How many requests of each agent wait for the user: what the apps' badge counts.
     waiting: Mutex<BTreeMap<String, usize>>,
+    /// What each agent's turn shows now, for who follows every agent inside this Host (the
+    /// chip a phone shows of the fleet): the status alone, never what the turn wrote.
+    statuses: broadcast::Sender<Arc<Value>>,
+    /// Counts the changes of what waits for the user: who watches it wakes with each.
+    badge: tokio::sync::watch::Sender<u64>,
 }
 
 impl Hub {
@@ -75,9 +80,13 @@ impl Hub {
     pub fn new(now_ms: i64) -> Self {
         let (live, _) = broadcast::channel(BEHIND_MAX);
         let (shown, _) = broadcast::channel(BEHIND_MAX);
+        let (statuses, _) = broadcast::channel(BEHIND_MAX);
+        let (badge, _) = tokio::sync::watch::channel(0);
         let seconds = u64::try_from(now_ms / 1_000).unwrap_or(0);
         Self {
             shown,
+            statuses,
+            badge,
             // The moment it started names a run: no two runs of a Host start in one. Twelve
             // hex signs, as the Python Host's name of a run has.
             epoch: format!("{now_ms:012x}"),
@@ -94,12 +103,27 @@ impl Hub {
     /// all: the count the apps are told.
     pub fn waiting_for_user(&self, agent_id: &str, count: usize) -> usize {
         let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = waiting.get(agent_id).copied().unwrap_or(0);
         if count == 0 {
             waiting.remove(agent_id);
         } else {
             waiting.insert(agent_id.to_string(), count);
         }
+        if before != count {
+            self.badge.send_modify(|changes| *changes += 1);
+        }
         waiting.values().sum()
+    }
+
+    /// Wakes whenever what waits for the user changed.
+    pub fn badge(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.badge.subscribe()
+    }
+
+    /// Follows what every agent's turn shows: each time a status changes, an event with
+    /// that status alone, as the stream of turns would have told it.
+    pub fn statuses(&self) -> broadcast::Receiver<Arc<Value>> {
+        self.statuses.subscribe()
     }
 
     /// Numbers an event, keeps it for those who reconnect and sends it to those who listen.
@@ -140,6 +164,17 @@ impl Hub {
     /// Sends a `live` event to the connections that asked to be shown agents' turns. The
     /// reading of the clock in it is this moment's: a client sets its own clock by it.
     pub fn show(&self, mut event: Value, now_ms: i64) {
+        if self.statuses.receiver_count() > 0 {
+            let ops = event["ops"].as_array().into_iter().flatten();
+            let mut statuses = ops.filter(|op| op["op"] == "status");
+            if let Some(status) = statuses.next_back() {
+                let told = json!({
+                    "type": "live", "agent_id": event["agent_id"], "session": event["session"],
+                    "ops": [status],
+                });
+                let _ = self.statuses.send(Arc::new(told));
+            }
+        }
         if self.shown.receiver_count() == 0 {
             return;
         }

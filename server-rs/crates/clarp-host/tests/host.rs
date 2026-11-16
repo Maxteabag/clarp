@@ -4488,6 +4488,244 @@ fn a_ring_that_rang_when_the_host_was_killed_is_missed_on_time_by_the_host_that_
 }
 
 #[test]
+fn the_chip_on_a_phones_lock_screen_is_kept_current_while_agents_work() {
+    let relay = StandInRelay::start();
+    let place = Place::new("chip");
+    let relay_at = format!("http://{}", relay.address);
+    let args = ["--push-relay", relay_at.as_str()];
+    // The chip goes to a token no phone gave a grant for: by the Host's own account at the
+    // relay.
+    let world = [("CLARP_PUSH_CREDENTIAL", "the-hosts-own-account")];
+    let host = place.start_in("secret", &args, &world);
+    let features = |host: &Host| host.get("/server-info")["contract"]["features"].clone();
+    assert_eq!(features(&host)["live_activity_push"], 45);
+    let (phone, _) = pair(&host, "Phone", "full");
+    let as_phone = |method: &str, body: Value| {
+        host.ask_as(&phone, method, "/devices/live-activity", Some(&body))
+    };
+    // Every push of the chip the relay was handed, in order.
+    let chips = || -> Vec<Value> {
+        let taken = relay.taken();
+        let sent = taken.iter().filter(|(path, ..)| path == "/v1/push/send");
+        let pushed = sent.map(|(_, _, body)| body["notifications"][0].clone());
+        pushed
+            .filter(|push| push["pushType"] == "liveactivity")
+            .collect()
+    };
+    let state = |push: &Value| push["payload"]["aps"]["content-state"].clone();
+
+    // What is no token, kind or side of the push service is refused in words.
+    for (said, why) in [
+        (json!({}), "token must be a hex ActivityKit push token"),
+        (
+            json!({ "token": "xyz" }),
+            "token must be a hex ActivityKit push token",
+        ),
+        (
+            json!({ "token": "ab", "kind": "else" }),
+            "kind must be agents-working",
+        ),
+        (
+            json!({ "token": "ab", "environment": "moon" }),
+            "environment must be sandbox or production",
+        ),
+    ] {
+        assert_eq!(
+            as_phone("POST", said.clone()),
+            (400, json!({ "error": why })),
+            "{said}"
+        );
+    }
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/devices/live-activity",
+            Some(&json!(["ab"]))
+        ),
+        (400, json!({ "error": "bad json" }))
+    );
+    // The summary for a phone of another kind is not here, and is no administrator's to ask.
+    let other = json!({ "platform": "fcm", "kind": "agents-working" });
+    assert_eq!(as_phone("POST", other.clone()).0, 501);
+    assert_eq!(
+        host.ask("POST", "/devices/live-activity", Some(&other)),
+        (403, json!({ "error": "full device access required" }))
+    );
+
+    // The phone leaves its activity. Nothing is pushed while nobody works.
+    let token = "AB".repeat(20);
+    let left = json!({
+        "token": token, "activity_id": "act-1", "kind": "agents-working", "environment": "sandbox",
+    });
+    assert_eq!(
+        as_phone("POST", left.clone()),
+        (200, json!({ "ok": true, "activity_id": "act-1" }))
+    );
+    assert!(chips().is_empty());
+
+    // An agent works: the chip is told at once, by the Host's own account, to the token.
+    let session = host.new_agent("Echo");
+    let began = Instant::now();
+    host.send(&session, "the build is green", "m1");
+    wait_for("the chip to be told that an agent works", || {
+        !chips().is_empty()
+    });
+    let first = &chips()[0];
+    assert_eq!(
+        (
+            &first["deviceToken"],
+            &first["priority"],
+            &first["collapseId"]
+        ),
+        (
+            &json!(token.to_lowercase()),
+            &json!("5"),
+            &json!("live-activity-act-1")
+        )
+    );
+    let taken = relay.taken();
+    let bound = taken
+        .iter()
+        .find(|(path, ..)| path == "/v1/push/devices")
+        .unwrap();
+    assert_eq!(bound.1, "Bearer the-hosts-own-account");
+    assert_eq!(
+        bound.2["devices"][0],
+        json!({ "deviceToken": token.to_lowercase(), "environment": "sandbox" })
+    );
+    let sent = taken
+        .iter()
+        .find(|(path, ..)| path == "/v1/push/send")
+        .unwrap();
+    assert_eq!(sent.1, "Bearer the-hosts-own-account");
+    let aps = &first["payload"]["aps"];
+    assert_eq!(aps["event"], "update");
+    assert_eq!(
+        aps["stale-date"].as_i64().unwrap() - aps["timestamp"].as_i64().unwrap(),
+        15 * 60
+    );
+    let working = state(first);
+    assert_eq!(
+        (
+            &working["working"],
+            &working["needs_you"],
+            &working["decisions"]
+        ),
+        (&json!(1), &json!(0), &json!(0))
+    );
+    assert_eq!(
+        (&working["lead"]["session"], &working["lead"]["persona"]),
+        (&json!(session), &json!("Echo"))
+    );
+    assert_eq!(working["agents"].as_array().unwrap().len(), 1);
+    assert!(
+        working["lead"]["headline"]
+            .as_str()
+            .is_some_and(|line| !line.is_empty())
+    );
+
+    // The turn is over soon. That nobody works any more is a change of the chip's shape:
+    // it is told ten seconds after the last push, not before, and then by itself.
+    wait_for("the turn to be over", || host.state(&session) == "done");
+    let last = || state(chips().last().unwrap());
+    while last()["working"] != 0 {
+        assert!(
+            began.elapsed() < Duration::from_secs(25),
+            "the chip was not told that nobody works: {:?}",
+            chips().len()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        began.elapsed() >= Duration::from_secs(9),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        (&last()["lead"], last()["agents"].as_array().unwrap().len()),
+        (&Value::Null, 0)
+    );
+    let quiet = chips().len();
+
+    // An agent asks its user something: more needs the owner than the phone was told, so
+    // it is told at once, and loud.
+    let ask = json!({ "session": session, "title": "Deploy?", "question": "Deploy version 1.2?" });
+    let (status, asked) = host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(status, 201, "{asked}");
+    wait_for("the chip to be told that something needs the owner", || {
+        chips().len() > quiet
+    });
+    let needs = &chips()[quiet];
+    assert_eq!(needs["priority"], "10");
+    let needing = state(needs);
+    assert_eq!(
+        (
+            &needing["working"],
+            &needing["needs_you"],
+            &needing["decisions"]
+        ),
+        (&json!(0), &json!(1), &json!(1))
+    );
+    assert_eq!(
+        (
+            &needing["agents"][0]["session"],
+            &needing["agents"][0]["headline"]
+        ),
+        (&json!(session), &json!("Waiting for you"))
+    );
+
+    // The activity is the Host's to keep: a Host that was killed still tells it. And an
+    // activity that ended on the phone is told nothing more.
+    host.kill();
+    let host = place.start_in("secret", &args, &world);
+    let before = chips().len();
+    host.send(&session, "once more", "m2");
+    wait_for("the chip of the Host that came back", || {
+        chips().len() > before
+    });
+    assert_eq!(chips()[before]["collapseId"], "live-activity-act-1");
+    let ended = host.ask_as(
+        &phone,
+        "POST",
+        "/devices/live-activity",
+        Some(&json!({ "activity_id": "act-1", "ended": true })),
+    );
+    assert_eq!(ended, (200, json!({ "ok": true, "removed": 1 })));
+    let again = host.ask_as(
+        &phone,
+        "DELETE",
+        "/devices/live-activity?activity_id=act-1",
+        None,
+    );
+    assert_eq!(again, (200, json!({ "ok": true, "removed": 0 })));
+    wait_for("the turn to be over", || host.state(&session) == "done");
+    let told = chips().len();
+    std::thread::sleep(Duration::from_secs(12));
+    assert_eq!(
+        chips().len(),
+        told,
+        "an activity that ended is told nothing"
+    );
+
+    // A Host without an account of its own at the relay cannot reach an activity: it keeps
+    // what a phone leaves, and does not say that it keeps a chip current.
+    let other = Place::new("chip-without-account");
+    let bare = other.start_in("secret", &args, &[("CLARP_PUSH_CREDENTIAL", "")]);
+    assert!(features(&bare).get("live_activity_push").is_none());
+    assert_eq!(
+        bare.ask("POST", "/devices/live-activity", Some(&left)),
+        (200, json!({ "ok": true, "activity_id": "act-1" }))
+    );
+    let before = chips().len();
+    let echo = bare.new_agent("Echo");
+    bare.send(&echo, "nothing is told", "m1");
+    wait_for("the turn to be over", || bare.state(&echo) == "done");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(chips().len(), before);
+}
+
+#[test]
 fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
     let relay = StandInRelay::start();
     let place = Place::new("push");

@@ -129,7 +129,7 @@ pub fn pusher() -> (Pusher, Waiting) {
 /// What the pusher's thread works with.
 pub struct Works {
     /// The way to the phones. `None`: this Host pushes nothing.
-    pub relay: Option<Relay>,
+    pub relay: Option<Arc<Relay>>,
     pub fleet: FleetHandle,
     pub desks: Arc<Mutex<Presence>>,
     pub clock: Arc<dyn Clock + Send + Sync>,

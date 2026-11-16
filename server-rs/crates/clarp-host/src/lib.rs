@@ -18,6 +18,7 @@ pub mod agent;
 pub mod apps;
 pub mod artifact_tool;
 pub mod calls;
+pub mod chip;
 pub mod config;
 pub mod edge;
 pub mod faces;

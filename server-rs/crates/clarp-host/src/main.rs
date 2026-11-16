@@ -121,10 +121,19 @@ async fn serve(config: Config) -> Result<(), String> {
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
     let fleet = fleet::start(works, store)?;
     let desks = Arc::new(Mutex::new(Presence::new()));
+    // The relay tells what paces the chip when it is asked too much, by an alert as well.
+    let (limited, is_limited) = tokio::sync::mpsc::unbounded_channel();
+    let relay = Some(config.push_relay.as_str())
+        .filter(|relay| !relay.is_empty())
+        .map(|relay| {
+            Arc::new(Relay::new(
+                relay,
+                &config.push_credential,
+                Some(limited.clone()),
+            ))
+        });
     to_push.run(pusher::Works {
-        relay: Some(config.push_relay.as_str())
-            .filter(|relay| !relay.is_empty())
-            .map(|relay| Relay::new(relay, &config.push_credential)),
+        relay: relay.clone(),
         fleet: fleet.clone(),
         desks: desks.clone(),
         clock: clock.clone(),
@@ -152,6 +161,7 @@ async fn serve(config: Config) -> Result<(), String> {
         blobs,
         activity: Arc::default(),
         calls: Arc::default(),
+        chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
             // nobody will ask for again are forgotten on the side.
@@ -187,6 +197,8 @@ async fn serve(config: Config) -> Result<(), String> {
     // A ring that rang when the Host stopped has its time again, or is missed now: the apps
     // and its agent are told without anybody having to ask first.
     clarp_host::calls::resume(&app);
+    // And the chips of the phones are kept current from now on.
+    clarp_host::chip::run(&app, is_limited);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",
