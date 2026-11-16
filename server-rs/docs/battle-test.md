@@ -168,11 +168,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 20:45 (16 Nov) | the Host updated by the installer, `a9c9f41e` to `99fe37a7`: the build with rings, the chip on a phone's lock screen, and schedules | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 21:52 (16 Nov) | the Host updated by the installer, `99fe37a7` to `6390a692`: the build with the connection relay, the door that trusts only what nobody handed on, and this Host's tools first in every bash | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 22:30 (16 Nov) | the Host updated by the installer, `6390a692` to `a60c7839`: the build that keeps an answer to a heartbeat as one line, and takes a name off a spoken message as the Python Host does since its second fix of the evening. The first update with the connection relay on: the new Host was connected to it again 194 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 00:07 (17 Nov) | the Host updated by the installer, `a60c7839` to `22ca39e7`: the build with the heartbeat, a message filed under the id its app gave it, the queue by its user's hand, and the portraits an agent keeps. The relay was on: the new Host was connected to it again 95 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and four turns in thirty
-exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and twelve of Codex
-in the four since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and seven turns in thirty-one
+exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and fifteen of Codex
+in the five since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -542,6 +543,52 @@ itself (`automation`), 12.8 seconds after the minute: the runner looks every fif
 with its word. The user was not moved to that agent. The schedule had moved on to its next minute before it
 sent. Turned off it had no next time; it had been sent once; removed, it was gone, and the Host had the
 agents and the schedules it had before.
+
+## The queue by its user's hand, and ids as a phone mints them
+
+On 17 Nov 2026 at 00:13, on the build of `22ca39e7`, with real Codex turns, by a check that makes an agent
+of its own and removes it. A message was sent under an id as the phone mints one (the mark `u-` and a UUID
+in capitals), and its turn ran a command of 45 seconds; three more were left for later behind it, one of
+them under such an id and two under ids as the desk mints them. The queue named each as its app had named
+it, and the conversation had the first message under the phone's id as it is: the fault of the build
+before, which filed a phone's message under its id with a second mark before it, is gone on the installed
+Host. Then, by hand: the words of one waiting message were changed, and words that are none were refused
+(400); one was taken back by the phone's id, and could not be taken back twice (404); nothing was sent past
+the turn that ran (409). The turn was stopped, which held the two that waited. The later of them was sent
+by hand past the hold and answered with its word, and the other stayed held; then that one was sent by
+hand and answered with the word it had been reworded to, and with nothing left waiting the hold was over
+without a resume. The conversation had the three messages that ran, each under the id its app looks for,
+and nothing of the one that was taken back.
+
+## The portraits an agent keeps
+
+On 17 Nov 2026 at 00:09, on the build of `22ca39e7`, without a turn of a model, by a check that makes an
+agent of its own and removes it. Two pictures were put into its gallery. One was kept as a portrait (kept
+again, it was kept once) and made the picture the agent wears: the snapshot then showed the agent with
+that picture, by what the address carries of the picture's digest; fetched there, the picture was the one
+that was published, byte for byte; and the portrait was handed out as the kind of picture it is
+(`image/png`). The second was kept beside it, with the one it wears first. A portrait the agent has not
+was refused in words (404).
+
+## A heartbeat, and what its first real turn found
+
+On 17 Nov 2026 at 00:09, on the build of `22ca39e7`, with one real Codex turn, by a check that makes an
+agent of its own in an empty directory, sets the owner's interval to a minute for as long as it runs, and
+puts the settings back. The settings were read and changed, and a change that cannot be was refused in
+words. The agent had not asked: no heartbeat was due. It asked, and one was due at once; the runner, which
+looks once a minute, gave it the heartbeat 58 seconds later, by itself. A chat shows the prompt as the
+Host's own business. The turn ended; the next was due an interval after this one was started; there was
+one heartbeat, not one at every look; turned off, none was due.
+
+What the turn counted as was wrong, and that is the finding. The agent said three things: two remarks on
+its way, and then that nothing was to be done, which the conversation kept as the line for it. By the rule
+this build had from the Python Host, a turn in which anything is said beside the token is activity: the
+count of turns that found nothing stayed at none, and the interval did not grow. An agent whose tool
+narrates would so be woken at the owner's interval for ever. The same rule on the owner's Host, counted
+there over seven days without reading what was said: 87 of 122 heartbeat turns of Codex agents and 230 of
+280 of Muse agents counted as activity, 4 of 31 of Claude agents. Reported to the release owner as
+reference defect R28. This Host counts a heartbeat's turn by its last answer from the build after this
+one, and the same check is run on it again.
 
 ## The soak so far
 
