@@ -47,7 +47,7 @@ def emitted(monkeypatch):
     from lib import diagnostics_settings
     diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
     calls: list[tuple] = []
-    monkeypatch.setattr(eventlog, "emit", lambda source, event, **kw: calls.append((source, event, kw)))
+    monkeypatch.setattr(eventlog, "emit", lambda source, event, **kw: calls.append((source, event, kw)) or True)
     return calls
 
 
@@ -204,3 +204,29 @@ def test_real_hook_report_sink_import_failure_stays_private(
         assert len(lines) == 1
         assert "toolend_hook" in lines[0] and "resolveFail OperationalError SQLITE_BUSY" in lines[0]
         assert "ImportError" in lines[0] and "SECRET" not in lines[0]
+
+
+def test_real_policy_cache_transition_cannot_drop_the_hook_report(monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+    from lib import diagnostics_settings, settings_store, telemetry
+
+    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
+    telemetry.conn()  # Initialize the real sink before controlling only the policy clock.
+    settings_store.set_text(diagnostics_settings.KEY, '{"enabled":false,"categories":[]}')
+    diagnostics_settings._CACHED_AT = 100.0
+    reads = []
+    def cache_clock():
+        value = 101.9 if not reads else 102.1
+        reads.append(value)
+        return value
+    monkeypatch.setattr(diagnostics_settings, "time", SimpleNamespace(monotonic=cache_clock))
+    reporter = _load("_hook_report", monkeypatch)
+    assert reporter.report("toolstart_hook", "recordFail", _locked()) is None
+    output = capsys.readouterr()
+    assert (output.out, output.err) == ("", "")
+    rows = telemetry.conn().execute(
+        "SELECT COUNT(*) FROM diagnostic_events WHERE source='toolstart_hook' AND event='recordFail'").fetchone()[0]
+    log = RuntimePaths.from_home(tmp_path).hook_log
+    lines = log.read_text().splitlines() if log.exists() else []
+    assert rows + len(lines) == 1
+    assert len(reads) == 1

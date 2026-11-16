@@ -33,10 +33,8 @@ def report(hook: str, event: str, exc: BaseException) -> None:
         # directory at import, which raises in a container without one, and
         # importing this module must never fail (agy_state is fail-open).
         import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
-        from lib import diagnostics_settings
         from lib.eventlog import emit
-        if diagnostics_settings.allows_event(source=hook, event=event):
-            emit(hook, event, level="error", detail=detail)
+        if emit(hook, event, level="error", detail=detail):
             return
         unrecorded = "capture policy"
     except Exception as emit_error:  # noqa: BLE001 - recorded in the hook log below
