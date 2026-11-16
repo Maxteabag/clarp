@@ -114,12 +114,13 @@ def _row_count(result) -> int | None:
 
 
 def _prune_keeping_newest(c, statement: str, params, *, key: str, group: str,
-                          batch: int, pause_s: float) -> int:
+                          batch: int, pause_s: float, before_first=None) -> int:
     """Delete expired rows, keeping each group's newest, one bounded batch per
     autocommit statement. The newest rows are read once per sweep, not once
     per batch, in one statement with the highest key; a row written during the
     sweep is above it and left alone, even back-dated. The expired rows are
-    found by short reads outside the write lock (RM-N8)."""
+    found by short reads outside the write lock (RM-N8). ``before_first`` is
+    called once, before the first delete, when there is a row to delete."""
     table, where = batched_delete.split(statement)
     high, keep = c.execute(
         f"""SELECT (SELECT MAX({key}) FROM {table}),
@@ -130,31 +131,56 @@ def _prune_keeping_newest(c, statement: str, params, *, key: str, group: str,
         return 0
     # Every read and every delete carries the whole condition, so a row read
     # outside the lock is deleted only if it still qualifies when written.
-    return batched_delete.prune(
-        c, f"{statement} AND {key} <= ? AND {key} NOT IN (SELECT value FROM json_each(?))",
-        (*params, high, keep), batch=batch, pause_s=pause_s)
+    whole = f"{statement} AND {key} <= ? AND {key} NOT IN (SELECT value FROM json_each(?))"
+    bound = (*params, high, keep)
+    rowids = batched_delete.matching_rowids(c, table, batched_delete.split(whole)[1], bound)
+    if rowids and before_first is not None:
+        before_first()
+    return batched_delete.prune(c, whole, bound, rowids=rowids, batch=batch, pause_s=pause_s)
 
 
 # agents.STATES_PRUNED_KEY: the agent list keeps each agent's state clocks for
 # its newest state row, and deleting older rows can change them too.
+#
+# What the agent list keeps rests on two facts about state_log: rows are only
+# ever inserted, never updated, and this sweep is the only thing that deletes
+# them. Whoever adds an UPDATE of a state row, or another DELETE, must add to
+# this count in the same way, or the list answers with clocks from before it
+# (tests/unit/test_dashboard_states_kept.py reads both facts from the sources).
 STATES_PRUNED_KEY = "state_log.pruned"
 
 
+def _state_rows_pruned(c) -> None:
+    c.execute(
+        """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
+           ON CONFLICT(key) DO UPDATE SET
+               value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
+               updated_at = excluded.updated_at""",
+        (STATES_PRUNED_KEY, int(time.time() * 1000)))
+
+
 def _prune_state_log(c, cutoff_ms: int) -> int:
-    """Expired state rows, keeping each agent's newest (PT-01, RM-N8). When
-    any went, one is added to ``STATES_PRUNED_KEY``, after the deletes: clocks
-    read while the sweep ran are read again once it has ended."""
-    deleted = _prune_keeping_newest(
-        c, "DELETE FROM state_log WHERE ts < ?", (cutoff_ms,), key="state_id", group="agent_id",
-        batch=STATE_LOG_DELETE_BATCH, pause_s=STATE_LOG_BATCH_PAUSE_S)
-    if deleted:
-        c.execute(
-            """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
-               ON CONFLICT(key) DO UPDATE SET
-                   value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
-                   updated_at = excluded.updated_at""",
-            (STATES_PRUNED_KEY, int(time.time() * 1000)))
-    return deleted
+    """Expired state rows, keeping each agent's newest (PT-01, RM-N8).
+
+    When there is a row to delete, one is added to ``STATES_PRUNED_KEY``
+    before the first delete and one more after the last, however the deletes
+    ended: a batch that gives up on the lock has still deleted the batches
+    before it. The first drops the clocks kept from before the sweep even if
+    the second cannot be written; the second has the clocks read while the
+    sweep ran read again. A sweep with nothing to delete adds nothing."""
+    began = []
+
+    def before_first():
+        _state_rows_pruned(c)
+        began.append(True)
+
+    try:
+        return _prune_keeping_newest(
+            c, "DELETE FROM state_log WHERE ts < ?", (cutoff_ms,), key="state_id", group="agent_id",
+            batch=STATE_LOG_DELETE_BATCH, pause_s=STATE_LOG_BATCH_PAUSE_S, before_first=before_first)
+    finally:
+        if began:
+            _state_rows_pruned(c)
 
 
 def _timed(phases: _Phases | None, name: str, fn):

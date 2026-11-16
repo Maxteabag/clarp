@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import random
+import sqlite3
 
 import pytest
 
@@ -183,3 +184,147 @@ def test_what_a_caller_does_to_its_answer_stays_its_own():
     first[aid]["detail"]["tool"]["name"] = "changed"
     first.pop(aid)
     assert agents.dashboard_states()[aid] == _as_it_was()[aid]
+
+
+# --- from the review of #379 ----------------------------------------------------
+
+def _pruned():
+    row = db.conn().execute("SELECT value FROM settings WHERE key=?", (agents.STATES_PRUNED_KEY,)).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _an_old_turn(aid):
+    """An agent whose last turn ended long ago, and a newer row that the sweep keeps."""
+    db.conn().execute("DELETE FROM state_log WHERE agent_id=?", (aid,))
+    _row(aid, "thinking", 100)
+    _row(aid, "done", 200)
+    _row(aid, "background", T)
+
+
+def test_a_sweep_that_fails_part_way_still_says_rows_went(monkeypatch):
+    """One batch is deleted, the next gives up on the lock. Rows are gone and
+    the sweep never reached its end: the count has moved all the same, and
+    the clocks are read again."""
+    aid = _agent(0)
+    _an_old_turn(aid)
+    assert agents.dashboard_states()[aid]["last_turn_end"] == 200
+    monkeypatch.setattr(maintenance, "STATE_LOG_DELETE_BATCH", 1)
+    plain = db._TrackedConnection.execute
+    deletes = []
+
+    def execute(self, sql, parameters=(), /):
+        if str(sql).lstrip().startswith("DELETE FROM state_log"):
+            deletes.append(1)
+            if len(deletes) == 2:
+                raise sqlite3.OperationalError("database is locked")
+        return plain(self, sql, parameters)
+    monkeypatch.setattr(db._TrackedConnection, "execute", execute)
+    with pytest.raises(sqlite3.OperationalError):
+        maintenance._prune_state_log(db.conn(), 1000)
+    monkeypatch.setattr(db._TrackedConnection, "execute", plain)
+
+    assert db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id=?", (aid,)).fetchone()[0] == 2
+    assert _pruned() >= 1
+    assert agents.dashboard_states() == _as_it_was()
+
+
+def test_a_sweep_whose_last_word_fails_has_said_so_before_it_deleted(monkeypatch):
+    """The count's own write after the deletes gives up. One was added before
+    the first batch, so the clocks kept from before the sweep are not used."""
+    aid = _agent(0)
+    _an_old_turn(aid)
+    assert agents.dashboard_states()[aid]["last_turn_end"] == 200
+    plain = db._TrackedConnection.execute
+    said = []
+
+    def execute(self, sql, parameters=(), /):
+        if "INSERT INTO settings" in str(sql) and agents.STATES_PRUNED_KEY in tuple(parameters):
+            said.append(1)
+            if len(said) == 2:
+                raise sqlite3.OperationalError("database is locked")
+        return plain(self, sql, parameters)
+    monkeypatch.setattr(db._TrackedConnection, "execute", execute)
+    with pytest.raises(sqlite3.OperationalError):
+        maintenance._prune_state_log(db.conn(), 1000)
+    monkeypatch.setattr(db._TrackedConnection, "execute", plain)
+
+    assert len(said) == 2 and _pruned() == 1
+    assert agents.dashboard_states()[aid]["last_turn_end"] is None
+    assert agents.dashboard_states() == _as_it_was()
+
+
+def test_a_sweep_with_nothing_to_delete_says_nothing():
+    aid = _agent(0)
+    _row(aid, "done", T + 5000)
+    assert maintenance._prune_state_log(db.conn(), 1000) == 0
+    assert _pruned() == 0
+
+
+def test_a_row_that_arrives_between_the_two_statements_is_kept_under_its_own_id(monkeypatch):
+    """A request reads every agent's newest id, then the clocks of those that
+    changed. Another process writes a state row between the two. The clocks
+    read hold that row, and they are kept under the id read with them, not
+    under the one the request began with: the next request finds them."""
+    import threading
+
+    aid, other = _agent(0), _agent(1)
+    _row(aid, "thinking", T + 1000)
+    _row(other, "done", T + 1000)
+    db.conn().commit()
+    plain = db._TrackedConnection.execute
+    here, arrived = threading.get_ident(), []
+
+    def execute(self, sql, parameters=(), /):
+        if "AS turn_started_at" in str(sql) and threading.get_ident() == here and not arrived:
+            arrived.append(True)
+
+            def write():
+                _row(aid, "done", T + 2000)
+                db.conn().commit()
+                db.close_local()
+            writer = threading.Thread(target=write)
+            writer.start()
+            writer.join(20)
+        return plain(self, sql, parameters)
+    monkeypatch.setattr(db._TrackedConnection, "execute", execute)
+    first = agents.dashboard_states()
+    monkeypatch.setattr(db._TrackedConnection, "execute", plain)
+
+    assert arrived and first[aid]["kind"] == "done" and first[aid]["last_turn_end"] == T + 2000
+    assert len(_statements(agents.dashboard_states)) == 1    # found under the id read with them
+    assert agents.dashboard_states() == _as_it_was()
+
+
+def test_state_rows_are_only_inserted_and_only_the_sweep_deletes_them():
+    """What is kept rests on these two facts. Read from the sources: no
+    statement updates a state row, and the only delete is the sweep's, which
+    adds to the count. Whoever adds another must add to the count too."""
+    import pathlib
+    import re
+    library = pathlib.Path(agents.__file__).resolve().parent
+    updates, deletes = [], []
+    for path in sorted(library.rglob("*.py")):
+        source = path.read_text()
+        updates += [path.name for _ in re.finditer(r"UPDATE\s+state_log\b", source)]
+        deletes += [path.name for _ in re.finditer(r"DELETE\s+FROM\s+state_log\b", source)]
+    assert updates == []
+    assert deletes == ["maintenance.py"]
+
+
+def test_clocks_read_while_the_sweep_runs_are_read_again_when_it_has_ended(monkeypatch):
+    """A request comes after the sweep has said it begins and before its
+    deletes: its clocks hold the rows about to go, kept under the sweep's
+    first number. The second number, after the deletes, has them read again."""
+    aid = _agent(0)
+    _an_old_turn(aid)
+    plain = maintenance.batched_delete.prune
+    during = []
+
+    def prune(*args, **kwargs):
+        during.append(agents.dashboard_states()[aid]["last_turn_end"])
+        return plain(*args, **kwargs)
+    monkeypatch.setattr(maintenance.batched_delete, "prune", prune)
+    assert maintenance._prune_state_log(db.conn(), 1000) == 2
+    assert during == [200] and _pruned() == 2
+    assert agents.dashboard_states()[aid]["last_turn_end"] is None
+    assert agents.dashboard_states() == _as_it_was()
