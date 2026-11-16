@@ -44,6 +44,8 @@ def _locked() -> sqlite3.OperationalError:
 
 @pytest.fixture
 def emitted(monkeypatch):
+    from lib import diagnostics_settings
+    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
     calls: list[tuple] = []
     monkeypatch.setattr(eventlog, "emit", lambda source, event, **kw: calls.append((source, event, kw)))
     return calls
@@ -83,6 +85,8 @@ def test_unreadable_stdin_is_reported_and_the_hook_still_exits_zero(monkeypatch,
 
 
 def test_when_the_event_log_fails_the_report_goes_to_the_hook_log(monkeypatch, tmp_path, capsys):
+    from lib import diagnostics_settings
+    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
     report = _load("_hook_report", monkeypatch)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
@@ -138,3 +142,65 @@ def test_agy_state_stays_fail_open_without_a_home(monkeypatch, capsys):
     runpy.run_path(str(HOOKS / "agy_state.py"), run_name="__main__")
 
     assert capsys.readouterr().out == "{}\n"
+
+
+@pytest.mark.parametrize("capture", ["off", "excluded", "on"])
+def test_real_hook_report_storage_obeys_capture_without_losing_failure(
+        monkeypatch, tmp_path, capsys, capture):
+    from lib import diagnostics_settings, settings_store, telemetry
+
+    if capture == "off":
+        settings_store.set_text(diagnostics_settings.KEY, "")
+        diagnostics_settings.reset_for_tests()
+    else:
+        diagnostics_settings.update({"enabled": True,
+                                     "categories": ["agents"] if capture == "on" else ["voice"]})
+    before = diagnostics_settings.get()
+    reporter = _load("_hook_report", monkeypatch)
+    log = RuntimePaths.from_home(tmp_path).hook_log
+    assert reporter.report("toolstart_hook", "recordFail", _locked()) is None
+    output = capsys.readouterr()
+    assert (output.out, output.err) == ("", "")
+    rows = telemetry.conn().execute(
+        "SELECT source,event,level,detail FROM diagnostic_events").fetchall()
+    if capture == "on":
+        assert len(rows) == 1
+        assert tuple(rows[0][:3]) == ("toolstart_hook", "recordFail", "error")
+        assert json.loads(rows[0]["detail"]) == {"error": "OperationalError", "code": "SQLITE_BUSY"}
+        assert not log.exists()
+    else:
+        assert rows == []
+        lines = log.read_text().splitlines()
+        assert len(lines) == 1
+        assert "toolstart_hook" in lines[0] and "recordFail OperationalError SQLITE_BUSY" in lines[0]
+        assert "SECRET" not in lines[0] and "locked" not in lines[0]
+    assert diagnostics_settings.get() == before
+
+
+@pytest.mark.parametrize("unwritable", [False, True])
+def test_real_hook_report_sink_import_failure_stays_private(
+        monkeypatch, tmp_path, capsys, unwritable):
+    import builtins
+    from lib import diagnostics_settings, telemetry
+
+    diagnostics_settings.update({"enabled": True, "categories": ["agents"]})
+    reporter = _load("_hook_report", monkeypatch)
+    log = RuntimePaths.from_home(tmp_path).hook_log
+    if unwritable:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.mkdir()  # Real IsADirectoryError; neither writer can be used.
+    original_import = builtins.__import__
+    def unavailable(name, *args, **kwargs):
+        if name == "lib.eventlog":
+            raise ImportError("SECRET sink unavailable")
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", unavailable)
+    assert reporter.report("toolend_hook", "resolveFail", _locked()) is None
+    output = capsys.readouterr()
+    assert (output.out, output.err) == ("", "")
+    assert telemetry.conn().execute("SELECT COUNT(*) FROM diagnostic_events").fetchone()[0] == 0
+    if not unwritable:
+        lines = log.read_text().splitlines()
+        assert len(lines) == 1
+        assert "toolend_hook" in lines[0] and "resolveFail OperationalError SQLITE_BUSY" in lines[0]
+        assert "ImportError" in lines[0] and "SECRET" not in lines[0]
