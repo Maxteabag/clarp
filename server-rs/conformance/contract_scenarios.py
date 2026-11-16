@@ -1840,6 +1840,44 @@ SCENARIOS.append({
 })
 
 
+def reworded(queue_id, words, name):
+    return {'op': 'put', 'path': f'/turn-queue/{queue_id}', 'body': {'text': words}, 'name': name}
+
+
+SCENARIOS.append({
+    'id': 'the-queue-reworded',
+    'what': 'the words of a waiting message are changed by its user: it keeps its id and its place, its turn '
+            'answers the words it has when it starts, also when they were changed while a hold held it; and '
+            'what does not wait has no words to change',
+    'steps': [
+        send(SLOW + 'synthetic reword first', 'r-first'),
+        {'op': 'wait_busy', 'busy': True},
+        send('synthetic reword golf', 'r-golf', queue_if_busy=True),
+        send('synthetic reword hotel', 'u-r-hotel', queue_if_busy=True),
+        reworded('r-golf', '   ', 'words that are none'),
+        {'op': 'put', 'path': '/turn-queue/r-golf', 'body': {}, 'name': 'no words'},
+        reworded('nothing-there', '   ', 'no words for what is not there'),
+        reworded('nothing-there', 'synthetic reword nothing', 'what is not there is reworded'),
+        reworded('r-golf', '  synthetic reword golf, in other words  ', 'one is reworded'),
+        reworded('u-r-hotel', 'synthetic reword hotel, as the phone has it now', "one of the phone's is reworded"),
+        {**QUEUE, 'name': 'the queue with the new words'},
+        post('/stop', {'session': AGENT}),
+        {'op': 'wait_busy', 'busy': False},
+        {'op': 'quiesce', 'held': True},
+        reworded('r-golf', 'synthetic reword golf, as it was held', 'reworded while a hold holds it'),
+        {**QUEUE, 'name': 'held, with the new words'},
+        post('/turn-queue/resume', {'session': AGENT}),
+        {'op': 'wait_reply', 'after': 'u-r-golf'},
+        {'op': 'wait_reply', 'after': 'u-r-hotel'},
+        {'op': 'quiesce'},
+        reworded('r-golf', 'synthetic reword too late', 'reworded after it ran'),
+        {**LOG, 'name': 'the conversation: each message with the words it had when its turn started'},
+        {**QUEUE, 'name': 'the queue afterwards'},
+        {**SNAPSHOT, 'name': 'the snapshot afterwards'},
+    ],
+})
+
+
 def settings(change, name):
     return post('/heartbeat/settings', change, name)
 
@@ -1891,6 +1929,9 @@ SCENARIOS.append({
         send('synthetic heartbeat alfa', 'hb-alfa'),
         {'op': 'wait_reply', 'after': 'u-hb-alfa'},
         {'op': 'quiesce'},
+        # The conversation is read, so that its rows are compared as rows where the snapshot
+        # names one, and not by how each Host spells an id.
+        {**LOG, 'name': 'the conversation after somebody spoke with it'},
         {**HEARTBEAT, 'name': 'its cadence after somebody spoke with it'},
         post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': True}, 'asked for once more'),
         get(f'/agent-heartbeat/status?session=%20{AGENT}%20', 'its cadence, asked for with blanks around its name'),
