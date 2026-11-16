@@ -484,6 +484,9 @@ CALL = re.compile(r'gcl_[0-9a-f]{32}')
 # event of the ring, in the path a client reads it by, in the trail, and in the id of the notice
 # in the agent's conversation. Named as the calls are.
 RING = re.compile(r'rng_[0-9a-f]{32}')
+# The id a Host gives a schedule: `sched_` and twelve hex signs. It is in the schedule's record and
+# in the path a client changes and removes it by. Named as the calls are.
+SCHEDULE = re.compile(r'sched_[0-9a-f]{12}')
 # The clip of a ring's opening line, where a Host voiced it: the name of its file begins with the
 # moment it was made. The harness's normalizer names such a file only under the keys it knows.
 RING_CLIP = re.compile(r'/audio/1[5-9][0-9]{11}(__[A-Za-z0-9._-]+\.mp3)')
@@ -783,7 +786,8 @@ def published(value, found: dict) -> dict:
 
 
 def called(value, found: dict) -> dict:
-    """The ids of the calls and of the rings a capture names, each with the name it is given here."""
+    """The ids of the calls, of the rings and of the schedules a capture names, each with the name it
+    is given here."""
     if isinstance(value, list):
         for item in value:
             called(item, found)
@@ -795,6 +799,9 @@ def called(value, found: dict) -> dict:
             elif key == 'ring_id' and isinstance(item, str) and RING.fullmatch(item):
                 known = sum(1 for name in found.values() if name.startswith('<ring:'))
                 found.setdefault(item, f'<ring:{known + 1}>')
+            elif key == 'schedule_id' and isinstance(item, str) and SCHEDULE.fullmatch(item):
+                known = sum(1 for name in found.values() if name.startswith('<schedule:'))
+                found.setdefault(item, f'<schedule:{known + 1}>')
             else:
                 called(item, found)
     return found
