@@ -2641,6 +2641,27 @@ fn a_call_is_the_hosts_record_of_who_is_in_it_and_its_messages_go_to_who_can_tak
     );
     let (status, _) = as_phone("POST", "/calls/dance", Some(json!({ "agent": "theo" })));
     assert_eq!(status, 404, "what is no change of a call is no route");
+    // And what is no route is said as the Python Host says it, by its path or by its method,
+    // to whoever may ask at all.
+    for (method, path) in [
+        ("POST", "/calls/dance"),
+        ("GET", "/nothing-of-the-kind"),
+        ("DELETE", "/calls"),
+        ("PUT", "/server-info"),
+    ] {
+        let none = fetch(&host, &phone, method, path, &[], b"");
+        assert_eq!(
+            (
+                none.status,
+                none.text().as_str(),
+                none.header("content-type")
+            ),
+            (404, "not found", "text/plain"),
+            "{method} {path}"
+        );
+    }
+    let nobody = fetch(&host, "", "GET", "/nothing-of-the-kind", &[], b"");
+    assert_eq!(nobody.status, 401, "and nobody else is told even that");
     let (status, bad) = as_phone("POST", "/calls", Some(json!({ "agents": "theo" })));
     assert_eq!(
         (status, bad),
