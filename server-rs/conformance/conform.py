@@ -388,12 +388,6 @@ NOT_YET = {
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
 NOT_BUILT = {
-    # With them: what a persona is like, as the old settings screen is told it (`bio` in
-    # `GET /voices`).
-    'portraits and the persona catalogue': {
-        'fields': ('bio',),
-        'events': (),
-    },
     # What `GET /status` says of the Python Host's own way of telling whether a turn's process
     # is still its own (budgets, a gate, counts of probes): no client reads it, and the Rust
     # Host has no such machinery to tell of.

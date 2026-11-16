@@ -599,6 +599,29 @@ its own). Their order is this Host's own, the roster's. On the owner's Host that
 persona the owner makes himself (nine of the 93), a picture an agent chose itself (eleven of his 180 agents),
 the janitors' pictures, and the making of pictures.
 
+**An agent's tool is told who the agent is, and how to speak** (16 Nov 2026). Found by reading for the
+personas, not by a run: until this build the Host handed a tool the user's words and nothing else. An agent
+here had no name to itself and no way of speaking, was never told to use the Host's own tools, and never
+marked a part of an answer for the ear unless its user asked for the mark by hand, so a spoken turn stayed
+silent. No test said so: the stand-in tools do not care who they are, and the check of speech out had asked
+for the mark in the message. Now a tool is told three things, in the Python Host's own words
+(`clarp-kernel` `told.rs`; the texts are carried as data, and held sign for sign to what that Host's own
+functions say for nine agents and settings made up for it, each in a room of its own). Who the agent is: its
+name and the way it speaks, which it has from the day it is made (asked for, else the persona's of its name)
+and keeps under another name; as the tool's standing instruction (`--append-system-prompt` for Claude Code,
+developer instructions for Codex). What holds for every turn: to use the Host's tools where they fit, and
+whose turn this is. And for a turn whose answer is read aloud, how to speak: which part is heard, how human
+it sounds at the agent's level, with tags of emotion only where the engine that speaks for the agent acts
+them out, and how much it says while it works. The last two go with the prompt: for Claude Code after the
+user's words in the same message, between the marks Claude Code puts around what a hook says (on the Python
+Host a hook says it); for Codex before the user's words, between that Host's marks for it. It is worked out
+when a message arrives (`clarp-host` `telling.rs`), from the agent, the owner's settings and the owner's
+file as they are then, so a change holds for the next turn and nothing has to be started again. The owner's
+settings for it are there: whether agents are told a way of speaking at all (`/personalities/settings`,
+which the iOS app has a switch for), how human voices sound (`/voice-humanness`), how much an agent says
+while it works (`/agent-voice-verbosity`). One thing is not copied: the Python Host never tells Claude Code
+the last of these (reference defect R21); here every tool is told.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
