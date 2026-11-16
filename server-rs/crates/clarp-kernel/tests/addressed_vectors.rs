@@ -2,10 +2,10 @@
 //!
 //! `fixtures/addressed-vectors.json` is written by `server-rs/tools/addressed-vectors.py`:
 //! what the Python Host's functions say of messages and agents made up for it. The same must
-//! be said here, with one difference made on purpose: a word is taken off whole or not at
-//! all, and the test names the messages where that shows. (The Python Host's defect with a
-//! name in letters English has not, R23, is fixed there since 16 Nov 2026, and its vectors
-//! were written again.)
+//! be said here, with one difference made on purpose: the word a name was found in is taken
+//! off whole, and the test names the messages where that shows. (The Python Host's defect
+//! with a name in letters English has not, R23, and what its first fix broke, R27, are
+//! fixed there since 16 Nov 2026, and the vectors were written again from each fix.)
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -91,22 +91,28 @@ fn a_message_is_for_the_agent_the_python_host_finds_named_in_it() {
         }
     }
     assert!(
-        messages >= 110 && for_an_agent >= 80,
+        messages >= 130 && for_an_agent >= 100,
         "{messages}, {for_an_agent}"
     );
     assert_eq!(whole_words, WHOLE_WORDS.len());
 }
 
 /// What is said, what this Host gives the agent of it, and what the Python Host gives it.
-/// The first four: the name is spelled another way than the agent has it, or goes on in
-/// more letters, and the Python Host leaves the end of the word. The last: the name is
-/// found in the middle of a longer word, and the Python Host cuts the word there.
-const WHOLE_WORDS: [(&str, &str, &str); 5] = [
+/// In each the word the name was found in does not end where the name does: it spells the
+/// name another way than the agent has it, or goes on in a letter, a digit, a mark or a
+/// sign that is no punctuation. The Python Host cuts after the letters of English it knows
+/// and leaves the agent the end of the word; this Host takes the word off whole.
+const WHOLE_WORDS: [(&str, &str, &str); 10] = [
     ("Rach\u{e9}l go", "go", "\u{e9}l go"),
     ("Zo\u{e9} go", "go", "\u{e9} go"),
-    ("Zo\u{eb}y go", "go", "y go"),
+    ("Zo\u{eb}y go", "go", "\u{eb}y go"),
     ("Rache\u{301}l go", "go", "\u{301}l go"),
-    ("Anna Mariana please", "Mariana please", "na please"),
+    ("Zo\u{eb}1 go", "go", "\u{eb}1 go"),
+    ("Zo\u{eb}\u{301} go", "go", "\u{eb}\u{301} go"),
+    ("Zo\u{eb}\u{1f642}go", "\u{1f642}go", "\u{eb}\u{1f642}go"),
+    ("Zo\u{eb}\u{200d}go", "\u{200d}go", "\u{eb}\u{200d}go"),
+    ("Zo\u{eb}+go", "+go", "\u{eb}+go"),
+    ("Zo\u{eb}$go", "$go", "\u{eb}$go"),
 ];
 
 #[test]

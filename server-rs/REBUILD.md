@@ -655,10 +655,10 @@ off; that agent is the open one from then on. Without a name the message stays w
 then with the one the app named. What was typed, or dictated for the open agent, is for the agent it names,
 as before. The router that asks a model is not built: an app that asks it (`/orchestrator/route-delegation`)
 is answered as by a Host whose router is off and asks its user. A name the message spells out is taken off
-whole, all its words and its letters however they are composed, as the Python Host does since its fix of
-reference defect R23 (16 Nov 2026). One thing is not copied: a word is taken off whole or not at all, where
-the Python Host leaves the end of a word that spells the name another way, and cuts a longer word where the
-name ends in it (reference defect R27).
+through its end where it ends as a word, all its words and its letters however they are composed, as the
+Python Host does since its fixes of reference defects R23 and R27 (16 Nov 2026). One thing is not copied:
+the word a name was found in is taken off whole, where the Python Host leaves the agent the end of a word
+that spells the name another way or goes on after it.
 
 **A phone says where it is** (16 Nov 2026). The first of the screens of what this Host had not that is
 built instead of answered as nothing: the app says where its phone is for a session (`POST /location`), an
