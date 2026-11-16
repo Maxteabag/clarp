@@ -144,9 +144,60 @@ def cases() -> list[tuple[str, object]]:
     return out
 
 
+# What a tool was given, for the card a conversation shows of its use: the fields a card takes
+# from it by the tool's name, as they should be, as they are when the model writes something
+# odd, and longer than a card holds.
+LONG = 'word ' * 200
+CARD_INPUTS = [
+    ('Edit', {'file_path': '/synthetic/notes.md', 'old_string': 'A line.', 'new_string': 'Another line.'}),
+    ('Edit', {'file_path': '/synthetic/notes.md', 'old_string': LONG, 'new_string': LONG + 'x', 'replace_all': True}),
+    ('Edit', {'file_path': 7, 'old_string': None, 'new_string': ['a'], 'replace_all': 'yes'}),
+    ('Edit', {}),
+    ('MultiEdit', {'file_path': '/synthetic/notes.md', 'edits': [{'old_string': 'a', 'new_string': 'b'}] * 12}),
+    ('MultiEdit', {'file_path': '/synthetic/notes.md', 'edits': [{'old_string': LONG, 'new_string': 'short'}, {}]}),
+    ('MultiEdit', {'file_path': '/synthetic/notes.md', 'edits': None}),
+    ('Write', {'file_path': '/synthetic/new.md', 'content': '# New\n\nA line.\n'}),
+    ('Write', {'file_path': '/synthetic/new.md', 'content': LONG}),
+    ('Write', {'content': 5}),
+    ('Read', {'file_path': '/synthetic/notes.md'}),
+    ('Read', {'file_path': '/synthetic/notes.md', 'offset': 10, 'limit': 20}),
+    ('Read', {'file_path': '/synthetic/notes.md', 'offset': ' 12 ', 'limit': '20'}),
+    ('Read', {'file_path': '/synthetic/notes.md', 'offset': '[160, 175]', 'limit': True}),
+    ('Read', {'file_path': '/synthetic/notes.md', 'offset': 1.5, 'limit': None}),
+    ('Read', {'file_path': '/synthetic/notes.md', 'offset': -3, 'limit': '1_000'}),
+    ('Bash', {'command': 'echo synthetic', 'description': 'Print a synthetic line'}),
+    ('Bash', {'command': 'x' * 500, 'description': LONG}),
+    ('Bash', {'command': ['echo'], 'description': 5}),
+    ('Bash', {}),
+    ('Grep', {'pattern': 'synthetic', 'path': '/synthetic', 'output_mode': 'files_with_matches'}),
+    ('Grep', {'pattern': 'synthetic', 'glob': '*.md'}),
+    ('Glob', {'pattern': '**/*.rs', 'path': 5}),
+    ('Glob', {}),
+    ('TodoWrite', {'todos': [{'content': 'Write it', 'status': 'in_progress', 'activeForm': 'Writing it'},
+                             {'content': 'Test it'}, {}]}),
+    ('TodoWrite', {'todos': None}),
+    ('mcp__synthetic__lookup', {'query': 'synthetic', 'limit': 3, 'filters': {'kind': 'note'}}),
+    ('mcp__synthetic__lookup', {'flag': True, 'nothing': None, 'ratio': 1.5, 'list': [1], 'long': LONG}),
+    ('WebFetch', {'url': 'https://example.org/a', 'prompt': 'What does it say?'}),
+    ('Agent', {'description': 'Look into it', 'prompt': 'Look into the synthetic thing.', 'subagent_type': 'general'}),
+    ('UnknownTool', {}),
+    ('UnknownTool', None),
+]
+# What a tool returned, as the tool's result says it.
+RESULTS = [
+    'synthetic\n', '', '   ', 'r' * 300, 'r' * 301, LONG, None, 5, True, [], {},
+    [{'type': 'text', 'text': 'one synthetic result'}],
+    [{'type': 'text', 'text': 'first'}, {'type': 'text', 'text': ''}, {'type': 'text', 'text': 'third'}],
+    [{'type': 'image', 'source': {}}, {'type': 'text', 'text': 'beside an image'}],
+    [{'content': 'held as content'}, 'a plain string', 5, None, {'text': 7}],
+    [{'type': 'text', 'text': 'x' * 400}],
+]
+
+
 def main() -> int:
     sys.path.insert(0, str(REPO / 'server'))
     from lib.activity import summarize_tool_activity
+    from lib.claude_transcript import _tool_result_text, summarise_tool
     from lib.live_core import tool_headline
     from lib.live_tools import classify_tool
     vectors = []
@@ -157,11 +208,25 @@ def main() -> int:
         vectors.append({'name': name, 'input': tool_input, 'category': category, 'label': label,
                         'command': command, 'headline': tool_headline(name, category, label),
                         'activity': activity})
+    # The card a conversation shows of a tool's use (`summarise_tool`), and what is shown of what
+    # the tool returned (`_tool_result_text`).
+    def card(name, tool_input, tool_id='toolu_synthetic'):
+        # What the library itself breaks on (an edit that is no object) is no card to hold to.
+        try:
+            return {'name': name, 'input': tool_input, 'id': tool_id, 'card': summarise_tool(name, tool_input, tool_id)}
+        except (AttributeError, TypeError):
+            return None
+
+    cards = [card(name, tool_input) for name, tool_input in CARD_INPUTS]
+    cards += [card(name, tool_input) for name, tool_input in cases() if isinstance(tool_input, dict)][:400]
+    cards.append(card('Bash', {'command': 'ls'}, ''))
+    cards = [made for made in cards if made is not None]
+    results = [{'content': content, 'text': _tool_result_text({'content': content})} for content in RESULTS]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps({
         'about': 'Written by server-rs/tools/tool-vectors.py from server/lib/live_tools.py and live_core.py. '
                  'Do not edit by hand.',
-        'vectors': vectors}, ensure_ascii=False, indent=1) + '\n')
+        'vectors': vectors, 'cards': cards, 'results': results}, ensure_ascii=False, indent=1) + '\n')
     kinds: dict[str, int] = {}
     for vector in vectors:
         kinds[vector['category']] = kinds.get(vector['category'], 0) + 1
