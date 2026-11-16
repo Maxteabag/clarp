@@ -1163,6 +1163,35 @@ pub(crate) fn inbox(app: &App, include_questions: bool, include_archived: bool) 
     })
 }
 
+/// What the apps' badge counts, as the agent each thing is of: every request that waits for
+/// the user, and everything an agent made that blocks on the user and is not put away.
+pub(crate) fn badge(app: &App) -> Vec<String> {
+    let fleet = Fleet::of(app);
+    let (shelves, now) = (fleet.shelves(), app.clock.now_ms());
+    let agent_of = |row: &Value| row["agent_id"].as_str().unwrap_or("").to_string();
+    let waiting = decisions::attention(&shelves, true, false, now);
+    let mut items: Vec<String> = waiting.iter().map(agent_of).collect();
+    let mut cursor = String::new();
+    // As many pages as a list of Updates can sensibly have: a list that changes under the
+    // count is counted again the next time.
+    for _ in 0..50 {
+        let Ok(page) = updates::page(&shelves, 200, &cursor, now) else {
+            break;
+        };
+        let blocking = page.artifacts.iter().filter(|row| {
+            row["attention_bucket"] == "blocking"
+                && row["archived_at"].is_null()
+                && row["type"] != "workflow_run"
+        });
+        items.extend(blocking.map(agent_of));
+        match page.next_cursor {
+            Some(next) => cursor = next,
+            None => break,
+        }
+    }
+    items
+}
+
 /// One artifact by its id, as it is shown.
 pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
     let fleet = Fleet::of(app);

@@ -22,6 +22,7 @@ use std::time::Duration;
 use clarp_kernel::devices::PushRow;
 use clarp_kernel::push::collapse_id_on_the_wire;
 use serde_json::{Value, json};
+use tokio::sync::mpsc::UnboundedSender;
 
 /// What the push service calls a token that is gone for good.
 const DEAD: [&str; 3] = ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"];
@@ -62,11 +63,42 @@ pub struct Push<'a> {
     pub priority: &'a str,
 }
 
+/// The relay said that this Host asks too much, and when to come back.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Limited {
+    /// Seconds to wait, as the relay said in its answer; 0 when it said none.
+    pub retry_after: f64,
+    /// It is the day's window that is spent, not the minute's.
+    pub whole_day: bool,
+}
+
+/// What a relay's 429 says of waiting: the header in whole seconds and what the answer
+/// itself says, the longer of the two; more than an hour in the header means the day.
+fn limited(header: &str, answer: &Value) -> Limited {
+    let header = header.trim();
+    let digits = !header.is_empty() && header.bytes().all(|sign| sign.is_ascii_digit());
+    let header = if digits {
+        header.parse::<f64>().ok().filter(|wait| wait.is_finite())
+    } else {
+        None
+    };
+    let header = header.unwrap_or(0.0);
+    let said = answer["retryAfter"].as_f64();
+    let said = said.filter(|wait| wait.is_finite() && *wait > 0.0);
+    Limited {
+        retry_after: header.max(said.unwrap_or(0.0)),
+        whole_day: header > 3600.0,
+    }
+}
+
 /// The way to the relay.
 pub struct Relay {
     base: String,
     credential: String,
     agent: ureq::Agent,
+    /// Who is told when the relay says that this Host asks too much: what paces the pushes
+    /// that can wait.
+    limited: Option<UnboundedSender<Limited>>,
     /// The tokens this Host has bound to its credential since it started, with the side of
     /// the push service each belongs to. Binding again is harmless.
     bound: Mutex<HashSet<(String, String)>>,
@@ -114,8 +146,9 @@ fn delivered(answer: &Value) -> Outcome {
 }
 
 impl Relay {
-    /// The relay at `base`, with this Host's credential there when it has one.
-    pub fn new(base: &str, credential: &str) -> Self {
+    /// The relay at `base`, with this Host's credential there when it has one. `limited`
+    /// is told each time the relay says that it is asked too much.
+    pub fn new(base: &str, credential: &str, limited: Option<UnboundedSender<Limited>>) -> Self {
         // Longer than the relay's own wait for the push service, so that the relay answers
         // before this gives up.
         let config = ureq::Agent::config_builder()
@@ -126,8 +159,15 @@ impl Relay {
             base: base.trim_end_matches('/').to_string(),
             credential: credential.to_string(),
             agent: config.into(),
+            limited,
             bound: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Whether this Host has an account of its own at the relay: the way to a token no
+    /// phone gave a grant for.
+    pub fn has_credential(&self) -> bool {
+        !self.credential.is_empty()
     }
 
     /// One request to the relay: the status it answered with and what it said. The error is
@@ -141,10 +181,18 @@ impl Relay {
             // Only that it failed: never what the request held.
             .map_err(|_| format!("the relay did not answer {path}"))?;
         let status = response.status().as_u16();
+        let wait = response.headers().get("retry-after");
+        let wait = wait
+            .and_then(|wait| wait.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let answer = response
             .body_mut()
             .read_json::<Value>()
             .unwrap_or(Value::Null);
+        if let (429, Some(told)) = (status, &self.limited) {
+            let _ = told.send(limited(&wait, &answer));
+        }
         match status {
             404 | 405 | 500.. => Err(format!("the relay answered {status} to {path}")),
             _ => Ok((status, answer)),
@@ -191,13 +239,13 @@ impl Relay {
         Ok(true)
     }
 
-    fn by_credential(&self, row: &PushRow, notification: &Value) -> Outcome {
-        let environment = if row.environment.eq_ignore_ascii_case("sandbox") {
+    fn by_credential(&self, (token, environment): (&str, &str), notification: &Value) -> Outcome {
+        let environment = if environment.eq_ignore_ascii_case("sandbox") {
             "sandbox"
         } else {
             "production"
         };
-        let mut addressed = json!({ "deviceToken": row.token });
+        let mut addressed = json!({ "deviceToken": token });
         if let (Some(addressed), Some(fields)) =
             (addressed.as_object_mut(), notification.as_object())
         {
@@ -205,7 +253,7 @@ impl Relay {
         }
         let body = json!({ "notifications": [addressed] });
         for attempt in 0..2 {
-            match self.bind(&row.token, environment) {
+            match self.bind(token, environment) {
                 Err(why) => return Outcome::Down(why),
                 Ok(false) => {
                     return Outcome::Refused {
@@ -221,7 +269,7 @@ impl Relay {
                 Ok((status, answer)) => {
                     if status == 401 {
                         // A credential that was revoked: what it bound is gone with it.
-                        self.forget(&row.token);
+                        self.forget(token);
                     }
                     return Outcome::Refused {
                         status,
@@ -235,11 +283,11 @@ impl Relay {
             // The relay dropped the binding: bind again, and try once more.
             let dropped = matches!(&outcome, Outcome::Refused { reason, .. } if reason == "DeviceNotRegistered");
             if dropped && attempt == 0 {
-                self.forget(&row.token);
+                self.forget(token);
                 continue;
             }
             if matches!(outcome, Outcome::Dead(_)) {
-                self.forget(&row.token);
+                self.forget(token);
             }
             return outcome;
         }
@@ -249,14 +297,18 @@ impl Relay {
         }
     }
 
+    /// Sends one push to a token no phone gave a grant for (the activity a phone shows the
+    /// fleet's work in), by this Host's own account at the relay.
+    pub fn to_token(&self, token: &str, environment: &str, push: &Push<'_>) -> Outcome {
+        if self.credential.is_empty() {
+            return Outcome::NoPath;
+        }
+        self.by_credential((token, environment), &notification(push))
+    }
+
     /// Sends one push to one row of the register.
     pub fn send(&self, row: &PushRow, push: &Push<'_>) -> Delivery {
-        let notification = json!({
-            "pushType": push.push_type,
-            "priority": push.priority,
-            "collapseId": collapse_id_on_the_wire(push.collapse_id),
-            "payload": push.payload,
-        });
+        let notification = notification(push);
         let mut grant_revoked = false;
         if !row.push_grant.is_empty() {
             match self.by_grant(&row.push_grant, &notification) {
@@ -277,10 +329,20 @@ impl Relay {
             };
         }
         Delivery {
-            outcome: self.by_credential(row, &notification),
+            outcome: self.by_credential((&row.token, &row.environment), &notification),
             grant_revoked,
         }
     }
+}
+
+/// A push as the relay takes it.
+fn notification(push: &Push<'_>) -> Value {
+    json!({
+        "pushType": push.push_type,
+        "priority": push.priority,
+        "collapseId": collapse_id_on_the_wire(push.collapse_id),
+        "payload": push.payload,
+    })
 }
 
 #[cfg(test)]
@@ -327,5 +389,34 @@ mod tests {
             delivered(&json!("not what a relay says")),
             Outcome::Refused { status: 502, .. }
         ));
+    }
+
+    #[test]
+    fn what_a_relay_says_of_waiting_is_never_made_shorter() {
+        let said = |header: &str, answer: Value| limited(header, &answer);
+        let wait = |retry_after: f64, whole_day: bool| Limited {
+            retry_after,
+            whole_day,
+        };
+        assert_eq!(said("", json!({})), wait(0.0, false));
+        assert_eq!(said("30", json!({})), wait(30.0, false));
+        assert_eq!(said(" 30 ", json!({ "retryAfter": 45 })), wait(45.0, false));
+        assert_eq!(said("90", json!({ "retryAfter": 45.5 })), wait(90.0, false));
+        // More than an hour in the header: the day's window is spent.
+        assert_eq!(said("3600", json!({})), wait(3600.0, false));
+        assert_eq!(said("3601", json!({})), wait(3601.0, true));
+        assert_eq!(
+            said("7", json!({ "retryAfter": 86400 })),
+            wait(86400.0, false)
+        );
+        // What is no whole number of seconds, or no wait at all, is none.
+        for header in ["soon", "1.5", "-3", "+3", "1e3"] {
+            assert_eq!(
+                said(header, json!({ "retryAfter": -1 })),
+                wait(0.0, false),
+                "{header}"
+            );
+        }
+        assert_eq!(said("5", json!("no object")), wait(5.0, false));
     }
 }

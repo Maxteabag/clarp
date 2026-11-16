@@ -720,6 +720,23 @@ user says in the call reaches its tool with why it rang. The feature is advertis
 built with it, and refused in words that say how to ring instead: a ring held as a live voice call, a ring
 that listens first, a phone's own switch for rings (`docs/differences.md`).
 
+**The chip on a phone's lock screen** (16 Nov 2026). A phone that shows the fleet's work as a Live Activity
+leaves the Host the token its pushes go to, and the Host keeps the chip current: how many agents work, how
+many need the owner, who leads, five rows at most. The rules are the kernel's (`chip.rs`), the Python Host's
+(`docs/live-items.md` §8, `server/lib/live_activity.py` and the gate in `apns.py`): what the chip says of a
+fleet (top-level agents only: a helper's work and its wait belong to the agent it works under), when it is
+said (routine change every fifteen seconds at most, a change of shape ten seconds after the last push, more
+that needs the owner at once and loud), the register of activities, and the chip's share of the push
+service's budget (ten at once, three hundred a day, a push service that says "too many" left alone for
+longer each time), so that the chip can never starve an alert. They are held to that Host's own module by
+26 names, 37 activities, 34 fleets, 17 steps of the register, 6 paced scripts and 6 scripts of the budget
+of 113 steps (`tools/chip-vectors.py`). At the edge (`clarp-host` `chip.rs`) one task follows what every
+agent's turn shows (a feed of statuses from the hub, never what a turn wrote), counts the badge off what the
+agents publish, and sends through the gate one push after another, by the Host's own account at the relay:
+an activity's token has no grant of the phone's. The relay tells the gate when it is asked too much, by an
+alert as well. The feature is listed (`live_activity_push`) only on a Host that has that account. Not built
+with it: the same summary for a phone of another kind.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
