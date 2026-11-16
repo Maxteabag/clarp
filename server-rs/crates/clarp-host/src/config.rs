@@ -151,6 +151,27 @@ pub fn typed_path(asked: &str, home: &Path) -> PathBuf {
 /// Only a path from the root is looked into: `./` and `../` are not this Host's own
 /// directory to show, as on the Python Host. Where nothing can be read, nothing is found.
 pub fn directories(asked: &str, home: &Path) -> (String, Vec<String>) {
+    // Another user's home (`~name`) is that user's, where this machine knows the user. A
+    // name it does not know is answered where it was asked, with nothing found, as on the
+    // Python Host: what is typed on a phone is not refused.
+    let trimmed = asked.trim();
+    let another = trimmed.strip_prefix('~');
+    let another = another.filter(|rest| !rest.is_empty() && !rest.starts_with('/'));
+    let theirs = match another {
+        Some(rest) => {
+            let (name, under) = rest
+                .split_once('/')
+                .map_or((rest, None), |(name, under)| (name, Some(under)));
+            let known = nix::unistd::User::from_name(name).ok().flatten();
+            let Some(user) = known else {
+                return (trimmed.to_string(), Vec::new());
+            };
+            let home = user.dir.display().to_string();
+            Some(under.map_or(home.clone(), |under| format!("{home}/{under}")))
+        }
+        None => None,
+    };
+    let asked = theirs.as_deref().unwrap_or(asked);
     let typed = typed_path(asked, home);
     let ends_in_slash = asked.trim().ends_with('/') && typed.is_absolute();
     let inside = ends_in_slash || typed == Path::new("/");
@@ -501,6 +522,17 @@ mod tests {
             typed_path("relative/path/", &home),
             PathBuf::from("relative/path")
         );
+        // Another user's home: looked into where this machine knows the user, and answered
+        // with nothing where it does not (the Python Host since 16 Nov 2026).
+        let nobody = "~nobody-of-that-name-here";
+        assert_eq!(
+            asked(&format!(" {nobody}/x ")),
+            (format!("{nobody}/x"), Vec::<String>::new())
+        );
+        assert_eq!(asked(nobody), (nobody.to_string(), Vec::<String>::new()));
+        assert_eq!(asked("~root").0, "/");
+        assert!(asked("~root").1.contains(&"/root".to_string()));
+        assert_eq!(asked("~root/").0, "/root");
         // No more than twenty.
         for count in 0..25 {
             std::fs::create_dir_all(home.join(format!("many/d{count:02}"))).unwrap();
