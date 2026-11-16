@@ -603,15 +603,17 @@ def _save_reap_cursor(name, con, cursor):
     setattr(_REAP_PROGRESS, name, (con, cursor))
 
 
-def reconcile_receipts(*, skip: Callable[[str], bool] | None = None,
-                       on_deferred: Callable[[str, str], None] | None = None) -> dict[str, int]:
+def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
+                       on_deferred: Callable[[str, int, str], None] | None = None) -> dict[str, int]:
     """Converge one bounded page from exact durable turn evidence.
 
-    ``skip(queue_id)`` lets a periodic caller leave a receipt unexamined this
-    pass, and ``on_deferred(queue_id, reason)`` tells it which ones this pass
-    could not decide. Deciding one reads the agent's state history; a receipt
-    that stays undecidable was read again in full every pass (issue 363).
-    Neither changes what a pass decides about the receipts it does examine.
+    ``skip(queue_id, queue_seq)`` lets a periodic caller leave a receipt
+    unexamined this pass, and ``on_deferred(queue_id, queue_seq, reason)``
+    tells it which ones this pass could not decide. Deciding one reads the
+    agent's state history; a receipt that stays undecidable was read again in
+    full every pass (issue 363). Neither changes what a pass decides about the
+    receipts it does examine. A receipt is its row: a queue id comes again
+    (goal wakes, peer requests) and the new row has a new ``queue_seq``.
 
     At most 100 receipts are examined per pass. A connection-local keyset
     cursor advances only after commit and wraps, including past no-turn rows
@@ -672,12 +674,12 @@ def reconcile_receipts(*, skip: Callable[[str], bool] | None = None,
                     (row["agent_id"], row["trace_id"])).fetchone()
                 if turn is None:
                     continue
-                if skip is not None and skip(str(row["queue_id"])):
+                if skip is not None and skip(str(row["queue_id"]), int(row["queue_seq"])):
                     continue  # deferred a moment ago: the caller looks again later
                 launch = _launch_status(row)
                 if launch != "observed":
                     if launch != "retryable":
-                        deferred.append((row["queue_id"], row["agent_id"], launch))
+                        deferred.append((row["queue_id"], row["queue_seq"], row["agent_id"], launch))
                     continue  # NOTSTARTED, Stop fences and unknowns are not consumed proof.
                 running = turn["settled_at"] is None and turn["ended_at"] is None
                 target = "started"
@@ -704,10 +706,10 @@ def reconcile_receipts(*, skip: Callable[[str], bool] | None = None,
     for queue_id, agent_id, target, turn_id in repaired:
         log("queueReceiptReconciled", f"queue={queue_id} agent={agent_id} "
             f"reason=durable_turn target={target} turn={turn_id}")
-    for queue_id, agent_id, reason in deferred:
+    for queue_id, queue_seq, agent_id, reason in deferred:
         log("queueReceiptDeferred", f"queue={queue_id} agent={agent_id} reason=launch_{reason}")
         if on_deferred is not None:
-            on_deferred(str(queue_id), str(reason))
+            on_deferred(str(queue_id), int(queue_seq), str(reason))
     return counts
 
 

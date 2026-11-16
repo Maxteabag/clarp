@@ -29,8 +29,10 @@ class BackgroundJobWatcher:
         self._last_id = 0
         self._stale_work_due = 0.0
         self._provider_due = 0.0
-        # queue_id -> (not before, the wait that led there), monotonic seconds.
-        self._receipt_waits: dict[str, tuple[float, float]] = {}
+        # (queue_id, queue_seq) -> (not before, the wait that led there),
+        # monotonic seconds. A queue id comes again (goal wakes, peer
+        # requests); the new row must not inherit the old one's wait.
+        self._receipt_waits: dict[tuple[str, int], tuple[float, float]] = {}
         from .provider_background_jobs import ProviderJobObserver
         self._provider_observer = ProviderJobObserver()
         self._stop = threading.Event()
@@ -65,19 +67,20 @@ class BackgroundJobWatcher:
                 except Exception as exc:  # noqa: BLE001
                     log_exception("idleReceiptSweepFail", exc)
 
-    def _receipt_waiting(self, queue_id: str, *, now: float | None = None) -> bool:
+    def _receipt_waiting(self, queue_id: str, queue_seq: int, *, now: float | None = None) -> bool:
         """This receipt was undecidable a moment ago; not yet time to look again."""
-        entry = self._receipt_waits.get(queue_id)
+        entry = self._receipt_waits.get((queue_id, queue_seq))
         return entry is not None and (time.monotonic() if now is None else now) < entry[0]
 
-    def _receipt_deferred(self, queue_id: str, reason: str = "", *, now: float | None = None) -> None:
+    def _receipt_deferred(self, queue_id: str, queue_seq: int, reason: str = "", *,
+                          now: float | None = None) -> None:
         """The pass could not decide this receipt: look again later, each time
         after twice as long, and forget the ones that are no longer deferred."""
         now = time.monotonic() if now is None else now
-        previous = self._receipt_waits.get(queue_id)
+        previous = self._receipt_waits.get((queue_id, queue_seq))
         wait = self.RECEIPT_RECHECK_SEC if previous is None else min(
             previous[1] * 2, self.RECEIPT_RECHECK_MAX_SEC)
-        self._receipt_waits[queue_id] = (now + wait, wait)
+        self._receipt_waits[queue_id, queue_seq] = (now + wait, wait)
         # A receipt that was decided, or is gone, is never deferred again and
         # so never refreshed: drop it once it is well past its time.
         stale = [key for key, (due, _wait) in self._receipt_waits.items()
