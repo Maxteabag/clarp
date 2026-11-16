@@ -1217,6 +1217,66 @@ SCENARIOS.append({
     ],
 })
 
+PERSONAS, CHANGED = '/personas', '/personas/update'
+# Two pictures: "a made-up picture" and "another picture", as an app hands them over.
+PICTURE, ANOTHER = 'YSBtYWRlLXVwIHBpY3R1cmU=', 'YW5vdGhlciBwaWN0dXJl'
+# Nothing makes a picture for a persona in these rooms: on the Python Host that is asked for.
+UNDRAWN = {'generate_avatar': False}
+
+SCENARIOS.append({
+    'id': 'personas',
+    'what': 'the owner makes a persona, changes it and removes it; a persona is given a voice nobody has when its '
+            'maker names none; it has a picture of its own; of a persona that is built in only the look changes; '
+            'and what is refused',
+    'steps': [
+        {**post(PERSONAS, {'name': '  Scout  ', 'avatar_symbol': 'star', **UNDRAWN,
+                           'personality': 'Personality: synthetic and curious.'}, 'a persona is made'),
+         'save': {'scout': 'persona.id'}},
+        post(PERSONAS, {'name': 'scout', **UNDRAWN}, 'a name a persona of the owner has'),
+        post(PERSONAS, {'name': 'MIKE', **UNDRAWN}, 'a name a built-in persona has'),
+        post(PERSONAS, {'name': '   ', **UNDRAWN}, 'no name'),
+        post(PERSONAS, {'name': 'x' * 61, **UNDRAWN}, 'too long a name'),
+        post(PERSONAS, ['Scout'], 'a persona that is no object'),
+        {**post(PERSONAS, {'name': 'Pictured', 'voice_id': '{}', 'avatar_base64': PICTURE, **UNDRAWN},
+                'a persona with a picture, and the word for no voice'),
+         'save': {'pictured': 'persona.id', 'face': 'persona.avatar_url'}},
+        post(PERSONAS, {'name': 'Voiced', 'voice_id': '  plain-synthetic-voice  ', 'avatar_symbol': 's' * 70,
+                        'personality': 'p' * 4100, **UNDRAWN}, 'a persona with a voice, and too much of the rest'),
+        get('{face}', 'the picture of a persona'),
+        {**get('/persona-avatars/{pictured}', 'a part of the picture'), 'headers': {'Range': 'bytes=2-8'}},
+        get('/persona-avatars/{scout}', 'the picture of a persona that has a symbol'),
+        get('/persona-avatars/persona-nobody-of-the-kind', 'the picture of nobody'),
+        {**SNAPSHOT, 'name': 'snapshot with three personas of the owner'},
+        # The owner changes one of his own.
+        post(CHANGED, {'original_name': 'scout', 'name': 'Scout Two', 'voice_id': ''},
+             'another name, and the voice it had'),
+        post(CHANGED, {'original_name': 'Scout', 'name': 'Scout', 'voice_id': ''}, 'a persona that is not there'),
+        post(CHANGED, {'original_name': 'Scout Two', 'name': '', 'voice_id': ''}, 'a change to no name'),
+        post(CHANGED, {'original_name': 'Scout Two', 'name': 'pictured', 'voice_id': ''},
+             'a change to a name another persona has'),
+        post(CHANGED, {'original_name': 'Scout Two', 'name': 'Rachel', 'voice_id': ''},
+             'a change to a name a built-in persona has'),
+        post(CHANGED, {'original_name': 'Pictured', 'name': 'Pictured', 'voice_id': '{"cartesia":"synthetic-chosen"}',
+                       'avatar_symbol': 'moon', 'personality': 'Personality: synthetic and slow.',
+                       'avatar_base64': ANOTHER}, 'another voice, another picture, a symbol and a way of speaking'),
+        get('/persona-avatars/{pictured}', 'the other picture'),
+        post(CHANGED, ['Scout Two'], 'a change that is no object'),
+        # Of a persona that is built in only the look changes, whatever else is said.
+        post(CHANGED, {'original_name': 'mike', 'name': 'Michael', 'voice_id': 'another', 'avatar_symbol': 'bolt',
+                       'personality': 'Personality: another.'}, 'a built-in persona is given a symbol'),
+        post(CHANGED, {'original_name': 'Rachel', 'name': 'Rachel', 'voice_id': '', 'avatar_base64': PICTURE},
+             'a built-in persona is given a picture'),
+        get('/persona-avatars/builtin-rachel', 'the picture of a built-in persona'),
+        get('/persona-avatars/builtin-mike', 'the picture of a built-in persona that has a symbol'),
+        # The owner removes one of his own, and nothing else.
+        {'op': 'delete', 'path': '/personas/Scout%20Two', 'name': 'a persona is removed'},
+        {'op': 'delete', 'path': '/personas/Scout%20Two', 'name': 'a persona that was removed'},
+        {'op': 'delete', 'path': '/personas/Mike', 'name': 'a built-in persona is not removed'},
+        {'op': 'delete', 'path': '/personas/nobody-of-the-kind', 'name': 'nobody is not removed'},
+        {**SNAPSHOT, 'name': 'snapshot afterwards'},
+    ],
+})
+
 EXPLAINED = '/tool-explanations/settings'
 
 SCENARIOS.append({
