@@ -5,7 +5,9 @@ keeps its exit code, stdout and return value. It must not swallow them
 silently either: `report` records the hook, the event and the exception's
 class (plus SQLite's error name when there is one), never its message, in
 Clarp's event log. If even that fails, it appends one line to the hook log
-file the other hooks already use. It writes nothing to stdout or stderr,
+file the other hooks already use. Capture policy also selects that fallback:
+the content-free failure trace is mandatory even when detailed capture is off.
+It writes nothing to stdout or stderr,
 so no runner (Claude Code, Codex, agy) can surface it to the model or the
 apps, and it never raises.
 """
@@ -31,9 +33,12 @@ def report(hook: str, event: str, exc: BaseException) -> None:
         # directory at import, which raises in a container without one, and
         # importing this module must never fail (agy_state is fail-open).
         import _clarp_lib  # noqa: F401  — puts Clarp's `lib` on sys.path
+        from lib import diagnostics_settings
         from lib.eventlog import emit
-        emit(hook, event, level="error", detail=detail)
-        return
+        if diagnostics_settings.allows_event(source=hook, event=event):
+            emit(hook, event, level="error", detail=detail)
+            return
+        unrecorded = "capture policy"
     except Exception as emit_error:  # noqa: BLE001 - recorded in the hook log below
         unrecorded = type(emit_error).__name__
     try:
