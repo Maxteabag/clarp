@@ -153,7 +153,10 @@ class RustHost(replay.Host):
                     # Speech in: the Host's own worker with no model in it, which hears in every
                     # clip what the reference Host's stand-in hears (tests/replay/host.py). No key
                     # of an engine outside is in this Host's world.
-                    'CLARP_WHISPER_FAKE_SAYS': HEARD, 'ELEVEN_API_KEY': ''})
+                    'CLARP_WHISPER_FAKE_SAYS': HEARD, 'ELEVEN_API_KEY': '',
+                    # The reference's harness turns the heartbeats of its Hosts off (`host.isolate`):
+                    # this Host is told the same.
+                    'CLARP_HEARTBEATS_DISABLED': '1'})
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
              '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
@@ -459,7 +462,10 @@ CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at',
                         # A call: when an agent joined it and when its state last changed.
                         'joined_at', 'changed_at',
                         # A schedule: when it runs next. Which minute that is, is held by vectors.
-                        'next_run_at'})
+                        'next_run_at',
+                        # A heartbeat: when the last was started and when the next is due. How far
+                        # apart they are is held by vectors and by the Host's own tests.
+                        'last_started_at', 'next_heartbeat_at'})
 # The ids a Host gives to what agents make and ask, and to a persona its owner makes. Under their
 # own keys the harness's normalizer names them by the order they appear in (`artifact-<id:1>`).
 # They are also in the paths a client calls (`/decisions/<id>/resolve`), in what an agent is told

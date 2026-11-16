@@ -1760,6 +1760,71 @@ TOKEN = 'replay-host-token'
 NOBODY = {'Authorization': ''}
 
 
+def settings(change, name):
+    return post('/heartbeat/settings', change, name)
+
+
+HEARTBEAT = get(f'/agent-heartbeat/status?session={AGENT}')
+
+SCENARIOS.append({
+    'id': 'the-heartbeat',
+    'what': "the heartbeat as an app's settings and an agent's profile read and change it: the owner's settings, "
+            "changed whole or not at all, and why not in words; an agent's switch; its cadence before anybody "
+            'spoke with it, after, and when it is off. On a Host whose heartbeats are off, as both are here, so '
+            'that nobody is woken while it is read: what an agent is sent and what its answer counts as is held '
+            'by vectors (crates/clarp-kernel/tests/heartbeat_vectors.rs) and by the Host\'s own tests',
+    'steps': [
+        get('/heartbeat/settings', 'the settings as a Host comes'),
+        settings({'heartbeat_interval_sec': 600, 'heartbeat_backoff_strategy': ' linear ',
+                  'heartbeat_backoff_cap_sec': 7200, 'heartbeat_dormant_after_noops': 2}, 'all four are changed'),
+        settings({'heartbeat_dormant_after_noops': 0}, 'one is changed and the others stay'),
+        settings({}, 'nothing is changed'),
+        settings({'heartbeat_interval_sec': 59}, 'an interval too short'),
+        settings({'heartbeat_interval_sec': 86401, 'heartbeat_backoff_cap_sec': 86401}, 'an interval too long'),
+        settings({'heartbeat_interval_sec': 7201}, 'an interval longer than the cap that stands'),
+        settings({'heartbeat_interval_sec': '600'}, 'an interval that is a word'),
+        settings({'heartbeat_interval_sec': True}, 'an interval that is yes'),
+        settings({'heartbeat_interval_sec': 600.0}, 'an interval with a fraction'),
+        settings({'heartbeat_interval_sec': None}, 'an interval that is nothing'),
+        settings({'heartbeat_backoff_cap_sec': 599}, 'a cap below the interval'),
+        settings({'heartbeat_backoff_cap_sec': 86401}, 'a cap longer than a day'),
+        settings({'heartbeat_dormant_after_noops': 101}, 'more heartbeats than a hundred'),
+        settings({'heartbeat_dormant_after_noops': -1}, 'fewer than none'),
+        settings({'heartbeat_backoff_strategy': 'quadratic'}, 'a strategy nobody knows'),
+        settings({'heartbeat_backoff_strategy': 'Linear'}, 'a strategy in other letters'),
+        settings({'heartbeat_backoff_strategy': 7}, 'a strategy that is a number'),
+        settings({'heartbeat_interval_sec': 900, 'heartbeat_backoff_strategy': 'quadratic'},
+                 'one right and one wrong: nothing is changed'),
+        settings({'heartbeat_backoff_cap_sec': '9', 'heartbeat_interval_sec': 5}, 'two wrong: the first is named'),
+        settings({'heartbeat_interval_sec': 86400, 'heartbeat_backoff_cap_sec': 86400,
+                  'heartbeat_backoff_strategy': 'fixed', 'heartbeat_dormant_after_noops': 100, 'something': 'else'},
+                 'the longest of everything, and something nobody asked about'),
+        settings({'heartbeat_interval_sec': 60, 'heartbeat_backoff_cap_sec': 60, 'heartbeat_backoff_strategy': 'exponential'},
+                 'the shortest of everything'),
+        settings([1], 'something that is no object'),
+        settings({'heartbeat_interval_sec': 600, 'heartbeat_backoff_cap_sec': 3600}, 'ten minutes, an hour at most'),
+        get('/heartbeat/settings', 'the settings afterwards'),
+        {**HEARTBEAT, 'name': 'the cadence of an agent that did not ask'},
+        post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': True}, 'an agent asks for the heartbeat'),
+        {**HEARTBEAT, 'name': 'its cadence before anybody spoke with it'},
+        {**SNAPSHOT, 'name': 'the snapshot says who asked'},
+        send('synthetic heartbeat alfa', 'hb-alfa'),
+        {'op': 'wait_reply', 'after': 'u-hb-alfa'},
+        {'op': 'quiesce'},
+        {**HEARTBEAT, 'name': 'its cadence after somebody spoke with it'},
+        post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': True}, 'asked for once more'),
+        get(f'/agent-heartbeat/status?session=%20{AGENT}%20', 'its cadence, asked for with blanks around its name'),
+        post('/agent-heartbeat', {'session': f' {AGENT} ', 'heartbeat_enabled': False},
+             'turned off, with blanks around its name'),
+        {**HEARTBEAT, 'name': 'its cadence when it is off'},
+        post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': 1}, 'a heartbeat that is a number'),
+        post('/agent-heartbeat', {'session': AGENT, 'heartbeat_enabled': None}, 'a heartbeat that is nothing'),
+        post('/agent-heartbeat', {'session': '   ', 'heartbeat_enabled': True}, 'a heartbeat for blanks'),
+        {**SNAPSHOT, 'name': 'the snapshot afterwards'},
+    ],
+})
+
+
 def asking(path, name, **headers):
     """A request for `path` with headers of its own; an underscore in a name stands for a hyphen."""
     return {**get(path, name), 'headers': {key.replace('_', '-'): value for key, value in headers.items()}}
