@@ -22,6 +22,10 @@ an assistant message and a result. Markers in the prompt:
 - ``[qa-drops:N]``: the connection drops in the first N processes that are given this prompt
   (a line on stderr in the CLI's words for it, no result, exit code 1); the next one answers.
   How often a prompt was given is counted in ``$CLARP_QA_PROVIDER_ROOT``.
+- ``[qa-tools]``: the agent uses its tools before it answers, the way the real CLI says it: an
+  assistant message with a ``tool_use`` in it, then a user message with the ``tool_result``.
+  A command, two tools at once (a file read and a search), an edit, a command that fails, and
+  a tool no Host knows by name. Nothing is run: what a tool "returned" is written here.
 
 Every process appends its lifecycle to ``$CLARP_QA_PROVIDER_ROOT/claude-procs.jsonl``.
 """
@@ -77,6 +81,57 @@ def record(path: Path | None, session: str, kind: str, parent: str | None, messa
                 'cwd': os.getcwd(), 'timestamp': now, 'isSidechain': False, 'userType': 'external',
                 'message': message, **more}) + '\n')
     return ident
+
+
+# What the agent does with its tools when a prompt says `[qa-tools]`: each entry is one
+# assistant message (what it says, if anything, and the tools it calls) and what each tool
+# returned (`None` text with `failed` for a tool that broke).
+TOOL_WORK = [
+    ('Claude replay looks first.', [
+        ('Bash', {'command': 'echo synthetic', 'description': 'Print a synthetic line'}, 'synthetic\n', False),
+    ]),
+    ('', [
+        ('Read', {'file_path': '/synthetic/notes.md', 'limit': 20}, '     1\t# Synthetic notes\n     2\tA line.\n', False),
+        ('Grep', {'pattern': 'synthetic', 'path': '/synthetic', 'output_mode': 'files_with_matches'},
+         'Found 1 file\n/synthetic/notes.md', False),
+    ]),
+    ('Claude replay changes a line.', [
+        ('Edit', {'file_path': '/synthetic/notes.md', 'old_string': 'A line.', 'new_string': 'Another line.'},
+         'The file /synthetic/notes.md has been updated successfully.', False),
+    ]),
+    ('', [
+        ('Bash', {'command': 'false', 'description': 'A command that fails'}, 'Exit code 1\nsynthetic failure', True),
+    ]),
+    ('', [
+        ('mcp__synthetic__lookup', {'query': 'synthetic', 'limit': 3, 'filters': {'kind': 'note'}},
+         [{'type': 'text', 'text': 'one synthetic result'}], False),
+    ]),
+]
+
+
+def tool_work(path: Path | None, session: str, text: str, parent: str | None) -> str | None:
+    """The agent uses its tools. Every use has an id made of the prompt and its place, so that
+    it is the same wherever the same prompt is given, and another for every other prompt."""
+    place = 0
+    for number, (said, calls) in enumerate(TOOL_WORK):
+        content = [{'type': 'text', 'text': said}] if said else []
+        uses = []
+        for name, given, _returned, _failed in calls:
+            ident = 'toolu_' + hashlib.sha256(f'{text}\0{place}'.encode()).hexdigest()[:20]
+            place += 1
+            uses.append(ident)
+            content.append({'type': 'tool_use', 'id': ident, 'name': name, 'input': given})
+        message = {'id': 'msg_' + hashlib.sha256(f'{text}\0m{number}'.encode()).hexdigest()[:12], 'role': 'assistant',
+                   'model': 'replay-fake', 'content': content, 'stop_reason': 'tool_use',
+                   'usage': {'input_tokens': 5, 'output_tokens': 3}}
+        parent = record(path, session, 'assistant', parent, {**message, 'type': 'message'})
+        emit({'type': 'assistant', 'session_id': session, 'message': message})
+        results = [{'type': 'tool_result', 'tool_use_id': ident, 'content': returned, 'is_error': failed}
+                   for ident, (_name, _given, returned, failed) in zip(uses, calls)]
+        answer = {'role': 'user', 'content': results}
+        parent = record(path, session, 'user', parent, answer)
+        emit({'type': 'user', 'session_id': session, 'message': answer})
+    return parent
 
 
 def given_before(text: str) -> int:
@@ -153,6 +208,8 @@ def main() -> int:
                  'usage': {'input_tokens': 5, 'output_tokens': 3}}
         asked = record(path, session, 'assistant', asked, {**first, 'type': 'message'})
         emit({'type': 'assistant', 'session_id': session, 'message': first})
+    if '[qa-tools]' in text:
+        asked = tool_work(path, session, text, asked)
     if '[qa-usage-limit]' in text:
         return out_of_usage(path, session, asked)
     if '[qa-crash]' in text:
