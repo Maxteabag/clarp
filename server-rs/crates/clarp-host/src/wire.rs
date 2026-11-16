@@ -16,7 +16,7 @@ use clarp_kernel::recovery;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::fleet::AgentRecord;
 
@@ -973,6 +973,83 @@ pub fn log_response(
         "file": file,
         "includes_automated": true,
     })
+}
+
+/// A text as a card's header shows it: 240 signs at most, the last of them an ellipsis.
+fn compact(value: &Value) -> Value {
+    match value.as_str() {
+        Some(text) if text.chars().count() > 240 => {
+            let cut: String = text.chars().take(239).collect();
+            json!(format!("{}…", cut.trim_end()))
+        }
+        _ => value.clone(),
+    }
+}
+
+/// How many cards a row's tools make, counted before they are shortened: the cells a tool
+/// with cells of its own shows, with an edit shown as the edit and not as its patch.
+fn activity_count(tools: &[Value], cells: &[Value]) -> usize {
+    if cells.is_empty() {
+        return tools.len();
+    }
+    let is_edit = |tool: &&Value| {
+        let name = tool.get("name").and_then(Value::as_str);
+        tool.is_object() && matches!(name, Some("Edit" | "MultiEdit" | "Write"))
+    };
+    let edits = tools.iter().filter(is_edit).count();
+    let shown = |cell: &&Value| !cell.is_object() || edits == 0 || cell["kind"] != "patch";
+    cells.iter().filter(shown).count() + edits
+}
+
+/// A page of a conversation as an app asks for it that opens a card's details itself
+/// (`include_tool_details=0`): of each row's tools one header is left, enough to show that
+/// there was work, with how many cards there are and whether there is more to open. The
+/// rule is the Python Host's (`conversation.py`).
+pub fn without_tool_details(response: &mut Value) {
+    let Some(rows) = response["turns"].as_array_mut() else {
+        return;
+    };
+    for row in rows {
+        let tools = row["tools"].as_array().cloned().unwrap_or_default();
+        let cells = row["display_cells"].as_array().cloned().unwrap_or_default();
+        let kept = |from: &Value, keys: &[&str]| -> Map<String, Value> {
+            let fields = keys
+                .iter()
+                .filter_map(|key| Some(((*key).to_string(), compact(from.get(*key)?))));
+            fields.collect()
+        };
+        let headers: Vec<Value> = tools
+            .iter()
+            .filter(|tool| tool.is_object())
+            .map(|tool| Value::Object(kept(tool, &["id", "name", "summary", "action", "status"])))
+            .collect();
+        let details = |cell: &Value| cell["lines"].as_array().map_or(0, Vec::len);
+        let mut cell_headers: Vec<Map<String, Value>> = cells
+            .iter()
+            .filter(|cell| cell.is_object())
+            .map(|cell| {
+                let keys = ["id", "kind", "title", "summary", "status", "ephemeral"];
+                let mut header = kept(cell, &keys);
+                header.insert("detail_count".to_string(), json!(details(cell)));
+                header
+            })
+            .collect();
+        row["tool_details_available"] = json!(!tools.is_empty() || !cells.is_empty());
+        row["activity_count"] = json!(activity_count(&tools, &cells));
+        row["tools"] = json!(headers.into_iter().take(1).collect::<Vec<_>>());
+        // One header stands for all the cells: it says how much there is behind it.
+        let behind: u64 = cell_headers
+            .iter()
+            .map(|header| header["detail_count"].as_u64().unwrap_or(0).max(1))
+            .sum();
+        row["display_cells"] = match cell_headers.first_mut() {
+            Some(first) => {
+                first.insert("detail_count".to_string(), json!(behind));
+                json!([first])
+            }
+            None => json!([]),
+        };
+    }
 }
 
 /// Fills in whom the answers on a page are to: the name and the session, today, of each
@@ -2138,5 +2215,66 @@ mod tests {
         // A row never carries what is metadata.
         let shown = row(&reply("Visible.\n<oai-mem-citation>c</oai-mem-citation>"));
         assert_eq!(shown["text"], "Visible.\n");
+    }
+
+    #[test]
+    fn a_rows_tools_are_one_header_for_an_app_that_opens_cards_itself() {
+        let long = "x".repeat(300);
+        let mut page = json!({ "turns": [
+            { "id": "u-1", "tools": [], "display_cells": [] },
+            { "id": "t-1", "display_cells": [], "tools": [
+                { "id": "toolu_1", "name": "Bash", "summary": long, "action": "Ran", "status": "ok",
+                  "command": "echo", "result": "synthetic" },
+                { "id": "toolu_2", "name": "Read", "summary": "notes.md", "action": "Read", "status": "ok" },
+            ] },
+            { "id": "t-2", "tools": [{ "id": "c-1", "name": "Edit", "summary": "notes.md" }, "odd"],
+              "display_cells": [
+                { "id": "cell-1", "kind": "exec", "title": "Ran", "lines": [1, 2, 3], "more": true },
+                { "id": "cell-2", "kind": "patch", "title": "Edited", "lines": [] },
+                { "id": "cell-3", "kind": "search", "title": "Searched" },
+            ] },
+        ] });
+        without_tool_details(&mut page);
+        let rows = page["turns"].as_array().unwrap();
+        // A row without tools says so.
+        assert_eq!(
+            (
+                &rows[0]["tool_details_available"],
+                &rows[0]["activity_count"],
+                &rows[0]["tools"]
+            ),
+            (&json!(false), &json!(0), &json!([]))
+        );
+        // Two cards: one header, cut to what a header holds, and nothing of what the card held.
+        assert_eq!(
+            (
+                &rows[1]["tool_details_available"],
+                &rows[1]["activity_count"]
+            ),
+            (&json!(true), &json!(2))
+        );
+        let header = &rows[1]["tools"][0];
+        assert_eq!(rows[1]["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(header["summary"].as_str().unwrap().chars().count(), 240);
+        assert!(header["summary"].as_str().unwrap().ends_with('…'));
+        assert_eq!(
+            (&header["id"], &header["name"], &header["status"]),
+            (&json!("toolu_1"), &json!("Bash"), &json!("ok"))
+        );
+        assert_eq!((header.get("command"), header.get("result")), (None, None));
+        // Cells: one header that says how much is behind it; an edit counts as the edit, not
+        // as its patch.
+        assert_eq!(
+            rows[2]["activity_count"], 3,
+            "two cells that are no patch, and the edit"
+        );
+        assert_eq!(
+            rows[2]["display_cells"],
+            json!([{ "id": "cell-1", "kind": "exec", "title": "Ran", "detail_count": 5 }])
+        );
+        assert_eq!(
+            rows[2]["tools"],
+            json!([{ "id": "c-1", "name": "Edit", "summary": "notes.md" }])
+        );
     }
 }
