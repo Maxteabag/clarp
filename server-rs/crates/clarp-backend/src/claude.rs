@@ -740,7 +740,9 @@ impl ClaudeInterpreter {
                     if text.is_empty() {
                         continue;
                     }
-                    self.moved(Activity::Responding, out);
+                    // A message that arrives whole was not seen being written: the agent is
+                    // said to be answering only while its answer streams, as the Python Host
+                    // says it.
                     let draft = self.draft_for(&id, out);
                     let index = draft.blocks.len() as u64;
                     draft.blocks.push((index, text.to_string()));

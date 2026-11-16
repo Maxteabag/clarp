@@ -119,3 +119,28 @@ ed6d06764d02  tool-turns: the id of the second notification
 d7ad60d66fcb  speech-in: catalog, of what the Host listens with
 2bd8cf8a3e99  speech-in: engine, of what the Host listens with
 af7214e69d60  speech-in: turn_taking, of what the Host listens with
+
+# A streamed turn, on the older channel. While the stream is read the Python Host tells each
+# phase it goes through as a state of its own: the model's thinking has begun (agent-state with
+# phase thinking, and the activity once more), then its answer (phase responding). The Rust Host
+# tells the state the agent is in when what there is to read has been read. The stand-in prints
+# a whole turn in one breath, so here that is the turn's end; a turn that takes time is told
+# as answering when its answer begins to stream. Four events less, and the numbers of the two
+# after them.
+22ee4b5ac928  live-items: the phases of a streamed turn that was read in one breath are not told after the fact
+a17ab1e29ef6  live-items: the number of the event that says the turn is done
+12cf02cde459  live-items: the same number, as the id of the event on the wire
+63dbe08dc856  live-items: the number of the activity that says the turn is done
+ad6466823c3e  live-items: the same number, as the id of the event on the wire
+
+# Defect R19 of the reference: in the first streamed turn of a conversation, the row the answer
+# was written into while it grew is not the row the conversation keeps. Its live item and its
+# notification then name a row that is not there, and no row carries the turn's summary. It
+# does so in some recordings and not in others; where both recordings of a run have it, these
+# are the places. The last two: the same of what the agent said before its first tool.
+6f3877dbaa97  live-items: the row that closes the turn carries the turn's summary
+f357d30076fb  live-items: the answer's live item names the row the conversation has
+90d4d0c6acaf  live-items: the same, where the item is first sent
+a807b17a302e  live-items: the notification names the row of the answer
+b35c53b1f0b2  live-items: what was said before the first tool names the row the conversation has
+f4fe4a319b70  live-items: the same, where the item is first sent
