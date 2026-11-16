@@ -8,7 +8,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_kernel::said::{
-    Voices, Who, clip_name, clip_named, merge_voice, resolve_voice, voice_map,
+    BUILT_IN_CARTESIA_VOICES, Voices, Who, clip_name, clip_named, merge_voice, resolve_voice,
+    voice_for, voice_map,
 };
 use serde_json::Value;
 
@@ -213,4 +214,105 @@ fn a_clip_is_called_what_the_python_host_calls_it() {
             .map(|made| (made, case["session"].as_str().map(str::to_string)));
         assert_eq!(read, expected, "{case}");
     }
+}
+
+#[test]
+fn the_voices_of_one_clip_are_the_ones_the_python_host_would_work_out() {
+    let vectors = vectors();
+    let about = &vectors["clip_voices"];
+    let listed = Voices {
+        gemini_voices: pairs(&about["gemini_voices"]),
+        gemini_vertex_voices: pairs(&about["vertex_voices"]),
+        cartesia_voices: pairs(&about["cartesia_voices"]),
+        ..Voices::default()
+    };
+    // A voice of Gemini's as each of Google's doors knows it.
+    let doors = about["doors"].as_array().unwrap();
+    assert!(doors.len() >= 16);
+    for case in doors {
+        let said = |key: &str| case[key].as_str().unwrap();
+        let known = listed.gemini_voice_at(said("voice"), said("backend") == "vertex");
+        assert_eq!(known, said("as_known"), "{case}");
+    }
+    // The voices one clip can be spoken in, by provider.
+    let cases = about["chosen"].as_array().unwrap();
+    assert!(cases.len() >= 72);
+    for case in cases {
+        let settings = Voices {
+            provider: case["provider"].as_str().unwrap().to_string(),
+            ..listed.clone()
+        };
+        let settings = with_agents(settings, &about["overrides"]);
+        let persona = case["persona"].as_str().unwrap();
+        let session = persona.to_lowercase();
+        let agent = Who {
+            name: "",
+            persona,
+            session: &session,
+        };
+        let route = settings.route(agent);
+        let expected = &case["route"];
+        assert_eq!(
+            route.provider,
+            expected["provider"].as_str().unwrap(),
+            "{case}"
+        );
+        assert_eq!(route.voice.as_deref(), expected["voice"].as_str(), "{case}");
+        let stored = case["raw"].as_str();
+        for (provider, voice) in case["by_provider"].as_object().unwrap() {
+            let found = voice_for(stored, &route, provider);
+            assert_eq!(found.as_deref(), voice.as_str(), "{provider} of {case}");
+        }
+        let voices = settings.for_clip(stored, agent, &route);
+        assert_eq!(
+            voices.cartesia.as_deref(),
+            case["cartesia_voice"].as_str(),
+            "{case}"
+        );
+        assert_eq!(
+            voices.elevenlabs.as_deref(),
+            case["eleven_voice"].as_str(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn the_voices_the_python_host_ships_with_are_there_and_an_owners_list_adds_to_them() {
+    let vectors = vectors();
+    let shipped: Vec<(String, String)> = vectors["built_in_cartesia_voices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pair| {
+            let said = |at: usize| pair[at].as_str().unwrap().to_string();
+            (said(0), said(1))
+        })
+        .collect();
+    assert!(shipped.len() >= 74);
+    let mine: Vec<(String, String)> = BUILT_IN_CARTESIA_VOICES
+        .iter()
+        .map(|(persona, voice)| ((*persona).to_string(), (*voice).to_string()))
+        .collect();
+    assert_eq!(mine, shipped);
+    // An owner's own list: a voice of his own for a persona that is shipped, and a persona
+    // of his own. The others stay.
+    let own = [
+        ("Rachel".to_string(), "ca-own-rachel".to_string()),
+        ("Maximus".to_string(), "ca-own-maximus".to_string()),
+    ];
+    let voices = Voices::default().with_cartesia(&own);
+    assert_eq!(voices.cartesia_voice_for("Rachel"), Some("ca-own-rachel"));
+    assert_eq!(voices.cartesia_voice_for("Maximus"), Some("ca-own-maximus"));
+    assert_eq!(
+        voices.cartesia_voice_for("Josh"),
+        Some(shipped[1].1.as_str())
+    );
+    assert_eq!(voices.cartesia_voices.len(), shipped.len() + 1);
+    // An agent nobody named speaks with the voice of what it is.
+    assert_eq!(
+        voices.cartesia_voice_for("Claude-5628"),
+        voices.cartesia_voice_for("Claude")
+    );
+    assert!(voices.cartesia_voice_for("Claude").is_some());
 }
