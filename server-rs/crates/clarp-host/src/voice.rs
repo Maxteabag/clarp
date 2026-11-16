@@ -36,6 +36,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use clarp_kernel::herald::{self, Attempt, Herald, Moment, Play, Taken};
 use clarp_kernel::media::{self, Part};
 use clarp_kernel::python;
 use clarp_kernel::said::{self, Who};
@@ -143,6 +144,19 @@ impl Growing {
     }
 }
 
+/// A clip the herald holds for its agent's turn: what it takes to announce it then.
+#[derive(Debug, Clone)]
+struct HeldClip {
+    agent_id: String,
+    clip: u64,
+    name: String,
+    trace_id: Option<String>,
+}
+
+/// What the herald's own clips are called, before what any clip is called (the Python
+/// Host's name for them).
+const HERALD_FILE: &str = "herald-internal-";
+
 /// The one that speaks, and where its clips are.
 pub struct Mouth {
     /// Where the owner's choices and keys are read.
@@ -167,6 +181,11 @@ pub struct Mouth {
     cartesia_voices: Mutex<Option<(std::time::Instant, Arc<Vec<Value>>)>>,
     /// Where the previews of voices are kept: `<data>/voice-previews`.
     previews: PathBuf,
+    /// The herald: what is held for agents whose user is with another, and whose hand is
+    /// up ([`clarp_kernel::herald`]). One thing at a time happens to it: whoever asks it
+    /// keeps it until what it said is told to the apps and written, so that a clip is
+    /// never let go before its line knows it.
+    herald: tokio::sync::Mutex<Herald<HeldClip>>,
 }
 
 /// How long Cartesia's list of voices is good for.
@@ -320,6 +339,7 @@ impl Waiting {
             clock: works.clock,
             cartesia_voices: Mutex::default(),
             previews: works.config.data_dir.join("voice-previews"),
+            herald: tokio::sync::Mutex::default(),
         });
         let speaking = mouth.clone();
         tokio::spawn(async move {
@@ -361,7 +381,8 @@ fn sweep(audio: &FilePath, now_ms: i64) {
         .flatten()
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
-            let (made, _) = said::clip_named(&name)?;
+            // A herald's clip is a clip, under its own beginning of a name.
+            let (made, _) = said::clip_named(name.strip_prefix(HERALD_FILE).unwrap_or(&name))?;
             Some((made, entry.metadata().ok()?.len(), entry.path()))
         })
         .collect();
@@ -560,7 +581,7 @@ impl Mouth {
                 return;
             };
             let looked_at = directory.focus.as_deref() == Some(agent_id.as_str());
-            self.say(member, line, looked_at).await;
+            Self::say(&self, member, line, looked_at).await;
         }
     }
 
@@ -576,8 +597,9 @@ impl Mouth {
         }
     }
 
-    /// Says one line: into a clip the apps are told of before its first byte is there.
-    async fn say(&self, member: &Member, line: Line, looked_at: bool) {
+    /// Says one line: into a clip the apps are told of before its first byte is there,
+    /// unless the herald holds it for its agent's turn.
+    async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
         let owners = self.owner.read().unwrap_or_default();
         let has_key = |provider: &str| self.owner.key(key_of(provider, &owners)).is_some();
@@ -616,15 +638,36 @@ impl Mouth {
             progress: watch::channel(start).0,
         });
         self.held().insert(clip, growing.clone());
-        // The apps are told where the clip is; then the line is written as having it. A
-        // line that is not this one's any more leaves a clip that is nobody's.
-        let announced = wire::audio(record, clip, &name, line.trace_id.as_deref());
-        let event_id = self.hub.publish(announced, self.now_ms());
-        let begun =
-            member
-                .agent
-                .line_begun(line.id.clone(), (clip, name), by[0].clone(), Some(event_id));
+        // The herald says whether the clip is played now. When it is, the apps are told
+        // where it is, and then the line is written as having it; when it is held, the
+        // line has it and nobody is told yet. A line that is not this one's any more
+        // leaves a clip that is nobody's.
+        let ours = HeldClip {
+            agent_id: record.agent_id.clone(),
+            clip,
+            name: name.clone(),
+            trace_id: line.trace_id.clone(),
+        };
+        let signs = i64::try_from(text.chars().count()).unwrap_or(i64::MAX);
+        let mut heralding = self.herald.lock().await;
+        let directory = self.fleet.directory();
+        let open = open_session(&directory);
+        let at = Moment {
+            open: &open,
+            now_ms: self.now_ms(),
+        };
+        let settings = herald_settings(&directory);
+        let taken = heralding.ingest((&record.session, ours), (Some(signs), true), at, settings);
+        let (event_id, raised) = match taken {
+            Taken::Decided(plays) => (self.tell(&directory, plays, Some(clip), None).await, None),
+            Taken::Raise(attempt) => (None, Some(attempt)),
+        };
+        let begun = member
+            .agent
+            .line_begun(line.id.clone(), (clip, name), by[0].clone(), event_id);
         if !matches!(begun.await, Ok(true)) {
+            heralding.withdraw(&record.session, |held| held.clip == clip);
+            drop(heralding);
             growing.progress.send_replace(Progress {
                 bytes: 0,
                 made: Made::Failed,
@@ -632,6 +675,11 @@ impl Mouth {
             self.held().remove(&clip);
             let _ = std::fs::remove_file(&path);
             return;
+        }
+        drop(heralding);
+        if let Some(attempt) = raised {
+            // The agent raises its hand while its reply is being said into the clip.
+            tokio::spawn(self.clone().raise(attempt, member.clone()));
         }
         let sink = growing.clone();
         let made = tokio::task::spawn_blocking(move || {
@@ -688,7 +736,11 @@ impl Mouth {
                     .await;
             }
             Err(why) => {
-                // A clip nothing came of is no file before anybody is told so.
+                // A clip nothing came of is no file before anybody is told so, and is not
+                // played later either.
+                let mut heralding = self.herald.lock().await;
+                heralding.withdraw(&record.session, |held| held.clip == clip);
+                drop(heralding);
                 if written == 0 {
                     let _ = std::fs::remove_file(&path);
                 }
@@ -697,6 +749,192 @@ impl Mouth {
         }
         // From here on the clip is found by its line.
         self.held().remove(&clip);
+    }
+}
+
+// ---- the herald --------------------------------------------------------------------------------
+
+/// The session of the agent that is open; empty when none is.
+fn open_session(directory: &Directory) -> String {
+    let open = directory.focus.as_deref().and_then(|open| {
+        let mut members = directory.members.iter();
+        members.find(|member| member.record.agent_id == open)
+    });
+    open.map_or_else(String::new, |member| member.record.session.clone())
+}
+
+/// How the owner has set the herald.
+fn herald_settings(directory: &Directory) -> herald::Settings {
+    herald::Settings::stored(
+        directory.setting(herald::DISABLED_KEY),
+        directory.setting(herald::SHORT_KEY),
+        directory.setting(herald::BYPASS_KEY),
+    )
+}
+
+impl Mouth {
+    /// Tells the apps of what the herald says is played now, in its order, and writes on
+    /// each clip's line the event it was told with. `this` is a clip whose line is written
+    /// by whoever asks (it is being begun): the event it was told with is answered, when it
+    /// is among them. `herald_file` is the herald's own clip, when one was made.
+    async fn tell(
+        &self,
+        directory: &Directory,
+        plays: Vec<Play<HeldClip>>,
+        this: Option<u64>,
+        herald_file: Option<&str>,
+    ) -> Option<u64> {
+        let mut told_this = None;
+        for play in plays {
+            match play {
+                Play::Herald { session } => {
+                    if let Some(name) = herald_file {
+                        self.hub
+                            .publish(wire::herald(&session, name), self.now_ms());
+                    }
+                }
+                Play::Clip {
+                    clip: held, across, ..
+                } => {
+                    let mut members = directory.members.iter();
+                    let Some(member) =
+                        members.find(|member| member.record.agent_id == held.agent_id)
+                    else {
+                        continue;
+                    };
+                    let trace = held.trace_id.as_deref();
+                    let event = if across {
+                        wire::audio_across(&member.record, held.clip, &held.name, trace)
+                    } else {
+                        wire::audio(&member.record, held.clip, &held.name, trace)
+                    };
+                    let event_id = self.hub.publish(event, self.now_ms());
+                    if this == Some(held.clip) {
+                        told_this = Some(event_id);
+                    } else {
+                        let _ = member
+                            .agent
+                            .line_announced(held.clip, event_id, across)
+                            .await;
+                    }
+                }
+            }
+        }
+        told_this
+    }
+
+    /// An agent raises its hand: the herald's words in the agent's own voice, in a clip of
+    /// their own; then what the herald says of it is played. When the user has turned to
+    /// the agent meanwhile, the clip is nobody's.
+    async fn raise(self: Arc<Self>, attempt: Attempt, member: Arc<Member>) {
+        let made = self.herald_clip(&member.record).await;
+        let mut heralding = self.herald.lock().await;
+        let directory = self.fleet.directory();
+        let open = open_session(&directory);
+        let at = Moment {
+            open: &open,
+            now_ms: self.now_ms(),
+        };
+        let plays = heralding.made(&attempt, made.is_some(), at);
+        let played = plays.iter().any(|play| matches!(play, Play::Herald { .. }));
+        let name = made.as_ref().map(|(name, _)| name.as_str());
+        self.tell(&directory, plays, None, name).await;
+        drop(heralding);
+        if let (Some((_, path)), false) = (made, played) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    /// The herald's clip for an agent: its name and its file. `None`: nothing on this Host
+    /// can say it now.
+    async fn herald_clip(&self, record: &AgentRecord) -> Option<(String, PathBuf)> {
+        let owners = self.owners();
+        let has_key = |provider: &str| self.has_key(provider, &owners);
+        let Chosen::By(by) = chosen(&owners, record, &has_key) else {
+            return None;
+        };
+        let engines: Vec<(Box<dyn Speaker>, String)> = by
+            .iter()
+            .filter_map(|(provider, voice)| Some((self.engine(&owners, provider)?, voice.clone())))
+            .collect();
+        let text = herald::words(&record.persona, &record.session);
+        let (audio, session, now) = (self.audio.clone(), record.session.clone(), self.now_ms());
+        let made = tokio::task::spawn_blocking(move || -> Option<(String, PathBuf)> {
+            let listed: Vec<(&dyn Speaker, &str)> = engines
+                .iter()
+                .map(|(engine, voice)| (engine.as_ref(), voice.as_str()))
+                .collect();
+            let mut sound = Vec::new();
+            let said = said_by_the_first_that_can(&listed, &text, &mut |piece| {
+                sound.extend_from_slice(piece);
+            });
+            if said.is_err() || sound.is_empty() {
+                return None;
+            }
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&audio)
+                .ok()?;
+            // A name of its own: the moment it was made, and the next when that is taken.
+            for later in 0..100 {
+                let name = format!(
+                    "{HERALD_FILE}{}",
+                    said::clip_name(Some(&session), now + later)
+                );
+                let path = audio.join(&name);
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&path);
+                match file {
+                    Ok(mut file) => {
+                        return match file.write_all(&sound) {
+                            Ok(()) => Some((name, path)),
+                            Err(_) => {
+                                let _ = std::fs::remove_file(&path);
+                                None
+                            }
+                        };
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(_) => return None,
+                }
+            }
+            None
+        });
+        made.await.ok().flatten()
+    }
+
+    /// The user opened an agent: what the herald held of it is played.
+    pub(crate) async fn opened(&self, session: &str) {
+        let mut heralding = self.herald.lock().await;
+        let plays = heralding.opened(session);
+        self.tell(&self.fleet.directory(), plays, None, None).await;
+    }
+
+    /// A message went to an agent: for a minute its answer is the one that is waited for,
+    /// and what the herald held of it is played.
+    pub(crate) async fn sent(&self, session: &str) {
+        let mut heralding = self.herald.lock().await;
+        let plays = heralding.sent(session, self.now_ms());
+        self.tell(&self.fleet.directory(), plays, None, None).await;
+    }
+
+    /// The user said something. A yes with the name of an agent whose hand is up lets what
+    /// it holds be played; a no leaves it held. Answers whether it was one of the two: what
+    /// was said is then a word to the herald, and no message for an agent.
+    pub(crate) async fn heard(&self, text: &str) -> bool {
+        let mut heralding = self.herald.lock().await;
+        let directory = self.fleet.directory();
+        let name_of = |session: &str| -> String {
+            let member = directory.by_session(session);
+            member.map_or_else(String::new, |member| member.record.persona.clone())
+        };
+        let (granted, declined, plays) = heralding.said(text, &name_of);
+        self.tell(&directory, plays, None, None).await;
+        !(granted.is_empty() && declined.is_empty())
     }
 }
 

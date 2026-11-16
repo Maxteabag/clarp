@@ -590,6 +590,28 @@ pub fn audio(record: &AgentRecord, clip: u64, name: &str, trace_id: Option<&str>
     })
 }
 
+/// The same for a clip that is played whichever agent is open, and before what waits
+/// there: one that was held until its agent's turn came.
+pub fn audio_across(record: &AgentRecord, clip: u64, name: &str, trace_id: Option<&str>) -> Value {
+    let mut event = audio(record, clip, name, trace_id);
+    if let Some(fields) = event.as_object_mut() {
+        fields.insert("herald".to_string(), json!(true));
+    }
+    event
+}
+
+/// The clip that says an agent has something for its user: no line of the agent's, and
+/// played whichever agent is open.
+pub fn herald(session: &str, name: &str) -> Value {
+    json!({
+        "type": "audio",
+        "url": format!("/audio/{name}"),
+        "name": name,
+        "session": session,
+        "herald": true,
+    })
+}
+
 /// The clip a line became, as it was announced, for an app that asks what it missed.
 /// `None`: the line has no clip.
 pub fn audio_of(record: &AgentRecord, line: &Line) -> Option<Value> {
@@ -599,8 +621,13 @@ pub fn audio_of(record: &AgentRecord, line: &Line) -> Option<Value> {
         line.clip.as_deref()?,
         line.trace_id.as_deref(),
     );
-    if let (Some(fields), Some(event_id)) = (event.as_object_mut(), line.event_id) {
-        fields.insert("event_id".to_string(), json!(event_id));
+    if let Some(fields) = event.as_object_mut() {
+        if line.across {
+            fields.insert("herald".to_string(), json!(true));
+        }
+        if let Some(event_id) = line.event_id {
+            fields.insert("event_id".to_string(), json!(event_id));
+        }
     }
     Some(event)
 }

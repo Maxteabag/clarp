@@ -1405,6 +1405,22 @@ impl Actor {
         Ok(ended)
     }
 
+    /// A clip that was held back is announced to the apps with the event of this number.
+    /// Answers whether the agent has that clip.
+    pub fn line_announced(
+        &mut self,
+        clip_id: u64,
+        (event_id, across): (u64, bool),
+        now_ms: i64,
+    ) -> Result<bool, ActorError> {
+        let Some(line) = self.speech.by_clip(clip_id) else {
+            return Ok(false);
+        };
+        let announced = line.announced(event_id, across);
+        self.write_lines(std::slice::from_ref(&announced), now_ms)?;
+        Ok(true)
+    }
+
     /// What an app says of playing a clip. Answers whether the agent has that clip.
     pub fn line_played(
         &mut self,

@@ -8278,6 +8278,241 @@ fn unchunked(body: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn an_agent_whose_user_is_with_another_raises_its_hand_and_is_heard_when_its_turn_comes() {
+    let place = Place::new("herald");
+    let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
+    let voice = cartesia_stand_in(sound.clone());
+    let (ear, _) = scribe_stand_in(r#"{"text":" Yes, Mike! ","words":[{"end":1.0}]}"#);
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n[cartesia.voices]\n\
+         Mike = \"voice-of-mike\"\nRachel = \"voice-of-rachel\"\n\n[elevenlabs]\napi_key = \"another\"\n",
+    )
+    .unwrap();
+    let args = [
+        "--speech-keys",
+        owners.to_str().unwrap(),
+        "--transcription-engine",
+        "elevenlabs:scribe_v2",
+    ];
+    // No engine outside is reached, whatever keys the machine that runs this test has.
+    let world = [
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CLARP_SCRIBE_ENDPOINT", ear.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let (rachel, mike) = (host.new_agent("Rachel"), host.new_agent("Mike"));
+    let heard = host.listen();
+    let audio = || -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let clips = heard.iter().filter(|event| event["type"] == "audio");
+        clips.cloned().collect()
+    };
+    // Something the Host runs by itself has an agent say this aloud. Nobody is waiting for
+    // an answer to it, so it does not make the agent the one that is waited for.
+    let report = "A long report of the day, with everything in it. ".repeat(4);
+    let mut sent = 0;
+    let mut says = |session: &str, words: &str| {
+        sent += 1;
+        let id = format!("h{sent}");
+        host.post(
+            "/send",
+            json!({
+                "session": session, "text": format!("<speak>{words}</speak>"), "client_msg_id": id,
+                "origin": "dreaming", "synthesize_audio": true,
+            }),
+        );
+        let mine = format!("u-{id}");
+        wait_for("the answer", || {
+            let rows = host.turns(session);
+            let at = rows.iter().position(|row| row["id"] == mine);
+            at.is_some_and(|at| rows[at + 1..].iter().any(|row| row["role"] == "assistant"))
+                && host.state(session) == "done"
+        });
+    };
+    let said_to_engine = |words: &str| {
+        let asked = voice.asked();
+        asked.iter().any(|request| request["transcript"] == words)
+    };
+    let offered = |session: &str| {
+        host.get(&format!("/clips/recoverable?session={session}"))["events"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+
+    // The user is with Rachel. Mike has something long to say: he raises his hand, in his
+    // own voice, and what he said is held.
+    host.post("/select", json!({ "session": rachel }));
+    says(&mike, &report);
+    wait_for("the herald", || !audio().is_empty());
+    wait_for("the engine to have said both", || {
+        said_to_engine("Mike here, ready for an update.") && voice.asked().len() == 2
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let clips = audio();
+    assert_eq!(
+        clips.len(),
+        1,
+        "the reply itself is not announced: {clips:?}"
+    );
+    let hand = clips[0].clone();
+    let name = hand["name"].as_str().unwrap().to_string();
+    assert!(
+        name.starts_with("herald-internal-") && name.ends_with("__mike.mp3"),
+        "{name}"
+    );
+    assert_eq!(
+        hand,
+        json!({
+            "type": "audio", "url": format!("/audio/{name}"), "name": name, "session": "mike",
+            "herald": true, "event_id": hand["event_id"],
+        })
+    );
+    let in_his_voice = voice
+        .asked()
+        .into_iter()
+        .find(|request| request["transcript"] == "Mike here, ready for an update.");
+    assert_eq!(in_his_voice.unwrap()["voice"]["id"], "voice-of-mike");
+    let fetched = fetch(&host, "", "GET", &format!("/audio/{name}"), &[], b"");
+    assert_eq!((fetched.status, fetched.body.len()), (200, sound.len()));
+    assert_eq!(
+        offered(&mike),
+        Vec::<Value>::new(),
+        "what is held is not offered"
+    );
+
+    // More of the same from him while his hand is up: held too, and no second herald.
+    says(&mike, &report);
+    wait_for("the engine to have said the second", || {
+        voice.asked().len() == 3
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(audio().len(), 1);
+
+    // The user says yes and his name: a word to the herald, and no message. What Mike
+    // held is played, in the order he said it, whichever agent is open.
+    let hear = || -> Value {
+        let answer = fetch(
+            &host,
+            "",
+            "POST",
+            "/transcribe",
+            &[("Content-Type", "audio/mp4")],
+            b"a clip",
+        );
+        assert_eq!(answer.status, 200);
+        serde_json::from_slice(&answer.body).unwrap()
+    };
+    let yes = hear();
+    assert_eq!(
+        (&yes["text"], &yes["herald_consumed"]),
+        (&json!("Yes, Mike!"), &json!(true))
+    );
+    wait_for("what was held to be played", || audio().len() == 3);
+    let released = audio()[1..].to_vec();
+    for clip in &released {
+        assert_eq!(
+            (&clip["session"], &clip["herald"], &clip["persona"]),
+            (&json!("mike"), &json!(true), &json!("Mike")),
+            "{clip}"
+        );
+        assert!(clip["stream_url"].as_str().unwrap().starts_with("/clips/"));
+    }
+    assert!(
+        released[0]["clip_id"].as_u64() < released[1]["clip_id"].as_u64(),
+        "in the order they were said"
+    );
+    // Now they were announced, and an app that was away is offered them as they were.
+    wait_for("the announced clips to be offered", || {
+        offered(&mike) == released
+    });
+    // Nobody's hand is up: the same words are a message like any other.
+    assert_eq!(hear()["herald_consumed"], false);
+
+    // A few words are said at once.
+    says(&mike, "Done.");
+    wait_for("the short reply", || audio().len() == 4);
+    let short = audio()[3].clone();
+    assert!(short.get("herald").is_none(), "{short}");
+    assert!(said_to_engine("Mike here. Done."));
+
+    // With the herald off everybody is heard at once.
+    let settings = host.get("/herald/settings");
+    assert_eq!(
+        settings,
+        json!({
+            "settings": { "disabled": false, "speak_if_short_chars": 120, "short_reply_bypass_enabled": true },
+            "defaults": { "speak_if_short_chars": 120, "short_reply_bypass_enabled": true },
+            "limits": { "speak_if_short_chars": [0, 2000] },
+        })
+    );
+    assert_eq!(
+        host.post("/herald/settings", json!({ "disabled": true })),
+        json!({
+            "ok": true,
+            "settings": { "disabled": true, "speak_if_short_chars": 120, "short_reply_bypass_enabled": true },
+        })
+    );
+    says(&mike, &report);
+    wait_for("the reply, at once", || audio().len() == 5);
+    assert!(audio()[4].get("herald").is_none());
+    assert_eq!(audio()[4]["session"], "mike");
+    // What is no setting is refused in words, and nothing changes.
+    for (asked, why) in [
+        (json!([]), "bad json"),
+        (json!({ "disabled": "yes" }), "disabled must be a boolean"),
+        (
+            json!({ "speak_if_short_chars": 5000 }),
+            "speak_if_short_chars must be between 0 and 2000",
+        ),
+        (
+            json!({ "disabled": false, "short_reply_bypass_enabled": 1 }),
+            "short_reply_bypass_enabled must be a boolean",
+        ),
+    ] {
+        let (status, refused) = host.ask("POST", "/herald/settings", Some(&asked));
+        assert_eq!((status, &refused["error"]), (400, &json!(why)), "{asked}");
+    }
+    assert_eq!(host.get("/herald/settings")["settings"]["disabled"], true);
+
+    // On again, and with short replies held like long ones: a hand goes up for two words,
+    // and the user who opens the agent hears them.
+    host.post(
+        "/herald/settings",
+        json!({ "disabled": false, "short_reply_bypass_enabled": false }),
+    );
+    says(&mike, "Two words.");
+    wait_for("the second herald", || audio().len() == 6);
+    let again = audio()[5].clone();
+    assert_eq!(
+        (&again["herald"], again.get("clip_id")),
+        (&json!(true), None)
+    );
+    assert_ne!(again["name"], hand["name"], "a clip of its own each time");
+    host.post("/focus", json!({ "session": mike }));
+    wait_for("the held reply", || audio().len() == 7);
+    let opened = audio()[6].clone();
+    assert_eq!(
+        (&opened["herald"], opened["clip_id"].is_u64()),
+        (&json!(true), true)
+    );
+
+    // The settings are the Host's to keep, and Mike, now the open one, is heard at once.
+    host.kill();
+    let host = place.start_in("", &args, &world);
+    assert_eq!(
+        host.get("/herald/settings")["settings"],
+        json!({ "disabled": false, "speak_if_short_chars": 120, "short_reply_bypass_enabled": false })
+    );
+}
+
+#[test]
 fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     let place = Place::new("speech-out");
     let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
@@ -10803,11 +11038,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         false
     );
     assert_eq!(read("/avatar-settings"), json!({ "model_avatars": false }));
-    assert_eq!(
-        read("/herald/settings")["settings"]["disabled"],
-        true,
-        "nobody heralds here"
-    );
     assert_eq!(read("/judgments/settings")["settings"]["enabled"], false);
     assert_eq!(read("/diagnostics/settings")["settings"]["enabled"], false);
     assert_eq!(read("/janitor-policy")["revision"], 0);
@@ -10986,7 +11216,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/agent-goal/pause", json!({ "session": echo })),
         ("/agent-portrait-generation", json!({ "session": echo })),
         ("/avatar-settings", json!({ "model_avatars": true })),
-        ("/herald/settings", json!({ "disabled": false })),
         ("/judgments/settings", json!({ "enabled": true })),
         ("/diagnostics/settings", json!({ "enabled": true })),
         ("/vocab/packs", json!({ "name": "p" })),

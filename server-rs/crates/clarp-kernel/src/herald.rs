@@ -244,6 +244,19 @@ impl<C: Clone> Herald<C> {
             .collect()
     }
 
+    /// Nothing came of a clip that is held (no engine said it): it is not played later.
+    /// A hand that is up for nothing else comes down.
+    pub fn withdraw(&mut self, session: &str, is_it: impl Fn(&C) -> bool) {
+        let Some(held) = self.held.get_mut(session) else {
+            return;
+        };
+        held.retain(|clip| !is_it(clip));
+        if held.is_empty() {
+            self.held.remove(session);
+            self.pending.remove(session);
+        }
+    }
+
     /// The user opened an agent. The wait for another agent's answer is over (the user
     /// has moved on), and what this agent held is played.
     pub fn opened(&mut self, session: &str) -> Vec<Play<C>> {

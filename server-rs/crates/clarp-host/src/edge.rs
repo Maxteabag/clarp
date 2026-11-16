@@ -1284,6 +1284,10 @@ pub(crate) async fn send_message(
         (false, _) => Origin::User,
     };
     let origin_is_user = origin == Origin::User;
+    // What the Host sends by itself on its own schedule (the Python Host's
+    // `ROUTINE_AUTOMATION_ORIGINS`).
+    let routine = matches!(&origin, Origin::Trigger { name }
+        if matches!(name.as_str(), "heartbeat" | "leader_tick" | "dreaming" | "janitor"));
     // Only a person moves the focus: the user, and the Oracle acting on what the user said
     // (the Python Host's `origins.FOCUS_ORIGINS`).
     let by_a_person =
@@ -1336,6 +1340,12 @@ pub(crate) async fn send_message(
         // with the agent that was open opens nothing.
         let _ = app.fleet.open(member.record.session.clone()).await;
     }
+    if !routine {
+        // For a minute this agent's answer is the one that is waited for: it is heard at
+        // once, and the others raise their hands (`clarp_kernel::herald`). What the Host
+        // sends by itself on its own schedule is waited for by nobody.
+        app.mouth.sent(&member.record.session).await;
+    }
     Ok(SendResponse {
         ok: true,
         session: member.record.session.clone(),
@@ -1383,10 +1393,14 @@ async fn select(
     Json(request): Json<SessionRequest>,
 ) -> Result<Json<SelectResponse>, ApiError> {
     match app.fleet.select(request.session.clone()).await? {
-        Some(record) => Ok(Json(SelectResponse {
-            ok: true,
-            session: record.session,
-        })),
+        Some(record) => {
+            // The user turned to this agent: what the herald held of it is played.
+            app.mouth.opened(&record.session).await;
+            Ok(Json(SelectResponse {
+                ok: true,
+                session: record.session,
+            }))
+        }
         None => Err(ApiError::new(StatusCode::NOT_FOUND, "no such session")),
     }
 }
