@@ -360,8 +360,50 @@ async fn usage(State(app): State<App>) -> Json<Value> {
     }))
 }
 
+// ---- the Host's own software and the skills of its agents' tools -----------------------------
+
+/// `GET /server-update`: who this Host is and whether a newer one is to be had. It is: who
+/// it is, as `GET /server-info` says; that nobody looked for a newer one; and that it is
+/// not updated from an app. Whoever installed it updates it, with the installer.
+async fn software(State(app): State<App>) -> Json<Value> {
+    let mut told = serde_json::to_value(crate::edge::identity(&app)).unwrap_or_else(|_| json!({}));
+    for (key, value) in [
+        ("checked", json!(false)),
+        ("latest_version", json!("")),
+        ("update_available", Value::Null),
+        ("update_method", json!("installer")),
+        ("can_update_in_app", json!(false)),
+        (
+            "update_command",
+            json!("server-rs/tools/install-host --start"),
+        ),
+    ] {
+        told[key] = value;
+    }
+    if told["image_version"].is_null() {
+        told["image_version"] = json!("");
+    }
+    Json(told)
+}
+
+async fn no_update() -> ApiError {
+    not_built("Updating this Host from an app is")
+}
+
+/// `GET /managed-skills`: the skills this Host keeps installed for its agents' tools. It
+/// keeps none: the skills a tool finds on this machine are whoever's put them there.
+async fn skills() -> Json<Value> {
+    Json(json!({ "skills": [] }))
+}
+
+async fn no_skills() -> ApiError {
+    not_built("Keeping skills installed is")
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/server-update", get(software).post(no_update))
+        .route("/managed-skills", get(skills).post(no_skills))
         .route("/backend-auth", get(logins))
         .route("/backend-usage", get(usage))
         .route("/backend-auth/{action}", post(no_logins))
