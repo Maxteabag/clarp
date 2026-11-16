@@ -33,7 +33,12 @@ if 'resolved_level' in case:
 reports = []
 def private_emit(source, event, **fields):
     reports.append({'source': source, 'event': event, **fields})
-eventlog.emit = private_emit
+if not case.get('real_storage'):
+    # Existing payload tests explicitly opt their collector cases into capture.
+    # The real-storage regression leaves capture policy and writers untouched.
+    from lib import diagnostics_settings
+    diagnostics_settings.update({'enabled': True, 'categories': ['agents']})
+    eventlog.emit = private_emit
 if case.get('unavailable'):
     original_import = builtins.__import__
     def unavailable(name, *args, **kwargs):
