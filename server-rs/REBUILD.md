@@ -852,8 +852,15 @@ the newest two hundred, `apps.rs`); and, as screens of what this Host has not, t
 Python Host says them before anything was read, one janitor as one it has not, and a request to explain
 tools as a Host answers where explaining is off. What a fresh Python Host answers there was asked of it
 first, by a run of the one scenario (`-f scenarios=`, five minutes instead of twenty-two): it corrected one
-answer that reading its source had got wrong (a janitor that is not there is `Agent not found`). Still
-asked and not there: a fork of an agent.
+answer that reading its source had got wrong (a janitor that is not there is `Agent not found`). Counted
+the other way, by what was done and not by what was read (requests that change something and were taken,
+86 routes in the three days): after this, the Host does everything that was done there but two things. One
+was a janitor's own settings (twice). The other, choosing the picture an agent wears from what it published
+(`POST /agent-portraits`, six times), is built next: an agent keeps up to three portraits, a picture it
+published is kept as one, and one of them is made the picture it wears, by the rules of the Python Host's
+`agent_portraits.py` (`kept_portraits.rs` in the kernel; the portraits are kept with the agent's record,
+and every portrait's bytes under the name an agent's picture is kept by). Still asked and not there: a
+fork of an agent.
 
 Reading for the queue's routes found what no run had: **the phone's ids for its messages begin with `u-`**,
 the mark a message's id has in a conversation (`"u-" + id` in the phone app's source, and so in the log:
