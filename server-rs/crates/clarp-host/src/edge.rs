@@ -1326,6 +1326,13 @@ pub(crate) async fn send_message(
         Origin::Agent { agent_id } if !agent_id.is_empty() => Some(agent_id.clone()),
         _ => None,
     };
+    if !routine {
+        // For a minute this agent's answer is the one that is waited for: it is heard at
+        // once, and the others raise their hands (`clarp_kernel::herald`). What the Host
+        // sends by itself on its own schedule is waited for by nobody. Said before the
+        // agent has the message, so that no answer is faster than this.
+        app.mouth.sent(&member.record.session).await;
+    }
     let sent = member.agent.send(message, admission).await?;
     if let Some(writer) = writer {
         // A helper that writes to the agent that made it has reported, and one that is
@@ -1339,12 +1346,6 @@ pub(crate) async fn send_message(
         // message names, by its session or at its beginning. A message that only stayed
         // with the agent that was open opens nothing.
         let _ = app.fleet.open(member.record.session.clone()).await;
-    }
-    if !routine {
-        // For a minute this agent's answer is the one that is waited for: it is heard at
-        // once, and the others raise their hands (`clarp_kernel::herald`). What the Host
-        // sends by itself on its own schedule is waited for by nobody.
-        app.mouth.sent(&member.record.session).await;
     }
     Ok(SendResponse {
         ok: true,

@@ -656,6 +656,24 @@ With it came a way to leave something small with the fleet under a key, in a tab
 question to the fleet for each small thing an app or an agent leaves. What comes next of that sort (a
 phone's tokens for calls and live activities) is kept the same way.
 
+**An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
+what is on by default on the Python Host, and the one a user with several agents would have heard first:
+until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the
+user was with. On the Python Host that is so only for the agent that is open, for the agent a message just
+went to (for a minute, and then for no other, not even the open one), and for a reply of a few words. Any
+other agent says "<name> here, ready for an update." in its own voice, and what it said is held until the
+user opens that agent, writes to it, or says yes and its name. The rule is the kernel's (`herald.rs`: a
+machine without clocks, voices or streams, and the classifier of what a user said), held to the Python
+Host's own manager through 15 scripts of 120 steps and to its classifier over 106 utterances
+(`tools/herald-vectors.py`). The one that speaks asks it at the moment a clip would be announced
+(`clarp-host` `voice.rs`), makes the herald's clip beside the reply's, and lets go of what is held when
+the user opens an agent, sends to one, or says so: `/transcribe` then answers `herald_consumed`, and the
+app sends nothing. One thing at a time happens to the herald, so a clip is never let go before its line
+knows it. A held clip's line has the clip and no event until it is announced; an app that was away is
+offered only what was announced. Three things are done otherwise, each in the register of differences: a
+clip nothing came of is taken back instead of announced later, two agents let speak in one breath are
+heard in the order of their sessions, and the settings a change does not name are not written.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
