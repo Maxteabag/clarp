@@ -239,11 +239,52 @@ pub fn sorted_ascii(value: &Value) -> String {
     out
 }
 
+/// A text as Python's `int()` reads it: the space around it left out, a sign, digits, and
+/// an underscore only between two digits. `None`: Python says it is no whole number. A
+/// number too long to count with is read as the largest there is.
+pub fn int(text: &str) -> Option<i128> {
+    let text = clarp_speech::listen::strip(text);
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let signs: Vec<char> = digits.chars().collect();
+    let mut plain = String::with_capacity(signs.len());
+    for (at, sign) in signs.iter().enumerate() {
+        let digit = |place: Option<&char>| place.is_some_and(char::is_ascii_digit);
+        match sign {
+            '_' if at > 0 && digit(signs.get(at - 1)) && digit(signs.get(at + 1)) => {}
+            sign if sign.is_ascii_digit() => plain.push(*sign),
+            _ => return None,
+        }
+    }
+    if plain.is_empty() {
+        return None;
+    }
+    let number = plain.parse::<i128>().unwrap_or(i128::MAX);
+    Some(if negative { -number } else { number })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_text_is_a_whole_number_when_python_says_so() {
+        assert_eq!(int("41"), Some(41));
+        assert_eq!(int(" \t+4_1\n"), Some(41));
+        assert_eq!(int("-0"), Some(0));
+        assert_eq!(int("-12"), Some(-12));
+        assert_eq!(int("007"), Some(7));
+        assert_eq!(int(&"9".repeat(60)), Some(i128::MAX));
+        for no_number in [
+            "", " ", "4 1", "41.0", "1e3", "4__1", "_41", "41_", "-", "+-1", "0x1f",
+        ] {
+            assert_eq!(int(no_number), None, "{no_number:?}");
+        }
+    }
 
     #[test]
     fn a_fraction_is_read_as_the_number_it_is_and_written_as_python_writes_it() {
