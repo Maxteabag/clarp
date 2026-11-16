@@ -122,17 +122,39 @@ def response_encoding(meta_headers: dict, *, passthrough: bool) -> str:
 APP_HEADERS = frozenset({'x-clarp-client', 'x-clarp-call-id', 'x-clarp-interaction-id'})
 
 
+class UnforwardableHeader(ValueError):
+    """What the relay handed over as a header is not one HTTP can carry. The request is refused."""
+
+
+# A header name as HTTP writes it (RFC 9110, token), and a value without control
+# characters (a tab is allowed). The names are filtered below as HTTP names; a
+# name with a space, a line break or a letter outside ASCII is not one, would not
+# be caught by that filter, and on the Host's side ends the headers early or
+# adds one. Only the relay itself could hand such a name over; it is refused.
+_TOKEN = frozenset("!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def _carriable(name, value) -> bool:
+    return (isinstance(name, str) and bool(name) and all(ch in _TOKEN for ch in name)
+            and isinstance(value, str)
+            and not any((ord(ch) < 32 and ch != '\t') or ord(ch) == 127 for ch in value))
+
+
 def forward_request_headers(meta_headers: dict, local_netloc: str, body_len: int,
                             *, passthrough_encoding: bool = False) -> dict:
+    if not all(_carriable(k, v) for k, v in meta_headers.items()):
+        raise UnforwardableHeader('a header the relay handed over is not an HTTP header')
     lower = {k.lower(): v for k, v in meta_headers.items()}
     connection_headers = {s.strip().lower() for s in lower.get('connection', '').split(',')}
-    headers = {k: v for k, v in meta_headers.items()
-               if k.lower() not in HOP | connection_headers | {'accept-encoding', 'forwarded', 'x-real-ip'}
-               and not k.lower().startswith(('x-forwarded-', 'tailscale-', 'cf-', 'sec-websocket'))
-               and (not k.lower().startswith('x-clarp-') or k.lower() in APP_HEADERS)}
+    # The connector's own mark is written first, before anything that came from
+    # outside: whatever follows, the Host has read it.
+    headers = {'X-Clarp-Transport': 'relay'}
+    headers.update({k: v for k, v in meta_headers.items()
+                    if k.lower() not in HOP | connection_headers | {'accept-encoding', 'forwarded', 'x-real-ip'}
+                    and not k.lower().startswith(('x-forwarded-', 'tailscale-', 'cf-', 'sec-websocket'))
+                    and (not k.lower().startswith('x-clarp-') or k.lower() in APP_HEADERS)})
     headers.update({'Host': local_netloc,
-                    'Accept-Encoding': response_encoding(meta_headers, passthrough=passthrough_encoding),
-                    'X-Clarp-Transport': 'relay'})
+                    'Accept-Encoding': response_encoding(meta_headers, passthrough=passthrough_encoding)})
     try:
         headers['X-Forwarded-For'] = str(ipaddress.ip_address(lower.get('x-forwarded-for', '')))
     except ValueError:
