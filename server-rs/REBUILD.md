@@ -833,7 +833,10 @@ it: the hours of the day in which nobody is woken and the settings an environmen
 (`CLAUDE_PWA_HEARTBEAT_*`: the rule for the hours is in the kernel, the Host reads none of the variables,
 and the owner's Host on elitebook sets none of them, looked on 16 Nov); a keeper that serves an agent
 instead (janitors); and the two other signs that wake an agent that has backed off, its team moving and a
-promotion in a leader's memory (teams and leaders).
+promotion in a leader's memory (teams and leaders). At its first run against the reference (43961721912) the
+scenario's 41 steps were answered the same by both Hosts: every refusal of a setting in its words, the
+switch, the cadence before and after somebody spoke. The one difference of that run was the scenario's own:
+it read a snapshot that names a row of the conversation without having read the conversation.
 
 **What the load still asks for, and the ids an app gives its messages** (16 Nov 2026). Counted again on the
 owner's Host on elitebook, its request log of three days: 175,200 requests over 395 routes, and 99.8 per cent
@@ -868,7 +871,11 @@ event, and one rule this Host did not have: **a hold holds what waits, and when 
 queue, taken back or gone to run, the hold is over** without a resume, as the Python Host ends a pause
 (`turn_queue.remove`, `mark_started`). So a stop that held nothing ends with the first thing that goes
 through the queue. The apps are told how the queue stands when a message is taken back; a hold that ended
-because its last message went to run is told with the news of that turn. Held by the kernel's tests (the
+because its last message went to run is told with the news of that turn. A message sent by hand counts twice
+in the count of the queue's changes a client orders its news by, once when it is taken out of its place and
+once when its turn starts, as the Python Host counts it: the first run against the reference (43965744063)
+found every status, body and event of the scenario the same on both Hosts, and that count the one thing
+that differed. Held by the kernel's tests (the
 order of any 120 commands, sending by hand among them, loses nothing and runs nothing twice), a Host test
 through a kill, and the scenario `the-queue-by-hand`. And the words of a waiting message are changed
 (`PUT /turn-queue/<id>` with `text`): the message is written anew where it waits, outside the conversation,
