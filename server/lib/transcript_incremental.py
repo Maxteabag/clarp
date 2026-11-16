@@ -238,17 +238,27 @@ def parse_range(backend: str, path: pathlib.Path, start: int, end: int,
                 *, observed: dict | None = None) -> list[dict]:
     """``observed``, when given, receives the digest of the bytes the parser
     was handed, as ``range_hash`` would take it: "hash" when the parser
-    opened the range once and read all of it, else None."""
+    opened the range once and read all of it, else None. With "mark" in it
+    (a count of bytes from ``start``) it also receives "at_mark", the digest
+    of the range's first ``mark`` bytes taken on the way past, as
+    ``range_hash(path, start, start + mark)`` would take it, and "opened",
+    the file as the reader found it when it opened it: (device, inode, size,
+    mtime_ns, ctime_ns). Both None with "hash"."""
     from . import backends
     ranged = _RangePath(path, start=start, end=end)
     if observed is not None:
         ranged._full_read = {"hash": hashlib.blake2b(digest_size=16), "bytes": 0, "opens": 0,
                              "file": None}
+        if "mark" in observed:
+            ranged._full_read["mark"] = observed["mark"]
     turns = backends.parse_turns(backend, ranged)
     if observed is not None:
         read = ranged._full_read
-        observed["hash"] = read["hash"].hexdigest() \
-            if read["opens"] == 1 and read["bytes"] == max(0, end - start) else None
+        whole = read["opens"] == 1 and read["bytes"] == max(0, end - start)
+        observed["hash"] = read["hash"].hexdigest() if whole else None
+        if "mark" in observed:
+            observed["at_mark"] = read.get("at_mark") if whole else None
+            observed["opened"] = (*read["file"], *read["stat"]) if whole else None
     return turns
 
 
@@ -682,9 +692,11 @@ def choose_boundary(backend: str, path: pathlib.Path, turns: list[dict],
 
 def decide(checkpoint: Checkpoint | None, backend: str, path: pathlib.Path,
            ident: Identity, *, now_ms: int, audit_every: int, audit_seconds: float,
-           max_tail_bytes: int) -> str:
+           max_tail_bytes: int, tail_hash_later: bool = False) -> str:
     """'' when an incremental import from ``checkpoint`` is safe, otherwise
-    the reason a full import is needed."""
+    the reason a full import is needed. With ``tail_hash_later`` the bytes
+    from the boundary to the checkpoint's end are not read here: the caller
+    parses them next and compares their digest then (``tail_rewritten``)."""
     if checkpoint is None:
         return "no_checkpoint"
     if checkpoint.backend != backend or checkpoint.parser_version != parser_version(backend):
@@ -702,8 +714,8 @@ def decide(checkpoint: Checkpoint | None, backend: str, path: pathlib.Path,
         return "tail_too_large"
     if prefix_hash(path, checkpoint.boundary_offset) != checkpoint.prefix_hash:
         return "prefix_rewritten"
-    if range_hash(path, checkpoint.boundary_offset, checkpoint.complete_size) \
-            != checkpoint.tail_hash:
+    if not tail_hash_later and range_hash(
+            path, checkpoint.boundary_offset, checkpoint.complete_size) != checkpoint.tail_hash:
         return "tail_rewritten"
     why = reference_outside_tail(backend, path, checkpoint.boundary_offset,
                                  complete_size(path, ident.size),
@@ -780,6 +792,13 @@ _DEFAULTS = {
     # are proven to be the file's still, and the next import is a tail.
     # False: it loses its frontier and the next import is full.
     "tail_keeps_frontier_when_grown": False,
+    # Off unless switched on: a tail takes the two hashes of its range from
+    # its own parse (the bytes are hashed as the parser reads them) instead
+    # of reading the range once before the parse and once after it, when the
+    # file did not change while it was parsed. A tail then reads its range
+    # twice, for the references and for the parse, where it read it four
+    # times.
+    "tail_hashes_while_parsing": False,
 }
 
 
@@ -1515,7 +1534,13 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             from .log import log
             log("transcriptCarryInputsChanged", f"what={what}")
             return refuse("carry_inputs_changed")
-    checks = dict(now_ms=db.now_ms(), max_tail_bytes=int(conf["max_tail_bytes"]))
+    # With ``tail_hashes_while_parsing`` a tail that is going to parse its
+    # range takes both hashes of it from that parse: the one that proves the
+    # earlier import's bytes from the boundary on (``tail_rewritten``, asked
+    # after the parse instead of before it) and the one its checkpoint keeps.
+    hashes_in_parse = bool(conf.get("tail_hashes_while_parsing")) and not unchanged
+    checks = dict(now_ms=db.now_ms(), max_tail_bytes=int(conf["max_tail_bytes"]),
+                  tail_hash_later=hashes_in_parse)
     reason = decide(cp, backend, path, before, audit_every=int(conf["audit_every"]),
                     audit_seconds=float(conf["audit_seconds"]), **checks)
     audited = False
@@ -1604,7 +1629,9 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             earlier_hasher = state.hasher.copy()
         _, current_hash, hasher = _read_digest(path, cp.complete_size, before.size,
                                                digest=state.hasher)
-    observed = {} if keep_when_grown else None
+    observed = {} if keep_when_grown or hashes_in_parse else None
+    if hashes_in_parse:
+        observed["mark"] = cp.complete_size - cp.boundary_offset
     turns = parse_range(backend, path, cp.boundary_offset, before.size, observed=observed)
     parsed = time.perf_counter()
     tail_hash = None
@@ -1626,8 +1653,27 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
                 path, cp.complete_size, before.size, digest=earlier_hasher)[1] != current_hash:
             return refuse("file_moved_during_parse")
         grew = True
+    parsed_hash = None      # the range's digest from the parse, when it is the file's
+    if hashes_in_parse:
+        # What the parser was handed is what a read of the range gives when
+        # the file did not change while it was parsed: the same file, size,
+        # modification and change time as when its reader opened it, and the
+        # size this import began with (``_parsed_digests`` asks the same of a
+        # full import). Otherwise the range is read, as it always was. Either
+        # way the earlier import's part is compared here, after the parse:
+        # bytes of it rewritten while this tail ran are found by this tail.
+        stood = _parse_stood(observed, path, before)
+        earlier_tail = observed.get("at_mark") if stood else None
+        if earlier_tail is None:
+            earlier_tail = range_hash(path, cp.boundary_offset, cp.complete_size)
+        if earlier_tail != cp.tail_hash:
+            _prefix_changed(path, "tail_rewritten", cp)
+            if diagnostic is not None:
+                diagnostic.pop("imported", None)
+            return refuse("tail_rewritten")
+        parsed_hash = observed.get("hash") if stood else None
     if tail_hash is None:
-        tail_hash = range_hash(path, cp.boundary_offset, before.size)
+        tail_hash = parsed_hash or range_hash(path, cp.boundary_offset, before.size)
     next_cp = replace(cp, size=before.size, mtime_ns=before.mtime_ns,
                       complete_size=before.size, turn_count=cp.boundary_seq + len(turns),
                       tail_hash=tail_hash,
@@ -1722,6 +1768,23 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             _tail_log("audited_by_digest", retention=True)
         _tail_log("tail_applied", backend=backend, size=size)
     return result
+
+
+def _parse_stood(observed, path, before) -> bool:
+    """Whether the file is still what the parser's reader found when it
+    opened it, and that was the file this import began with: the same device
+    and inode, the size ``before`` has, the same modification and change
+    time. Then the bytes the parser was handed are the file's. False when it
+    did not read the range in one piece."""
+    opened = (observed or {}).get("opened")
+    if opened is None:
+        return False
+    try:
+        now = os.stat(path)
+    except OSError:
+        return False
+    return opened == (now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns, now.st_ctime_ns) \
+        and opened[:4] == (before.device, before.inode, before.size, before.mtime_ns)
 
 
 def _parsed_digests(parsed_read, parsed_evidence, before, earlier, path):
