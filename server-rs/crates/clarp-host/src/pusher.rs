@@ -48,9 +48,41 @@ pub struct Requested {
     pub expires_at: Option<i64>,
 }
 
+/// A ring of an agent as it is now, and what happened to it: `ring` for the incoming call,
+/// then `answered`, `declined`, `missed` or `cancelled`.
+#[derive(Debug, Clone)]
+pub struct Rung {
+    pub ring: clarp_kernel::rings::Ring,
+    pub kind: &'static str,
+    /// The owner lets a locked phone show why the agent calls.
+    pub show_reason: bool,
+}
+
+/// What became of a push, as the one who asked for it is told: whether this Host pushes at
+/// all, and to how many phones it went, did not go, and will not go again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counted {
+    pub enabled: bool,
+    pub sent: u32,
+    pub failed: u32,
+    pub disabled: u32,
+}
+
+impl Counted {
+    /// As the Python Host says it (`apns.send_agent_ring`).
+    pub fn told(&self) -> Value {
+        serde_json::json!({
+            "enabled": self.enabled, "sent": self.sent, "failed": self.failed,
+            "disabled": self.disabled,
+        })
+    }
+}
+
 enum Job {
     Turn(TurnDone),
     Request(Requested),
+    /// A ring, and who waits to hear what became of its push.
+    Ring(Rung, Option<tokio::sync::oneshot::Sender<Counted>>),
 }
 
 /// The way to the pusher's thread. Handing it something never waits.
@@ -66,6 +98,20 @@ impl Pusher {
 
     pub fn requested(&self, asked: Requested) {
         let _ = self.tx.send(Job::Request(asked));
+    }
+
+    /// A ring changed: the owner's phones are told, whether or not anybody sits at a desk.
+    /// An agent calling is the one interruption its user asked for.
+    pub fn rung(&self, rung: Rung) {
+        let _ = self.tx.send(Job::Ring(rung, None));
+    }
+
+    /// The same, for the one who placed the ring and is told what became of its push. The
+    /// answer comes when every phone was tried; a pusher that is gone answers nothing.
+    pub fn rung_and_told(&self, rung: Rung) -> tokio::sync::oneshot::Receiver<Counted> {
+        let (told, answer) = tokio::sync::oneshot::channel();
+        let _ = self.tx.send(Job::Ring(rung, Some(told)));
+        answer
     }
 }
 
@@ -104,8 +150,12 @@ impl Waiting {
             .spawn(move || {
                 for job in self.rx {
                     // Without a relay what is handed over is taken and let go.
-                    if let Some(relay) = &works.relay {
-                        deliver(relay, &works, &job);
+                    let counted = match &works.relay {
+                        Some(relay) => deliver(relay, &works, &job),
+                        None => Counted::default(),
+                    };
+                    if let Job::Ring(_, Some(told)) = job {
+                        let _ = told.send(counted);
                     }
                 }
             })
@@ -151,11 +201,29 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
             }),
             &asked.decision_id,
         ),
+        Job::Ring(rung, _) => (
+            push::ring(&push::Rung {
+                ring_id: &rung.ring.ring_id,
+                state: &rung.ring.state,
+                session: &rung.ring.session,
+                persona: &rung.ring.persona,
+                reason: &rung.ring.reason,
+                opening_line: &rung.ring.opening_line,
+                opening_audio_url: &rung.ring.opening_audio_url,
+                expires_at: rung.ring.expires_at,
+                kind: rung.kind,
+                show_reason: rung.show_reason,
+                avatar_url,
+                avatar_custom,
+                server_instance_id: server_id,
+            }),
+            &rung.ring.ring_id,
+        ),
     }
 }
 
-/// Sends one job to every row of the register that is to have it.
-fn deliver(relay: &Relay, works: &Works, job: &Job) {
+/// Sends one job to every row of the register that is to have it. Answers what became of it.
+fn deliver(relay: &Relay, works: &Works, job: &Job) -> Counted {
     let directory = works.fleet.directory();
     let now = works.clock.now_ms();
     let (_, name) = payload(job, &works.server_id, ("", false));
@@ -164,6 +232,7 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) {
     let (session, persona) = match job {
         Job::Turn(told) => (&told.session, &told.persona),
         Job::Request(asked) => (&asked.session, &asked.persona),
+        Job::Ring(rung, _) => (&rung.ring.session, &rung.ring.persona),
     };
     let about = directory.by_session(session).map(|member| &member.record);
     let own = about.and_then(|record| record.avatar.as_deref());
@@ -182,14 +251,20 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) {
         let signed_by = (works.secret.as_str(), now / 1_000);
         clarp_kernel::portraits::face_for_push(&row.base_url, (agent_id, own), &shipped, signed_by)
     };
-    // A user who sits at a desk with the app open sees it there.
-    let at_a_desk = works
-        .desks
-        .lock()
-        .is_ok_and(|desks| desks.active(now, &|owner| directory.can_receive(owner)));
+    // A user who sits at a desk with the app open sees it there. A ring goes to the phones
+    // all the same: an agent calling is the interruption its user chose to allow.
+    let at_a_desk = !matches!(job, Job::Ring(..))
+        && works
+            .desks
+            .lock()
+            .is_ok_and(|desks| desks.active(now, &|owner| directory.can_receive(owner)));
+    let mut counted = Counted {
+        enabled: true,
+        ..Counted::default()
+    };
     if at_a_desk {
         eprintln!("clarp-host: push {name}: not sent, a desktop is active");
-        return;
+        return counted;
     }
     // A revoked device's rows are stopped when it is revoked; this is for any that outlived
     // that. Phones that are reached through another push service are not reached yet.
@@ -199,7 +274,7 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) {
         .filter(|row| row.provider != "fcm" && directory.can_receive(&row.principal))
         .collect();
     if rows.is_empty() {
-        return;
+        return counted;
     }
     let (mut sent, mut failed, mut disabled) = (0, 0, 0);
     for row in rows {
@@ -260,4 +335,6 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) {
         }
     }
     eprintln!("clarp-host: push {name}: sent {sent}, failed {failed}, disabled {disabled}");
+    (counted.sent, counted.failed, counted.disabled) = (sent, failed, disabled);
+    counted
 }

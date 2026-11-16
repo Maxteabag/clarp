@@ -696,7 +696,29 @@ that carries its call goes to the agent it names when that one can take speech, 
 call that is over refuses it. Every message to an agent the user spoke to in a call carries the call's
 header to the turn's tool: who else is there, and what was said since the agent last spoke, gathered from
 the conversations of the call's agents. The feature is advertised (`group_calls`). Not built with it: how
-a call is transcribed (its own feature), and rings.
+a call is transcribed (its own feature). And what is no route of this Host, by its path or by its method, is
+answered as the Python Host answers it (`not found`, as text): the scenario of calls found that it was
+answered with nothing.
+
+**Rings** (16 Nov 2026). An agent calls its owner: it asks the Host to ring the phone with why and with the
+line it will open with; the phone shows an incoming call; answering starts a call with that agent on the
+floor, and the line is heard first, voiced when the ring was placed, in the agent's own voice. The rules are
+the kernel's (`rings.rs`), the Python Host's contract (`docs/agent-rings.md`) for the ring whose line is
+said: who may ring (rings on, a contact, not muted, one at a time, a minute between an agent's rings, ten an
+hour), how a ring ends once (answered, declined, cancelled by its agent, missed after 45 seconds), the trail
+of every request and outcome, the owner's switches, and the token a phone leaves for calls. They are held to
+that Host's own module through 6 scripts of 480 steps (147 refused, 95 rings placed) and to its push for a
+ring in each state (`tools/rings-vectors.py`). At the edge a ring and the call it becomes are one desk's
+(`clarp-host` `calls.rs`), because an answer changes both: a ring is admitted, voiced and placed with no
+other ring admitted in between, while reading and answering wait for nobody's voice; a ring that is overdue
+is missed by a timer of the Host's own, set again for a ring that rang when the Host stopped; every change
+is told to the apps (`agent-ring`), pushed to the owner's phones whether or not anybody sits at a desk (the
+incoming call breaks through Focus and has Answer and Decline; what became of it takes its place), and
+noted quietly in the agent's conversation. An agent rings as itself with its own tool (`clarp-admin call
+ring --reason .. --say .. [--wait]`, `ring-status`, `ring-cancel`, `rings on|off|status`); the next thing its
+user says in the call reaches its tool with why it rang. The feature is advertised (`agent_rings`). Not
+built with it, and refused in words that say how to ring instead: a ring held as a live voice call, a ring
+that listens first, a phone's own switch for rings (`docs/differences.md`).
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can

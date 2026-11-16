@@ -73,13 +73,6 @@
   "provider": "openai",
   "reason": "Making pictures is not built on this Host yet"
  },
- "/calls/ring": {
-  "ring": null,
-  "settings": {
-   "enabled": false,
-   "show_reason": false
-  }
- },
  "/oracle/status": {
   "available": false,
   "model": "gpt-realtime-2.1",
