@@ -427,8 +427,19 @@ mod tests {
             asked("~/nothing/x"),
             (at("home/nothing"), Vec::<String>::new())
         );
-        assert_eq!(asked("/").0, "/");
-        assert!(asked("/").1.contains(&"/usr".to_string()));
+        // The root is looked into itself: directories right under it, whichever a machine has.
+        let (base, under_root) = asked("/");
+        assert_eq!(base, "/");
+        assert!(
+            !under_root.is_empty() && under_root.len() <= 20,
+            "{under_root:?}"
+        );
+        for path in &under_root {
+            assert!(
+                path.starts_with('/') && path.matches('/').count() == 1,
+                "{path}"
+            );
+        }
         // A path that ends in a slash asks what is in the directory. (The Python Host answers
         // it with the directory itself: reference defect R22.)
         assert_eq!(
