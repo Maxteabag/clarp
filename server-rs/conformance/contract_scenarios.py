@@ -967,9 +967,6 @@ SCENARIOS.append({
         activity('a report that says neither front nor behind', sequence=4, foreground='yes'),
         activity('a report with an input that is no number', sequence=5, input_age_ms='now'),
         post('/application-activity', ['front'], 'a report that is a list'),
-        post('/crash', {'crashDiagnostics': [{'synthetic': 'a stack'}], 'hangDiagnostics': []},
-             "what a phone's system told an app of itself"),
-        post('/crash', [1, 2], 'a report that is no object'),
         post('/clog', {'event': 'synthetic-event', 'detail': 'a synthetic line'}, 'a line of the log of the app'),
         post('/clog', {'events': [{'event': 'synthetic-one', 'detail': {'k': 1}}, {'event': 'synthetic-two'}]},
              'lines of the log of the app'),
@@ -996,6 +993,11 @@ SCENARIOS.append({
         attached('synthetic attachment two', 'another file under the same id'),
         attached('synthetic attachment one', 'a file under an id that is none', upload_id='two words'),
         attached('', 'a file of nothing', upload_id='synthetic-upload-2'),
+        # Asked last: a step that is put in before others moves the places the registered
+        # differences of this scenario are named by.
+        post('/crash', {'crashDiagnostics': [{'synthetic': 'a stack'}], 'hangDiagnostics': []},
+             "what a phone's system told an app of itself"),
+        post('/crash', [1, 2], 'a report that is no object'),
     ],
 })
 
@@ -1354,6 +1356,11 @@ SCENARIOS.append({
         get('/oracle/contact', 'whom the Oracle is put through to'),
         get('/oracle/delegations', 'what the Oracle handed on'),
         get('/oracle/calls/status', 'what came of it'),
+        # Asked last, so that no place a difference is named by moves.
+        get('/hotseat/status', 'how the account seats stand, as they were last read'),
+        get('/hotseat/desk', 'the desk of the account seats'),
+        get('/janitors/nobody-of-the-kind', 'a janitor that is not there'),
+        get('/janitors/nobody-of-the-kind/runs?limit=5', 'the runs of a janitor that is not there'),
     ],
 })
 
@@ -1387,6 +1394,14 @@ SCENARIOS.append({
         # (defect R6), and its names would shift what is compared here; that a new turn
         # replaces the items of the one before is held by the recorded streams of the
         # contract and by this Host's own tests.
+        # Asked last, so that no place a registered difference is named by moves: tools are
+        # asked to be explained where nothing explains them.
+        post('/tool-explanations', {'session': AGENT, 'detail_level': 3,
+                                    'items': [{'id': 'tool-1', 'name': 'Bash'}, 'not a thing', {'name': 'no id'}]},
+             'tools are asked to be explained where nothing explains'),
+        post('/tool-explanations', {'session': 'nobody-of-the-kind', 'items': []}, 'explained for nobody'),
+        post('/tool-explanations', {'items': []}, 'explained for no session'),
+        post('/tool-explanations', [1], 'asked with something that is no object'),
     ],
 })
 

@@ -465,7 +465,9 @@ CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at',
                         'next_run_at',
                         # A heartbeat: when the last was started and when the next is due. How far
                         # apart they are is held by vectors and by the Host's own tests.
-                        'last_started_at', 'next_heartbeat_at'})
+                        'last_started_at', 'next_heartbeat_at',
+                        # The account seats: when the Host answered.
+                        'served_at'})
 # The ids a Host gives to what agents make and ask, and to a persona its owner makes. Under their
 # own keys the harness's normalizer names them by the order they appear in (`artifact-<id:1>`).
 # They are also in the paths a client calls (`/decisions/<id>/resolve`), in what an agent is told
