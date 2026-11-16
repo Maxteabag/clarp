@@ -883,6 +883,34 @@ says so, and is never an action on the other Host.
 | 3 Daily use | speech in and out, push, artifacts, goals and their wakes, helpers, background jobs | Peter uses it for a week with agents he chooses |
 | 4 Everything | autonomy on the trigger engine, live calls, remaining backends, accounts, install and update | the last agent leaves the Python server |
 
+### Before the Rust Host takes a phone
+
+A phone is switched from the Python Host of a machine to the Rust Host by the Rust Host dialling the
+connection relay under the name the phone is paired with. Each of these is true first; none is a note.
+
+1. **Voice goes through the relay.** The owner talks to his agents by voice from the phone: the stream of
+   speech and the Oracle's live sockets are WebSockets, and the terminal is one. The Rust Host has no
+   WebSocket route yet and answers such a request through the relay as a Host that could not open it. Each
+   of these routes is built against one port that a socket at the door and the relay's tunnel both carry,
+   and is shown through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a
+   gate, not a note").
+2. **The Python Host of that machine is stopped and cannot come back by itself.** The relay keeps one
+   session for a name and closes the older one when another dials: a Python Host that came back would take
+   the phones again, and neither Host would report an error, only lose its connection again and again. The
+   order is: stop its unit, disable it, see that it is inactive and disabled, then install the Rust Host
+   with that Host's file (`tools/install-host --relay-config ~/.config/clarp/config.toml`). The installer
+   refuses the name while that unit is anything but stopped, or anything but disabled or masked.
+3. **An agent's commands reach the Rust Host's tools in every shell.** This side puts its tools first in
+   every bash, also a login shell's (`BASH_ENV`); the Python Host's wrappers hand over when a turn is not
+   theirs. Both, because a shell of another kind finds what its profile put first
+   (`docs/battle-test.md`, "Where the fence between the two Hosts did not hold").
+4. **The phones' pairings are there.** The paired devices of the Python Host, each with the hash of its
+   token, its scope and its name, are in the Rust Host before it dials: a phone presents the token it has.
+5. **Pushes have an account.** The Rust Host has a credential of its own at the push relay, given by the
+   owner; the Python Host's is never copied.
+6. **The owner has tested it himself**, after everything is implemented, voice included (his word of
+   16 Nov 2026), on a name of the battle test's own (`elitebook-rust`), which takes no phone from anybody.
+
 ## 8. Roles
 
 | Role | Session | Owns |
