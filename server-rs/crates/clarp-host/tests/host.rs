@@ -10447,6 +10447,23 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     );
     assert!(software["version"].is_string() && software["image_version"].is_string());
     assert_eq!(read("/managed-skills"), json!({ "skills": [] }));
+    assert_eq!(
+        read("/harness-providers?harness=opencode"),
+        json!({
+            "catalogue_available": false, "harness": "opencode", "installed": false,
+            "providers": [], "store_harness": "opencode", "tasks": {},
+        })
+    );
+    assert_eq!(read("/harness-providers")["harness"], "opencode");
+    let (status, why) = host.ask(
+        "GET",
+        "/harness-providers/models?harness=opencode&provider=nothing",
+        None,
+    );
+    assert_eq!(
+        (status, why["error"].as_str()),
+        (400, Some("unknown provider nothing"))
+    );
 
     // What cannot be read as asked, in the Python Host's words.
     for (path, status, why) in [
@@ -10508,6 +10525,13 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/oracle/v2/calls/control", json!({ "action": "end" })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
+        (
+            "/harness-providers/login",
+            json!({ "harness": "opencode", "provider": "p" }),
+        ),
+        ("/compact", json!({ "session": echo })),
+        ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
+        ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
         (
             "/managed-skills",
             json!({ "id": "clarp-media", "enabled": true }),

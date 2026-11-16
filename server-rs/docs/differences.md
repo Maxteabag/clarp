@@ -75,11 +75,13 @@ Host's first day says there what this Host must not say of itself.
 | The skills kept installed for the tools (`GET /managed-skills`) | none: this Host manages no skills | refused |
 | The sessions a tool had in a directory (`GET /past-sessions`) | none offered | taking one up or forking one when an agent is made is refused (`resume_unsupported`) |
 
+Refused in words, 501, as not built: compacting a conversation from an app (`POST /compact`), a
+tool's own servers (`POST /agent-mcp`), nudging a team (`POST /team-nudging`), signing a harness in to
+a provider of models (`/harness-providers`: none is listed).
+
 Not answered yet, each "no such route": how an engine is told what to listen for
-(`/transcription-guidance`), the orchestrator's settings, the budgets of the vocabulary, dreaming's settings and
-runs (an app asks for them only of a Host that lists `dreaming`), the providers of models
-(`/harness-providers`), the Oracle's voice, compacting
-a conversation (`POST /compact`), a tool's own servers (`POST /agent-mcp`), nudging a team.
+(`/transcription-guidance`), the orchestrator's settings, the budgets of the vocabulary, dreaming's
+settings and runs (an app asks for them only of a Host that lists `dreaming`), the Oracle's voice.
 
 ## Compared as what a client may rely on
 
