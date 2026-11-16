@@ -67,4 +67,11 @@ pub struct CreateAgentRequest {
     /// speaks as the persona of its name does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub personality: Option<String>,
+    /// The symbol it is shown with instead of a picture. Without one it has its persona's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_symbol: Option<String>,
+    /// A picture of its own, in base64. Without one it has its persona's own, when that
+    /// persona has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_base64: Option<String>,
 }

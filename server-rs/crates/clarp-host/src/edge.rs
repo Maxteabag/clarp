@@ -529,11 +529,25 @@ pub(crate) fn agent_row(
         view.ended.as_ref(),
         focused,
     );
-    // The face it is shown with: the picture this Host ships for its name, else the one
-    // for its tool; and the one drawn for its name on its model, where there is one.
+    // The face it is shown with: the picture it has of its own; else, unless it has a
+    // symbol, the picture this Host ships for its name, or the one for its tool. And the
+    // picture drawn for its name on its model, where there is one and the agent wears no
+    // picture of its own: that one is the owner's choice and is never changed under him.
     let record = &member.record;
-    row["avatar_url"] = json!(faces.of(&record.persona, view.backend));
-    row["model_avatar_url"] = json!(faces.on_model(&record.persona, view.backend, &record.model));
+    let own = record.avatar.as_deref().map(|digest| {
+        let version = clarp_kernel::personas::version(digest);
+        clarp_kernel::portraits::address(crate::personas::OF_AGENTS, &record.agent_id, version)
+    });
+    row["avatar_symbol"] = json!(record.avatar_symbol);
+    row["model_avatar_url"] = json!(match &own {
+        Some(_) => String::new(),
+        None => faces.on_model(&record.persona, view.backend, &record.model),
+    });
+    row["avatar_url"] = json!(match own {
+        Some(own) => own,
+        None if record.avatar_symbol.is_empty() => faces.of(&record.persona, view.backend),
+        None => String::new(),
+    });
     // Two things keep an agent busy after its turn: helpers it made that are working, and
     // background processes it left running. A job that only mirrors one of its helpers is
     // not a process of its own.
@@ -686,6 +700,8 @@ pub(crate) async fn make_agent(
         role: plain("role"),
         session: plain("session"),
         personality: plain("personality"),
+        avatar_symbol: plain("avatar_symbol"),
+        avatar_base64: plain("avatar_base64"),
     };
     let unavailable =
         |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
