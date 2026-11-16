@@ -17,6 +17,15 @@ the same evening (PR 361, `b30029b4`) and is in force on both of the owner's Hos
 23:03 (the release owner's word of 16 Nov: at 23:21 a message from another Host started a turn in
 an agent and the focus stayed where it was).
 
+In force on both of the owner's Hosts since 16 Nov 2026, 23:27 (elitebook) and 23:28
+(laptopstudio), which run main `21263308` (the release owner's word of that hour, who tried two of
+them on the installed release itself): R20; R22, with what followed it (PRs 385 and 389: `~someone/`
+and a user name with a NUL in it are answered, quietly); R23 for a name the transcript spells as
+the agent has it, with the first point of R27; R24, also for a janitor's and a goal's cron; R25,
+with the rule that a request whose header names are no HTTP tokens is refused (PR 384). Not fixed,
+on issue 360: R18, R19, R21 (PR 392 is in review), the letters of R23 that are spelled another way
+("Rachél" for Rachel), and the earlier ones as triaged there. R26 is issue 372.
+
 | # | What | Evidence | State |
 |---|---|---|---|
 | R1 | A message sent again under the same `client_msg_id`, after it was answered, leaves the conversation in one of two shapes: the reply is either the row written while the turn ran (with the turn's end on it), or the row imported from the tool's transcript (another id, no `turn`). Which one depends on timing | Conformance runs 43678950870 and 43679413710, scenario `retry-same-client-id`: the reference differs from itself | Scenario marked `unsteady`: compared, not counted. To report |
