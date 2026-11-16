@@ -4,6 +4,7 @@
 //! list as a whole whenever it changes, so that everyone else reads a list that is complete and
 //! never waits for the fleet to find an agent.
 
+use clarp_kernel::kept_portraits::Portrait;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -119,6 +120,10 @@ pub struct AgentRecord {
     /// of it is what the picture's address carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
+    /// The portraits it keeps: the picture it wears, once a change has recorded it, and
+    /// the ones chosen beside it from what it published (`clarp_kernel::kept_portraits`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub portraits: Vec<Portrait>,
 }
 
 impl AgentRecord {
@@ -168,6 +173,11 @@ pub enum Amend {
     Voice(String),
     /// How much it says while it works, from 0 to 3.
     Narration(i64),
+    /// The portraits it keeps, and the picture it wears among them when that changes.
+    Portraits {
+        kept: Vec<Portrait>,
+        worn: Option<String>,
+    },
 }
 
 /// Why an agent was not changed.
@@ -1629,6 +1639,12 @@ impl Fleet {
             }
             Amend::Voice(voices) => record.voice_id = voices,
             Amend::Narration(level) => record.narration = level,
+            Amend::Portraits { kept, worn } => {
+                record.portraits = kept;
+                if worn.is_some() {
+                    record.avatar = worn;
+                }
+            }
         }
         let (took, taken) = oneshot::channel();
         if record == *before {

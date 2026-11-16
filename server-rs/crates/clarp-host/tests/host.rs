@@ -12983,7 +12983,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
 }
 
 #[test]
-fn an_agents_portraits_are_the_picture_it_wears() {
+fn an_agent_keeps_portraits_and_its_user_chooses_the_one_it_wears() {
     let place = Place::new("portraits");
     let host = place.start();
     // A picture that is one: the first bytes of a PNG, as an app hands it over.
@@ -13073,15 +13073,214 @@ fn an_agents_portraits_are_the_picture_it_wears() {
         (status, why["error"].as_str()),
         (404, Some("unknown session"))
     );
-    // Choosing another is refused as not built.
-    let (status, why) = host.ask(
-        "POST",
-        "/agent-portraits",
-        Some(
-            &json!({ "session": session, "action": "select_primary", "portrait_id": portrait_id }),
+    // What is asked has to be one of the two changes, of an agent that is there, about
+    // something that is there. What kind of change it is, is read first.
+    let change = |body: Value| host.ask("POST", "/agent-portraits", Some(&body));
+    let refused = |status: u16, why: &str| (status, json!({ "error": why }));
+    for (body, why) in [
+        (
+            json!({ "session": session, "action": "paint" }),
+            refused(400, "unsupported portrait action"),
         ),
+        (
+            json!({ "session": "nobody", "action": "paint" }),
+            refused(400, "unsupported portrait action"),
+        ),
+        (
+            json!({ "session": session }),
+            refused(400, "unsupported portrait action"),
+        ),
+        (
+            json!({ "session": "nobody", "action": "select_primary", "portrait_id": portrait_id }),
+            refused(404, "unknown session"),
+        ),
+        (
+            json!({ "session": session, "action": "select_primary", "portrait_id": "portrait_nobody" }),
+            refused(404, "portrait not found"),
+        ),
+        (
+            json!({ "session": session, "action": "add_media_asset", "asset_id": "asset_nothing" }),
+            refused(404, "media asset not found"),
+        ),
+        (json!([1]), refused(400, "bad json")),
+    ] {
+        assert_eq!(change(body.clone()), why, "{body}");
+    }
+
+    // The agent publishes three pictures, and another agent one.
+    let picture_of = |shade: u8| {
+        [
+            &b"\x89PNG\r\n\x1a\n"[..],
+            &[0, 0, 0, 13],
+            b"IHDR",
+            &[0, 0, 0, shade, 0, 0, 0, shade, 8, 6, 0, 0, 0],
+        ]
+        .concat()
+    };
+    let publish = |session: &str, shade: u8| -> String {
+        let said = [
+            ("X-Session", session),
+            ("X-File-Name", "a picture.png"),
+            ("Content-Type", "image/png"),
+        ];
+        let answer = fetch(&host, "", "POST", "/media", &said, &picture_of(shade));
+        assert_eq!(answer.status, 200, "{}", answer.text());
+        let published: Value = serde_json::from_slice(&answer.body).unwrap();
+        published["asset_id"].as_str().unwrap().to_string()
+    };
+    let (first, second, third) = (
+        publish(&session, 1),
+        publish(&session, 2),
+        publish(&session, 3),
     );
-    assert_eq!(status, 501, "{why}");
+    let theirs = publish(&plain, 4);
+    let heard = host.listen();
+    let keep = |asset: &str| {
+        change(json!({ "session": session, "action": "add_media_asset", "asset_id": asset }))
+    };
+
+    // One of its own is kept beside the picture it wears, which a change records under the
+    // id a reading showed for it. Kept again, it is the portrait it was.
+    let (status, with_one) = keep(&first);
+    assert_eq!(status, 200, "{with_one}");
+    let listed = with_one["portraits"].as_array().unwrap();
+    assert_eq!(listed.len(), 2, "{with_one}");
+    assert_eq!(
+        (
+            &with_one["primary_portrait_id"],
+            &listed[0]["portrait_id"],
+            &listed[0]["role"]
+        ),
+        (&json!(portrait_id), &json!(portrait_id), &json!("primary"))
+    );
+    let chosen_from = listed[1].clone();
+    let alternate = chosen_from["portrait_id"].as_str().unwrap().to_string();
+    assert!(
+        alternate.starts_with("portrait_") && !alternate.starts_with("portrait_legacy_"),
+        "{alternate}"
+    );
+    assert_eq!(
+        (
+            &chosen_from["media_asset_id"],
+            &chosen_from["role"],
+            &chosen_from["source"],
+            &chosen_from["available"],
+            chosen_from["content_version"].as_str().unwrap().len()
+        ),
+        (
+            &json!(first),
+            &json!("alternate"),
+            &json!("media_asset"),
+            &json!(true),
+            16
+        )
+    );
+    assert_eq!(
+        keep(&first),
+        (200, with_one.clone()),
+        "kept twice, it is kept once"
+    );
+    assert_eq!(
+        host.get(&format!("/agent-portraits?session={session}")),
+        with_one
+    );
+    // Another agent's picture is not this agent's to keep; and three are kept at most.
+    assert_eq!(
+        keep(&theirs),
+        refused(409, "media asset belongs to another agent")
+    );
+    assert_eq!(keep(&second).0, 200);
+    assert_eq!(
+        keep(&third),
+        refused(409, "an agent can retain at most three portraits")
+    );
+    let three = host.get(&format!("/agent-portraits?session={session}"));
+    assert_eq!(three["portraits"].as_array().unwrap().len(), 3);
+
+    // Its user chooses the one it wears: that portrait is first now, the picture it wore is
+    // kept beside it, the agent's face is that picture everywhere, and the apps are told.
+    let (status, worn) =
+        change(json!({ "session": session, "action": "select_primary", "portrait_id": alternate }));
+    assert_eq!(status, 200, "{worn}");
+    let listed = worn["portraits"].as_array().unwrap();
+    assert_eq!(
+        (
+            &worn["primary_portrait_id"],
+            &listed[0]["portrait_id"],
+            &listed[0]["role"],
+            listed.len()
+        ),
+        (&json!(alternate), &json!(alternate), &json!("primary"), 3)
+    );
+    let beside: Vec<(&Value, &Value)> = listed[1..]
+        .iter()
+        .map(|kept| (&kept["portrait_id"], &kept["role"]))
+        .collect();
+    assert!(
+        beside.contains(&(&json!(portrait_id), &json!("alternate"))),
+        "{worn}"
+    );
+    let now = listed[0]["content_version"].as_str().unwrap();
+    let face = fetch(&host, "", "GET", &format!("/avatars/{id}"), &[], b"");
+    assert_eq!(
+        (face.status, face.body.as_slice()),
+        (200, picture_of(1).as_slice())
+    );
+    let snapshot = host.get("/agents/snapshot");
+    let row = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["session"] == session.as_str())
+        .unwrap();
+    assert!(
+        row["avatar_url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("?v={now}")),
+        "{row}"
+    );
+    let picture = fetch(
+        &host,
+        "",
+        "GET",
+        listed[0]["url"].as_str().unwrap(),
+        &[],
+        b"",
+    );
+    assert_eq!(
+        (
+            picture.status,
+            picture.header("content-type"),
+            picture.body.as_slice()
+        ),
+        (200, "image/png", picture_of(1).as_slice())
+    );
+    wait_for("the apps to be told of the picture it wears now", || {
+        let heard = heard.lock().unwrap();
+        heard.iter().any(|event| {
+            event["type"] == "agent-roster"
+                && event["kind"] == "portrait-selected"
+                && event["session"] == session.as_str()
+        })
+    });
+    // Chosen back, the picture it was made with is the one it wears again.
+    let (status, back) = change(
+        json!({ "session": session, "action": "select_primary", "portrait_id": portrait_id }),
+    );
+    assert_eq!(
+        (status, &back["primary_portrait_id"]),
+        (200, &json!(portrait_id))
+    );
+    let face = fetch(&host, "", "GET", &format!("/avatars/{id}"), &[], b"");
+    assert_eq!(face.body.as_slice(), png.as_slice());
+    // And what it keeps outlives the Host.
+    host.kill();
+    let host = place.start();
+    assert_eq!(
+        host.get(&format!("/agent-portraits?session={session}")),
+        back
+    );
 }
 
 // ---- the connection relay --------------------------------------------------------------------

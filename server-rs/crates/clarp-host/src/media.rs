@@ -226,7 +226,7 @@ async fn list(State(app): State<App>, Query(query): Query<ListQuery>) -> Json<Va
 /// The published file with this id, whichever agent published it.
 /// What the agents of this Host have under an id: the agent that published the file, and
 /// each agent that brought it along because it names it.
-fn kept_under(app: &App, asset_id: &str) -> Vec<Asset> {
+pub(crate) fn kept_under(app: &App, asset_id: &str) -> Vec<Asset> {
     let directory = app.fleet.directory();
     let of = |member: &Arc<Member>| member.agent.view().books.media.get(asset_id).cloned();
     directory.members.iter().filter_map(of).collect()

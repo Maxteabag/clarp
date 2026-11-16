@@ -23,6 +23,7 @@ pub mod helpers;
 pub mod herald;
 pub mod jobs;
 pub mod journal;
+pub mod kept_portraits;
 pub mod languages;
 pub mod live;
 pub mod located;
