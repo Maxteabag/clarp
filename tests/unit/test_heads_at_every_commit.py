@@ -152,7 +152,22 @@ def test_a_writer_whose_head_fails_leaves_no_row_behind(monkeypatch):
     assert db.conn().execute("SELECT COUNT(*) FROM messages WHERE agent_id=?", (aid,)).fetchone()[0] == 0
 
 
-def test_a_reply_finalized_after_a_newer_turn_opened_has_its_head(commits):
+@pytest.fixture
+def a_clock_that_ticks(monkeypatch):
+    """Each row a millisecond of its own. The list shows the newest row by its
+    time; two rows written in the same millisecond are told apart by their
+    sequence numbers, and the question would show above its streamed reply."""
+    from lib import message_live, message_writes
+    now = [message_writes.now_ms()]
+
+    def tick():
+        now[0] += 5
+        return now[0]
+    monkeypatch.setattr(message_writes, "now_ms", tick)
+    monkeypatch.setattr(message_live, "now_ms", tick)
+
+
+def test_a_reply_finalized_after_a_newer_turn_opened_has_its_head(commits, a_clock_that_ticks):
     """The reviewer's case, through the real writers. A turn streams a reply;
     a message arrives while the agent works and opens a newer turn; then the
     first turn's result is finalized. Its streamed row is given the final
