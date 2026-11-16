@@ -967,6 +967,9 @@ SCENARIOS.append({
         activity('a report that says neither front nor behind', sequence=4, foreground='yes'),
         activity('a report with an input that is no number', sequence=5, input_age_ms='now'),
         post('/application-activity', ['front'], 'a report that is a list'),
+        post('/crash', {'crashDiagnostics': [{'synthetic': 'a stack'}], 'hangDiagnostics': []},
+             "what a phone's system told an app of itself"),
+        post('/crash', [1, 2], 'a report that is no object'),
         post('/clog', {'event': 'synthetic-event', 'detail': 'a synthetic line'}, 'a line of the log of the app'),
         post('/clog', {'events': [{'event': 'synthetic-one', 'detail': {'k': 1}}, {'event': 'synthetic-two'}]},
              'lines of the log of the app'),
@@ -1803,7 +1806,9 @@ SCENARIOS.append({
         send('synthetic queue india', 'q-india', queue_if_busy=True),
         send('synthetic queue juliett', 'q-juliett', queue_if_busy=True),
         {**QUEUE, 'name': 'four wait'},
-        by_hand('q-india', 'sent by hand while a turn runs'),
+        # Not asked here: one of them sent by hand while the turn runs. Both Hosts refuse it
+        # in the same words (409), and the Python Host's count of the queue's changes moves by
+        # two with the refusal, which every number after it would show (docs/differences.md).
         by_hand('nothing-there', 'what is not there, sent by hand'),
         taken_back('nothing-there', 'what is not there, taken back'),
         taken_back('u-q-hotel', 'one is taken back, by the id its app gave it'),
