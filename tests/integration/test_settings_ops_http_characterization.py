@@ -177,18 +177,31 @@ def test_dirs_answers_a_malformed_tilde_username_quietly(running_server, monkeyp
     assert logged == []
 
 
-def test_dirs_does_not_swallow_an_unrelated_recovery_error(monkeypatch):
+@pytest.mark.parametrize("error_type", [LookupError, ValueError])
+@pytest.mark.parametrize("failure_site", ["recovery", "named-expansion"])
+def test_dirs_does_not_swallow_an_unrelated_recovery_error(monkeypatch, error_type, failure_site):
     from lib import launch_paths
     from lib.routes import settings as settings_routes
 
-    failure = LookupError("unrelated recovery defect")
+    failure = error_type("unrelated recovery defect")
     def broken(_raw):
         raise failure
-    monkeypatch.setattr(launch_paths, "recover_user_path", broken)
+    path = "/projects/"
+    if failure_site == "recovery":
+        monkeypatch.setattr(launch_paths, "recover_user_path", broken)
+    else:
+        import pathlib
+        path = "~typed-user/"
+        original_expanduser = pathlib.Path.expanduser
+        def broken_expansion(candidate):
+            if str(candidate) == "~typed-user":
+                raise failure
+            return original_expanduser(candidate)
+        monkeypatch.setattr(pathlib.Path, "expanduser", broken_expansion)
     responses = []
-    handler = SimpleNamespace(_query=lambda: {"path": ["/projects/"]},
+    handler = SimpleNamespace(_query=lambda: {"path": [path]},
                               _send=lambda *args: responses.append(args))
-    with pytest.raises(LookupError) as caught:
+    with pytest.raises(error_type) as caught:
         settings_routes.SettingsRoutes._handle_dirs(handler)
     assert caught.value is failure
     assert responses == []
@@ -202,3 +215,23 @@ def test_message_tool_details_requires_a_known_message(running_server):
         404, {"error": "message not found"})
     assert _call(base, "GET", "/message-tool-details?session=claude&message_id=m1") == (
         404, {"error": "message not found"})
+
+
+@pytest.mark.parametrize("input_path", ["absolute", "~", "~/projects/"])
+def test_dirs_logs_a_host_home_failure(running_server, tmp_path, monkeypatch, input_path):
+    import pathlib
+    from lib.routes import settings as settings_routes
+
+    base, _ctx, _srv = running_server
+    path = str(tmp_path) + "/" if input_path == "absolute" else input_path
+    failure = RuntimeError("Host account has no home")
+    logged = []
+    monkeypatch.setattr(settings_routes, "log_exception",
+                        lambda event, error, **more: logged.append((event, error)))
+    def no_home(cls):
+        raise failure
+    query = urllib.parse.urlencode({"path": path})
+    with monkeypatch.context() as home_failure:
+        home_failure.setattr(pathlib.Path, "home", classmethod(no_home))
+        assert _call(base, "GET", f"/dirs?{query}") == (200, {"base": path, "matches": []})
+    assert logged == [("dirsPathRefused", failure)]

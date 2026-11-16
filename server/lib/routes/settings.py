@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shutil
 from lib.outdated_clients import _note_outdated_client
 from lib import health
@@ -14,6 +15,24 @@ from lib import identity
 from lib.log import log_exception
 from lib.herald import DEFAULT_SPEAK_IF_SHORT_CHARS, MAX_SPEAK_IF_SHORT_CHARS, get_settings as get_herald_settings, update_settings as update_herald_settings
 from lib.personalities import get_settings as get_personality_settings, update_settings as update_personality_settings
+
+
+def _expand_completion_user_path(raw: str) -> str | None:
+    """Expand a typed ~user; None means an unknown or malformed username."""
+    if not raw.startswith("~"):
+        return raw
+    path = pathlib.Path(raw)
+    username = path.parts[0][1:]
+    if not username:  # ~ and ~/ use the Host account, whose failures must log.
+        return raw
+    if "\0" in username:
+        return None
+    try:
+        return str(path.expanduser())
+    except RuntimeError:
+        # expanduser cannot resolve this named user. No recovery/home work
+        # is in this catch; its failures retain the handler's diagnostics.
+        return None
 
 
 class SettingsRoutes:
@@ -96,12 +115,12 @@ class SettingsRoutes:
         # the question is read before the path is recovered.
         inside = raw.endswith("/")
         try:
-            recovered = recover_user_path(raw)
-        except (OSError, RuntimeError, ValueError) as e:
-            # Unknown or malformed ~users are ordinary completion misses.
-            # Report an actual filesystem refusal, but not every typing pause.
-            if isinstance(e, OSError):
-                log_exception("dirsPathRefused", e, detail=raw[:200])
+            expanded = _expand_completion_user_path(raw)
+            recovered = recover_user_path(expanded) if expanded is not None else None
+        except (OSError, RuntimeError) as e:
+            log_exception("dirsPathRefused", e, detail=raw[:200])
+            recovered = None
+        if recovered is None:
             self._send(200, json.dumps({"base": raw, "matches": []}).encode(), "application/json")
             return
         raw = str(recovered)
