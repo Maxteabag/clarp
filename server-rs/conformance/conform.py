@@ -92,6 +92,10 @@ class PythonHost(replay.Host):
         return self
 
 
+# What the reference Host's stand-in for an engine that listens hears in every clip.
+HEARD = scenarios.HEARD
+
+
 class RustHost(replay.Host):
     """The Rust Host behind the same fake Claude."""
 
@@ -114,6 +118,11 @@ class RustHost(replay.Host):
                 raise replay.StepFailed(f'the Rust Host did not make the agent {session} ({status})')
         self._end()
         self._launch()
+        # The reference Host's stand-in for an engine that listens is there from its first
+        # moment. This Host's is a worker that says when it is ready: it is waited for here, so
+        # that a model being loaded is not part of what a client sees of a scenario.
+        clip = {'bytes': 'is the engine there', 'content_type': 'audio/webm'}
+        replay._poll('the engine that listens', lambda: self.request('POST', '/transcribe', None, clip)[0] != 503)
         return self
 
     def _launch(self):
@@ -121,10 +130,15 @@ class RustHost(replay.Host):
         env = replay.child_env()
         env.update({'HOME': str(self.root / 'home'), 'TMPDIR': str(self.root / 'tmp'),
                     'CLARP_HOST_TOKEN': replay.TOKEN, 'CLARP_CLAUDE_PROGRAM': str(provider / 'bin' / 'claude'),
-                    'CLARP_QA_PROVIDER_ROOT': str(provider)})
+                    'CLARP_QA_PROVIDER_ROOT': str(provider),
+                    # Speech in: the Host's own worker with no model in it, which hears in every
+                    # clip what the reference Host's stand-in hears (tests/replay/host.py). No key
+                    # of an engine outside is in this Host's world.
+                    'CLARP_WHISPER_FAKE_SAYS': HEARD, 'ELEVEN_API_KEY': ''})
         self.process = subprocess.Popen(
             [str(self.build), '--data', str(self.root / 'data'), '--run', str(self.root / 'run'),
-             '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0'],
+             '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
+             '--whisper-python', sys.executable, '--whisper-worker', str(HERE.parent / 'tools' / 'whisper-worker.py')],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
             env=env, cwd=str(self.root), start_new_session=True)
         first = self.process.stderr.readline().decode(errors='replace')
