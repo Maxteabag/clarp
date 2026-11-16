@@ -20,10 +20,12 @@ use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_actor::conversation::Which;
 use clarp_kernel::activity::Leases;
+use clarp_kernel::addressed;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::presence::Presence;
+use clarp_kernel::python;
 use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
@@ -213,6 +215,7 @@ pub fn router(app: App) -> Router {
         .route("/log", get(log))
         .route("/events", get(events))
         .route("/send", post(send))
+        .route("/orchestrator/route-delegation", post(route_delegation))
         .route("/stop", post(stop))
         .route("/select", post(select))
         .route("/turn-queue", get(queue))
@@ -1171,6 +1174,16 @@ async fn send(
     send_message(&app, request).await.map(Json)
 }
 
+/// `POST /orchestrator/route-delegation`: a message the app could not tell the agent of. It
+/// is a send that asks the router of spoken messages.
+async fn route_delegation(
+    State(app): State<App>,
+    Json(mut request): Json<SendRequest>,
+) -> Result<Json<SendResponse>, ApiError> {
+    request.orchestrator_fallback = Some(true);
+    send_message(&app, request).await.map(Json)
+}
+
 /// Takes a message for an agent: what `POST /send` does, and what an agent's own tool does
 /// when it writes to another agent.
 pub(crate) async fn send_message(
@@ -1178,14 +1191,63 @@ pub(crate) async fn send_message(
     request: SendRequest,
 ) -> Result<SendResponse, ApiError> {
     // What the Python Host refuses a send with, in its order and its words (plain text).
-    if request.text.trim().is_empty() {
+    let text = python::strip(&request.text).to_string();
+    if text.is_empty() {
         return Err(ApiError::plain(StatusCode::BAD_REQUEST, "empty text"));
     }
-    let Some(member) = app.member(&request.session) else {
-        return Err(ApiError::plain(
-            StatusCode::NOT_FOUND,
-            "unknown forced agent",
-        ));
+    let trace_id = request.trace_id.clone().unwrap_or_else(|| ids::hex(8));
+    // Whom it is for. What was typed, or dictated for the agent that is open, is for the
+    // agent it names. What was dictated hands-free is for the agent whose name it begins
+    // with, and without a name it stays with the agent that is open (`addressed`).
+    let asked = match python::strip(&request.session) {
+        "" => addressed::DEFAULT_SESSION,
+        asked => asked,
+    };
+    let forced = request.force_session == Some(true) || request.hands_free != Some(true);
+    let (member, text, chosen) = if forced {
+        let Some(member) = app.member(asked) else {
+            return Err(ApiError::plain(
+                StatusCode::NOT_FOUND,
+                "unknown forced agent",
+            ));
+        };
+        (member, text, true)
+    } else if request.orchestrator_fallback == Some(true) {
+        // The app could not tell whom it is for and asks the router of spoken messages. This
+        // Host has none: the answer of a Python Host whose router is off, which is how it
+        // comes. Nothing is sent, and the app asks its user.
+        return Ok(SendResponse {
+            ok: true,
+            trace_id,
+            orchestrator: Some(
+                json!({ "action": "disabled", "decision_id": null, "decision": null }),
+            ),
+            ..SendResponse::default()
+        });
+    } else {
+        let directory = app.fleet.directory();
+        let agents: Vec<(&str, &str)> = directory
+            .members
+            .iter()
+            .map(|member| {
+                (
+                    member.record.session.as_str(),
+                    member.record.persona.as_str(),
+                )
+            })
+            .collect();
+        let open = directory.focus.as_deref().and_then(|open| {
+            let members = directory.members.iter();
+            members
+                .map(|member| &member.record)
+                .find(|record| record.agent_id == open)
+        });
+        let open = open.map_or("", |record| record.session.as_str());
+        let target = addressed::target(&text, (asked, open, addressed::DEFAULT_SESSION), &agents);
+        let Some(member) = directory.by_session(&target.session).cloned() else {
+            return Err(ApiError::plain(StatusCode::NOT_FOUND, "unknown agent"));
+        };
+        (member, target.text, target.by_name)
     };
     // Who it comes from. A message that names its sender is that agent's, whatever else it
     // says of itself: on the Python Host a client that names a sender may still say the
@@ -1239,11 +1301,10 @@ pub(crate) async fn send_message(
         (true, true) => Admission::Later,
         (true, false) => Admission::Background,
     };
-    let trace_id = request.trace_id.clone().unwrap_or_else(|| ids::hex(8));
     let client_msg_id = request.client_msg_id.clone().unwrap_or_else(ids::uuid);
     let message = Message {
         id: format!("u-{client_msg_id}"),
-        text: request.text,
+        text,
         origin,
         trace_id: Some(trace_id.clone()),
         sender,
@@ -1267,8 +1328,10 @@ pub(crate) async fn send_message(
             .noted(writer, member.record.agent_id.clone())
             .await?;
     }
-    if by_a_person {
-        // Writing to an agent makes it the open one, without a word about it.
+    if by_a_person && chosen {
+        // Writing to an agent makes it the open one, without a word about it: an agent a
+        // message names, by its session or at its beginning. A message that only stayed
+        // with the agent that was open opens nothing.
         let _ = app.fleet.open(member.record.session.clone()).await;
     }
     Ok(SendResponse {

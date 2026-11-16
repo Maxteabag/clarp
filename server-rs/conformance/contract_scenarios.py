@@ -1387,4 +1387,55 @@ SCENARIOS.append({
     ],
 })
 
+def dictated(text, msg_id, to, **extra):
+    """A message dictated hands-free that names the scenario's agent, and the wait for its answer
+    where the Host took it to."""
+    return [send(text, msg_id, hands_free=True, **extra),
+            {'op': 'wait_reply', 'after': f'u-{msg_id}', 'session': to},
+            {'op': 'quiesce', 'session': to}]
+
+
+SCENARIOS.append({
+    'id': 'spoken-names',
+    'what': 'whom a message is for that was dictated hands-free: the agent whose name it begins with, by the '
+            'name as it is written or by one much like it, without the address; without a name the agent that '
+            'is open; the agent the app names when the app says so; and what a Host answers whose router of '
+            'spoken messages is off',
+    'sessions': (AGENT, NOVA),
+    'steps': [
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        post('/select', {'session': AGENT}, 'the first agent is open'),
+        *dictated('Hey Nova, synthetic word alfa', 'namealfa', NOVA),
+        SNAPSHOT,
+        # Without a name it stays with the agent that is open, whoever the app names.
+        *dictated('synthetic word bravo', 'namebravo', NOVA),
+        # The app says whom it is for: a name changes nothing.
+        *dictated('Nova, synthetic word charlie', 'namecharlie', AGENT, force_session=True),
+        SNAPSHOT,
+        # A name much like one, as a transcript writes it.
+        *dictated('Novah: synthetic word delta', 'namedelta', NOVA),
+        # A name alone is not taken off.
+        *dictated('Nova?', 'nameecho', NOVA),
+        # What was typed is for the agent it names.
+        send('Nova, synthetic word foxtrot', 'namefoxtrot'),
+        {'op': 'wait_reply', 'after': 'u-namefoxtrot'},
+        {'op': 'quiesce'},
+        # The app could not tell and asks the Host's router, which is off: nothing is sent.
+        post('/orchestrator/route-delegation',
+             {'session': AGENT, 'text': 'synthetic word golf for somebody', 'client_msg_id': 'namegolf',
+              'synthesize_audio': False, 'hands_free': True, 'force_session': False, 'orchestrator_fallback': True},
+             'the router is asked whom a message is for'),
+        # The same path with the agent chosen is a send.
+        post('/orchestrator/route-delegation',
+             {'session': NOVA, 'text': 'Claire, synthetic word hotel', 'client_msg_id': 'namehotel',
+              'synthesize_audio': False, 'hands_free': True, 'force_session': True},
+             'the router is not asked: the app chose'),
+        {'op': 'wait_reply', 'after': 'u-namehotel', 'session': NOVA},
+        {'op': 'quiesce', 'session': NOVA},
+        get(f'/log?session={NOVA}', 'the conversation of the agent that was named'),
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

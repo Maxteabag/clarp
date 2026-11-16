@@ -6,7 +6,10 @@ use serde_json::Value;
 /// `POST /send`: a message for an agent.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SendRequest {
+    /// The agent it is for. Left out: the Host's default.
+    #[serde(default)]
     pub session: String,
+    #[serde(default)]
     pub text: String,
     /// The idempotency key. The message is filed as `u-` and this id; a repeated request with the
     /// same id is the same message.
@@ -16,8 +19,15 @@ pub struct SendRequest {
     pub trace_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synthesize_audio: Option<bool>,
+    /// Dictated hands-free: the Host then looks whom it is for, unless `force_session` says
+    /// it is for the agent it names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hands_free: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_session: Option<bool>,
+    /// The app could not tell whom it is for and asks the Host's router of spoken messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_fallback: Option<bool>,
     /// Wait behind a running turn instead of taking its place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_if_busy: Option<bool>,

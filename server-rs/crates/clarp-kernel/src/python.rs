@@ -369,6 +369,17 @@ pub fn b64encode(bytes: &[u8]) -> String {
     out
 }
 
+/// Whether Python counts a sign as blank (`str.isspace`, and `\s` in a pattern): what
+/// Unicode calls white space, and the four separators of information below the space.
+pub fn blank(sign: char) -> bool {
+    sign.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&sign)
+}
+
+/// A text without the blanks at its ends (`str.strip`).
+pub fn strip(text: &str) -> &str {
+    text.trim_matches(blank)
+}
+
 /// The first `count` signs of a text, as Python's `text[:count]` cuts it.
 pub fn first(text: &str, count: usize) -> &str {
     match text.char_indices().nth(count) {
