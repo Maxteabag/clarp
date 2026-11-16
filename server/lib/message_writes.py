@@ -258,16 +258,19 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             "revision": int(existing["revision"]),
             "created": False,
         }
-    row = database.execute(
-        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
-             FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?""",
-        (agent_id, backend_session_id),
-    ).fetchone()
-    seq = min(int(row["next_seq"]), -1)  # negative band, never collides with transcript
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
     with _row_with_its_head(database):
+        # Inside the transaction: read before it, two writers to one
+        # conversation could take the same number, and the second then
+        # failed on the unique index.
+        row = database.execute(
+            """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+                 FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, backend_session_id),
+        ).fetchone()
+        seq = min(int(row["next_seq"]), -1)  # negative band, never collides with transcript
         revision = _next_revision(database)
         inserted = database.execute(
             """INSERT INTO messages (
@@ -359,13 +362,6 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
     if database.execute(
             "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
         return None
-    row = database.execute(
-        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
-             FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?""",
-        (agent_id, backend_session_id),
-    ).fetchone()
-    seq = min(int(row["next_seq"]), -1)
     cause = database.execute(
         f"""SELECT {_message_activity_sql()} AS ts_ms, updated_at
               FROM messages WHERE message_id = ?""",
@@ -385,6 +381,16 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
         )
     timestamp = _iso_from_ms(timestamp_ms)
     with _row_with_its_head(database):
+        # Inside the transaction: read before it, two writers to one
+        # conversation could take the same number, and the second then
+        # failed on the unique index.
+        row = database.execute(
+            """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+                 FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, backend_session_id),
+        ).fetchone()
+        seq = min(int(row["next_seq"]), -1)
         revision = _next_revision(database)
         inserted = database.execute(
             """INSERT INTO messages (
@@ -446,16 +452,19 @@ def record_system_notice(*, agent_id: str, backend_session_id: str,
 
 def _record_system_notice(agent_id, backend_session_id, msg_id, text):
     database = conn()
-    row = database.execute(
-        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
-             FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?""",
-        (agent_id, backend_session_id),
-    ).fetchone()
-    seq = min(int(row["next_seq"]), -1)
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
     with _row_with_its_head(database):
+        # Inside the transaction: read before it, two writers to one
+        # conversation could take the same number, and the second then
+        # failed on the unique index.
+        row = database.execute(
+            """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+                 FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, backend_session_id),
+        ).fetchone()
+        seq = min(int(row["next_seq"]), -1)
         revision = _next_revision(database)
         inserted = database.execute(
             """INSERT INTO messages (
@@ -502,22 +511,25 @@ def record_dream_digest(*, agent_id: str, backend_session_id: str,
     if database.execute(
             "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,)).fetchone():
         return None
-    row = database.execute(
-        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
-             FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?""",
-        (agent_id, backend_session_id),
-    ).fetchone()
-    # Below the transcript's numbering, like the interruption marker. seq is
-    # unique per (agent, session) and the rebuild assigns its own values from
-    # the transcript, so a server-authored row sitting inside that range
-    # collides the moment the agent takes its next turn. Display order is
-    # timestamp first, so a negative seq costs nothing: the digest still lands
-    # at the end of the conversation by its own clock.
-    seq = min(int(row["next_seq"]), -1)
     timestamp_ms = now_ms()
     timestamp = _iso_from_ms(timestamp_ms)
     with _row_with_its_head(database):
+        # Inside the transaction: read before it, two writers to one
+        # conversation could take the same number, and the second then
+        # failed on the unique index.
+        row = database.execute(
+            """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+                 FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, backend_session_id),
+        ).fetchone()
+        # Below the transcript's numbering, like the interruption marker. seq is
+        # unique per (agent, session) and the rebuild assigns its own values from
+        # the transcript, so a server-authored row sitting inside that range
+        # collides the moment the agent takes its next turn. Display order is
+        # timestamp first, so a negative seq costs nothing: the digest still lands
+        # at the end of the conversation by its own clock.
+        seq = min(int(row["next_seq"]), -1)
         revision = _next_revision(database)
         inserted = database.execute(
             """INSERT INTO messages (
