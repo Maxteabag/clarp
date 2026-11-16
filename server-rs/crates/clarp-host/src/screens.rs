@@ -209,15 +209,6 @@ async fn no_janitors() -> ApiError {
     not_built("Janitors are")
 }
 
-/// `GET /location`: where the owner's phone last said it is. Nothing asks for it here.
-async fn location() -> Json<Value> {
-    Json(json!({}))
-}
-
-async fn no_location() -> ApiError {
-    not_built("Asking a phone where it is is")
-}
-
 /// `GET /cartesia-voices`: the old picker of Cartesia's voices. The catalogue of voices
 /// (`GET /voice-catalog`) has them; this list is not kept.
 async fn cartesia_voices() -> Json<Value> {
@@ -495,8 +486,6 @@ pub fn routes() -> Router<App> {
             get(diagnostics).post(no_diagnostics),
         )
         .route("/janitor-policy", get(janitor_policy).post(no_janitors))
-        .route("/location", get(location).post(no_location))
-        .route("/location/request", post(no_location))
         .route("/cartesia-voices", get(cartesia_voices))
         .route("/podcast-history", get(podcasts))
         .route("/podcast-history/sources", get(podcast_sources))

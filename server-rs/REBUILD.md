@@ -646,6 +646,16 @@ is answered as by a Host whose router is off and asks its user. One thing is not
 leaves the end of a name's word in the message when the word has a letter English has not (reference defect
 R23).
 
+**A phone says where it is** (16 Nov 2026). The first of the screens of what this Host had not that is
+built instead of answered as nothing: the app says where its phone is for a session (`POST /location`), an
+agent's tools read the last place said (`GET /location`), and an agent asks for a new one (`POST
+/location/request`), which every listening app is told. It is asked a hundred times a week on the owner's
+Python Host. The rules and their words are that Host's (`clarp-kernel` `located.rs`; the scenario `places`).
+With it came a way to leave something small with the fleet under a key, in a table of its kind
+(`FleetHandle::keep`, `kept`): one writer and one store as for everything else, without a new kind of
+question to the fleet for each small thing an app or an agent leaves. What comes next of that sort (a
+phone's tokens for calls and live activities) is kept the same way.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as

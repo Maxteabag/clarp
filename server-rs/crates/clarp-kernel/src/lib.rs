@@ -20,6 +20,7 @@ pub mod jobs;
 pub mod journal;
 pub mod languages;
 pub mod live;
+pub mod located;
 pub mod media;
 pub mod notify;
 pub mod personas;
