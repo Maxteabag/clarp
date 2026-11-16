@@ -4,7 +4,7 @@
 //! list as a whole whenever it changes, so that everyone else reads a list that is complete and
 //! never waits for the fleet to find an agent.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use clarp_actor::Profile;
 use clarp_kernel::devices::{self, PushBook, PushRow};
-use clarp_kernel::personas::{self, PERSONALITY_MOST};
+use clarp_kernel::personas::{self, Book, Kept, Look, Made, Owner, PERSONALITY_MOST, Wanted};
 use clarp_kernel::{helpers, python, roster};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
@@ -46,6 +46,10 @@ const JOBS: &str = "job";
 const PUSH: &str = "push";
 /// The other Hosts this one may write to, by the name the owner gave each.
 const PEERS: &str = "peer";
+/// The personas the owner made, by their ids.
+const PERSONAS: &str = "persona";
+/// How the owner made built-in personas look, by their ids.
+const LOOKS: &str = "persona-look";
 
 /// How long a tool gets to end by itself when its turn is stopped.
 const STOP_GRACE_MS: u64 = 5_000;
@@ -230,6 +234,25 @@ pub struct Directory {
     /// The settings the owner makes from an app, each a text under its key
     /// (`transcription.agent_engines`), as the Python Host keeps them.
     pub settings: Arc<BTreeMap<String, String>>,
+    /// The personas the owner made, and how he made built-in ones look.
+    pub personas: Arc<Book>,
+}
+
+/// What an app says of a persona it makes or changes.
+#[derive(Debug, Clone, Default)]
+pub struct PersonaSaid {
+    pub name: String,
+    pub voice_id: String,
+    pub avatar_symbol: String,
+    pub personality: String,
+    /// The picture it is given, in base64. Empty: none.
+    pub picture: String,
+}
+
+/// The name a persona's or an agent's own picture is kept under, by its digest. The Python
+/// Host keeps each as a JPEG file, whatever is in it, and hands it out as one.
+pub fn picture_name(digest: &str) -> String {
+    format!("{digest}.jpg")
 }
 
 impl Directory {
@@ -440,6 +463,20 @@ enum Ask {
         settings: Vec<(String, String)>,
         answer: Answer<Result<(), Unavailable>>,
     },
+    /// The owner makes a persona (`original` is `None`) or changes the one of that name.
+    /// `fetched` are the voices of Cartesia's this Host has listed: what a voice is picked
+    /// from first. The inner error is why not, in words for the app.
+    PersonaWrite {
+        original: Option<String>,
+        said: PersonaSaid,
+        fetched: Vec<String>,
+        answer: Answer<Result<serde_json::Value, String>>,
+    },
+    /// The owner removes a persona of his own. Answers whether there was one to remove.
+    PersonaRemove {
+        name: String,
+        answer: Answer<bool>,
+    },
 }
 
 /// The way to the fleet's thread, and the fleet as anyone may read it.
@@ -646,6 +683,28 @@ impl FleetHandle {
         self.ask(|answer| Ask::PeerRemove { name, answer }).await
     }
 
+    /// Makes a persona, or changes the one named `original`. The inner error is why not,
+    /// in the Python Host's words. Answers the persona as an app is told it.
+    pub async fn persona_write(
+        &self,
+        original: Option<String>,
+        said: PersonaSaid,
+        fetched: Vec<String>,
+    ) -> Result<Result<serde_json::Value, String>, Unavailable> {
+        self.ask(|answer| Ask::PersonaWrite {
+            original,
+            said,
+            fetched,
+            answer,
+        })
+        .await
+    }
+
+    /// Removes a persona the owner made. Answers whether there was one of that name.
+    pub async fn persona_remove(&self, name: String) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::PersonaRemove { name, answer }).await
+    }
+
     /// Sets settings, each a text under its key. They are there for every reader when this
     /// returns, and after a restart.
     pub async fn set(&self, settings: Vec<(String, String)>) -> Result<(), Unavailable> {
@@ -694,6 +753,8 @@ struct Fleet {
     peers: BTreeMap<String, Peer>,
     /// The owner's settings, by key.
     settings: BTreeMap<String, String>,
+    /// The personas the owner made, and how he made built-in ones look.
+    book: Arc<Book>,
     directory: watch::Sender<Arc<Directory>>,
 }
 
@@ -797,6 +858,22 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         })?;
         push.apply(&[row]);
     }
+    // The personas the owner made, and the looks he gave built-in ones.
+    let mut made: Vec<Made> = Vec::new();
+    for (id, stored) in store.list(PERSONAS).map_err(|error| error.to_string())? {
+        made.push(
+            serde_json::from_slice(&stored).map_err(|error| {
+                format!("the entry for the persona {id} cannot be read: {error}")
+            })?,
+        );
+    }
+    let mut looks: Vec<Look> = Vec::new();
+    for (id, stored) in store.list(LOOKS).map_err(|error| error.to_string())? {
+        looks.push(serde_json::from_slice(&stored).map_err(|error| {
+            format!("the entry for the look of the persona {id} cannot be read: {error}")
+        })?);
+    }
+    let book = Arc::new(Book::new(made, looks));
     let mut peers = BTreeMap::new();
     for (name, stored) in store.list(PEERS).map_err(|error| error.to_string())? {
         let peer: Peer = serde_json::from_slice(&stored)
@@ -810,6 +887,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         push: Arc::new(push.clone()),
         peers: Arc::new(peers.clone()),
         settings: Arc::new(settings.clone()),
+        personas: book.clone(),
     }));
     let (tx, rx) = mpsc::channel();
     let fleet = Fleet {
@@ -822,6 +900,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         push,
         peers,
         settings,
+        book,
         directory,
     };
     std::thread::Builder::new()
@@ -948,6 +1027,17 @@ impl Fleet {
                 Ask::PeerRemove { name, answer } => {
                     let _ = answer.send(self.peer_remove(&name));
                 }
+                Ask::PersonaWrite {
+                    original,
+                    said,
+                    fetched,
+                    answer,
+                } => {
+                    let _ = answer.send(self.persona_write(original.as_deref(), &said, &fetched));
+                }
+                Ask::PersonaRemove { name, answer } => {
+                    let _ = answer.send(self.persona_remove(&name));
+                }
                 Ask::Set { settings, answer } => {
                     let _ = answer.send(Ok(self.set(settings)));
                 }
@@ -988,7 +1078,107 @@ impl Fleet {
             push: Arc::new(self.push.clone()),
             peers: Arc::new(self.peers.clone()),
             settings,
+            personas: self.book.clone(),
         }));
+    }
+
+    /// The owner makes a persona, or changes one. What is kept is written before anybody
+    /// is told: the picture first, then what names it.
+    fn persona_write(
+        &mut self,
+        original: Option<&str>,
+        said: &PersonaSaid,
+        fetched: &[String],
+    ) -> Result<Result<serde_json::Value, String>, Unavailable> {
+        let [roster, cartesia, gemini] = self.works.telling.owner_tables();
+        let owner = Owner {
+            roster: &roster,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        };
+        let wanted = Wanted {
+            name: &said.name,
+            voice_id: &said.voice_id,
+            avatar_symbol: &said.avatar_symbol,
+            personality: &said.personality,
+            picture: &said.picture,
+        };
+        // The voice it is given when its maker names none: one no agent and no persona has.
+        let voices = self.members.iter().map(|member| &member.record.voice_id);
+        let of_agents: HashSet<String> = voices
+            .filter_map(|voice| personas::cartesia_of(voice))
+            .collect();
+        let candidates = personas::candidate_voices(fetched, &owner);
+        let voice = personas::picked_voice(&candidates, &of_agents, &self.book.voices(&owner));
+        let mut book = (*self.book).clone();
+        let changed = match original {
+            None => {
+                let id = format!("persona-{}", ids::hex(8));
+                book.create(&owner, &wanted, (&id, &voice), self.now_ms())
+            }
+            Some(original) => book.update(&owner, original, &wanted, &voice),
+        };
+        let change = match changed {
+            Ok(change) => change,
+            Err(why) => return Ok(Err(why)),
+        };
+        let failed = |error: clarp_ports::kv::StoreError| Unavailable(error.to_string());
+        let (table, id, kept, digest) = match &change.kept {
+            Kept::Made(made) => (
+                PERSONAS,
+                &made.persona_id,
+                serde_json::to_vec(made),
+                &made.avatar,
+            ),
+            Kept::Look(look) => (
+                LOOKS,
+                &look.persona_id,
+                serde_json::to_vec(look),
+                &look.avatar,
+            ),
+        };
+        if let (Some(bytes), Some(digest)) = (&change.picture, digest) {
+            let name = picture_name(digest);
+            self.works.blobs.put(&name, bytes).map_err(failed)?;
+        }
+        let kept = kept.map_err(|error| Unavailable(error.to_string()))?;
+        self.store.put(table, id, &kept).map_err(failed)?;
+        let told = book.told(&owner, &change.kept);
+        self.book = Arc::new(book);
+        self.publish();
+        let kind = if original.is_none() {
+            "persona-created"
+        } else {
+            "persona-updated"
+        };
+        self.works
+            .hub
+            .publish(wire::roster_personas(kind), self.now_ms());
+        Ok(Ok(told))
+    }
+
+    /// The owner removes a persona of his own. Its picture stays where it is kept: an agent
+    /// that was made as that persona may still wear it.
+    fn persona_remove(&mut self, name: &str) -> Result<bool, Unavailable> {
+        let [roster, cartesia, gemini] = self.works.telling.owner_tables();
+        let owner = Owner {
+            roster: &roster,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        };
+        let mut book = (*self.book).clone();
+        let Some(made) = book.delete(&owner, name) else {
+            return Ok(false);
+        };
+        self.store
+            .delete(PERSONAS, &made.persona_id)
+            .map_err(|error| Unavailable(error.to_string()))?;
+        self.book = Arc::new(book);
+        self.publish();
+        self.works
+            .hub
+            .publish(wire::roster_personas("persona-deleted"), self.now_ms());
+        Ok(true)
     }
 
     /// Writes settings and publishes them. Only what has a dot in its key is a setting.
