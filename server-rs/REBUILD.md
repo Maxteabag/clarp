@@ -900,10 +900,21 @@ connection relay under the name the phone is paired with. Each of these is true 
    order is: stop its unit, disable it, see that it is inactive and disabled, then install the Rust Host
    with that Host's file (`tools/install-host --relay-config ~/.config/clarp/config.toml`). The installer
    refuses the name while that unit is anything but stopped, or anything but disabled or masked.
-3. **An agent's commands reach the Rust Host's tools in every shell.** This side puts its tools first in
-   every bash, also a login shell's (`BASH_ENV`); the Python Host's wrappers hand over when a turn is not
-   theirs. Both, because a shell of another kind finds what its profile put first
-   (`docs/battle-test.md`, "Where the fence between the two Hosts did not hold").
+3. **An agent's commands reach the Rust Host's tools in every shell.** Two halves, and both are needed.
+   This side: a turn's path begins with this Host's tools, and every bash reads `BASH_ENV` after its
+   profile, which puts them first again; that holds for bash, plain, as a login shell, and one started
+   inside another. The other side (the Python Host's wrappers, issue 388): a wrapper that finds itself in a
+   turn of another Host, which it knows by `CLARP_HOST_ADDR`, runs `$CLARP_SHARE_DIR/tools/<its own name>`
+   instead of itself, or, where there is no such tool, refuses with its name and "this turn belongs to
+   another Clarp Host" and exit 69; it never goes on to the Python Host. For that, every turn of this Host
+   carries both variables (measured on 16 Nov 2026 in a Codex turn: plain, `bash -lc` and `sh -lc`), and
+   its `tools/` holds a tool under every name the Python Host has (the installer writes one for each).
+   What an agent's turn does under `sh -lc` or zsh: **before** the Python Host's wrappers hand over, the
+   profile's order stands, the Python Host's tool is found, sets that Host's environment and acts on
+   that Host, under the agent's own session name (`docs/battle-test.md`, "Where the fence between the two
+   Hosts did not hold"); **after**, the same wrapper is found and hands the call to this Host's tool, or
+   refuses. So no agent of the owner's moves before the wrappers are installed on its machine, and until
+   then no test agent here calls a Clarp tool from anything but bash.
 4. **The phones' pairings are there.** The paired devices of the Python Host, each with the hash of its
    token, its scope and its name, are in the Rust Host before it dials: a phone presents the token it has.
 5. **Pushes have an account.** The Rust Host has a credential of its own at the push relay, given by the
