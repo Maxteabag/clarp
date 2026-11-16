@@ -376,7 +376,27 @@ NOT_BUILT = {
         'fields': ('delivery_admission',),
         'events': (),
     },
+    # Which run of the vocabulary a clip was heard with (`vocab_run_id` in the answer to
+    # `POST /transcribe`): the Rust Host asks an engine to listen for what its agents are called
+    # and keeps no runs of a vocabulary.
+    'the vocabulary an engine is asked to listen for': {
+        'fields': ('vocab_run_id',),
+        'events': (),
+    },
 }
+# What the reference Host's stand-in for an engine that listens says by fiat, whatever was heard
+# (`StubSTT(ends_terminal=True)` in tests/replay/host.py): whether what was said ends as a
+# sentence ends. A real engine's answer reads it off the text, and so does the Rust Host's;
+# that rule is held by the speech vectors (crates/clarp-kernel/tests/speech_vectors.rs), not here.
+BY_FIAT = {'/transcribe': ('ends_terminal',)}
+
+
+def by_fiat(path, body):
+    """A body without what the reference's stand-in decides by itself."""
+    said = BY_FIAT.get(path, ())
+    if not said or not isinstance(body, dict):
+        return body
+    return {key: value for key, value in body.items() if key not in said}
 # The lists an app's screens are made of, for what the Rust Host keeps nothing of yet: janitors,
 # what speech there is, the models an agent can be given. It answers each as the Python Host
 # answers a list, and empty, so that an app shows nothing there instead of an error. What is
@@ -574,6 +594,7 @@ def core(raw: dict) -> dict:
             else exchange for exchange in http]
     http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange
             for exchange in http]
+    http = [{**exchange, 'body': by_fiat(exchange.get('path'), exchange['body'])} for exchange in http]
     sse = []
     for frame in raw['sse']:
         data = frame.get('data')

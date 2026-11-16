@@ -108,3 +108,14 @@ ca92e3773cde  tool-turns: its third row, whole: the turn's end (it is on the row
 2a86588b81e4  tool-turns: the id of the first notification (ids are numbered as they come, and six tool ids came before)
 ed6d06764d02  tool-turns: the id of the second notification
 39ab584a295e  tool-turns: the row the second notification is about (three rows further down)
+
+# What a Host listens with (`GET /transcription-capabilities`): the Rust Host says which engine
+# hears a clip nobody named one for, where a turn of speech ends, and what could be installed,
+# as a Python Host with an engine of its own does. (The reference Host of the suite has a
+# stand-in for an engine, and answers for it with the four fields of a Host that cannot say.)
+83859d0c30a7  app-asks: catalog, of what the Host listens with
+9f7a43314e24  app-asks: engine, of what the Host listens with
+920569e9c50f  app-asks: turn_taking, of what the Host listens with
+d7ad60d66fcb  speech-in: catalog, of what the Host listens with
+2bd8cf8a3e99  speech-in: engine, of what the Host listens with
+af7214e69d60  speech-in: turn_taking, of what the Host listens with
