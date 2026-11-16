@@ -265,11 +265,75 @@ pub fn int(text: &str) -> Option<i128> {
     Some(if negative { -number } else { number })
 }
 
+/// The lines of a text without their ends, as Python's `str.splitlines()` gives them: a line
+/// ends at a line feed, a carriage return (with the line feed after it, when there is one), and
+/// at the rarer signs Python counts as line ends too. A text that ends with a line end has no
+/// empty line after it.
+pub fn splitlines(text: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut signs = text.char_indices().peekable();
+    while let Some((at, sign)) = signs.next() {
+        let ends = matches!(
+            sign,
+            '\n' | '\r'
+                | '\u{b}'
+                | '\u{c}'
+                | '\u{1c}'
+                | '\u{1d}'
+                | '\u{1e}'
+                | '\u{85}'
+                | '\u{2028}'
+                | '\u{2029}'
+        );
+        if !ends {
+            continue;
+        }
+        lines.push(&text[start..at]);
+        start = at + sign.len_utf8();
+        if sign == '\r' && signs.peek().is_some_and(|(_, next)| *next == '\n') {
+            signs.next();
+            start += 1;
+        }
+    }
+    if start < text.len() {
+        lines.push(&text[start..]);
+    }
+    lines
+}
+
+/// The first `count` signs of a text, as Python's `text[:count]` cuts it.
+pub fn first(text: &str, count: usize) -> &str {
+    match text.char_indices().nth(count) {
+        Some((at, _)) => &text[..at],
+        None => text,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_text_is_cut_into_lines_where_python_cuts_it() {
+        assert_eq!(splitlines(""), Vec::<&str>::new());
+        assert_eq!(splitlines("one"), ["one"]);
+        assert_eq!(splitlines("one\n"), ["one"]);
+        assert_eq!(splitlines("one\n\ntwo"), ["one", "", "two"]);
+        assert_eq!(splitlines("a\r\nb\rc\n\rd"), ["a", "b", "c", "", "d"]);
+        assert_eq!(
+            splitlines("a\u{b}b\u{c}c\u{1c}d\u{1d}e\u{1e}f"),
+            ["a", "b", "c", "d", "e", "f"]
+        );
+        assert_eq!(splitlines("a\u{85}b\u{2028}c\u{2029}"), ["a", "b", "c"]);
+        // A tab and the sign before the rarer ends are no ends.
+        assert_eq!(splitlines("a\tb\u{1f}c"), ["a\tb\u{1f}c"]);
+        assert_eq!(first("héllo", 2), "hé");
+        assert_eq!(first("hé", 5), "hé");
+        assert_eq!(first("", 3), "");
+    }
 
     #[test]
     fn a_text_is_a_whole_number_when_python_says_so() {
