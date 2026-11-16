@@ -17,6 +17,7 @@ from . import origins, turn_lifecycle
 from .voice_levels import clamp as _clamp_voice_verbosity
 from .policies import helper_state as helper_policy
 from .db import conn, now_ms
+from .revisioned_cache import RevisionedCache
 from .protocol import AgentBackend, AgentState, ClipStatus, TurnSource
 
 
@@ -695,15 +696,16 @@ def is_busy(agent_id: str) -> bool:
     return bool(s) and s["kind"] in turn_lifecycle.BUSY
 
 
-def dashboard_states() -> dict[str, dict[str, Any]]:
-    """Read state clocks together, preserving state-id ordering for tied times.
+# What the retention sweep adds one to when it has deleted state rows
+# (maintenance._prune_state_log). An agent's cached state clocks are valid for
+# its newest state row and this number: a new row is the only other way an
+# agent's state history changes.
+STATES_PRUNED_KEY = "state_log.pruned"
+# One entry an agent; headroom above the roster, as for the previews.
+_STATE_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
+    "agents.dashboard_states", max_entries=8192)
 
-    Every clock is an indexed walk from the newest row of one agent, so the
-    cost follows the number of live agents, not the size of state_log. The
-    previous window-function form scanned the whole table per snapshot
-    (1.6 s on 325k rows) and was most of the server's idle CPU.
-    """
-    rows = conn().execute("""
+_STATE_CLOCKS = """
         SELECT a.agent_id, l.kind, l.ts, l.detail,
                (SELECT MIN(b.ts) FROM state_log b
                  WHERE b.agent_id = a.agent_id
@@ -721,23 +723,85 @@ def dashboard_states() -> dict[str, dict[str, Any]]:
                             AND (p.ts < c.ts OR (p.ts = c.ts AND p.state_id < c.state_id))
                           ORDER BY p.ts DESC, p.state_id DESC LIMIT 1) IN ('thinking', 'tool')))
                  ORDER BY c.ts DESC, c.state_id DESC LIMIT 1
-               ) AS last_turn_end
+               ) AS last_turn_end,
+               (SELECT MAX(n.state_id) FROM state_log n WHERE n.agent_id = a.agent_id) AS newest_state_id,
+               (SELECT value FROM settings WHERE key = ?) AS states_pruned
           FROM agents a
           JOIN state_log l ON l.state_id = (
                    SELECT x.state_id FROM state_log x
                     WHERE x.agent_id = a.agent_id
                     ORDER BY x.ts DESC, x.state_id DESC LIMIT 1)
          WHERE a.deleted_at IS NULL
-    """).fetchall()
-    result = {}
-    for row in rows:
+"""
+
+
+def _state_clocks(agent_ids: list[str] | None = None) -> dict[str, tuple[tuple, dict[str, Any]]]:
+    """{agent: (what its clocks are valid for, its clocks)} for every live
+    agent, or for those named: the newest state row, when the current turn
+    began and when the last one ended, each an indexed walk from the newest
+    row of one agent. The key is read by the statement that reads the
+    clocks, so both are of one moment."""
+    sql, params = _STATE_CLOCKS, [STATES_PRUNED_KEY]
+    if agent_ids is not None:
+        sql += "           AND a.agent_id IN (SELECT value FROM json_each(?))\n"
+        params.append(json.dumps(agent_ids))
+    found = {}
+    for row in conn().execute(sql, params):
         state = dict(row)
+        key = (state.pop('newest_state_id'), state.pop('states_pruned'))
         try:
             state['detail'] = json.loads(state['detail'] or '{}')
         except json.JSONDecodeError:
             state['detail'] = {}
-        result[row['agent_id']] = state
-    return result
+        found[row['agent_id']] = (key, state)
+    return found
+
+
+def _state_copy(state: dict[str, Any]) -> dict[str, Any]:
+    """A caller's own copy: the cached clocks are shared between requests."""
+    return {**state, 'detail': json.loads(json.dumps(state['detail']))}
+
+
+def dashboard_states() -> dict[str, dict[str, Any]]:
+    """Read state clocks together, preserving state-id ordering for tied times.
+
+    Every clock is an indexed walk from the newest row of one agent, so the
+    cost followed the number of live agents, not the size of state_log; the
+    window-function form before that scanned the whole table per snapshot
+    (1.6 s on 325k rows). It was still every agent at every request: a tenth
+    of the agent list's time on a Host with 1,500 agents, most of them
+    archived (issue 371). An agent's clocks are now kept for its newest state
+    row: a request reads that row's id for every agent in one statement and
+    walks only the agents whose state has changed since. State rows are only
+    ever added, or deleted by the retention sweep, which says so
+    (``STATES_PRUNED_KEY``).
+
+    Inside a caller's transaction nothing is kept or taken from what is kept:
+    it may see rows that are rolled back.
+    """
+    database = conn()
+    if database.in_transaction:
+        return {agent_id: state for agent_id, (_key, state) in _state_clocks().items()}
+    keys = [(row['agent_id'], (row['newest_state_id'], row['states_pruned'])) for row in database.execute(
+        """SELECT a.agent_id,
+                  (SELECT MAX(n.state_id) FROM state_log n WHERE n.agent_id = a.agent_id) AS newest_state_id,
+                  (SELECT value FROM settings WHERE key = ?) AS states_pruned
+             FROM agents a WHERE a.deleted_at IS NULL""", (STATES_PRUNED_KEY,))]
+    kept: dict[str, dict[str, Any]] = {}
+    changed: list[str] = []
+    for agent_id, key in keys:
+        if key[0] is None:
+            continue                # no state row yet: not in the answer
+        hit, state = _STATE_CACHE.get(agent_id, key)
+        if hit:
+            kept[agent_id] = state
+        else:
+            changed.append(agent_id)
+    if changed:
+        for agent_id, (key, state) in _state_clocks(changed).items():
+            _STATE_CACHE.put(agent_id, key, state)
+            kept[agent_id] = state
+    return {agent_id: _state_copy(kept[agent_id]) for agent_id, _key in keys if agent_id in kept}
 
 
 def dashboard_runtimes() -> dict[str, dict[str, Any]]:

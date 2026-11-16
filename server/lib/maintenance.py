@@ -135,11 +135,26 @@ def _prune_keeping_newest(c, statement: str, params, *, key: str, group: str,
         (*params, high, keep), batch=batch, pause_s=pause_s)
 
 
+# agents.STATES_PRUNED_KEY: the agent list keeps each agent's state clocks for
+# its newest state row, and deleting older rows can change them too.
+STATES_PRUNED_KEY = "state_log.pruned"
+
+
 def _prune_state_log(c, cutoff_ms: int) -> int:
-    """Expired state rows, keeping each agent's newest (PT-01, RM-N8)."""
-    return _prune_keeping_newest(
+    """Expired state rows, keeping each agent's newest (PT-01, RM-N8). When
+    any went, one is added to ``STATES_PRUNED_KEY``, after the deletes: clocks
+    read while the sweep ran are read again once it has ended."""
+    deleted = _prune_keeping_newest(
         c, "DELETE FROM state_log WHERE ts < ?", (cutoff_ms,), key="state_id", group="agent_id",
         batch=STATE_LOG_DELETE_BATCH, pause_s=STATE_LOG_BATCH_PAUSE_S)
+    if deleted:
+        c.execute(
+            """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
+               ON CONFLICT(key) DO UPDATE SET
+                   value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
+                   updated_at = excluded.updated_at""",
+            (STATES_PRUNED_KEY, int(time.time() * 1000)))
+    return deleted
 
 
 def _timed(phases: _Phases | None, name: str, fn):
