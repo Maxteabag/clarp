@@ -1455,7 +1455,7 @@ async fn shown(
         .member(session.trim())
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
     let mut whole = member.agent.shown().await?;
-    whole["tool_explanations"] = json!({ "enabled": false, "detail_level": 2 });
+    whole["tool_explanations"] = apps::explanations_told(&app);
     Ok(Json(whole))
 }
 

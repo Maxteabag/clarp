@@ -1133,4 +1133,37 @@ SCENARIOS.append({
     ],
 })
 
+EXPLAINED = '/tool-explanations/settings'
+
+SCENARIOS.append({
+    'id': 'live-items',
+    'what': 'a turn as it is shown while it runs (docs/live-items.md), to a connection that asked for this agent: '
+            'what it thinks, what it says, a file it reads and an edit, each an item that appears, grows and '
+            'settles; the whole view before any turn, when a turn is over and after the next; and what is shown '
+            'of nobody. Nothing explains a tool here: the scenario turns that off first, so that both Hosts '
+            'show a turn by itself',
+    # The events are listened to as an app that follows this agent does.
+    'live': True,
+    'steps': [
+        post(EXPLAINED, {'enabled': 'no'}, 'a setting that is no yes or no'),
+        post(EXPLAINED, {'detail_level': 9}, 'a level nobody has'),
+        post(EXPLAINED, {'enabled': False, 'detail_level': 3}, 'tools are not explained, and for whom they would be'),
+        get(EXPLAINED, 'whether tools are explained'),
+        get(f'/live?session={AGENT}', 'what is shown before any turn'),
+        get('/live?session=nobody-of-the-kind', 'what is shown of nobody'),
+        get('/live', 'what is shown of no session'),
+        send('[qa-stream] synthetic work, shown as it is done', 'shown-1'),
+        {'op': 'wait_reply', 'after': 'u-shown-1'},
+        {'op': 'quiesce'},
+        get(f'/live?session={AGENT}', 'what is shown when the turn is over'),
+        LOG,
+        SNAPSHOT,
+        send('[qa-stream] and once more', 'shown-2'),
+        {'op': 'wait_reply', 'after': 'u-shown-2'},
+        {'op': 'quiesce'},
+        get(f'/live?session={AGENT}', 'what is shown of the turn after it'),
+        LOG,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

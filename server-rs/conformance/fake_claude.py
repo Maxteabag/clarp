@@ -26,6 +26,11 @@ an assistant message and a result. Markers in the prompt:
   assistant message with a ``tool_use`` in it, then a user message with the ``tool_result``.
   A command, two tools at once (a file read and a search), an edit, a command that fails, and
   a tool no Host knows by name. Nothing is run: what a tool "returned" is written here.
+- ``[qa-stream]``: the turn is printed piece by piece, as the real CLI prints one when it is
+  asked for partial messages: a message begins, each of its blocks begins, grows and ends
+  (what the agent thinks, what it says, a tool call whose input arrives in parts), and each
+  block is said whole once before it ends. It thinks, says what it will do, reads a file,
+  edits it, and answers.
 
 Every process appends its lifecycle to ``$CLARP_QA_PROVIDER_ROOT/claude-procs.jsonl``.
 """
@@ -134,6 +139,81 @@ def tool_work(path: Path | None, session: str, text: str, parent: str | None) ->
     return parent
 
 
+# What the agent does when a prompt says `[qa-stream]`: each entry is one message (its
+# blocks, in order: what it thinks, what it says, the tools it calls) and what each tool
+# returned.
+STREAM_WORK = [
+    ([{'type': 'thinking', 'thinking': '**Reading the notes**\nThey are short.', 'signature': 'synthetic'},
+      {'type': 'text', 'text': 'Claude replay looks at the notes.'},
+      ('Read', {'file_path': '/synthetic/notes.md', 'limit': 20})],
+     ['     1\t# Synthetic notes\n     2\tA line.\n']),
+    ([('Edit', {'file_path': '/synthetic/notes.md', 'old_string': 'A line.',
+                'new_string': 'Another line.\nAnd one more.'})],
+     ['The file /synthetic/notes.md has been updated successfully.']),
+]
+
+
+def parts(text: str, count: int = 3) -> list[str]:
+    """A text in up to `count` pieces of about the same length, none empty."""
+    size = max(1, -(-len(text) // count))
+    return [text[at:at + size] for at in range(0, len(text), size)]
+
+
+def streamed(session: str, message: dict) -> None:
+    """Prints a message the way the CLI does when it is asked for partial messages: its
+    beginning, each block as it begins, grows and ends, with the block whole in a message of
+    its own before it ends, and the message's end. (The order is the CLI's own, read off a
+    recorded turn of Claude Code 2.1.321.)"""
+    def piece(event: dict) -> None:
+        emit({'type': 'stream_event', 'event': event, 'session_id': session, 'parent_tool_use_id': None})
+
+    piece({'type': 'message_start', 'message': {**message, 'content': [], 'stop_reason': None}})
+    for index, block in enumerate(message['content']):
+        if block['type'] == 'thinking':
+            begun, grows = {**block, 'thinking': ''}, [{'type': 'thinking_delta', 'thinking': part}
+                                                        for part in parts(block['thinking'])]
+        elif block['type'] == 'text':
+            begun, grows = {**block, 'text': ''}, [{'type': 'text_delta', 'text': part} for part in parts(block['text'])]
+        else:
+            begun, grows = {**block, 'input': {}}, [{'type': 'input_json_delta', 'partial_json': part}
+                                                     for part in parts(json.dumps(block['input']))]
+        piece({'type': 'content_block_start', 'index': index, 'content_block': begun})
+        for grown in grows:
+            piece({'type': 'content_block_delta', 'index': index, 'delta': grown})
+        emit({'type': 'assistant', 'session_id': session, 'message': {**message, 'content': [block]}})
+        piece({'type': 'content_block_stop', 'index': index})
+    piece({'type': 'message_delta', 'delta': {'stop_reason': message.get('stop_reason') or 'end_turn'},
+           'usage': message.get('usage')})
+    piece({'type': 'message_stop'})
+
+
+def stream_work(path: Path | None, session: str, text: str, parent: str | None) -> str | None:
+    """The agent works where everyone can watch: every message of it is printed piece by
+    piece. Ids are made of the prompt and the place, as in `tool_work`."""
+    place = 0
+    for number, (blocks, returns) in enumerate(STREAM_WORK):
+        content, uses = [], []
+        for block in blocks:
+            if isinstance(block, dict):
+                content.append(block)
+                continue
+            name, given = block
+            ident = 'toolu_' + hashlib.sha256(f'{text}\0s{place}'.encode()).hexdigest()[:20]
+            place += 1
+            uses.append(ident)
+            content.append({'type': 'tool_use', 'id': ident, 'name': name, 'input': given})
+        message = {'id': 'msg_' + hashlib.sha256(f'{text}\0sm{number}'.encode()).hexdigest()[:12], 'role': 'assistant',
+                   'model': 'replay-fake', 'content': content, 'stop_reason': 'tool_use',
+                   'usage': {'input_tokens': 5, 'output_tokens': 3}}
+        parent = record(path, session, 'assistant', parent, {**message, 'type': 'message'})
+        streamed(session, message)
+        answer = {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': ident, 'content': returned,
+                                               'is_error': False} for ident, returned in zip(uses, returns)]}
+        parent = record(path, session, 'user', parent, answer)
+        emit({'type': 'user', 'session_id': session, 'message': answer})
+    return parent
+
+
 def given_before(text: str) -> int:
     """How many processes were given this prompt before this one. Counted in a file of the
     provider's directory; without one, never."""
@@ -210,6 +290,8 @@ def main() -> int:
         emit({'type': 'assistant', 'session_id': session, 'message': first})
     if '[qa-tools]' in text:
         asked = tool_work(path, session, text, asked)
+    if '[qa-stream]' in text:
+        asked = stream_work(path, session, text, asked)
     if '[qa-usage-limit]' in text:
         return out_of_usage(path, session, asked)
     if '[qa-crash]' in text:
@@ -221,8 +303,15 @@ def main() -> int:
     said = {'id': 'msg_' + PROC, 'role': 'assistant', 'model': 'replay-fake',
             'content': [{'type': 'text', 'text': reply}],
             'usage': {'input_tokens': 5, 'output_tokens': 7}}
+    if '[qa-stream]' in text:
+        # A message has one id however often it is given this prompt: a streamed turn's
+        # items are named by it.
+        said['id'] = 'msg_' + hashlib.sha256(f'{text}\0said'.encode()).hexdigest()[:12]
     record(path, session, 'assistant', asked, {**said, 'type': 'message'})
-    emit({'type': 'assistant', 'session_id': session, 'message': said})
+    if '[qa-stream]' in text:
+        streamed(session, said)
+    else:
+        emit({'type': 'assistant', 'session_id': session, 'message': said})
     emit({'type': 'result', 'subtype': 'success', 'is_error': False, 'session_id': session,
           'result': reply, 'num_turns': 1, 'duration_ms': 1,
           'usage': {'input_tokens': 5, 'output_tokens': 7}})
