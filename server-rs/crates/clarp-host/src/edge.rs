@@ -236,6 +236,7 @@ pub fn router(app: App) -> Router {
         .merge(push::routes())
         .merge(peers::routes())
         .merge(roster::routes())
+        .merge(crate::personas::routes())
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::faces::routes())
@@ -587,9 +588,9 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         .map(|member| agent_row(&directory, &families, member, &app.faces))
         .collect();
     // Who an agent can be: the personas this Host has built in, with the voices the owner's
-    // file gives them. (A persona the owner makes himself is not built yet.)
+    // file gives them and the look the owner gave them, and the personas the owner made.
     let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
-    let personas = clarp_kernel::personas::builtins(&clarp_kernel::personas::Owner {
+    let personas = directory.personas.listed(&clarp_kernel::personas::Owner {
         roster: &named,
         cartesia: &cartesia,
         gemini: &gemini,

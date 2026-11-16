@@ -48,6 +48,14 @@ impl Telling {
             .unwrap_or_else(PoisonError::into_inner) = settings;
     }
 
+    /// What the owner's file names for personas, as it is now: voices of three engines,
+    /// each a table in the file's order.
+    pub fn owner_tables(&self) -> [Vec<(String, String)>; 3] {
+        self.owner
+            .read()
+            .map_or_else(Default::default, |file| owner::personas(&file))
+    }
+
     /// What the tool of this agent is told from its next turn on.
     pub fn of(&self, record: &AgentRecord) -> Told {
         let settings = self

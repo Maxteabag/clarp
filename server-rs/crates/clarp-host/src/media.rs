@@ -317,6 +317,47 @@ async fn content(
     guarded(response)
 }
 
+/// A file that is kept under a name, as the Python Host sends any file (`_send_file`): all
+/// of it or the part a `Range` header asks for, as the kind it is said to be, and never to
+/// be kept by whoever fetched it.
+pub(crate) fn send_kept(blobs: &Arc<dyn Blobs>, name: String, kind: &str, range: &str) -> Response {
+    let Ok(Some(total)) = blobs.len(&name) else {
+        return not_found();
+    };
+    let (status, first, last) = match media::byte_range(range, total) {
+        Part::Missing => {
+            let said = [
+                (header::CONTENT_TYPE, "text/plain".to_string()),
+                (header::CONTENT_RANGE, format!("bytes */{total}")),
+            ];
+            return (StatusCode::RANGE_NOT_SATISFIABLE, said).into_response();
+        }
+        Part::Whole => (StatusCode::OK, 0, total.saturating_sub(1)),
+        Part::Bytes { first, last } => (StatusCode::PARTIAL_CONTENT, first, last),
+    };
+    let length = if total == 0 { 0 } else { last - first + 1 };
+    let mut said = vec![
+        (header::CONTENT_TYPE, kind.to_string()),
+        (header::CONTENT_LENGTH, length.to_string()),
+        (header::CACHE_CONTROL, "no-store".to_string()),
+        (header::ACCEPT_RANGES, "bytes".to_string()),
+    ];
+    if status == StatusCode::PARTIAL_CONTENT {
+        said.push((
+            header::CONTENT_RANGE,
+            format!("bytes {first}-{last}/{total}"),
+        ));
+    }
+    let mut response = Response::new(parts_of(blobs.clone(), name, first, length));
+    *response.status_mut() = status;
+    for (name, value) in said {
+        if let Ok(value) = HeaderValue::from_str(&value) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    response
+}
+
 /// A file's bytes from `first` on, `length` of them, read and sent a part at a time.
 fn parts_of(blobs: Arc<dyn Blobs>, name: String, first: u64, length: u64) -> Body {
     let parts = stream::unfold((first, length), move |(at, left)| {

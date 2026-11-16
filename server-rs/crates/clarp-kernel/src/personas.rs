@@ -204,12 +204,19 @@ pub struct Made {
     pub voice_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub avatar_symbol: String,
-    /// What is in its own picture, when it has one: what the picture's address carries.
+    /// The digest of its own picture, when it has one: what the picture is kept under, and
+    /// the beginning of it is what the picture's address carries ([`version`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub personality: String,
     pub created_at_ms: i64,
+}
+
+/// What a picture's address carries of the picture's digest: its first sixteen signs, as the
+/// Python Host's addresses do.
+pub fn version(digest: &str) -> &str {
+    digest.get(..16).unwrap_or(digest)
 }
 
 /// What a name that is taken is refused with.
@@ -232,7 +239,7 @@ pub fn same(a: &str, b: &str) -> bool {
 /// A persona the owner made, as an app is told it.
 pub fn told(made: &Made) -> Value {
     let avatar_url = match &made.avatar {
-        Some(version) => portraits::address(AVATARS, &made.persona_id, version),
+        Some(digest) => portraits::address(AVATARS, &made.persona_id, version(digest)),
         None => String::new(),
     };
     json!({
@@ -352,8 +359,8 @@ pub struct Change {
 /// said, in that decoder's own words, which differ from fault to fault.)
 pub const NO_PICTURE: &str = "Avatar is not base64.";
 
-/// A picture as it is handed over, in base64, with what its address will carry: the first
-/// sixteen signs of its digest. `Ok(None)`: none was handed over.
+/// A picture as it is handed over, in base64, with its digest. `Ok(None)`: none was handed
+/// over.
 pub fn picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, &'static str> {
     if base64.is_empty() {
         return Ok(None);
@@ -362,13 +369,11 @@ pub fn picture(base64: &str) -> Result<Option<(Vec<u8>, String)>, &'static str> 
     if bytes.len() > AVATAR_MOST {
         return Err(AVATAR_TOO_LARGE);
     }
-    let digest = Sha256::digest(&bytes);
-    let version: String = digest
+    let digest: String = Sha256::digest(&bytes)
         .iter()
-        .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    Ok(Some((bytes, version)))
+    Ok(Some((bytes, digest)))
 }
 
 /// Two names that are one name in a table that folds the letters of ASCII alone, as the
@@ -402,8 +407,9 @@ impl Book {
         let id = persona["id"].as_str().unwrap_or("").to_string();
         if let Some(look) = self.looks.iter().find(|look| look.persona_id == id) {
             persona["avatar_symbol"] = json!(look.avatar_symbol);
-            if let Some(version) = &look.avatar {
-                persona["avatar_url"] = json!(portraits::address(AVATARS, &id, version));
+            if let Some(digest) = &look.avatar {
+                let address = portraits::address(AVATARS, &id, version(digest));
+                persona["avatar_url"] = json!(address);
             }
         }
         persona
@@ -457,14 +463,21 @@ impl Book {
         self.made_at(&built_in, name).map(|at| told(&self.made[at]))
     }
 
-    /// The picture a persona has of its own, by the persona's id: what its address carries.
+    /// The digest of the picture a persona has of its own, by the persona's id.
     pub fn picture_of(&self, owner: &Owner<'_>, persona_id: &str) -> Option<String> {
-        let mut listed = self.listed(owner).into_iter();
-        let persona = listed.find(|persona| persona["id"] == persona_id)?;
-        let address = persona["avatar_url"].as_str()?;
-        address
-            .rsplit_once("?v=")
-            .map(|(_, version)| version.to_string())
+        let built_in = builtins(owner);
+        if built_in.iter().any(|persona| persona["id"] == persona_id) {
+            let look = self
+                .looks
+                .iter()
+                .find(|look| look.persona_id == persona_id)?;
+            return look.avatar.clone();
+        }
+        let mut awake = self.awake(&built_in);
+        awake
+            .find(|made| made.persona_id == persona_id)?
+            .avatar
+            .clone()
     }
 
     /// The voices of Cartesia's that personas have: what a new persona is not given first.
@@ -502,7 +515,7 @@ impl Book {
                 named => named.to_string(),
             },
             avatar_symbol: python::first(wanted.avatar_symbol, SYMBOL_MOST).to_string(),
-            avatar: picture.as_ref().map(|(_, version)| version.clone()),
+            avatar: picture.as_ref().map(|(_, digest)| digest.clone()),
             personality: python::first(wanted.personality, PERSONALITY_MOST).to_string(),
             created_at_ms: now_ms,
         };
@@ -531,10 +544,7 @@ impl Book {
             let kept = before.and_then(|look| look.avatar.clone());
             let look = Look {
                 avatar_symbol: python::first(wanted.avatar_symbol, SYMBOL_MOST).to_string(),
-                avatar: picture
-                    .as_ref()
-                    .map(|(_, version)| version.clone())
-                    .or(kept),
+                avatar: picture.as_ref().map(|(_, digest)| digest.clone()).or(kept),
                 persona_id: id,
             };
             self.looks.retain(|held| held.persona_id != look.persona_id);
@@ -562,8 +572,8 @@ impl Book {
             (named, _) => named.to_string(),
         };
         held.avatar_symbol = python::first(wanted.avatar_symbol, SYMBOL_MOST).to_string();
-        if let Some((_, version)) = &picture {
-            held.avatar = Some(version.clone());
+        if let Some((_, digest)) = &picture {
+            held.avatar = Some(digest.clone());
         }
         held.personality = python::first(wanted.personality, PERSONALITY_MOST).to_string();
         Ok(Change {

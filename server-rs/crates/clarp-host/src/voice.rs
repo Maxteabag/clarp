@@ -183,6 +183,19 @@ impl Mouth {
         self.owner.key(key_of(provider, owners)).is_some()
     }
 
+    /// The ids of Cartesia's voices as this Host last listed them, however long ago, without
+    /// asking anybody: what a voice for a new persona is picked from first.
+    pub(crate) fn cartesia_known(&self) -> Vec<String> {
+        let kept = self
+            .cartesia_voices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let listed = kept.iter().flat_map(|(_, voices)| voices.iter());
+        listed
+            .filter_map(|voice| voice["id"].as_str().map(str::to_string))
+            .collect()
+    }
+
     /// Cartesia's own list of voices: the one fetched within the last quarter of an hour,
     /// or a new one. Without a key, or when Cartesia does not answer, there is none.
     pub(crate) async fn cartesia_list(self: &Arc<Self>) -> Arc<Vec<Value>> {

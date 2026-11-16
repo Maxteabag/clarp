@@ -9603,3 +9603,271 @@ fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
         "{said}"
     );
 }
+
+#[test]
+fn the_owner_makes_changes_and_removes_a_persona_and_an_agent_can_be_it() {
+    let place = Place::new("personas");
+    let host = place.start_with_token("secret");
+    // The events are listened to with the token in the address, as a browser does.
+    let heard = host.listen_at("/events?token=secret");
+    let told = |kind: &str| {
+        let heard = heard.lock().unwrap();
+        let kinds = heard.iter().filter(|event| event["type"] == "agent-roster");
+        kinds.filter(|event| event["kind"] == kind).count()
+    };
+    let listed = |host: &Host| -> Vec<Value> {
+        host.get("/agents/snapshot")["personas"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let built_in = listed(&host).len();
+    assert!(built_in >= 80, "{built_in} personas built in");
+
+    // The owner makes a persona. It names no voice and is given one no persona has.
+    let (status, made) = host.ask(
+        "POST",
+        "/personas",
+        Some(&json!({
+            "name": "  Scout  ", "avatar_symbol": "star", "personality": "Personality: curious.",
+        })),
+    );
+    assert_eq!(status, 201, "{made}");
+    let scout = made["persona"].clone();
+    let id = scout["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("persona-") && id.len() == 24, "{id}");
+    let voice: Value = serde_json::from_str(scout["voice_id"].as_str().unwrap()).unwrap();
+    let given = voice["cartesia"].as_str().unwrap().to_string();
+    assert!(!given.is_empty(), "{voice}");
+    assert_eq!(
+        scout,
+        json!({
+            "id": id, "name": "Scout", "voice_id": scout["voice_id"], "avatar_symbol": "star",
+            "avatar_url": "", "avatar_generation_status": null,
+            "personality": "Personality: curious.", "tier": "", "builtin": false,
+        })
+    );
+    wait_for("the apps to be told of a persona that was made", || {
+        told("persona-created") == 1
+    });
+    let after = listed(&host);
+    assert_eq!(after.len(), built_in + 1);
+    assert_eq!(
+        after.last(),
+        Some(&scout),
+        "the owner's own come after the built-in ones"
+    );
+    let roster = host.get("/agents/snapshot")["roster"].clone();
+    assert!(
+        roster.as_array().unwrap().contains(&json!("Scout")),
+        "{roster}"
+    );
+    for persona in &after[..built_in] {
+        let theirs = persona["voice_id"].as_str().unwrap();
+        assert!(!theirs.contains(&given), "{given} is {}'s", persona["name"]);
+    }
+
+    // What is refused, in the Python Host's words.
+    let refused = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    let too_large = "QUFB".repeat(512_000 / 3 + 1);
+    for (body, status, why) in [
+        (json!({ "name": "scout" }), 409, "scout already exists."),
+        (json!({ "name": "MIKE" }), 409, "MIKE already exists."),
+        (
+            json!({ "name": "  " }),
+            409,
+            "A personality name is required (maximum 60 characters).",
+        ),
+        (
+            json!({ "name": "x".repeat(61) }),
+            409,
+            "A personality name is required (maximum 60 characters).",
+        ),
+        (
+            json!({ "name": "No Picture", "avatar_base64": "not base64!" }),
+            409,
+            "Avatar is not base64.",
+        ),
+        (
+            json!({ "name": "Too Large", "avatar_base64": too_large }),
+            409,
+            "Avatar is too large.",
+        ),
+        (json!(["Scout"]), 400, "bad json"),
+    ] {
+        let (answered, said) = refused("/personas", body.clone());
+        let about: String = body.to_string().chars().take(80).collect();
+        assert_eq!(
+            (answered, said["error"].as_str()),
+            (status, Some(why)),
+            "{about}"
+        );
+    }
+    assert_eq!(
+        listed(&host).len(),
+        built_in + 1,
+        "nothing was made of what was refused"
+    );
+
+    // A persona with a picture of its own: the address carries what is in the picture, and
+    // the picture is fetched with the token, whole or in part.
+    let (status, made) = refused(
+        "/personas",
+        json!({ "name": "Pictured", "voice_id": "{}", "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU=" }),
+    );
+    assert_eq!(status, 201, "{made}");
+    let pictured = made["persona"].clone();
+    let face = pictured["avatar_url"].as_str().unwrap().to_string();
+    let pictured_id = pictured["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        face,
+        format!("/persona-avatars/{pictured_id}?v=f475387a7e87a1a9")
+    );
+    let other: Value = serde_json::from_str(pictured["voice_id"].as_str().unwrap()).unwrap();
+    assert_ne!(
+        other["cartesia"],
+        json!(given),
+        "the voice Scout was given is taken"
+    );
+    let picture = fetch(&host, "secret", "GET", &face, &[], b"");
+    assert_eq!(
+        (picture.status, picture.text().as_str()),
+        (200, "a made-up picture")
+    );
+    assert_eq!(picture.header("content-type"), "image/jpeg");
+    assert_eq!(picture.header("cache-control"), "no-store");
+    let part = fetch(
+        &host,
+        "secret",
+        "GET",
+        &face,
+        &[("Range", "bytes=2-8")],
+        b"",
+    );
+    assert_eq!((part.status, part.text().as_str()), (206, "made-up"));
+    assert_eq!(part.header("content-range"), "bytes 2-8/17");
+    assert_eq!(fetch(&host, "", "GET", &face, &[], b"").status, 401);
+    let nobody = fetch(
+        &host,
+        "secret",
+        "GET",
+        "/persona-avatars/persona-nobody",
+        &[],
+        b"",
+    );
+    assert_eq!((nobody.status, nobody.text().as_str()), (404, "not found"));
+    let no_picture = fetch(
+        &host,
+        "secret",
+        "GET",
+        &format!("/persona-avatars/{id}"),
+        &[],
+        b"",
+    );
+    assert_eq!(no_picture.status, 404, "Scout has a symbol and no picture");
+
+    // The owner changes it: another name, and the voice it had stays when none is named.
+    let (status, changed) = refused(
+        "/personas/update",
+        json!({ "original_name": "scout", "name": "Scout Two", "voice_id": "" }),
+    );
+    assert_eq!(status, 200, "{changed}");
+    assert_eq!(
+        changed["persona"],
+        json!({
+            "id": id, "name": "Scout Two", "voice_id": scout["voice_id"], "avatar_symbol": "",
+            "avatar_url": "", "avatar_generation_status": null, "personality": "", "tier": "",
+            "builtin": false,
+        }),
+        "what a change does not name is taken away, as on the Python Host; the voice stays"
+    );
+    for (body, why) in [
+        (
+            json!({ "original_name": "Scout", "name": "Scout", "voice_id": "" }),
+            "Only saved custom Contacts can be edited.",
+        ),
+        (
+            json!({ "original_name": "Scout Two", "name": "", "voice_id": "" }),
+            "A Contact name is required (maximum 60 characters).",
+        ),
+        (
+            json!({ "original_name": "Scout Two", "name": "pictured", "voice_id": "" }),
+            "pictured already exists.",
+        ),
+        (
+            json!({ "original_name": "Scout Two", "name": "Rachel", "voice_id": "" }),
+            "Rachel already exists.",
+        ),
+    ] {
+        let (answered, said) = refused("/personas/update", body.clone());
+        assert_eq!(
+            (answered, said["error"].as_str()),
+            (409, Some(why)),
+            "{body}"
+        );
+    }
+    // Of a persona that is built in only the look is changed, whatever else is said.
+    let before = listed(&host);
+    let mike = before
+        .iter()
+        .find(|persona| persona["id"] == "builtin-mike");
+    let mike = mike.unwrap().clone();
+    let (status, changed) = refused(
+        "/personas/update",
+        json!({
+            "original_name": "mike", "name": "Michael", "voice_id": "another", "avatar_symbol": "bolt",
+            "personality": "Personality: another.", "avatar_base64": "YW5vdGhlciBwaWN0dXJl",
+        }),
+    );
+    assert_eq!(status, 200, "{changed}");
+    let mut dressed = mike.clone();
+    dressed["avatar_symbol"] = json!("bolt");
+    dressed["avatar_url"] = json!("/persona-avatars/builtin-mike?v=b2917681b4f4fee3");
+    assert_eq!(changed["persona"], dressed);
+    let picture = fetch(
+        &host,
+        "secret",
+        "GET",
+        "/persona-avatars/builtin-mike",
+        &[],
+        b"",
+    );
+    assert_eq!(
+        (picture.status, picture.text().as_str()),
+        (200, "another picture")
+    );
+    wait_for("the apps to be told of two changes", || {
+        told("persona-updated") == 2
+    });
+
+    // The owner removes one of his own; not one that is built in, and not one that is not there.
+    let gone = host.ask("DELETE", "/personas/Scout%20Two", None);
+    assert_eq!(gone, (200, json!({ "ok": true })));
+    for name in ["Scout%20Two", "Mike", "nobody-of-the-kind"] {
+        let (status, why) = host.ask("DELETE", &format!("/personas/{name}"), None);
+        assert_eq!(
+            (status, why["error"].as_str()),
+            (404, Some("personality not removable")),
+            "{name}"
+        );
+    }
+    wait_for("the apps to be told of a persona that was removed", || {
+        told("persona-deleted") == 1
+    });
+    assert_eq!(told("persona-created"), 2);
+
+    // All of it is the Host's to keep.
+    let before = listed(&host);
+    assert_eq!(before.len(), built_in + 1);
+    host.kill();
+    let host = place.start_with_token("secret");
+    assert_eq!(listed(&host), before);
+    let picture = fetch(&host, "secret", "GET", &face, &[], b"");
+    assert_eq!(
+        (picture.status, picture.text().as_str()),
+        (200, "a made-up picture")
+    );
+    let kept = listed(&host);
+    let mike = kept.iter().find(|persona| persona["id"] == "builtin-mike");
+    assert_eq!(mike, Some(&dressed));
+}

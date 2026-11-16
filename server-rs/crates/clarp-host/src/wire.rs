@@ -835,6 +835,12 @@ pub fn roster_renamed(session: &str, name: &str) -> Value {
     json!({ "type": "agent-roster", "kind": "agent-renamed", "session": session, "name": name })
 }
 
+/// The personas changed (`persona-created`, `persona-updated`, `persona-deleted`): the apps
+/// read the list again.
+pub fn roster_personas(kind: &str) -> Value {
+    json!({ "type": "agent-roster", "kind": kind })
+}
+
 pub fn focus(record: &AgentRecord) -> Value {
     json!({ "type": "agent-focus", "session": record.session, "agent_id": record.agent_id })
 }
