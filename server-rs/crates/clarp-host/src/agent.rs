@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
-    Action, Actor, ActorError, Changed, ImportedRow, Kept, Outputs, Profile, QueueState, Sent,
-    Status, Waiting,
+    Action, Actor, ActorError, ByHand, Changed, ImportedRow, Kept, Outputs, Profile, QueueState,
+    Sent, Status, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -126,7 +126,13 @@ pub enum Ask {
     Withdraw {
         turn: TurnId,
         by: String,
-        answer: Answer<bool>,
+        answer: Answer<(bool, QueueState)>,
+    },
+    /// Send one waiting message now, past whatever holds the mailbox.
+    SendNow {
+        turn: TurnId,
+        by: String,
+        answer: Answer<ByHand>,
     },
     /// The Host says something quiet in the conversation, once under its id.
     Note {
@@ -375,8 +381,18 @@ impl AgentHandle {
         .await
     }
 
-    pub async fn withdraw(&self, turn: TurnId, by: String) -> Result<bool, Unavailable> {
+    /// Takes a waiting message back. Answers whether it waited, and how the queue stands.
+    pub async fn withdraw(
+        &self,
+        turn: TurnId,
+        by: String,
+    ) -> Result<(bool, QueueState), Unavailable> {
         self.ask(|answer| Ask::Withdraw { turn, by, answer }).await
+    }
+
+    /// Sends one waiting message now, past whatever holds the mailbox.
+    pub async fn send_now(&self, turn: TurnId, by: String) -> Result<ByHand, Unavailable> {
+        self.ask(|answer| Ask::SendNow { turn, by, answer }).await
     }
 
     /// Writes a quiet word of the Host's into the conversation, once under its id: that the
@@ -630,6 +646,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         tx: tx.clone(),
         view: view_tx,
         told: None,
+        let_go_by_hand: false,
         newest: None,
         ended: None,
         transcript_sent: None,
@@ -660,6 +677,10 @@ struct Worker {
     view: watch::Sender<Arc<View>>,
     /// What the clients were last told, so that only a change is told.
     told: Option<Status>,
+    /// Its user let the mailbox go a moment ago: the clients are told so in a word of its
+    /// own. A hold that ended because the last thing it held went to run is told with the
+    /// news of that turn.
+    let_go_by_hand: bool,
     /// The newest row of the conversation.
     newest: Option<Versioned>,
     /// How the last turn ended.
@@ -1426,6 +1447,7 @@ impl Worker {
             }
             Ask::Resume { by, answer } => {
                 let resumed = actor.resume(&by, now);
+                self.let_go_by_hand = true;
                 let queue = actor.queue_state();
                 answered(resumed.map(|(held, out)| ((held, queue), out)), answer)?
             }
@@ -1440,7 +1462,12 @@ impl Worker {
                 rows,
                 answer,
             } => answered(actor.import(&from, backend_session, rows, now), answer)?,
-            Ask::Withdraw { turn, by, answer } => answered(actor.withdraw(turn, &by, now), answer)?,
+            Ask::Withdraw { turn, by, answer } => {
+                let withdrawn = actor.withdraw(turn, &by, now);
+                let queue = actor.queue_state();
+                answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
+            }
+            Ask::SendNow { turn, by, answer } => answered(actor.send_now(turn, &by, now), answer)?,
             Ask::Note { id, text, answer } => answered(actor.note(&id, &text, now), answer)?,
             Ask::Tail {
                 limit,
@@ -1746,6 +1773,7 @@ impl Worker {
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
     fn show(&mut self, changed: Changed) {
+        let by_hand = std::mem::take(&mut self.let_go_by_hand);
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
@@ -1768,7 +1796,7 @@ impl Worker {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|waiting| !was_waiting.contains(&waiting.turn))
-                .map(|waiting| waiting.message_id)
+                .map(|waiting| waiting.client_id)
                 .collect()
         } else {
             Vec::new()
@@ -1788,9 +1816,9 @@ impl Worker {
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
 
         // The queue: a message joined it, one left it to run, it was held or let go.
-        for message_id in &joined {
+        for client_id in &joined {
             hub.publish(
-                wire::queue_updated(&record, &status, Some(message_id), false),
+                wire::queue_updated(&record, &status, Some(client_id), false),
                 now,
             );
         }
@@ -1802,16 +1830,29 @@ impl Worker {
             // nothing was in its way.
             if live.from_queue {
                 hub.publish(
-                    wire::queue_updated(&record, &status, Some(&live.message_id), true),
+                    wire::queue_updated(&record, &status, Some(&live.client_id), true),
                     now,
                 );
             }
             hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
         }
-        if before
+        // The mailbox was held or let go, or a waiting message was taken back: it left the
+        // queue and no turn began for it. A hold that ended by itself, because the last
+        // thing it held went to run, was told with that turn a moment ago.
+        let held_or_let_go = before
             .as_ref()
-            .is_some_and(|told| told.paused != status.paused)
-        {
+            .is_some_and(|told| told.paused != status.paused);
+        let began_from_the_queue = status
+            .live
+            .as_ref()
+            .is_some_and(|live| live.from_queue && was_live.map(|was| was.turn) != Some(live.turn));
+        let told_with_its_turn = !status.paused && !by_hand && began_from_the_queue;
+        let taken_back = was_waiting.iter().any(|turn| {
+            !status.waiting.contains(turn)
+                && status.live.as_ref().map(|live| live.turn) != Some(*turn)
+                && status.last.as_ref().map(|last| last.id) != Some(*turn)
+        });
+        if (held_or_let_go && !told_with_its_turn) || taken_back {
             hub.publish(wire::queue_updated(&record, &status, None, false), now);
         }
         // What the agent is doing changed: its state, and the line that describes it.
@@ -2022,6 +2063,7 @@ fn refuse_for(
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Note { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
                 drop(answer.send(Err(refusal())));

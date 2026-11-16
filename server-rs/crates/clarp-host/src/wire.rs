@@ -134,11 +134,6 @@ fn session_name(record: &AgentRecord, status: &Status) -> String {
     }
 }
 
-/// The id a client gave a message, from the id the conversation files it under.
-pub fn client_id(message_id: &str) -> &str {
-    message_id.strip_prefix("u-").unwrap_or(message_id)
-}
-
 // ---- events ---------------------------------------------------------------------------------
 
 /// The Host says which version it is: a client that sees another one reloads.
@@ -159,7 +154,7 @@ pub fn dispatched(record: &AgentRecord, live: &LiveStatus, waiting: usize) -> Va
         "agent_id": record.agent_id,
         "session": record.session,
         "kind": "thinking",
-        "client_msg_id": client_id(&live.message_id),
+        "client_msg_id": live.client_id,
         "trace_id": live.trace_id.clone().unwrap_or_default(),
         "queue_started": live.from_queue,
         "queue_remaining": waiting,
@@ -485,7 +480,7 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
 pub fn queue_updated(
     record: &AgentRecord,
     status: &Status,
-    message_id: Option<&str>,
+    client_id: Option<&str>,
     started: bool,
 ) -> Value {
     let mut event = json!({
@@ -497,8 +492,8 @@ pub fn queue_updated(
         "queue_started": started,
         "queue_revision": status.queue_revision,
     });
-    if let Some(message_id) = message_id {
-        event["client_msg_id"] = json!(client_id(message_id));
+    if let Some(client_id) = client_id {
+        event["client_msg_id"] = json!(client_id);
     }
     event
 }
@@ -1474,6 +1469,7 @@ mod tests {
             live: live.map(|activity| LiveStatus {
                 turn: TurnId(2),
                 message_id: "u-m2".to_string(),
+                client_id: "m2".to_string(),
                 trace_id: Some("trace-2".to_string()),
                 origin: Origin::User,
                 from_queue: false,
@@ -2194,7 +2190,7 @@ mod tests {
             (&json!(1), &json!(true), &json!(7), &json!(false))
         );
         assert!(held.get("client_msg_id").is_none());
-        let left = queue_updated(&record(), &thinking, Some("u-m2"), true);
+        let left = queue_updated(&record(), &thinking, Some("m2"), true);
         assert_eq!(
             (&left["client_msg_id"], &left["queue_started"]),
             (&json!("m2"), &json!(true))

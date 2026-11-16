@@ -26,6 +26,9 @@ use crate::turn::{
     StartOutcome, Turn, TurnEvent, TurnId, Wait,
 };
 
+/// Who let a mailbox go that held nothing any more: the last thing that waited left to run.
+pub const DRAINED: &str = "nothing waits";
+
 /// Who stopped a turn that a direct message replaced.
 pub fn preempted_by(turn: TurnId) -> String {
     format!("message of turn {}", turn.0)
@@ -42,6 +45,9 @@ pub enum Command {
     },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
+    /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
+    /// hand. Only when no turn runs.
+    SendNow { turn: TurnId, by: String },
     /// End the live turn and hold the mailbox.
     Stop { by: String },
     /// Let the mailbox run again.
@@ -103,6 +109,12 @@ pub enum AgentEvent {
         by: String,
         at_ms: i64,
     },
+    /// A waiting turn was sent by hand: it is the next to run, and no hold holds it.
+    SentNow {
+        turn: TurnId,
+        by: String,
+        at_ms: i64,
+    },
     /// The agent's own label for what it is busy with beyond its turns. Empty: none any more.
     Labelled {
         text: String,
@@ -153,6 +165,8 @@ pub enum Refusal {
     NotParked(TurnId),
     /// A resume for an agent that is not held.
     NotPaused,
+    /// A turn of the agent runs: nothing that waits is sent by hand past it.
+    AtWork,
     /// An agent that has run a turn here is not one that just arrived.
     AlreadyAtWork,
 }
@@ -164,6 +178,7 @@ impl std::fmt::Display for Refusal {
             Self::NotLive(turn) => write!(f, "turn {} is not the live turn", turn.0),
             Self::NotParked(turn) => write!(f, "turn {} does not wait for an attempt", turn.0),
             Self::NotPaused => write!(f, "the agent is not paused"),
+            Self::AtWork => write!(f, "a turn of the agent runs"),
             Self::AlreadyAtWork => write!(f, "the agent has already worked on this Host"),
         }
     }
@@ -357,9 +372,23 @@ impl Agent {
                 work.record(AgentEvent::Turn {
                     turn,
                     change: TurnEvent::Settled {
-                        outcome: Outcome::Withdrawn { by },
+                        outcome: Outcome::Withdrawn { by: by.clone() },
                         at_ms: now_ms,
                     },
+                });
+                work.let_go_of_nothing(&by, now_ms);
+            }
+            Command::SendNow { turn, by } => {
+                if !work.agent.mailbox.iter().any(|queued| queued.id == turn) {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                if work.agent.live.is_some() {
+                    return Err(Refusal::AtWork);
+                }
+                work.record(AgentEvent::SentNow {
+                    turn,
+                    by,
+                    at_ms: now_ms,
                 });
             }
             Command::Stop { by } => {
@@ -534,6 +563,20 @@ impl Agent {
                 self.paused = false;
                 self.unheld.clear();
                 self.queue_revision += 1;
+            }
+            AgentEvent::SentNow { turn, .. } => {
+                let Some(at) = self.mailbox.iter().position(|queued| queued.id == *turn) else {
+                    return Err(IllegalTransition {
+                        turn: *turn,
+                        state: "not waiting",
+                        event: "sent-now",
+                    });
+                };
+                // Ahead of everything that waits, and held by nothing.
+                if let Some(queued) = self.mailbox.remove(at) {
+                    self.mailbox.push_front(queued);
+                }
+                self.unheld.insert(*turn);
             }
             AgentEvent::StopRequested { turn, by, .. } => {
                 if self.live_id() != Some(*turn) {
@@ -758,6 +801,21 @@ impl Work {
         self.decision
             .effects
             .push(Effect::StartTurn { turn, message_seq });
+        if self.agent.live_from_queue {
+            self.let_go_of_nothing(DRAINED, now_ms);
+        }
+    }
+
+    /// A hold holds what waits. When the last of it has left the queue, taken back or gone
+    /// to run, the hold is over: the next thing that is left for the agent is not held by
+    /// a stop that held something else. So the Python Host ends a pause (`turn_queue`).
+    fn let_go_of_nothing(&mut self, by: &str, now_ms: i64) {
+        if self.agent.paused && self.agent.mailbox.is_empty() {
+            self.record(AgentEvent::Resumed {
+                by: by.to_string(),
+                at_ms: now_ms,
+            });
+        }
     }
 }
 
@@ -1175,6 +1233,137 @@ mod tests {
         );
     }
 
+    fn by_hand(turn: u64) -> Command {
+        Command::SendNow {
+            turn: TurnId(turn),
+            by: "peter".to_string(),
+        }
+    }
+
+    fn stop() -> Command {
+        Command::Stop {
+            by: "peter".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_waiting_message_is_sent_by_hand_past_a_hold_and_the_hold_ends_with_the_last() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.user(12);
+        // A turn runs: nothing that waits is sent past it.
+        assert_eq!(a.send(by_hand(3)), Err(Refusal::AtWork));
+        a.send(stop()).unwrap();
+        assert_eq!(a.finish(1), vec![], "held");
+        assert_eq!(a.waiting(), vec![2, 3]);
+        let revision = a.agent.queue_revision();
+        // The user sends the later of the two by hand: it runs now, and the other stays held.
+        assert_eq!(
+            a.send(by_hand(3)).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }]
+        );
+        assert!(a.agent.is_paused() && a.agent.holds(TurnId(2)));
+        assert!(a.agent.live_from_queue());
+        assert_eq!(a.agent.queue_revision(), revision + 1, "it left the queue");
+        // What does not wait is not sent, and nothing is while a turn runs.
+        assert_eq!(a.send(by_hand(3)), Err(Refusal::NotWaiting(TurnId(3))));
+        assert_eq!(a.send(by_hand(9)), Err(Refusal::NotWaiting(TurnId(9))));
+        assert_eq!(a.send(by_hand(2)), Err(Refusal::AtWork));
+        assert_eq!(a.finish(3), vec![], "the hold holds what is left");
+        // The last one is sent by hand: nothing waits any more, and the hold is over.
+        assert_eq!(
+            a.send(by_hand(2)).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert!(!a.agent.is_paused());
+        assert_eq!(
+            a.agent.queue_revision(),
+            revision + 3,
+            "it left, and the hold ended"
+        );
+        assert!(matches!(a.history.last(), Some(AgentEvent::Resumed { by, .. }) if by == DRAINED));
+        a.finish(2);
+        // Background work that comes now runs: no hold is left to hold it.
+        assert_eq!(
+            a.background(13),
+            vec![Effect::StartTurn {
+                turn: TurnId(4),
+                message_seq: 13
+            }]
+        );
+        assert_eq!(a.started, vec![TurnId(1), TurnId(3), TurnId(2), TurnId(4)]);
+    }
+
+    #[test]
+    fn a_hold_ends_when_the_last_thing_it_held_is_taken_back() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.user(12);
+        a.send(stop()).unwrap();
+        a.finish(1);
+        let take_back = |turn: u64| Command::Withdraw {
+            turn: TurnId(turn),
+            by: "peter".to_string(),
+        };
+        a.send(take_back(2)).unwrap();
+        assert!(a.agent.is_paused(), "one still waits");
+        let revision = a.agent.queue_revision();
+        a.send(take_back(3)).unwrap();
+        assert!(!a.agent.is_paused());
+        assert_eq!(
+            a.agent.queue_revision(),
+            revision + 2,
+            "taken back, and the hold ended"
+        );
+        assert!(matches!(a.history.last(), Some(AgentEvent::Resumed { by, .. }) if by == "peter"));
+        assert_eq!((a.live(), a.waiting()), (None, vec![]));
+        // Taken back where nothing is held, nothing else changes.
+        a.user(13);
+        a.user(14);
+        let revision = a.agent.queue_revision();
+        a.send(take_back(5)).unwrap();
+        assert_eq!(a.agent.queue_revision(), revision + 1);
+        assert!(!a.agent.is_paused());
+    }
+
+    #[test]
+    fn a_stop_that_holds_nothing_ends_with_the_first_thing_that_goes_through_the_queue() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(stop()).unwrap();
+        a.finish(1);
+        assert!(a.agent.is_paused() && a.waiting().is_empty());
+        // What a person says to a free agent never waited: the hold stays.
+        a.user(11);
+        assert!(a.agent.is_paused());
+        a.finish(2);
+        assert!(a.agent.is_paused());
+        // What is left for later goes through the queue, and past a hold that was placed
+        // before it came. Nothing waits behind it: the hold holds nothing, and is over.
+        let later = Command::Accept {
+            message_seq: 12,
+            origin: Origin::User,
+            admission: Admission::Later,
+        };
+        assert_eq!(
+            a.send(later).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }]
+        );
+        assert!(!a.agent.is_paused());
+        assert!(matches!(a.history.last(), Some(AgentEvent::Resumed { by, .. }) if by == DRAINED));
+    }
+
     #[test]
     fn a_direct_message_ends_the_live_turn_and_runs_ahead_of_what_waits() {
         let mut a = Driven::new();
@@ -1512,7 +1701,7 @@ mod tests {
             let mut accepted = 0u64;
             for step in 0..120u64 {
                 let live = a.live().map(TurnId);
-                let command = match next(10) {
+                let command = match next(11) {
                     0..=2 => {
                         accepted += 1;
                         let origin = if next(3) == 0 {
@@ -1556,6 +1745,10 @@ mod tests {
                     8 => Command::StartFailed {
                         turn: TurnId(next(accepted + 2)),
                         reason: "no".to_string(),
+                    },
+                    9 => Command::SendNow {
+                        turn: TurnId(next(accepted + 2)),
+                        by: "peter".to_string(),
                     },
                     _ => Command::TurnEnded {
                         turn: live.unwrap_or(TurnId(999)),

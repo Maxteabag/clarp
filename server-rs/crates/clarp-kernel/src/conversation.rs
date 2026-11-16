@@ -26,11 +26,16 @@ pub struct Sender {
     pub session: String,
 }
 
+/// The mark the id of a message carries in a conversation, which the ids of what an agent
+/// says never begin with.
+pub const MARK: &str = "u-";
+
 /// A message to the agent.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
-    /// For a message from an app: `u-` and the id the app minted, so that the bubble the app
-    /// painted and this item are the same thing.
+    /// For a message from an app: the id the app minted, with the mark before it where the
+    /// app's id comes without ([`Message::filed`]), so that the bubble the app painted and
+    /// this item are the same thing.
     pub id: String,
     pub text: String,
     pub origin: Origin,
@@ -54,6 +59,33 @@ pub struct Message {
     /// told to the agent's tool with this message, and no part of what the user said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<String>,
+    /// The id its app minted came with the mark already, as the phone's ids do: the app's
+    /// id is `id` whole. Otherwise the app's id is `id` without the mark.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub marked: bool,
+}
+
+impl Message {
+    /// Where a message is filed for the id its app gave it, and whether that id came with
+    /// the mark: an id that has the mark is filed as it is, any other with the mark before
+    /// it. So the Python Host files a message (`message_id_for_client`), and so an app
+    /// finds the bubble it painted, whichever of the two its ids are.
+    pub fn filed(client_id: &str) -> (String, bool) {
+        if client_id.starts_with(MARK) {
+            (client_id.to_string(), true)
+        } else {
+            (format!("{MARK}{client_id}"), false)
+        }
+    }
+
+    /// The id the app that sent this message gave it: what an app is told a message by.
+    pub fn client_id(&self) -> &str {
+        if self.marked {
+            &self.id
+        } else {
+            self.id.strip_prefix(MARK).unwrap_or(&self.id)
+        }
+    }
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -346,6 +378,48 @@ impl Entry {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_is_filed_under_its_apps_id_and_gives_that_id_back_as_it_was() {
+        // An app whose ids come without the mark (the desk), and one whose ids have it
+        // (the phone): each finds its message under the id the Python Host files it under,
+        // and is told of it by the id it minted.
+        for (minted, filed, marked) in [
+            ("m1", "u-m1", false),
+            (
+                "u-6485F414-2894-4ABE-955D-55F4F289747C",
+                "u-6485F414-2894-4ABE-955D-55F4F289747C",
+                true,
+            ),
+            ("u-", "u-", true),
+            ("U-1", "u-U-1", false),
+            ("", "u-", false),
+        ] {
+            let (id, came_marked) = Message::filed(minted);
+            assert_eq!((id.as_str(), came_marked), (filed, marked), "{minted:?}");
+            let message = Message {
+                id,
+                marked: came_marked,
+                ..Message::default()
+            };
+            assert_eq!(message.client_id(), minted);
+            // Whether its id came with the mark is kept with the message, and only then.
+            let kept = serde_json::to_value(&message).unwrap();
+            assert_eq!(kept.get("marked").is_some(), marked, "{kept}");
+            let read: Message = serde_json::from_value(kept).unwrap();
+            assert_eq!(read, message);
+        }
+        // A message the Host itself wrote, and every message written before this was kept:
+        // the id without the mark.
+        let written = serde_json::to_value(Message {
+            id: "u-decision-1".to_string(),
+            ..Message::default()
+        })
+        .unwrap();
+        assert!(written.get("marked").is_none(), "{written}");
+        let old: Message = serde_json::from_value(written).unwrap();
+        assert_eq!((old.marked, old.client_id()), (false, "decision-1"));
+    }
 
     #[test]
     fn every_entry_comes_back_from_its_item_under_its_own_id() {
