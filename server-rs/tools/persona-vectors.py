@@ -47,6 +47,52 @@ CASES = [
                '[gemini_tts.voices]\nMike = "Charon"\n'},
 ]
 
+# What an owner does with personas of his own, in a room with this owner's file: each step is
+# made, changed or removed by the Python Host's own functions, and what it answered (the persona
+# as an app is told it, or the words it was refused with) is written down, with the voice the
+# next persona would be given were it to name none.
+PICTURE = 'YSBtYWRlLXVwIHBpY3R1cmU='          # "a made-up picture"
+ANOTHER = 'YW5vdGhlciBwaWN0dXJl'              # "another picture"
+OWN = [
+    {'name': 'personas of the owner, on a Host with nothing of his in its file', 'config': '', 'steps': [
+        {'create': {'name': '  Nova  ', 'voice_id': '', 'personality': 'Personality: brisk.'}},
+        {'create': {'name': 'nova'}},
+        {'create': {'name': 'MIKE'}},
+        {'create': {'name': ''}},
+        {'create': {'name': 'x' * 61}},
+        {'create': {'name': 'x' * 60, 'voice_id': '{"gemini":"Kore"}', 'avatar_symbol': 's' * 70,
+                    'personality': 'p' * 4100}},
+        {'create': {'name': 'Pictured', 'voice_id': 'plain-eleven-id', 'avatar_base64': PICTURE}},
+        {'create': {'name': 'Zoë', 'avatar_symbol': 'star.fill'}},
+        {'create': {'name': 'ZOË'}},
+        {'update': {'original_name': 'nobody-of-the-kind', 'name': 'New'}},
+        {'update': {'original_name': 'Nova', 'name': '', 'voice_id': ''}},
+        {'update': {'original_name': 'Nova', 'name': 'Pictured', 'voice_id': ''}},
+        {'update': {'original_name': 'nova', 'name': 'Nova Prime', 'voice_id': '', 'personality': 'Personality: slower.',
+                    'avatar_symbol': 'moon'}},
+        {'update': {'original_name': 'Nova Prime', 'name': 'NOVA PRIME', 'voice_id': '{"cartesia":"c-chosen"}'}},
+        {'update': {'original_name': 'Pictured', 'name': 'Pictured', 'voice_id': 'plain-eleven-id',
+                    'avatar_base64': ANOTHER}},
+        {'update': {'original_name': 'Mike', 'name': 'Michael', 'voice_id': 'ignored', 'avatar_symbol': 'bolt',
+                    'personality': 'ignored'}},
+        {'update': {'original_name': 'Rachel', 'name': 'Rachel', 'voice_id': '', 'avatar_base64': PICTURE}},
+        {'delete': 'Mike'},
+        {'delete': 'nobody-of-the-kind'},
+        {'delete': 'zoë'},
+        {'delete': 'Zoë'},
+        {'delete': 'pictured'},
+        {'create': {'name': 'Pictured'}},
+    ]},
+    {'name': 'a voice of the owner that nobody has', 'config':
+        '[cartesia.voices]\nspare = "c-spare-of-the-owner"\nRachel = "c-rachel-of-the-owner"\n', 'steps': [
+        {'create': {'name': 'First'}},
+        {'create': {'name': 'Second'}},
+        {'create': {'name': 'Third', 'voice_id': '{}'}},
+        {'delete': 'First'},
+        {'create': {'name': 'Fourth'}},
+    ]},
+]
+
 # Names asked which kind of tool they belong to, and how they speak.
 NAMES = ['Mike', 'mike', ' MIKE ', 'Rachel', 'Codex', 'codex default', 'Claude', 'Grok', 'Gemini', 'DeepSeek',
          'Nobody', '', 'Mike 2', 'Mike B', 'Mike 22', 'Mike two', 'Mike 2 3', 'Astra', 'Astra 7', 'Rivet',
@@ -78,6 +124,39 @@ def one(case: dict) -> dict:
     return {'personas': listed, 'lists': lists, 'asked': asked}
 
 
+def own(room: dict) -> dict:
+    """Runs in a process of its own: what an owner does with personas of his own."""
+    spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
+    host = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(host)
+    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-persona-vectors-', dir='/var/tmp'))
+    (root / 'scenario-config.toml').write_text(room['config'])
+    host.isolate(root)
+    host.loopback_only()
+    sys.path.insert(0, str(REPO / 'server'))
+    from lib import contact_minting, personas
+    personas.ensure_builtins()
+    done = []
+    for step in room['steps']:
+        (what, given), = step.items()
+        try:
+            if what == 'create':
+                answered = personas.public(personas.create(**given))
+            elif what == 'update':
+                answered = personas.public(personas.update(**{'name': '', 'voice_id': '', **given}))
+            else:
+                answered = personas.delete(given)
+            refused = None
+        except (ValueError, OSError) as error:
+            answered, refused = None, str(error)
+        changed = [personas.public(row) for row in personas.list_all()
+                   if not row['builtin'] or row.get('avatar_symbol') or row.get('avatar_path')]
+        done.append({'step': step, 'answered': answered, 'refused': refused, 'changed': changed,
+                     'next_voice': contact_minting.pick_available_voice()})
+    shutil.rmtree(root, ignore_errors=True)
+    return {'steps': done}
+
+
 def owner_of(config_text: str) -> dict:
     """What the owner's file names, as a Host reads it: three tables of texts, in the file's order."""
     data = tomllib.loads(config_text) if config_text else {}
@@ -90,6 +169,9 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == '--case':
         print(json.dumps(one(CASES[int(sys.argv[2])])))
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == '--own':
+        print(json.dumps(own(OWN[int(sys.argv[2])])))
+        return 0
     cases, lists, asked = [], None, None
     for index, case in enumerate(CASES):
         ran = subprocess.run([sys.executable, '-I', __file__, '--case', str(index)], capture_output=True, text=True,
@@ -101,6 +183,15 @@ def main() -> int:
         assert lists in (None, told['lists']), 'the lists are the same for every case'
         lists, asked = told['lists'], told['asked']
         cases.append({**case, 'owner': owner_of(case['config']), 'personas': told['personas']})
+    rooms = []
+    for index, room in enumerate(OWN):
+        ran = subprocess.run([sys.executable, '-I', __file__, '--own', str(index)], capture_output=True, text=True,
+                             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+        if ran.returncode != 0:
+            print(ran.stderr[-2000:], file=sys.stderr)
+            return 1
+        told = json.loads(ran.stdout.splitlines()[-1])
+        rooms.append({'name': room['name'], 'owner': owner_of(room['config']), 'steps': told['steps']})
     out = ['{', ' "about": "Written by server-rs/tools/persona-vectors.py from server/lib/personas.py, config.py and '
                 'roster.py. Do not edit by hand.",', ' "asked": [']
     out.extend('  ' + json.dumps(row, ensure_ascii=False) + (',' if at < len(asked) - 1 else '') for at, row in enumerate(asked))
@@ -112,6 +203,14 @@ def main() -> int:
         out.extend('    ' + json.dumps(row, ensure_ascii=False) + (',' if place < len(personas) - 1 else '')
                    for place, row in enumerate(personas))
         out.append('  ]}' + (',' if at < len(cases) - 1 else ''))
+    out.append(' ],')
+    out.append(' "own": [')
+    for at, room in enumerate(rooms):
+        steps = room.pop('steps')
+        out.append('  {"room": ' + json.dumps(room, ensure_ascii=False) + ', "steps": [')
+        out.extend('    ' + json.dumps(step, ensure_ascii=False) + (',' if place < len(steps) - 1 else '')
+                   for place, step in enumerate(steps))
+        out.append('  ]}' + (',' if at < len(rooms) - 1 else ''))
     out.append(' ]')
     out.append('}')
     OUT.write_text('\n'.join(out) + '\n')
