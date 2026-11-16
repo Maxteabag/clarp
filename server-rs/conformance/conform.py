@@ -391,7 +391,7 @@ NOT_BUILT = {
     # With them: what a persona is like, as the old settings screen is told it (`bio` in
     # `GET /voices`).
     'portraits and the persona catalogue': {
-        'fields': ('personas', 'bio'),
+        'fields': ('bio',),
         'events': (),
     },
     # What `GET /status` says of the Python Host's own way of telling whether a turn's process
@@ -490,6 +490,11 @@ def settle(value, sessions):
             item = [row for row in item if not isinstance(row, dict) or row.get('session') in sessions]
         elif key == 'roster' and isinstance(item, list):
             item = [name for name in item if isinstance(name, str) and name.lower() in sessions]
+        elif key == 'personas' and isinstance(item, list):
+            # The personas a Host offers are compared each by its id. Their order is each
+            # Host's own: the Python Host's is the millisecond a persona was first written and
+            # then its id, the Rust Host's the roster's.
+            item = sorted(item, key=lambda persona: str(persona.get('id')) if isinstance(persona, dict) else '')
         out[key] = settle(item, sessions)
     if 'server_id' in out and 'capabilities' in out and out.get('name'):
         out['name'] = '<name>'  # `GET /server-info`: a Host is called what its machine is called

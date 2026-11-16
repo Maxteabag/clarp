@@ -58,6 +58,18 @@ fn as_text(value: &Value) -> Option<String> {
     }
 }
 
+/// What the owner's file adds to the personas this Host has built in, each a table of texts:
+/// a voice of ElevenLabs for a name (`[roster]`, which also makes a name of his own a
+/// persona), a voice of Cartesia (`[cartesia.voices]`) and one of Gemini
+/// (`[gemini_tts.voices]`).
+pub fn personas(file: &Table) -> [Vec<(String, String)>; 3] {
+    [
+        texts_at(file, &["roster"]),
+        texts_at(file, &["cartesia", "voices"]),
+        texts_at(file, &["gemini_tts", "voices"]),
+    ]
+}
+
 /// The owner's choices of speech out as his file has them: the engine every agent speaks
 /// with (`[tts] provider`, Cartesia unless he says otherwise) and the one that is tried
 /// after it (`fallback`), the entries of single agents (`[tts.agents.<name>]`), Gemini's
