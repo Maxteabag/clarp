@@ -21,10 +21,11 @@
 //! (and an `error` line) and exits with 1. An item of type `error` is not a failure: it is
 //! Codex remarking on its own configuration, and it is left out.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
+use clarp_kernel::live::Glimpse;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
@@ -197,7 +198,12 @@ pub struct CodexInterpreter {
     failure: Option<String>,
     stderr: ErrorTail,
     ended: bool,
+    /// The calls those who watch the turn were shown, by Codex's item id.
+    shown: BTreeSet<String>,
 }
+
+/// What the ids of Codex's live items begin with.
+const SHOWN: &str = "cx";
 
 impl CodexInterpreter {
     pub fn new(turn: u64, name: &str) -> Self {
@@ -210,6 +216,7 @@ impl CodexInterpreter {
             failure: None,
             stderr: ErrorTail::default(),
             ended: false,
+            shown: BTreeSet::new(),
         }
     }
 
@@ -265,9 +272,96 @@ impl CodexInterpreter {
         }
     }
 
+    /// What those who watch the turn are shown of an item. Codex says an item when it begins
+    /// and when it is whole, and nothing in between: a command is shown from when it starts,
+    /// with what it printed when it ends; what the model thought and said is shown whole.
+    fn show(&mut self, done: bool, item: &Value, out: &mut Vec<Signal>) {
+        let raw = text_of(&item["id"]);
+        if raw.is_empty() {
+            return;
+        }
+        let id = format!("{SHOWN}:{raw}");
+        let mut glimpse = |glimpse: Glimpse| out.push(Signal::Glimpse(glimpse));
+        match text_of(&item["type"]) {
+            "agent_message" => {
+                let text = match text_of(&item["text"]) {
+                    "" => text_of(&item["message"]),
+                    text => text,
+                };
+                if text.trim().is_empty() {
+                    return;
+                }
+                glimpse(Glimpse::Message {
+                    id: id.clone(),
+                    text: text.to_string(),
+                    row: Some(format!("r-{}-{raw}", self.name)),
+                });
+                if done {
+                    glimpse(Glimpse::Done { id });
+                }
+            }
+            "reasoning" => {
+                glimpse(Glimpse::Reasoning {
+                    id: id.clone(),
+                    text: text_of(&item["text"]).to_string(),
+                });
+                if done {
+                    glimpse(Glimpse::Done { id });
+                }
+            }
+            "context_compaction" => glimpse(Glimpse::Compacting {
+                prefix: SHOWN.to_string(),
+                over: done,
+            }),
+            // Its plan, whole each time: every step with whether it is done.
+            "todo_list" => {
+                let steps: Vec<Value> = item["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|step| {
+                        let status = match step["completed"].as_bool() {
+                            Some(true) => "completed",
+                            _ => "pending",
+                        };
+                        json!({"text": text_of(&step["text"]), "status": status})
+                    })
+                    .collect();
+                glimpse(Glimpse::Plan {
+                    prefix: SHOWN.to_string(),
+                    steps: Value::Array(steps),
+                });
+            }
+            "error" | "" => {}
+            _ => {
+                // A call is shown once when it is first seen, under the id its row in the
+                // conversation has, and settled when it is whole.
+                if self.shown.insert(raw.to_string()) {
+                    let (name, input) = call_of(item);
+                    glimpse(Glimpse::Tool {
+                        id: id.clone(),
+                        call_id: format!("c-{}-{raw}", self.name),
+                        name,
+                        input,
+                        whole: true,
+                    });
+                }
+                if done {
+                    glimpse(Glimpse::Returned {
+                        id,
+                        content: Value::String(result_of(item)),
+                        failed: went_wrong(item),
+                        exit_code: item["exit_code"].as_i64(),
+                    });
+                }
+            }
+        }
+    }
+
     fn on_item(&mut self, step: &str, item: &Value, t: i64, out: &mut Vec<Signal>) {
         let id = text_of(&item["id"]);
         let done = step == "item.completed";
+        self.show(done, item, out);
         match text_of(&item["type"]) {
             "agent_message" => {
                 let text = match text_of(&item["text"]) {
@@ -483,7 +577,110 @@ mod tests {
         );
     }
 
+    /// What a turn means for the conversation: everything but what is only shown.
     fn read(lines: &[&str], exit: (Option<i32>, Option<i32>)) -> Vec<Signal> {
+        let mut signals = read_all(lines, exit);
+        signals.retain(|signal| !matches!(signal, Signal::Glimpse(_)));
+        signals
+    }
+
+    /// A turn as those who watch it hold it at its end: every glimpse given to a hub, and
+    /// every event the hub sent applied by the reducer a client runs.
+    fn watched(lines: &[&str]) -> clarp_kernel::live::View {
+        use clarp_kernel::live::{Hub, View};
+
+        let mut hub = Hub::new("epoch-1", "agent-1", "rachel");
+        let mut client = View::new();
+        client.apply_snapshot(&json!({"epoch": "epoch-1", "lseq": 0}));
+        let mut sent = hub.begin_turn("rachel", "conv-1", "tr-1", None, 100);
+        for (at, signal) in read_all(lines, (Some(0), None)).into_iter().enumerate() {
+            if let Signal::Glimpse(glimpse) = signal {
+                sent.extend(hub.show(&glimpse, Some("tr-1"), 101 + at as i64));
+            }
+        }
+        sent.extend(hub.end_turn("completed", None, 10_000));
+        for event in &sent {
+            assert!(
+                client.apply_event(event).is_empty(),
+                "a client takes {event}"
+            );
+        }
+        client
+    }
+
+    #[test]
+    fn a_turn_is_shown_as_items_from_what_codex_says_of_each() {
+        let view = watched(&[
+            r#"{"type":"thread.started","thread_id":"t-1"}"#,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Looking at the tests**\nThey are few."}}"#,
+            r#"{"type":"item.started","item":{"id":"item_1","type":"todo_list","items":[{"text":"run the tests","completed":false},{"text":"answer","completed":false}]}}"#,
+            r#"{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"bash -lc 'cargo test'","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"bash -lc 'cargo test'","aggregated_output":"running 2 tests\ntest a ... ok\ntest b ... FAILED\n","exit_code":101,"status":"failed"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"src/b.rs","kind":"update"}],"status":"completed"}}"#,
+            r#"{"type":"item.updated","item":{"id":"item_1","type":"todo_list","items":[{"text":"run the tests","completed":true},{"text":"answer","completed":false}]}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"One test fails; I changed b.rs."}}"#,
+            r#"{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ]);
+        let items = view.items();
+        let shown: Vec<(&str, &str, &str)> = items
+            .iter()
+            .map(|item| {
+                let text = |name: &str| item[name].as_str().unwrap();
+                (text("id"), text("kind"), text("status"))
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("cx:item_0", "reasoning", "completed"),
+                ("cx:tr-1:plan", "plan", "completed"),
+                ("cx:item_2", "tool", "failed"),
+                ("cx:item_3", "tool", "completed"),
+                ("cx:item_4", "message", "completed"),
+            ]
+        );
+        assert_eq!(items[0]["title"], "Looking at the tests");
+        assert_eq!(
+            items[1]["plan"]["steps"],
+            json!([{"text": "run the tests", "status": "completed"}, {"text": "answer", "status": "pending"}]),
+            "the plan is replaced whole"
+        );
+        let command = &items[2]["tool"];
+        assert_eq!(
+            (
+                &command["name"],
+                &command["category"],
+                &command["label"],
+                &command["call_id"]
+            ),
+            (
+                &json!("shell"),
+                &json!("exec"),
+                &json!("cargo test"),
+                &json!("c-m1-item_2")
+            ),
+            "a command is shown by what it runs, under the id its row in the conversation has"
+        );
+        assert_eq!(
+            command["output"],
+            json!({"tail": ["running 2 tests", "test a ... ok", "test b ... FAILED"], "total_lines": 3,
+                   "truncated": false, "exit_code": 101}),
+            "with what it printed and the code it ended with"
+        );
+        assert_eq!(items[3]["tool"]["category"], "edit");
+        assert_eq!(
+            (&items[4]["text"], &items[4]["phase"], &items[4]["row_id"]),
+            (
+                &json!("One test fails; I changed b.rs."),
+                &json!("final"),
+                &json!("r-m1-item_4")
+            )
+        );
+        assert_eq!(view.turn().unwrap()["tool_count"], 2);
+        assert_eq!(view.activity()["state"], "idle");
+    }
+
+    fn read_all(lines: &[&str], exit: (Option<i32>, Option<i32>)) -> Vec<Signal> {
         let mut interpreter = CodexInterpreter::new(3, "m1");
         let mut out = Vec::new();
         let mut t = 100;

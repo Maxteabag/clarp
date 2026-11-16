@@ -577,10 +577,12 @@ the connections that asked (`/events?live=`): whole to one that follows the agen
 turn alone to one that does not, nothing to one that did not ask; they have no number and are never kept.
 `GET /live?session=` answers the whole view. The corpus has the scenario `live-items`: its stand-in for
 Claude Code prints a turn piece by piece as the real one does (`[qa-stream]`), and the scenario is listened
-to as an app that follows the agent. Not there: an explanation of a tool's use in plain words (the setting
-answers off, and turning it on is refused in words); the items of a Codex turn, which shows its turn and its
-status line alone; plan and diff items; and the pushes that keep the phone's "agents working" activity
-current.
+to as an app that follows the agent. A Codex turn is shown from what `codex exec --json` says of each item
+when it begins and when it is whole: a command from when it starts, with what it printed and the code it
+ended with, what the model thought and said, and its plan. Not there: an explanation of a tool's use in
+plain words (the setting answers off, and turning it on is refused in words); a plan from Claude Code's list
+of tasks and the turn's diff as items of their own; and the pushes that keep the phone's "agents working"
+activity current.
 
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can

@@ -40,6 +40,8 @@ fn read(fixture: &str, name: &str, exit: (Option<i32>, Option<i32>)) -> Vec<Sign
         },
         &mut out,
     );
+    // What a turn means for the conversation: what is only shown is looked at by itself.
+    out.retain(|signal| !matches!(signal, Signal::Glimpse(_)));
     out
 }
 

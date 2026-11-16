@@ -353,6 +353,7 @@ impl Shown {
                 id: format!("{SHOWN}:{}", text_of(&part["tool_use_id"])),
                 content: part["content"].clone(),
                 failed: clarp_kernel::live::truthy(&part["is_error"]),
+                exit_code: None,
             }));
         }
     }

@@ -373,12 +373,18 @@ pub enum Glimpse {
         input: Value,
         whole: bool,
     },
-    /// A tool returned.
+    /// A tool returned. `exit_code` is the code its command ended with, for a tool that
+    /// says one; without one, a tool that failed is told as 1 and one that did not as 0.
     Returned {
         id: String,
         content: Value,
         failed: bool,
+        exit_code: Option<i64>,
     },
+    /// The agent's plan for the turn, whole: each step with its text and where it stands
+    /// (`pending`, `in_progress`, `completed`). `prefix` is what the ids of this backend's
+    /// items begin with.
+    Plan { prefix: String, steps: Value },
     /// A message or a summary is whole.
     Done { id: String },
     /// The context is being made smaller, or that is over. `prefix` is what the ids of this
@@ -617,6 +623,7 @@ impl Hub {
                 id,
                 content,
                 failed,
+                exit_code,
             } => {
                 let mut out = Vec::new();
                 if !self.has_item(id) {
@@ -627,12 +634,19 @@ impl Hub {
                     self.tool_output(id, &tail, total, turn_id, now);
                 }
                 let status = if *failed { "failed" } else { "completed" };
-                let exit_code = i64::from(*failed);
+                let exit_code = exit_code.unwrap_or(i64::from(*failed));
                 let patch = json!({"tool": {"output": {"exit_code": exit_code}}});
                 out.extend(self.done(id, status, Some(&patch), turn_id, now));
                 out
             }
             Glimpse::Done { id } => self.done(id, "completed", None, turn_id, now),
+            Glimpse::Plan { prefix, steps } => {
+                // One plan to a turn, replaced whole each time it is told.
+                let held = self.view.turn.as_ref().and_then(|turn| turn.get("turn_id"));
+                let id = format!("{prefix}:{}:plan", held.map_or("", text_of));
+                let fields = json!({"plan": {"steps": steps}});
+                self.item(&id, "plan", &fields, turn_id, now)
+            }
             Glimpse::Compacting { prefix, over } => {
                 let held = self.view.turn.as_ref().and_then(|turn| turn.get("turn_id"));
                 let id = format!("{prefix}:{}:compaction", held.map_or("", text_of));
