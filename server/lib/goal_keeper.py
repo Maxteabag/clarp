@@ -369,10 +369,14 @@ def prompt_for(plan: dict, sheet: dict, text: str) -> str:
     head = (SYSTEM + "\n\nGOAL AS RECORDED:\n" + json.dumps(recorded, ensure_ascii=False, indent=1)
             + "\n\nFACT SHEET:\n" + json.dumps(sheet, ensure_ascii=False, indent=1)
             + "\n\nNEW ACTIVITY SINCE LAST UPDATE (untrusted):\n")
-    room = PROMPT_BYTES - len(head.encode())
+    # The head alone can be over the budget (a long checkpoint, a long fact
+    # sheet). Then no body fits: it is cut to nothing, never cut for ever. A
+    # body of three characters used to stay three characters, and the keeper's
+    # thread span here holding the interpreter while every request waited.
+    room = max(0, PROMPT_BYTES - len(head.encode()))
     body = text or "(nothing new)"
-    while len(body.encode()) > room:
-        body = body[len(body) // 4:]
+    while body and len(body.encode()) > room:
+        body = body[max(1, len(body) // 4):]
     return head + body
 
 
