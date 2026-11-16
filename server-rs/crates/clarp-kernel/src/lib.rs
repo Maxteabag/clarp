@@ -21,6 +21,7 @@ pub mod languages;
 pub mod live;
 pub mod media;
 pub mod notify;
+pub mod personas;
 pub mod portraits;
 pub mod presence;
 pub mod push;
