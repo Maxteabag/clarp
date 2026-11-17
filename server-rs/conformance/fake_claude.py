@@ -17,7 +17,10 @@ fail at random. The moment is taken there and nowhere else. Taken in every turn,
 the user's words and the answer in the transcript, it turned another race of the reference
 the other way (a reply that closes a later turn left without its mark, defect R6: in a
 quarter of such rows instead of a sixth, conformance run 44096945408, which then differed
-at 21 places nobody had seen it differ at). The prompt is the user's words: a text block that
+at 21 places nobody had seen it differ at). And a turn marked ``[qa-slow]`` takes none: it
+is slow already, and the scenarios that stop such a turn or queue behind it found it, with
+a moment before everything, at a point where it had written nothing yet (run 44101297003:
+138 differences in six such scenarios). The prompt is the user's words: a text block that
 begins with ``<system-reminder>`` is what a Host says with them (the Rust Host says after
 the user's words what the Python Host says by a hook this stand-in does not run), and is
 no part of it. Markers in the prompt:
@@ -350,7 +353,9 @@ def main() -> int:
     # The moment a tool takes, in the first turn of a conversation and before anything else:
     # what it then writes (the session, the user's words and its answer in its transcript, its
     # answer and its result on its output) comes in one piece, as it does in every later turn.
-    if '--resume' not in args:
+    # A turn that is slow by its own mark takes no moment more: it is slow so that something
+    # can be done to it while it runs, and has written the user's words by then.
+    if '--resume' not in args and '[qa-slow]' not in text:
         stopped.wait(ANSWER_AFTER_S)
     emit({'type': 'system', 'subtype': 'init', 'session_id': session, 'cwd': os.getcwd(),
           'model': 'replay-fake', 'tools': []})
