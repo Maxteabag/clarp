@@ -2,6 +2,8 @@ import pathlib
 import sys
 import time
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib.protocol import TurnSource  # noqa: E402
 from lib.timing import HOOK_TIMING  # noqa: E402
@@ -279,3 +281,146 @@ def test_a_claude_turn_is_told_whose_turn_it_is():
     context = pwa_source_flag._build_additional_context(
         app_dispatched=True, voiced=False, agent={"persona": "Koko", "session": "koko-5850"})
     assert "This turn belongs to Koko (Clarp session koko-5850)" in context
+
+
+@pytest.mark.parametrize("level,label", [(0, None), (1, "milestones"), (2, "steps"),
+                                         (3, "running commentary")])
+@pytest.mark.parametrize("delivery", ["voiced", "audio-disabled", "typed"])
+def test_hook_context_carries_only_the_speaking_agents_narration_level(
+        tmp_path, monkeypatch, level, label, delivery):
+    import json
+    from lib import agents as agents_db
+
+    speaker = agents_db.create_agent(persona="Speaker", voice_id="V", cwd=str(tmp_path),
+                                    session="speaker")
+    agents_db.update_agent(speaker, voice_verbosity=level)
+    other = agents_db.create_agent(persona="Other", voice_id="V", cwd=str(tmp_path),
+                                  session="other")
+    agents_db.update_agent(other, voice_verbosity=(level + 1) % 4)
+    if delivery != "typed":
+        marker = pwa_source_flag.PATHS.source_marker("speaker")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        audio = int(delivery == "voiced")
+        marker.write_text(f"{TurnSource.PWA_VOICE_MARKER} speaker {time.time():.3f} narration-trace {audio}\n")
+
+    _run_hook(monkeypatch, "speaker", "speaker-uuid")
+
+    context = json.loads(sys.stdout.getvalue())["hookSpecificOutput"]["additionalContext"]
+    if delivery == "voiced" and level:
+        assert context.count(f"Narration level: {label}.") == 1
+        assert context.count("Narration level:") == 1
+    else:
+        assert "Narration level:" not in context
+
+
+@pytest.fixture
+def narration_hook_pair(tmp_path):
+    """Compare complete main/candidate hook executions, not selected strings."""
+    import json
+    import os
+    import subprocess
+    from lib import agents as agents_db
+    from lib.db import conn
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    agent_id = agents_db.create_agent(persona="Narration test", voice_id="V", cwd=str(tmp_path),
+                                     session="narration-test")
+    def run_pair(*, stored=0, **case):
+        # SQLite permits a REAL infinity in this INTEGER-affinity column.
+        # Row projections exercise NULL/missing/text without weakening NOT NULL.
+        conn().execute("UPDATE agents SET voice_verbosity=? WHERE agent_id=?", (stored, agent_id))
+        case_file = tmp_path / "case.json"
+        case_file.write_text(json.dumps(case))
+        results = []
+        for version in ("main", "candidate"):
+            report_file = tmp_path / f"reports-{version}.json"
+            result = subprocess.run(
+                [sys.executable, str(root / "tests/fixtures/pwa_narration_hook_runner.py"),
+                 str(root), str(case_file), version, str(report_file)],
+                input=json.dumps({"session_id": "narration-uuid", "prompt": "hi"}).encode(),
+                env={**os.environ, "CLAUDE_PWA_SESSION": "narration-test"},
+                capture_output=True, timeout=10)
+            reports = json.loads(report_file.read_text())
+            results.append((result, reports))
+        return results
+    return run_pair
+
+
+@pytest.mark.parametrize("level", [0, 2])
+def test_narration_import_failure_keeps_main_output_and_reports_privately(narration_hook_pair, tmp_path, level):
+    (main, _), (actual, reports) = narration_hook_pair(stored=level, unavailable=True)
+    assert main.returncode == actual.returncode == 0
+    assert main.stdout == actual.stdout
+    assert main.stderr == actual.stderr == b""
+    assert reports == [{"source": "userprompt_hook", "event": "narrationFail", "level": "error",
+                        "detail": {"error": "ImportError"}}]
+    _assert_private_narration_line(tmp_path, "ImportError")
+
+
+def test_narration_infinity_keeps_main_output_and_reports_privately(narration_hook_pair, tmp_path):
+    (main, _), (actual, reports) = narration_hook_pair(stored=float("inf"))
+    assert main.returncode == actual.returncode == 0
+    assert main.stdout == actual.stdout
+    assert main.stderr == actual.stderr == b""
+    assert reports == [{"source": "userprompt_hook", "event": "narrationFail", "level": "error",
+                        "detail": {"error": "OverflowError"}}]
+    _assert_private_narration_line(tmp_path, "OverflowError")
+
+
+@pytest.mark.parametrize("case", [{"stored": 0}, {"resolved_level": None},
+                                  {"resolved_level": "missing"}, {"resolved_level": "garbage"},
+                                  {"stored": -1}])
+def test_quiet_narration_whole_output_matches_main(narration_hook_pair, case):
+    (main, _), (actual, reports) = narration_hook_pair(**case)
+    assert main.returncode == actual.returncode == 0
+    assert main.stdout == actual.stdout
+    assert main.stderr == actual.stderr == b""
+    assert reports == []
+
+
+@pytest.mark.parametrize("case,expected_level", [({"stored": 99}, 3),
+                                                ({"resolved_level": "2"}, 2)])
+def test_narration_odd_values_follow_shared_catalogue(narration_hook_pair, case, expected_level):
+    import json
+    from lib import voice_verbosity
+
+    (main, _), (actual, reports) = narration_hook_pair(**case)
+    assert main.returncode == actual.returncode == 0
+    assert main.stderr == actual.stderr == b""
+    assert reports == []
+    expected = json.loads(main.stdout)
+    context = expected["hookSpecificOutput"]["additionalContext"]
+    header = "\n\nNARRATION TEST GROUP HEADER"
+    assert context.endswith(header)
+    clause = voice_verbosity.narration_clause(expected_level)
+    expected["hookSpecificOutput"]["additionalContext"] = context[:-len(header)] + "\n\n" + clause + header
+    assert actual.stdout == (json.dumps(expected) + "\n").encode()
+
+
+def test_narration_failure_writes_one_private_line_with_capture_off(
+        narration_hook_pair, tmp_path):
+    from lib import diagnostics_settings, telemetry
+    from lib.paths import RuntimePaths
+
+    diagnostics_settings.update({"enabled": False, "categories": []})
+    (main, _), (actual, _) = narration_hook_pair(stored=2, unavailable=True, real_storage=True)
+    assert main.returncode == actual.returncode == 0
+    assert actual.stdout == main.stdout
+    assert actual.stderr == main.stderr == b""
+    lines = RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()
+    assert len(lines) == 1
+    assert "userprompt_hook" in lines[0] and "narrationFail ImportError" in lines[0]
+    assert "test: narration unavailable" not in lines[0]
+    assert telemetry.conn().execute(
+        "SELECT COUNT(*) FROM diagnostic_events WHERE event='narrationFail'").fetchone()[0] == 0
+    diagnostics_settings.reset_for_tests()  # Read persisted policy, not the parent's cached value.
+    assert diagnostics_settings.get().enabled is False
+
+
+def _assert_private_narration_line(tmp_path, error_class):
+    from lib.paths import RuntimePaths
+
+    lines = RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()
+    assert len(lines) == 1
+    assert "userprompt_hook" in lines[0] and f"narrationFail {error_class}" in lines[0]
+    assert "test: narration unavailable" not in lines[0]
