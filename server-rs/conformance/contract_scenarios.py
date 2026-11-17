@@ -1587,18 +1587,20 @@ SCENARIOS.append({
             'a copy of it is for another agent to go on from (`fork_session_id`); the session of an agent '
             'that was removed is taken up (`resume_session_id`), and what was said in it is the conversation '
             'of the agent that took it up. (The directory is one the Python Host finds the sessions of: '
-            'reference defect R36.)',
+            'reference defect R36. The sessions of every directory are not asked for: the Python Host '
+            'has run its tool in a directory of its own by then, and lists that. The conversation of the '
+            "scenario's own agent is not read: on the Python Host the agent that takes its session up "
+            'has that same conversation, counted on from where the first agent left it, and on the Rust '
+            'Host one of its own: docs/differences.md.)',
     'sessions': (AGENT, FORKED, TAKEN),
     'steps': [
         send('synthetic word alfa [qa-tools]', 'pastalfa'),
         {'op': 'wait_reply', 'after': 'u-pastalfa'},
         {'op': 'quiesce'},
-        LOG,
         {**get(PAST + '?cwd={workspace}&backend=claude', 'the sessions its tool kept in its directory'),
          'save': {'kept': 'sessions.0.id'}},
         get(PAST + '?cwd={workspace}', 'the sessions of its directory, of no tool said'),
         get(PAST + '?cwd={workspace}/&backend=claude&scope=workspace', 'the same directory, written with a slash'),
-        get(PAST + '?scope=all&backend=claude', 'the sessions of every directory'),
         get(PAST + '?cwd=/nowhere&backend=claude', 'the sessions of a directory that is not there'),
         post('/agents', {**MAKE_FROM, 'name': 'Second', 'resume_session_id': '{kept}'},
              'a session an agent has, taken up'),
@@ -1608,7 +1610,6 @@ SCENARIOS.append({
              'a session nobody kept, opened'),
         post('/agents', {**MAKE_FROM, 'name': 'Second', 'fork_session_id': 'no-such-session'},
              'a session nobody kept, forked'),
-        SNAPSHOT,
         post('/agents', {**MAKE_FROM, 'name': 'Forked One', 'session': FORKED, 'fork_session_id': '{kept}'},
              'a copy of its session, for another agent'),
         {'op': 'quiesce', 'session': FORKED},
@@ -1617,7 +1618,6 @@ SCENARIOS.append({
         {'op': 'wait_reply', 'after': 'u-pastbravo', 'session': FORKED},
         {'op': 'quiesce', 'session': FORKED},
         get(f'/log?session={FORKED}', 'its conversation with a message after'),
-        LOG,
         get(PAST + '?cwd={workspace}&backend=claude', 'the sessions of the directory, with the copy'),
         {'op': 'delete', 'path': f'/agents/{AGENT}', 'name': 'the agent whose session it was is removed'},
         post('/agents', {**MAKE_FROM, 'name': 'Taken One', 'session': TAKEN, 'resume_session_id': '{kept}'},
