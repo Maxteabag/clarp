@@ -88,6 +88,7 @@ ddf864060396  roster-edits: the same, in the snapshot with the agent put away
 b552ef3283ca  roster-edits: the same, in the snapshot asked for in another word
 6fabd674f43e  roster-edits: the same, in the list of the agents put away
 46022bbcdc67  roster-edits: the same, in that list one to a page
+1cd25c5f6b98  text-turn: live_activity of the agent after its first turn (run 44089630630: both recordings of the reference left it empty here, and one of two in voice-markup and in agent-forks)
 
 # What a tool that died left on stderr is given without the end of its last line in the state
 # of the failed turn (the Python Host gives the tool's bytes as they came).
