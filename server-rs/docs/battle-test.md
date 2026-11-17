@@ -1050,6 +1050,29 @@ some hundreds), a second turn in a conversation that was taken up, and a turn wh
 The Host's own process holds 36 MB eighty seconds after it started; its unit holds 1.07 GB in all, and
 the only other process in it is the worker that listens (speech in, its model loaded from the start).
 
+## A conversation made shorter, through the installed Host
+
+The Host installed on elitebook from main `374ed321` (17 Nov at 16:36, back on the relay after 93 ms, its
+23 agents as before), with the real Claude Code 2.1.321 on Sonnet: Claude is what is tried here. One
+check (`verify-compact.py`, 23 seconds), three short turns of a model and the compaction, in a directory
+of the kind both Hosts take for their own scratch.
+
+| What was asked | What the installed Host did |
+|---|---|
+| The picker | says a conversation of Claude Code can be made shorter |
+| `POST /compact` for an agent that has had no turn | refused, 409, "no live session to compact" |
+| Two turns: one word each | answered; the agent's row says its conversation holds 31,381 tokens |
+| `POST /compact` | started; the row says `compacting` while it runs; asked again meanwhile, it is at it already; then at rest (`done`), nothing waiting, the same session of the tool, and the row says the conversation holds 8,878 tokens |
+| A third turn: which two words were they? | answered with both, from the tool's own summary, in the same session |
+| What the Host counted for Claude | 4 turns, 94,304 tokens in, 17 out, 0.2197 dollars: the cost as the rise of the session's total, turn by turn |
+| Afterwards | the agent removed; the Host has its 23 agents |
+
+One point of the check did not hold, and it was the check's own: it read the agent's log with the rows the
+Host writes by itself in it, and so counted the request for the compaction (five rows, where the chat has
+four). An app that folds such rows away asks for the log without them; the Host's test holds both
+readings (the chat as it was, and the request marked as the Host's own). The check reads as an app does
+from now on. It was not run a second time for that point: four more calls of a model.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart
