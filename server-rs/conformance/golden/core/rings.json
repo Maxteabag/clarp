@@ -3622,21 +3622,6 @@
   },
   {
    "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "ringzero",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
     "agent_id": "<id:1>",
     "detail": {
      "session": "nova"
@@ -3695,6 +3680,21 @@
    },
    "event": null,
    "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "client_msg_id": "ringzero",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {

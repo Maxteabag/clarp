@@ -1938,36 +1938,6 @@
   {
    "data": {
     "agent_id": "<id:5>",
-    "client_msg_id": "u-phone-bravo",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "desk-charlie",
-    "event_id": "<eid:queue-updated#2@dfa4af>",
-    "queue_depth": 2,
-    "queue_paused": false,
-    "queue_revision": 2,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#2@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
     "detail": {
      "backend_session_id": "<id:4>",
      "dispatch": "claude",
@@ -2008,6 +1978,103 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "u-phone-bravo",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "desk-charlie",
+    "event_id": "<eid:queue-updated#2@dfa4af>",
+    "queue_depth": 2,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#2@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:5>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "badge": true,
+    "cause_message_id": "u-phone-alfa",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:6>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {
@@ -2068,51 +2135,6 @@
    },
    "event": null,
    "id": "<eid:agent-state#3@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "detail": {
-     "dispatch": "clarp",
-     "duration_ms": "<duration>",
-     "origin": "user",
-     "tokens_in": 5,
-     "tokens_out": 7,
-     "trace_id": "<id:1>"
-    },
-    "event_id": "<eid:agent-state#3@0952e1>",
-    "kind": "done",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#3@0952e1>"
-  },
-  {
-   "data": {
-    "action": "done",
-    "agent_id": "<id:5>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#4@0952e1>",
-    "file_path": "",
-    "kind": "done",
-    "persona": "Claire",
-    "phase": "done",
-    "session": "claire",
-    "started_at_ms": null,
-    "state": "idle",
-    "status": "ok",
-    "summary": "Done",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": null,
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#4@0952e1>"
   },
   {
    "data": {
@@ -2291,28 +2313,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#12@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "badge": true,
-    "cause_message_id": "u-phone-alfa",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:6>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:1>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {

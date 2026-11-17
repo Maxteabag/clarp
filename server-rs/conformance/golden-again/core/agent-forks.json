@@ -4032,6 +4032,36 @@
   {
    "data": {
     "agent_id": "<id:4>",
+    "client_msg_id": "",
+    "event_id": "<eid:queue-updated#1@8a6a65>",
+    "queue_depth": 0,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": true,
+    "session": "<forked:1>",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@8a6a65>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "client_msg_id": "",
+    "event_id": "<eid:agent-state#1@d7b769>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "<forked:1>",
+    "trace_id": "<id:7>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@d7b769>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
     "detail": {
      "session": "<forked:1>"
     },
@@ -4068,36 +4098,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0a5455>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "",
-    "event_id": "<eid:queue-updated#1@8a6a65>",
-    "queue_depth": 0,
-    "queue_paused": false,
-    "queue_revision": 2,
-    "queue_started": true,
-    "session": "<forked:1>",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@8a6a65>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "",
-    "event_id": "<eid:agent-state#1@d7b769>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "<forked:1>",
-    "trace_id": "<id:7>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@d7b769>"
   },
   {
    "data": {

@@ -822,8 +822,18 @@ told to wait, then carries "Runs sleep. Then runs echo." while the turn still ru
 next turn is answered from what was learned, and nobody is asked. What the Python Host does for a patch
 its other process cannot take, and for what it missed while it was away, has no counterpart here: the rows
 and their explainer are one process. The switch and the janitor stay off as installed: what is asked of a
-model, on whose account, is the owner's to decide, and comes over with the owner's settings. Not built
-yet: the whole command of a row whose name an app cut off.
+model, on whose account, is the owner's to decide, and comes over with the owner's settings.
+
+One part of the Python Host's explainer is left out on purpose: its memory of each agent's recent commands
+(`tool_explanation_commands`). That Host shows a command of Codex as the name of its row, cut at 80 signs,
+and remembers the whole commands to complete a cut name an app asks about. This Host shows such a command
+under the name `shell` with the command beside it (2,000 signs at most on its item), and the apps ask with
+what the row carries (name, summary, command, path and what it was given: read in the phone's app and in
+the desktop's; the web app does not ask, it shows what the row carries). No name this Host tells is cut, so
+there is nothing to complete, and no command is held in memory for it. What is
+still short of the Python Host is another thing: a call of Codex is a row of its own in the conversation
+here, with a plain card that holds 200 signs of its command, where that Host groups such calls into cells.
+The cells are to be built.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

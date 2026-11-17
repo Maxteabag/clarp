@@ -180,11 +180,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 07:48 (17 Nov) | the Host updated by the installer, `bebd58a7` to `e46cbf51`: the build in which a new agent begins with a session its tool kept, an agent asks for an event in its user's calendar, and an app's picker is told the models. The relay was on: the new Host was connected to it again 93 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 09:39 (17 Nov) | the Host updated by the installer, `e46cbf51` to `5bf5ab93`: the build in which the Host's own turns are counted for an app's usage screen, the gauge shows what the last answer was made from, a turn is told this Host under the names a skill's own script reads, and the explainer of the use of tools is in as far as its desk (nothing of it runs in this build). The relay was on: the new Host was connected to it again 134 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 09:50 (17 Nov) | the Host updated by the installer, `5bf5ab93` to `382d1c37`: the build in which an app that asks for the use of tools to be explained is answered (off as it comes, and its janitor paused). The relay was on: the new Host was connected to it again 45 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 10:08 (17 Nov) | the Host updated by the installer, `382d1c37` to `d725481b`: the build in which a row of a tool carries its explanation while its turn is shown (off as it comes). The relay was on: the new Host was connected to it again 66 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and forty turns in
-forty-two exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-forty-eight of Codex in the sixteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and forty-three turns in
+forty-three exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+fifty-one of Codex in the seventeen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -821,6 +822,18 @@ installed; the check turns both on, and puts both back.
 | The same program with another file | answered at once from what was learned, and nobody is asked |
 | The ledger (`GET /tool-explanations/stats`) | the template, the one answer from what was learned and the one question to the model are counted; one row learned, with places |
 | The janitor's runs | one, completed |
+| Afterwards | the janitor paused, the switch off, the check's agent removed; the 23 agents that were there still are |
+
+**On the row itself.** Landed with `d725481b` (17 Nov, 10:07, installed by exercise 43 a minute later) and
+tried on the installed Host with the real tools (`verify-explain-rows.py`, 15 points): the switch and the
+janitor turned on, an agent of the check's own on Codex asked to run one harmless command of a made-up shape
+(`printf 'zorb-…\n' | wc -c`), and what is shown of its turn (`GET /live`) read three times a second.
+
+| What | On the installed Host |
+|---|---|
+| The row of the command, when the turn shows it | told to wait for its explanation (`pending`) |
+| 7.6 seconds later | carries its sentence (`ready`): "Print the supplied text. Then count the bytes in standard input." No template says either part, so the janitor's model was asked: Codex, started to read and nothing else |
+| The turn | completed; its row was settled 12.4 seconds after the message |
 | Afterwards | the janitor paused, the switch off, the check's agent removed; the 23 agents that were there still are |
 
 ## The soak so far

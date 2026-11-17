@@ -25,10 +25,10 @@
     "conversation_id": "<id:2>",
     "cwd": "<ROOT>/workspace",
     "delivery_scope": {
-     "agent_id": "<id:5>",
+     "agent_id": "<id:6>",
      "runtime_instance": "<instance>",
      "runtime_release": "in-process",
-     "server_id": "<id:4>"
+     "server_id": "<id:5>"
     },
     "delivery_stop_generation": 0,
     "file": "<id:2>.jsonl",
@@ -74,10 +74,32 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:3>",
+      "id": "msg-<id:3>",
       "kind": null,
       "origin": "user",
       "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 2,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: [qa-drops:1] synthetic work quebec",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:1>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "live-<id:4>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -117,7 +139,7 @@
      {
       "activity": {
        "action": "done",
-       "agent_id": "<id:5>",
+       "agent_id": "<id:6>",
        "call_id": null,
        "file_path": "",
        "kind": "done",
@@ -133,7 +155,7 @@
        "turn_started_ms": null,
        "type": "agent-activity"
       },
-      "agent_id": "<id:5>",
+      "agent_id": "<id:6>",
       "alive": true,
       "archived_at": null,
       "avatar_generation_status": null,
@@ -171,7 +193,7 @@
       "last_activity": "<time>",
       "last_completed_message": "Claude replay reply: [qa-drops:1] synthetic work quebec",
       "last_message": "Claude replay reply: [qa-drops:1] synthetic work quebec",
-      "last_message_id": "live-<id:3>",
+      "last_message_id": "live-<id:4>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -206,7 +228,7 @@
      }
     ],
     "available_mcp_servers": [],
-    "focus": "<id:5>",
+    "focus": "<id:6>",
     "model_avatars": false,
     "personas": [
      {
@@ -1729,7 +1751,7 @@
     "queue_revision": 0,
     "queued": false,
     "session": "claire",
-    "trace_id": "<id:6>"
+    "trace_id": "<id:7>"
    },
    "headers": {
     "cache-control": "no-store",
@@ -1745,16 +1767,16 @@
     "conversation_id": "<id:2>",
     "cwd": "<ROOT>/workspace",
     "delivery_scope": {
-     "agent_id": "<id:5>",
+     "agent_id": "<id:6>",
      "runtime_instance": "<instance>",
      "runtime_release": "in-process",
-     "server_id": "<id:4>"
+     "server_id": "<id:5>"
     },
     "delivery_stop_generation": 0,
     "file": "<id:2>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 9,
+    "latest_revision": 11,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -1794,14 +1816,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:3>",
+      "id": "msg-<id:3>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 5,
+      "revision": 2,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1810,15 +1832,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      },
      {
       "automated": false,
@@ -1826,7 +1840,7 @@
       "delivery": {
        "for": {
         "client_msg_id": "sierra",
-        "trace_id": "<id:6>"
+        "trace_id": "<id:7>"
        },
        "rev": 2,
        "seq": 4,
@@ -1849,20 +1863,20 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:6>"
+      "trace_id": "<id:7>"
      },
      {
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:7>",
+      "id": "live-<id:8>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 9,
+      "revision": 10,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1871,13 +1885,13 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:6>",
+      "trace_id": "<id:7>",
       "turn": {
        "ended_at_ms": "<time>",
        "started_at_ms": "<time>",
        "status": "completed",
        "tool_count": 0,
-       "turn_id": "<id:6>",
+       "turn_id": "<id:7>",
        "worked_ms": "<duration>"
       }
      }
@@ -1898,7 +1912,7 @@
      {
       "activity": {
        "action": "done",
-       "agent_id": "<id:5>",
+       "agent_id": "<id:6>",
        "call_id": null,
        "file_path": "",
        "kind": "done",
@@ -1914,7 +1928,7 @@
        "turn_started_ms": null,
        "type": "agent-activity"
       },
-      "agent_id": "<id:5>",
+      "agent_id": "<id:6>",
       "alive": true,
       "archived_at": null,
       "avatar_generation_status": null,
@@ -1939,7 +1953,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 9,
+      "head_revision": 11,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -1950,9 +1964,9 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "You: synthetic greeting sierra",
+      "last_completed_message": "Claude replay reply: synthetic greeting sierra",
       "last_message": "Claude replay reply: synthetic greeting sierra",
-      "last_message_id": "live-<id:7>",
+      "last_message_id": "live-<id:8>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -1963,7 +1977,7 @@
        "since_ms": "<time>",
        "state": "idle",
        "tool": null,
-       "turn_id": "<id:6>",
+       "turn_id": "<id:7>",
        "turn_started_ms": null
       },
       "mcp_servers": [],
@@ -1987,7 +2001,7 @@
      }
     ],
     "available_mcp_servers": [],
-    "focus": "<id:5>",
+    "focus": "<id:6>",
     "model_avatars": false,
     "personas": [
      {
@@ -3528,7 +3542,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "event_id": "<eid:transcript-updated#1@45bbad>",
     "session": "claire",
     "type": "transcript-updated"
@@ -3538,7 +3552,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "event_id": "<eid:delivery-updated#1@0e9287>",
     "message_id": "u-quebec",
     "session": "claire",
@@ -3549,7 +3563,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "client_msg_id": "quebec",
     "event_id": "<eid:agent-state#1@91d46a>",
     "kind": "thinking",
@@ -3564,7 +3578,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "detail": {
      "backend_session_id": "<id:2>",
      "dispatch": "claude",
@@ -3586,7 +3600,7 @@
   {
    "data": {
     "action": "thinking",
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "call_id": null,
     "event_id": "<eid:agent-activity#2@0952e1>",
     "file_path": "",
@@ -3608,7 +3622,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "detail": {
      "action": "reconnecting",
      "after_ms": 1000,
@@ -3632,7 +3646,7 @@
   {
    "data": {
     "action": "reconnecting",
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "call_id": null,
     "event_id": "<eid:agent-activity#4@0952e1>",
     "file_path": "",
@@ -3654,7 +3668,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -3677,7 +3691,7 @@
   {
    "data": {
     "action": "done",
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "call_id": null,
     "event_id": "<eid:agent-activity#6@0952e1>",
     "file_path": "",
@@ -3699,20 +3713,20 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "badge": true,
     "cause_message_id": "u-quebec",
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#1@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:8>",
+    "notification_id": "pn-<id:9>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: [qa-drops:1] synthetic work quebec",
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:3>",
+    "source_message_id": "live-<id:4>",
     "type": "user-notification",
     "unread": true
    },
@@ -3721,7 +3735,7 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "event_id": "<eid:delivery-updated#2@0e9287>",
     "message_id": "u-sierra",
     "session": "claire",
@@ -3732,14 +3746,14 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "client_msg_id": "sierra",
     "event_id": "<eid:agent-state#2@91d46a>",
     "kind": "thinking",
     "queue_remaining": 0,
     "queue_started": false,
     "session": "claire",
-    "trace_id": "<id:6>",
+    "trace_id": "<id:7>",
     "type": "agent-state"
    },
    "event": null,
@@ -3747,13 +3761,13 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "detail": {
      "backend_session_id": "<id:2>",
      "dispatch": "claude",
      "origin": "user",
      "source": "pwa",
-     "trace_id": "<id:6>"
+     "trace_id": "<id:7>"
     },
     "event_id": "<eid:agent-state#7@0952e1>",
     "kind": "thinking",
@@ -3769,7 +3783,7 @@
   {
    "data": {
     "action": "thinking",
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "call_id": null,
     "event_id": "<eid:agent-activity#8@0952e1>",
     "file_path": "",
@@ -3791,14 +3805,14 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
      "origin": "user",
      "tokens_in": 5,
      "tokens_out": 7,
-     "trace_id": "<id:6>"
+     "trace_id": "<id:7>"
     },
     "event_id": "<eid:agent-state#9@0952e1>",
     "kind": "done",
@@ -3814,7 +3828,7 @@
   {
    "data": {
     "action": "done",
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "call_id": null,
     "event_id": "<eid:agent-activity#10@0952e1>",
     "file_path": "",
@@ -3836,20 +3850,20 @@
   },
   {
    "data": {
-    "agent_id": "<id:5>",
+    "agent_id": "<id:6>",
     "badge": true,
     "cause_message_id": "u-sierra",
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#2@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:9>",
+    "notification_id": "pn-<id:10>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: synthetic greeting sierra",
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:7>",
+    "source_message_id": "live-<id:8>",
     "type": "user-notification",
     "unread": true
    },
