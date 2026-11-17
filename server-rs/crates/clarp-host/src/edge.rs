@@ -391,6 +391,7 @@ pub fn router(app: App) -> Router {
         .merge(roster::routes())
         .merge(crate::calls::routes())
         .merge(crate::chip::routes())
+        .merge(crate::compact::routes())
         .merge(crate::schedules::routes())
         .merge(crate::heartbeat::routes())
         .merge(crate::forks::routes())

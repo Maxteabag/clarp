@@ -21,6 +21,7 @@ pub mod audio;
 pub mod calendar;
 pub mod calls;
 pub mod chip;
+pub mod compact;
 pub mod config;
 pub mod connector;
 pub mod edge;

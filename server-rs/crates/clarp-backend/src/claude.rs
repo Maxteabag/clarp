@@ -62,6 +62,13 @@ impl Backend for Claude {
         &["low", "medium", "high", "xhigh", "max"]
     }
 
+    /// Claude Code takes its own command for it as a message, also outside its screen: it
+    /// sums the conversation up, goes on under the same name, and ends without a word
+    /// (measured with 2.1.321 on 17 Nov 2026, `tests/fixtures/claude-2.1.321-compact.jsonl`).
+    fn shortens_with(&self) -> Option<&'static str> {
+        Some("/compact")
+    }
+
     fn launch(&self, spec: &TurnSpec) -> Launch {
         let mut args: Vec<String> = [
             "-p",
@@ -680,6 +687,11 @@ impl ClaudeInterpreter {
                     prefix: SHOWN.to_string(),
                     over: true,
                 }));
+                // How much the conversation holds now, where the tool says so: how full it is
+                // from here on, until an answer says otherwise.
+                if let Some(held) = event["compact_metadata"]["post_tokens"].as_u64() {
+                    out.push(Signal::Context { tokens: held });
+                }
             }
             _ => {}
         }

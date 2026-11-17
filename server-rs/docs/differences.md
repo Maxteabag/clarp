@@ -44,7 +44,7 @@ and every field with its kind.
 |---|---|---|---|
 | `GET /janitors` | its seven janitors, three of them on, their templates, triggers and providers, and `runtime_available: true` | its seven janitors, all paused, the same templates and triggers, no providers, and `runtime_available: true` | A scheduled task, the router of spoken messages, the explainer of tools, the Goal keeper and the audio bookkeeper run on this Host, and no other job yet (below). The answer is compared as its fields and their kinds |
 | `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that listen there, the providers and their models | the engines that listen here: this Host's own Whisper, and each provider the owner's file has a key or a project for | Never the same list: each Host says what it listens with |
-| `GET /agent-model-options` | every tool it knows, installed or not, each with its models | the three tools this Host runs (Claude Code, Codex, Antigravity), each with its models found the same way (the tool is asked, and what is known of it anyway comes after), in the same fields; what this Host cannot do with a tool yet is said as that (`supports_compact`, `supports_mcp`, `supports_auth`, `supports_usage`; for Codex also `supports_fork` and `supports_steer`; for Antigravity `supports_compact`) | Never the same list: each Host says what it runs, and an app offers an agent on every tool that is listed. The answer is compared as its fields and their kinds; the rows are held to the Python Host's by vectors |
+| `GET /agent-model-options` | every tool it knows, installed or not, each with its models | the three tools this Host runs (Claude Code, Codex, Antigravity), each with its models found the same way (the tool is asked, and what is known of it anyway comes after), in the same fields; what this Host cannot do with a tool yet is said as that (`supports_mcp`, `supports_auth`, `supports_usage`, and `supports_steer` for Claude Code; for Codex also `supports_fork` and `supports_compact`; for Antigravity `supports_compact`) | Never the same list: each Host says what it runs, and an app offers an agent on every tool that is listed. The answer is compared as its fields and their kinds; the rows are held to the Python Host's by vectors |
 
 ## Screens of what this Host has not
 
@@ -73,9 +73,17 @@ Host's first day says there what this Host must not say of itself.
 | The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
 | The skills kept installed for the tools (`GET /managed-skills`) | none: this Host manages no skills | refused |
 
-Refused in words, 501, as not built: compacting a conversation from an app (`POST /compact`), a
-tool's own servers (`POST /agent-mcp`), nudging a team (`POST /team-nudging`), signing a harness in to
-a provider of models (`/harness-providers`: none is listed).
+Refused in words, 501, as not built: a tool's own servers (`POST /agent-mcp`), nudging a team
+(`POST /team-nudging`), signing a harness in to a provider of models (`/harness-providers`: none is
+listed).
+
+| A conversation made shorter from an app (`POST /compact`) | Python Host | Rust Host | Why |
+|---|---|---|---|
+| How it is done | the tool's own screen is started in a terminal (tmux) on the agent's session, `/compact` is typed into it (`/compress` for Antigravity), the transcript is watched until it is quiet, and the terminal is ended; for Claude Code, Codex and Antigravity | a turn of the agent's own, in which the tool is given its own word for it as its whole message (`Backend::shortens_with`: Claude Code's `/compact`, which it takes outside its screen too); nobody's message, nothing said, left out of the chat an app reads | No terminal and no keys typed at a screen: one way in which an agent's tool is ever run. Measured with Claude Code 2.1.321 on 17 Nov 2026: it sums up, goes on under the same name, and says how much shorter (the recording is a fixture) |
+| The answers | started, already at it, or refused in words: no such agent, no live session, unsupported for the tool, busy | the same, in the same words | The contract an app has |
+| Codex, Antigravity | made shorter the same way | refused, "compaction unsupported for codex" (for `agy`), and the picker says so (`supports_compact` false) | Neither is known to take a word for it as a message; both make their conversations shorter by themselves while they work. Antigravity's print mode may take `/compress`: not measured |
+| While it runs | the row says `compacting` | the row says `compacting`; a message that is sent meanwhile waits its turn behind it, like behind any turn | One actor an agent |
+| Afterwards | `context_tokens` falls when the next turn's transcript is read | `context_tokens` is what the tool says the conversation holds after it, at once | The tool says it (`compact_metadata.post_tokens`) |
 
 Not answered yet, each "no such route": how an engine is told what to listen for
 (`/transcription-guidance`), the budgets of the vocabulary, dreaming's

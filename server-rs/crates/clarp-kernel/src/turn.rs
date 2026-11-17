@@ -54,10 +54,15 @@ impl Origin {
     }
 }
 
+/// What a turn is filed under in which a tool makes its own conversation shorter, asked for
+/// from an app: nobody's message, and nothing is said in it. The Python Host has no such
+/// turn (it types into the tool's own screen), so the word is this Host's.
+pub const COMPACTION: &str = "compaction";
+
 /// [`Origin::automation_kind`] for an origin by its name.
 pub fn automation_kind(origin: &str) -> &str {
     match origin {
-        "watcher" | "heartbeat" | "leader_tick" | "dreaming" | "janitor" => origin,
+        "watcher" | "heartbeat" | "leader_tick" | "dreaming" | "janitor" | COMPACTION => origin,
         _ => "",
     }
 }
@@ -65,7 +70,10 @@ pub fn automation_kind(origin: &str) -> &str {
 /// Whether the turns of an origin are left out of a chat that is read without automation.
 /// A janitor's are automated and stay: it works in a chat of its own.
 pub fn left_out_of_chats(origin: &str) -> bool {
-    matches!(origin, "watcher" | "heartbeat" | "leader_tick" | "dreaming")
+    matches!(
+        origin,
+        "watcher" | "heartbeat" | "leader_tick" | "dreaming" | COMPACTION
+    )
 }
 
 /// Whether a turn of this origin that fails is told in the agent's state alone, with no row in

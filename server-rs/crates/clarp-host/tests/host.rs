@@ -9330,6 +9330,224 @@ printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false
 }
 
 #[test]
+fn a_conversation_of_claude_is_made_shorter_from_an_app() {
+    let place = Place::new("compact");
+    let (claude, started) = (place.root.join("claude"), place.root.join("started"));
+    // A stand-in for Claude Code. Given its own word for it as its whole message, it does
+    // what the tool does (recorded on 17 Nov 2026): it says that it is compacting, then how
+    // much shorter the conversation is, and ends well under the same name without a word,
+    // its summary and the echo of the command written as messages of the user's. Given
+    // anything else it answers, and says how much its conversation holds. It writes down
+    // what it was given.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, sys, time
+args = sys.argv[1:]
+blocks = [part.get("text", "") for part in json.loads(sys.stdin.readline())["message"]["content"]]
+named = "--resume" if "--resume" in args else "--session-id"
+session = args[args.index(named) + 1]
+with open({started}, "a") as out:
+    out.write(json.dumps({{"blocks": blocks, "resumed": named == "--resume"}}) + "\n")
+with open({started}) as seen:
+    count = len(seen.readlines())
+def say(**event):
+    print(json.dumps({{**event, "session_id": session}}), flush=True)
+if blocks == ["/compact"]:
+    say(type="system", subtype="status", status="compacting")
+    time.sleep(1.0)
+    say(type="system", subtype="status", status=None, compact_result="success")
+    say(type="system", subtype="init", model="stand-in")
+    held = {{"trigger": "manual", "pre_tokens": 30729, "post_tokens": 8957}}
+    say(type="system", subtype="compact_boundary", compact_metadata=held)
+    summary = "This session is being continued from a previous conversation. Summary: two short turns."
+    say(type="user", message={{"role": "user", "content": summary}}, isSynthetic=True)
+    echo = "<local-command-stdout>Compacted </local-command-stdout>"
+    say(type="user", message={{"role": "user", "content": echo}}, isReplay=True)
+    say(type="result", subtype="success", is_error=False, result="", num_turns=0,
+        usage={{"input_tokens": 0, "output_tokens": 0}})
+    sys.exit(0)
+if "slowly" in blocks[0]:
+    time.sleep(1.2)
+say(type="system", subtype="init", model="stand-in")
+usage = {{"input_tokens": 29, "cache_read_input_tokens": 30000, "cache_creation_input_tokens": 700, "output_tokens": 3}}
+answer = {{"id": "msg_%d" % count, "role": "assistant", "model": "stand-in",
+          "content": [{{"type": "text", "text": "on it"}}], "usage": usage}}
+say(type="assistant", message=answer)
+say(type="result", subtype="success", is_error=False, result="on it", num_turns=1,
+    usage={{"input_tokens": 30729, "output_tokens": 3}})
+"#,
+        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
+    );
+    program(&claude, &script);
+    let codex = place.root.join("codex");
+    program(&codex, CODEX_AT_WORK);
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let ask = |body: Value| host.ask("POST", "/compact", Some(&body));
+    let (_, made) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({ "name": "Shorty", "backend": "claude" })),
+    );
+    let agent = made["session"].as_str().unwrap().to_string();
+    let row = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["session"] == session);
+        row.cloned().unwrap()
+    };
+    let starts = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&started).unwrap_or_default();
+        let lines = written.lines();
+        lines
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let refusal =
+        |answer: (u16, Value)| (answer.0, answer.1["ok"].clone(), answer.1["error"].clone());
+
+    // What is no request, and what there is nothing to make shorter of.
+    let (status, why) = ask(json!({}));
+    assert_eq!((status, &why["error"]), (400, &json!("session required")));
+    let (status, why) = ask(json!(["a list"]));
+    assert_eq!((status, &why["error"]), (400, &json!("bad json")));
+    assert_eq!(
+        refusal(ask(json!({ "session": "nobody-there" }))),
+        (409, json!(false), json!("no such agent"))
+    );
+    assert_eq!(
+        refusal(ask(json!({ "session": agent }))),
+        (409, json!(false), json!("no live session to compact"))
+    );
+
+    // After a turn the conversation holds what its last answer was made from.
+    host.send(&agent, "first", "u-1");
+    wait_for("the first turn to be over", || host.state(&agent) == "done");
+    assert_eq!(row(&agent)["context_tokens"], 30_729);
+    assert_eq!(row(&agent)["compacting"], false);
+
+    // Asked for from an app: started at once, and the agent's row says what it is at.
+    // Asked for again meanwhile: it is at it already.
+    let (status, told) = ask(json!({ "session": agent }));
+    assert_eq!(
+        (status, &told),
+        (
+            200,
+            &json!({ "ok": true, "status": "started", "backend": "claude" })
+        )
+    );
+    wait_for("the row to say it is compacting", || {
+        row(&agent)["compacting"] == true
+    });
+    assert_eq!(row(&agent)["latest_state"], "compacting");
+    let (status, told) = ask(json!({ "session": agent }));
+    assert_eq!(
+        (status, &told),
+        (
+            200,
+            &json!({ "ok": true, "status": "already_compacting", "backend": "claude" })
+        )
+    );
+    wait_for("the conversation to be made shorter", || {
+        let row = row(&agent);
+        row["busy"] == false && row["compacting"] == false && row["context_tokens"] == 8_957
+    });
+    // The tool was given its own word for it as its whole message, in the session it has.
+    let second = starts().remove(1);
+    assert_eq!(
+        second,
+        json!({ "blocks": ["/compact"], "resumed": true }),
+        "what the tool was given"
+    );
+    assert_eq!(starts().len(), 2, "asked for twice, done once");
+    // Nobody said anything: the chat an app reads, without what the Host does by itself, is
+    // as it was, and nothing waits. With all of it, the request is there, marked as the
+    // Host's own, and nothing answers it.
+    let chat = host.get(&format!(
+        "/log?session={agent}&limit=100&include_automated=0"
+    ));
+    let read: Vec<(&str, &str)> = chat["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|turn| {
+            (
+                turn["role"].as_str().unwrap(),
+                turn["text"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(read, [("user", "first"), ("assistant", "on it")]);
+    let whole = host.get(&format!("/log?session={agent}&limit=100"));
+    let whole = whole["turns"].as_array().unwrap();
+    assert_eq!(whole.len(), 3, "{whole:?}");
+    assert_eq!(
+        (
+            &whole[2]["text"],
+            &whole[2]["automated"],
+            &whole[2]["automation_kind"],
+            &whole[2]["origin"],
+        ),
+        (
+            &json!("/compact"),
+            &json!(true),
+            &json!("compaction"),
+            &json!("compaction"),
+        ),
+        "{}",
+        whole[2]
+    );
+    assert_eq!(row(&agent)["queued_turn_count"], 0);
+
+    // The next turn goes on in the same session of the tool, with the Host's own words
+    // beside the user's as in every turn.
+    host.send(&agent, "second, slowly", "u-2");
+    wait_for("the second turn to run", || row(&agent)["busy"] == true);
+    // While a turn runs the conversation is not made shorter.
+    assert_eq!(
+        refusal(ask(json!({ "session": agent }))),
+        (
+            409,
+            json!(false),
+            json!("agent is busy \u{2014} try again when idle")
+        )
+    );
+    wait_for("the second turn to be over", || {
+        let row = row(&agent);
+        row["busy"] == false && row["context_tokens"] == 30_729
+    });
+    let third = starts().remove(2);
+    assert_eq!(third["resumed"], true, "{third}");
+    assert!(third["blocks"].as_array().unwrap().len() > 1, "{third}");
+    assert_eq!(starts().len(), 3, "the refusal started nothing");
+
+    // A tool that takes no message for it is refused as one that cannot, in the Python
+    // Host's words.
+    let (_, made) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({ "name": "Cody", "backend": "codex" })),
+    );
+    let cody = made["session"].as_str().unwrap().to_string();
+    host.send(&cody, "run the tests", "u-9");
+    wait_for("the turn of Codex to be over", || {
+        let row = row(&cody);
+        row["busy"] == false && !row["backend_session_id"].as_str().unwrap_or("").is_empty()
+    });
+    assert_eq!(
+        refusal(ask(json!({ "session": cody }))),
+        (409, json!(false), json!("compaction unsupported for codex"))
+    );
+    // An app's picker says which tool can.
+    let told = host.get("/agent-model-options");
+    assert_eq!(told["providers"]["claude"]["supports_compact"], true);
+    assert_eq!(told["providers"]["codex"]["supports_compact"], false);
+}
+
+#[test]
 fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     let place = Place::new("model-options");
     // Stand-ins for the tools: each says its version, and Codex and Antigravity list their
@@ -9469,13 +9687,13 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         ),
         (
             "claude",
+            vec!["supports_mcp", "supports_auth", "supports_usage"],
             vec![
+                "supports_fork",
+                "supports_resume",
+                "supports_routing",
                 "supports_compact",
-                "supports_mcp",
-                "supports_auth",
-                "supports_usage",
             ],
-            vec!["supports_fork", "supports_resume", "supports_routing"],
         ),
         (
             "codex",
@@ -16117,7 +16335,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
             "/harness-providers/login",
             json!({ "harness": "opencode", "provider": "p" }),
         ),
-        ("/compact", json!({ "session": echo })),
         ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
         (
