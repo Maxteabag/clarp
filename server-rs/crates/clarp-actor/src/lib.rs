@@ -429,9 +429,11 @@ struct LiveTurn {
     said: Vec<String>,
     /// What the turn's replies mark for the ear is said aloud.
     speak: bool,
-    /// What the tool has said of itself so far: its model, and what the turn cost.
+    /// What the tool has said of itself so far: its model, what the turn cost, and how
+    /// full its conversation was at its newest answer.
     model: Option<String>,
     tokens: Option<(u64, u64)>,
+    context: Option<u64>,
     interpreter: Box<dyn Interpreter>,
     /// How far the turn's spool has been read. Never behind the position in the log.
     offset: u64,
@@ -454,6 +456,7 @@ impl LiveTurn {
             trace_id: self.trace_id.clone(),
             model: self.model.clone(),
             tokens: self.tokens,
+            context: self.context,
         }
     }
 }
@@ -513,9 +516,11 @@ struct Remembered {
 }
 
 impl Remembered {
-    /// Takes what a turn's end says, where it says something.
+    /// Takes what a turn's end says, where it says something. How full the conversation
+    /// is: what the tool said of that at its last answer; of a tool that says no such
+    /// thing, what the turn took in.
     fn take(&mut self, end: &TurnEnd) {
-        if let Some(tokens) = end.tokens_in {
+        if let Some(tokens) = end.context_tokens.or(end.tokens_in) {
             self.context_tokens = Some(tokens);
         }
         if end.status == "completed" {
@@ -692,6 +697,7 @@ struct Facts {
     trace_id: Option<String>,
     model: Option<String>,
     tokens: Option<(u64, u64)>,
+    context: Option<u64>,
 }
 
 /// How the turn that has just ended in this batch ended, for the row that closed it.
@@ -702,6 +708,7 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     end.model = facts.model;
     end.tokens_in = facts.tokens.map(|(tokens_in, _)| tokens_in);
     end.tokens_out = facts.tokens.map(|(_, tokens_out)| tokens_out);
+    end.context_tokens = facts.context;
     Some(Entry::TurnEnd(end))
 }
 
@@ -920,6 +927,7 @@ impl Actor {
                 origin: message.origin,
                 model: None,
                 tokens: None,
+                context: None,
                 offset: 0,
                 drafts: Vec::new(),
                 tools: Vec::new(),
@@ -2251,9 +2259,9 @@ impl Actor {
         let interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
-        let (last_row, model, tokens) = match before {
-            Some(before) => (before.last_row, before.model, before.tokens),
-            None => (message.id.clone(), None, None),
+        let (last_row, model, tokens, context) = match before {
+            Some(before) => (before.last_row, before.model, before.tokens, before.context),
+            None => (message.id.clone(), None, None, None),
         };
         self.live = Some(LiveTurn {
             turn,
@@ -2266,6 +2274,7 @@ impl Actor {
             origin: message.origin,
             model,
             tokens,
+            context,
             interpreter,
             offset: 0,
             drafts: Vec::new(),
@@ -2336,7 +2345,7 @@ impl Actor {
         let until = self.recorder.spool_offset(turn);
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
-        let (mut model, mut tokens) = (None, None);
+        let (mut model, mut tokens, mut context) = (None, None, None);
         let mut interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
@@ -2391,6 +2400,7 @@ impl Actor {
                             tokens_in,
                             tokens_out,
                         } => tokens = Some((tokens_in, tokens_out)),
+                        Signal::Context { tokens: held } => context = Some(held),
                         Signal::Glimpse(glimpse) => {
                             let _ = self.shown.show(&glimpse, Some(&name), record.t);
                         }
@@ -2423,6 +2433,7 @@ impl Actor {
             speak: message.speak,
             model,
             tokens,
+            context,
             interpreter,
             offset,
             drafts,
@@ -2710,6 +2721,10 @@ impl Actor {
                             tokens_out,
                         } => {
                             live.tokens = Some((tokens_in, tokens_out));
+                            continue;
+                        }
+                        Signal::Context { tokens } => {
+                            live.context = Some(tokens);
                             continue;
                         }
                         Signal::Reply(mut reply) => {

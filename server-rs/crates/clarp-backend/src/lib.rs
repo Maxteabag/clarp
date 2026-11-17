@@ -106,6 +106,11 @@ pub enum Signal {
         tokens_in: u64,
         tokens_out: u64,
     },
+    /// How many tokens the tool's conversation holds now, where the tool says so with an
+    /// answer: how full it is.
+    Context {
+        tokens: u64,
+    },
     /// The tool process is gone, and this is how the turn went.
     Ended(RunOutcome),
 }

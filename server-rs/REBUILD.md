@@ -727,7 +727,13 @@ took in was counted as `input_tokens` alone, where the Python Host counts with i
 the cache and read from it (`turn_stop._result_detail`), and a turn of Claude Code that goes on in a long
 conversation reads nearly all of what it takes in from the cache. No scenario saw it, because the suite's
 stand-in for Claude Code reports no cache; it is in a row's summary of its turn (`tokens_in`) as in the
-tally. Now as there, held by the backend's own test.
+tally. Now as there, held by the backend's own test. And one number hung on that one: how full an agent's
+conversation is (`context_tokens`, the gauge an app shows) was taken from what the last turn took in. The
+two are different things, as the Python Host's own note on it says: a turn's sum counts every step of the
+turn anew, so a turn of thirty steps says thirty times what the conversation holds. How full it is, is what
+the last answer was made from, which Claude Code says with every answer; that is now told by itself
+(`Signal::Context`), kept with the turn's end, and what the gauge shows. A tool that says no such thing
+(Codex in the mode this Host runs it) is shown as before, by what its turn took in.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

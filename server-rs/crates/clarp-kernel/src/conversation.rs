@@ -243,6 +243,11 @@ pub struct TurnEnd {
     pub tokens_in: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens_out: Option<u64>,
+    /// How many tokens the tool's conversation held when the turn's last answer was made,
+    /// where the tool said so: how full it is. Not what the turn took in, which counts
+    /// every step of the turn anew.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
 }
 
 impl TurnEnd {
@@ -267,6 +272,7 @@ impl TurnEnd {
             model: None,
             tokens_in: None,
             tokens_out: None,
+            context_tokens: None,
         })
     }
 }
@@ -515,6 +521,7 @@ mod tests {
                 model: None,
                 tokens_in: None,
                 tokens_out: None,
+                context_tokens: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {
