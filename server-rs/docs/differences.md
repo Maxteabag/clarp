@@ -44,7 +44,7 @@ and every field with its kind.
 |---|---|---|---|
 | `GET /janitors` | its seven janitors, three of them on, their templates, triggers and providers, and `runtime_available: true` | its seven janitors, all paused, the same templates and triggers, no providers, and `runtime_available: true` | A scheduled task runs on this Host and no other job yet (below). The answer is compared as its fields and their kinds |
 | `GET /transcription-capabilities`, `GET /transcription-providers` | the engines that listen there, the providers and their models | the engines that listen here: this Host's own Whisper, and each provider the owner's file has a key or a project for | Never the same list: each Host says what it listens with |
-| `GET /agent-model-options` | every backend with its models, what each supports and how it is signed in | no backends listed. An agent's model is set by name (`POST /agent-llm`) | The catalogue of models |
+| `GET /agent-model-options` | every tool it knows, installed or not, each with its models | the two tools this Host runs, each with its models found the same way (the tool is asked, and what is known of it anyway comes after), in the same fields; what this Host cannot do with a tool yet is said as that (`supports_compact`, `supports_mcp`, `supports_auth`, `supports_usage`; for Codex also `supports_fork`, `supports_resume`, `supports_steer`) | Never the same list: each Host says what it runs, and an app offers an agent on every tool that is listed. The answer is compared as its fields and their kinds; the rows are held to the Python Host's by vectors |
 
 ## Screens of what this Host has not
 

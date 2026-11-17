@@ -38,6 +38,7 @@ pub mod launcher;
 pub mod library;
 pub mod logins;
 pub mod media;
+pub mod models;
 pub mod once;
 pub mod owner;
 pub mod pairing;

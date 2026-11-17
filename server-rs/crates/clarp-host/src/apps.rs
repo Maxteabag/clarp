@@ -750,17 +750,6 @@ async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
 
-async fn model_options(State(app): State<App>) -> Json<Value> {
-    Json(json!({
-        "schema_version": 2,
-        "observed_at": crate::wire::iso(app.clock.now_ms()),
-        "freshness": "fresh",
-        "freshness_note": "This Host keeps no catalogue of models yet.",
-        "freshness_scope": "response_observation",
-        "providers": {},
-    }))
-}
-
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/status", get(status))
@@ -778,7 +767,6 @@ pub fn routes() -> Router<App> {
         )
         .route("/voice-humanness", get(humanness).post(set_humanness))
         .route("/herald/settings", get(herald).post(set_herald))
-        .route("/agent-model-options", get(model_options))
         .route(
             "/tool-explanations/settings",
             get(explanations).post(set_explanations),

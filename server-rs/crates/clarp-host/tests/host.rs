@@ -9192,6 +9192,183 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
 }
 
 #[test]
+fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
+    let place = Place::new("model-options");
+    // Stand-ins for the two tools: each says its version, and Codex lists its models.
+    let claude = place.root.join("claude");
+    program(
+        &claude,
+        "#!/bin/sh\n[ \"$1\" = --version ] && echo '9.9.9 (Stand-in Code)'\nexit 0\n",
+    );
+    let codex = place.root.join("codex");
+    let listed = json!({ "models": [
+        { "slug": "gpt-stand-in", "display_name": "GPT Stand-in", "visibility": "list",
+          "default_reasoning_level": "medium",
+          "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }] },
+        { "slug": "gpt-kept-back", "visibility": "hide" },
+    ]});
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 9.9.9'; exit 0; fi\n\
+         if [ \"$1 $2\" = 'debug models' ]; then cat <<'LISTED'\n{listed}\nLISTED\nexit 0; fi\nexit 2\n"
+    );
+    program(&codex, &script);
+    // The Host's user has a home of their own, in which Claude Code kept what its account
+    // may run.
+    let kept = place.root.join(".claude.json");
+    let account = |models: Value| {
+        let said = json!({ "oauthAccount": { "accountUuid": "stand-in" },
+                           "numStartups": 7, "additionalModelOptionsCache": models });
+        std::fs::write(&kept, said.to_string()).unwrap();
+    };
+    account(
+        json!([{ "value": "claude-stand-in-1[1m]", "label": "Stand-in",
+                     "description": "Stand-in 1 \u{b7} for tests" }]),
+    );
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let told = host.get("/agent-model-options");
+    assert_eq!(
+        (&told["schema_version"], &told["freshness"]),
+        (&json!(2), &json!("fresh")),
+        "{told}"
+    );
+    let tools: Vec<&String> = told["providers"].as_object().unwrap().keys().collect();
+    assert_eq!(
+        tools,
+        ["claude", "codex"],
+        "the tools this Host runs, and no other"
+    );
+    let ids = |row: &Value| -> Vec<String> {
+        let models = row["models"].as_array().unwrap().iter();
+        models
+            .map(|model| model["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // Claude Code: there, in the version it says, with what its account may run before
+    // what is known of it anyway.
+    let of_claude = &told["providers"]["claude"];
+    assert_eq!(
+        (
+            &of_claude["installed"],
+            &of_claude["availability"],
+            &of_claude["cli_version"],
+            &of_claude["source"]["kind"],
+            &of_claude["label"]
+        ),
+        (
+            &json!(true),
+            &json!("available"),
+            &json!("9.9.9 (Stand-in Code)"),
+            &json!("cli_cache"),
+            &json!("Claude")
+        ),
+        "{of_claude}"
+    );
+    let models = ids(of_claude);
+    assert_eq!(models[0], "claude-stand-in-1[1m]");
+    assert_eq!(of_claude["models"][0]["label"], "Stand-in 1");
+    assert!(
+        models.contains(&"sonnet".to_string()) && models.len() == 14,
+        "{models:?}"
+    );
+    // Codex: the models it lists, without the one it keeps back.
+    let of_codex = &told["providers"]["codex"];
+    assert_eq!(
+        (&of_codex["cli_version"], &of_codex["source"]["kind"]),
+        (&json!("codex-cli 9.9.9"), &json!("cli_probe")),
+        "{of_codex}"
+    );
+    let models = ids(of_codex);
+    assert_eq!(models[0], "gpt-stand-in");
+    assert!(!models.contains(&"gpt-kept-back".to_string()), "{models:?}");
+    assert_eq!(
+        of_codex["models"][0]["supported_efforts"],
+        json!(["low", "medium"])
+    );
+    // What this Host cannot do with a tool yet, it does not say it can.
+    for (tool, cannot, can) in [
+        (
+            "claude",
+            vec![
+                "supports_compact",
+                "supports_mcp",
+                "supports_auth",
+                "supports_usage",
+            ],
+            vec!["supports_fork", "supports_resume", "supports_routing"],
+        ),
+        (
+            "codex",
+            vec![
+                "supports_fork",
+                "supports_resume",
+                "resumable",
+                "supports_steer",
+                "supports_compact",
+            ],
+            vec!["supports_routing"],
+        ),
+    ] {
+        let row = &told["providers"][tool];
+        for flag in cannot {
+            assert_eq!(row[flag], false, "{tool}: {flag}");
+        }
+        for flag in can {
+            assert_eq!(row[flag], true, "{tool}: {flag}");
+        }
+    }
+
+    // Asked again, it is told again as it was found: the tools are not asked each time,
+    // also where Claude Code wrote its file anew for something else.
+    let said = json!({ "oauthAccount": { "accountUuid": "stand-in" }, "numStartups": 8,
+                       "additionalModelOptionsCache": [{ "value": "claude-stand-in-1[1m]", "label": "Stand-in",
+                                                         "description": "Stand-in 1 \u{b7} for tests" }] });
+    std::fs::write(&kept, said.to_string()).unwrap();
+    assert_eq!(host.get("/agent-model-options"), told);
+    // Another account may run other models: what the file says of them changed, and the
+    // tools are asked again.
+    account(json!(["opus", "claude-stand-in-2"]));
+    let again = host.get("/agent-model-options");
+    let models = ids(&again["providers"]["claude"]);
+    assert_eq!(models[..2], ["opus", "claude-stand-in-2"], "{models:?}");
+    assert!(!models.contains(&"claude-stand-in-1[1m]".to_string()));
+    drop(host);
+
+    // A tool that is not on the machine is told as that, with the models it is known to have.
+    let nowhere = place.root.join("no-such-program");
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", nowhere.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let told = host.get("/agent-model-options");
+    let of_codex = &told["providers"]["codex"];
+    assert_eq!(
+        (
+            &of_codex["installed"],
+            &of_codex["availability"],
+            &of_codex["cli_version"],
+            &of_codex["source"]["kind"]
+        ),
+        (
+            &json!(false),
+            &json!("unavailable"),
+            &Value::Null,
+            &json!("static_fallback")
+        ),
+        "{of_codex}"
+    );
+    assert_eq!(ids(of_codex).len(), 9);
+    assert_eq!(told["providers"]["claude"]["installed"], true);
+}
+
+#[test]
 fn an_agent_asks_for_an_event_in_its_users_calendar() {
     let place = Place::new("calendar");
     let host = place.start();
@@ -11874,11 +12051,11 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
         (&json!("cartesia"), &json!(false))
     );
     assert_eq!(voices["providers"].as_array().unwrap().len(), 5);
+    // The tools this Host runs are listed for an app's picker, wherever they are found or not.
     let models = host.get("/agent-model-options");
-    assert_eq!(
-        (&models["schema_version"], &models["providers"]),
-        (&json!(2), &json!({}))
-    );
+    assert_eq!(models["schema_version"], 2);
+    let tools: Vec<&String> = models["providers"].as_object().unwrap().keys().collect();
+    assert_eq!(tools, ["claude", "codex"]);
     assert!(models["observed_at"].is_string() && models["freshness"].is_string());
 
     // On a Host that asks for no token, nobody is known to be a person.

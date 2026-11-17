@@ -166,6 +166,7 @@ async fn serve(config: Config) -> Result<(), String> {
         heartbeat: Arc::default(),
         janitors: Arc::default(),
         router: Arc::default(),
+        models: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
         ears: {

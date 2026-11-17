@@ -680,8 +680,27 @@ reads no time. The rule is the Python Host's (`calendar_request.py`), held by wh
 fifty made-up requests (`tools/calendar-vectors.py`: what a request must say and the words it is refused
 with, the zone under either of its two names, a number or a list where a word is expected written as Python
 writes it, and `all_day` by what Python takes for something, so that the word "false" is a yes), by a Host
-test and by the scenario `calendar`. The other ten of the eleven: an agent's slot given back by hand
+test and by the scenario `calendar` (11 steps, no difference at its first asking, run 44028268830). The
+other ten of the eleven: an agent's slot given back by hand
 (`POST /repair-slot`, five), and teams (three routes, three requests).
+
+**The models an app's picker offers** (17 Nov 2026). The same week's log, read for what was asked and
+not for what was done: among the screens this Host answered as having nothing, the one asked most was the
+list of tools and models an app shows where an agent's model is chosen (`GET /agent-model-options`, 316
+times), and with no tool listed there an app has nothing to choose from. Now the two tools this Host runs
+are listed, each as the Python Host tells a tool (`provider_capabilities.py`): whether its program is on
+the machine, the version it says, and its models. Codex is asked for them (`codex debug models`: the ones
+it shows in a list, with the efforts it says each takes); of Claude Code the file is read in which it
+keeps what the account that is signed in may run, since it has no command that lists them; and after what
+a tool was seen to have come the models it is known to have anyway, each row saying where it is from. The
+rules are in `clarp-backend` (`catalogue.rs`), pure, held by what the Python Host's own functions make of
+eleven answers of Codex, eleven files of Claude Code and sixteen situations of a tool that is there, is not
+there, or says nothing (`tools/model-catalogue-vectors.py`); what is declared of a tool (how it is shown,
+the models it is known to have) is that Host's own table, written out by the same tool. The Host asks the
+tools (`models.rs`): each has two and a half seconds, both are asked at once, and what was found is told
+again for five minutes unless a login changed. Three things are this Host's own: it lists the tools it
+runs and no other; what it cannot do with a tool yet it does not say it can, whatever is declared of the
+tool; and it reads only what a tool prints, as the Python Host does where it runs for real.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
