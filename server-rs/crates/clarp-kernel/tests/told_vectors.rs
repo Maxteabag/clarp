@@ -2,9 +2,7 @@
 //!
 //! `fixtures/told-vectors.json` is written by `server-rs/tools/told-vectors.py`: what the
 //! Python Host's functions say to the tool of agents made up for it, in rooms with different
-//! settings. The same must be said here, sign for sign. One clause is added on purpose: how
-//! much an agent says while it works is told to Claude Code too (reference defect R21), and
-//! the test says where.
+//! settings. The same must be said here, sign for sign.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -191,24 +189,12 @@ fn an_agents_tool_is_told_what_the_python_host_tells_it() {
             expected(&["hook", "silent"]),
             "{name}"
         );
-        let quiet = Sound {
-            narration: 0,
-            ..sound
-        };
-        let by_hook = expected(&["hook", "spoken"]);
-        assert_eq!(
-            beside(persona, session, Some(quiet)),
-            by_hook,
-            "{name}: spoken"
-        );
-        // The one clause this Host adds: the Python Host's hook never says it.
-        let more = match clause {
-            "" => by_hook,
-            clause => format!("{by_hook}\n\n{clause}"),
-        };
+        // Spoken, with how much the agent says while it works. The Python Host's hook says
+        // that clause too since 17 Nov 2026; before, it left it out (reference defect R21),
+        // and this test held the two apart.
         assert_eq!(
             beside(persona, session, Some(sound)),
-            more,
+            expected(&["hook", "spoken"]),
             "{name}: spoken, and how much"
         );
 

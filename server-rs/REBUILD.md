@@ -725,8 +725,8 @@ when a message arrives (`clarp-host` `telling.rs`), from the agent, the owner's 
 file as they are then, so a change holds for the next turn and nothing has to be started again. The owner's
 settings for it are there: whether agents are told a way of speaking at all (`/personalities/settings`,
 which the iOS app has a switch for), how human voices sound (`/voice-humanness`), how much an agent says
-while it works (`/agent-voice-verbosity`). One thing is not copied: the Python Host never tells Claude Code
-the last of these (reference defect R21); here every tool is told. And when an app says that its user began to
+while it works (`/agent-voice-verbosity`). One thing was not copied: the Python Host never told Claude Code
+the last of these (reference defect R21, mended there on 17 Nov 2026); here every tool is told. And when an app says that its user began to
 speak before hearing what the agent last said aloud (`unheard_audio_sessions` of a send), the tool is told
 so before the user's words, in that Host's words, while the conversation keeps the words as they were said.
 
