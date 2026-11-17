@@ -183,12 +183,13 @@ def test_mutator_against_mutator_schedules(monkeypatch, order, first, second):
 
 
 @pytest.mark.parametrize('run_first', [False, True])
-def test_run_start_and_wake_absorb_one_signal_by_commit_order(monkeypatch, run_first):
+@pytest.mark.parametrize('order', ORDERS)
+def test_run_start_and_wake_absorb_one_signal_by_commit_order(monkeypatch, run_first, order):
     world = _seed(monkeypatch)
     lines = []
     monkeypatch.setattr(heartbeat, 'log', lambda event, detail: lines.append((event, detail)))
     _schedule(monkeypatch, world, 'run-start' if run_first else 'external-wake',
-              'external-wake' if run_first else 'run-start', ORDERS[0], 5000)
+              'external-wake' if run_first else 'run-start', order, 5000)
     assert [event for event, _ in lines] == ([] if run_first else ['heartbeatWake'])
 
 
