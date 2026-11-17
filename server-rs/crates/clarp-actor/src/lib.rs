@@ -204,6 +204,10 @@ pub struct Changed {
 pub struct Outputs {
     pub actions: Vec<Action>,
     pub changed: Changed,
+    /// The agent's tool named a new conversation in place of one it had let go of, and the
+    /// Host carried the conversation over: from which name to which. What is bound to the
+    /// agent's conversation with its tool (its goals) follows.
+    pub carried: Vec<(String, String)>,
     /// Lines of a spool that were not records. They were passed over; the operator should know.
     pub damaged_lines: usize,
 }
@@ -1418,6 +1422,44 @@ impl Actor {
         conversation::revision_at(self.recorder.log(), self.span(), ts_ms)
     }
 
+    /// What was said in the conversation before the message of this id, the oldest first,
+    /// each with whether the user said it: as much of its end as a record that is carried
+    /// into a new conversation can hold ([`told::restored`]), and no more is read.
+    fn said_before(&self, own: &str) -> Result<Vec<(bool, String)>, ActorError> {
+        const AT_A_TIME: usize = 200;
+        let mut said: Vec<(bool, String)> = Vec::new(); // the newest first
+        let mut held = 0;
+        let mut page = Some(self.tail_of(AT_A_TIME, Which::All)?);
+        while let Some(rows) = page.take() {
+            for row in rows.entries.iter().rev() {
+                let (by_user, text) = match &row.entry {
+                    Entry::Message(message) if message.id != own => (true, message.text.clone()),
+                    Entry::Reply(reply) => (false, reply.text.clone()),
+                    Entry::Imported(brought) => {
+                        let text = brought.row["text"].as_str().unwrap_or_default().to_string();
+                        match brought.row["role"].as_str() {
+                            Some("user") => (true, text),
+                            Some("assistant") => (false, text),
+                            _ => continue,
+                        }
+                    }
+                    _ => continue,
+                };
+                held += text.chars().count().min(told::RESTORED_OF_ONE);
+                said.push((by_user, text));
+            }
+            let oldest = rows.entries.first().map(|row| row.entry.id().to_string());
+            if held < told::RESTORED_MOST
+                && rows.has_more
+                && let Some(oldest) = oldest
+            {
+                page = self.before_of(&oldest, AT_A_TIME, Which::All)?;
+            }
+        }
+        said.reverse();
+        Ok(said)
+    }
+
     /// Up to `limit` things a reader asks for that are newer than `revision`.
     pub fn after_of(&self, revision: u64, limit: usize, which: Which) -> Result<Page, ActorError> {
         conversation::after(
@@ -2276,6 +2318,13 @@ impl Actor {
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
         let backend_session = self.recorder.agent().backend_session().map(str::to_string);
+        // A tool that lets go of old conversations no longer has this one: named, it would
+        // begin an empty one without a word. The turn begins a new one instead, which opens
+        // with the Host's own record of the old.
+        let lost = backend_session
+            .as_deref()
+            .is_some_and(|session| !self.backend.keeps(session));
+        let backend_session = backend_session.filter(|_| !lost);
         // A turn that waited for an account is taken up again: the tool, which has the turn
         // in its own session, is told so. One whose tool never got as far as a session is
         // given the message, as if for the first time.
@@ -2288,6 +2337,20 @@ impl Actor {
         let prompt = match recovering {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,
+        };
+        let prompt = if lost {
+            let said = self.said_before(&message.id)?;
+            let said: Vec<(bool, &str)> = said
+                .iter()
+                .map(|(by_user, text)| (*by_user, text.as_str()))
+                .collect();
+            let declared = clarp_backend::catalogue::declared(self.backend.id());
+            let tool = declared["shown"]["label"]
+                .as_str()
+                .unwrap_or(self.backend.id());
+            told::restored(tool, &said, &prompt)
+        } else {
+            prompt
         };
         // A user who began to speak before hearing the last reply: the tool is told so before
         // the words. The conversation keeps the words as they were said.
@@ -2680,6 +2743,14 @@ impl Actor {
                 for signal in signals.drain(..) {
                     let piece = match signal {
                         Signal::Bound { backend_session } => {
+                            // Another conversation than the agent had, of a tool that has
+                            // that one no more: the Host carried the conversation over.
+                            let had = batch.agent().backend_session().map(str::to_string);
+                            let lost =
+                                |had: &String| *had != backend_session && !self.backend.keeps(had);
+                            if let Some(had) = had.filter(lost) {
+                                out.carried.push((had, backend_session.clone()));
+                            }
                             let command = Command::TurnBound {
                                 turn,
                                 backend_session,

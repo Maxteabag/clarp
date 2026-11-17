@@ -877,6 +877,11 @@ fn keep_goal(
     actor.keep(&kept, now_ms)
 }
 
+/// Why a goal is bound to another conversation after its tool let go of the one it was
+/// bound to: the Python Host's words for it.
+const CARRIED: &str = "Antigravity pruned the conversation; Clarp continued it in a new one that \
+                       opens with its record of the old one";
+
 /// Asks an agent's book of goals something, with the world around it as its actor has it.
 fn with_goals<T>(
     actor: &Actor,
@@ -1654,7 +1659,28 @@ impl Worker {
     }
 
     /// Does what the actor decided, and tells the clients what changed.
-    fn after(&mut self, out: Outputs) {
+    fn after(&mut self, mut out: Outputs) {
+        // The agent's conversation with its tool was carried over into a new one: its goals
+        // are bound to that conversation and follow it, each with the artifact it is shown as.
+        for (from, to) in std::mem::take(&mut out.carried) {
+            let now = self.now_ms();
+            let Some(actor) = self.actor.as_mut() else {
+                break;
+            };
+            let moved = with_goals(actor, now, |book, _| book.carried(&from, &to, CARRIED, now));
+            for change in &moved {
+                match keep_goal(actor, &self.setup.record, change, None, now) {
+                    Ok(kept) => {
+                        out.changed.goals |= kept.changed.goals;
+                        out.changed.artifacts |= kept.changed.artifacts;
+                    }
+                    Err(error) => eprintln!(
+                        "clarp-host: agent {}: a goal did not follow its conversation: {error}",
+                        self.setup.record.session
+                    ),
+                }
+            }
+        }
         if out.damaged_lines > 0 {
             eprintln!(
                 "clarp-host: agent {}: {} damaged line(s) in a spool were passed over",

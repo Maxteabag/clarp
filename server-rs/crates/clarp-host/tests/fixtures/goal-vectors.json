@@ -22255,6 +22255,2491 @@
      "note": "refused: a plan that has no goal"
     }
    ]
+  },
+  {
+   "name": "the_host_carries_goals_to_a_new_conversation",
+   "session": "vera8",
+   "agent_id": "0008aaaabbbbcccc",
+   "steps": [
+    {
+     "argv": [
+      "create",
+      "vera8",
+      "ship",
+      "Ship the thing",
+      "[{\"id\": \"probe\", \"title\": \"Probe the behaviour\"}, {\"id\": \"build\", \"title\": \"Build it\", \"detail\": \"the whole of it\", \"subtasks\": [{\"id\": \"part\", \"title\": \"A part\"}]}]",
+      "{\"outcome\": \"The thing is shipped\", \"criteria\": [\"It runs\", \"It is documented\"], \"limits\": \"No publication\"}"
+     ],
+     "at": 1794780001000,
+     "exit": 0,
+     "stdout": {
+      "revision": 0,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780001000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-1",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        }
+       ],
+       "checkpoint": null,
+       "continuation": {
+        "generation": 0,
+        "state": "not_enrolled",
+        "reason": "Recovery not enrolled",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": ""
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 1,
+       "last_event_at": 1794780001000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 3,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 0,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 3,
+      "server_now": 1794780001000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-1"
+    },
+    {
+     "argv": [
+      "step",
+      "0008aaaabbbbcccc:ship:00000002",
+      "0",
+      "probe",
+      "in_progress"
+     ],
+     "at": 1794780002000,
+     "exit": 0,
+     "stdout": {
+      "revision": 1,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780002000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-1",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        }
+       ],
+       "checkpoint": null,
+       "continuation": {
+        "generation": 0,
+        "state": "not_enrolled",
+        "reason": "Recovery not enrolled",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": ""
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 2,
+       "last_event_at": 1794780002000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 2,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780002000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 0,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 3,
+      "server_now": 1794780002000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 1).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-1"
+    },
+    {
+     "argv": [
+      "checkpoint",
+      "0008aaaabbbbcccc:ship:00000002",
+      "1",
+      "{\"progress\": \"Build launched\", \"next_work\": \"Inspect its result\", \"continuation\": {\"kind\": \"dependency\", \"key\": \"build-1\", \"reason\": \"Waiting for build\", \"due_at\": 1794783602000}}"
+     ],
+     "at": 1794780003000,
+     "exit": 0,
+     "stdout": {
+      "revision": 2,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780003000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-1",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 3,
+       "last_event_at": 1794780003000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 2,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780002000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 1000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 3,
+      "server_now": 1794780003000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 2).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "note": "a goal that waits: its wake is of the plan as it stands",
+     "native": "native-1"
+    },
+    {
+     "argv": [
+      "create",
+      "vera8",
+      "other",
+      "Another goal",
+      "[{\"id\": \"probe\", \"title\": \"Probe the behaviour\"}]",
+      "{\"outcome\": \"The thing is shipped\", \"criteria\": [\"It runs\", \"It is documented\"], \"limits\": \"No publication\"}"
+     ],
+     "at": 1794780004000,
+     "exit": 0,
+     "stdout": {
+      "revision": 0,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:other:00000004",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Another goal",
+      "status": "active",
+      "created_at": 1794780004000,
+      "updated_at": 1794780004000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-1",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780004000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        }
+       ],
+       "checkpoint": null,
+       "continuation": {
+        "generation": 0,
+        "state": "not_enrolled",
+        "reason": "Recovery not enrolled",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": ""
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 1,
+       "last_event_at": 1794780004000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:other:00000004:probe",
+        "plan_id": "0008aaaabbbbcccc:other:00000004",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "pending",
+        "created_at": 1794780004000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 1,
+      "server_now": 1794780004000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:other:00000004 (plan revision 0).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:other:00000004\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Recovery not enrolled\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-1"
+    },
+    {
+     "argv": [
+      "cancel",
+      "0008aaaabbbbcccc:other:00000004",
+      "0",
+      "{\"reason\": \"Not needed\"}"
+     ],
+     "at": 1794780005000,
+     "exit": 0,
+     "stdout": {
+      "revision": 1,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:other:00000004",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Another goal",
+      "status": "cancelled",
+      "created_at": 1794780004000,
+      "updated_at": 1794780005000,
+      "completed_at": 1794780005000,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-1",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780004000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780005000,
+         "kind": "cancel",
+         "revision": 1,
+         "detail": {
+          "reason": "Not needed"
+         }
+        }
+       ],
+       "checkpoint": null,
+       "continuation": {
+        "generation": 1,
+        "state": "cancelled",
+        "reason": "Not needed",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "observed_state": "cancelled",
+        "observed_reason": "Not needed",
+        "observed_at": 1794780005000
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 2,
+       "last_event_at": 1794780005000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:other:00000004:probe",
+        "plan_id": "0008aaaabbbbcccc:other:00000004",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "pending",
+        "created_at": 1794780004000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 1,
+      "server_now": 1794780005000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:other:00000004 (plan revision 1).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:other:00000004\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: none\nProgress: \nProvisional next work: \nContinuation: Not needed\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-1"
+    },
+    {
+     "argv": [
+      "create",
+      "vera8",
+      "list",
+      "A plan without a goal",
+      "[{\"id\": \"probe\", \"title\": \"Probe the behaviour\"}]"
+     ],
+     "at": 1794780006000,
+     "exit": 0,
+     "stdout": {
+      "revision": 0,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:list:00000006",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "A plan without a goal",
+      "status": "active",
+      "created_at": 1794780006000,
+      "updated_at": 1794780006000,
+      "completed_at": null,
+      "goal": null,
+      "history": [],
+      "legacy": true,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:list:00000006:probe",
+        "plan_id": "0008aaaabbbbcccc:list:00000006",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "pending",
+        "created_at": 1794780006000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 1,
+      "server_now": 1794780006000
+     },
+     "stderr": "",
+     "native": "native-1"
+    },
+    {
+     "by": "host",
+     "argv": [
+      "carry",
+      "native-0",
+      "native-9",
+      "from a conversation no goal is bound to"
+     ],
+     "at": 1794780007000,
+     "exit": 0,
+     "stdout": [],
+     "stderr": "",
+     "note": "nothing moves",
+     "native": "native-1"
+    },
+    {
+     "argv": [
+      "get",
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "at": 1794780008000,
+     "exit": 0,
+     "stdout": {
+      "revision": 2,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780003000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-1",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 3,
+       "last_event_at": 1794780003000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 2,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780002000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 6000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 3,
+      "server_now": 1794780008000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 2).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-1"
+    },
+    {
+     "by": "host",
+     "argv": [
+      "carry",
+      "native-1",
+      "native-2",
+      "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one"
+     ],
+     "at": 1794780009000,
+     "exit": 0,
+     "stdout": [
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "stderr": "",
+     "note": "the open goal follows; the cancelled one and the plan without a goal stay",
+     "native": "native-2"
+    },
+    {
+     "argv": [
+      "get",
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "at": 1794780010000,
+     "exit": 0,
+     "stdout": {
+      "revision": 3,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780009000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-2",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        },
+        {
+         "at": 1794780009000,
+         "kind": "rebind",
+         "revision": 3,
+         "detail": {
+          "reason": "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one",
+          "from_native_session_id": "native-1",
+          "native_session_id": "native-2"
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 4,
+       "last_event_at": 1794780009000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 0,
+       "pending": 2,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780002000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [],
+        "elapsed_ms": 8000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 0,
+      "total_count": 3,
+      "server_now": 1794780010000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 3).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "note": "bound to the new conversation, one revision on, and its wake still of the plan as it stands",
+     "native": "native-2"
+    },
+    {
+     "argv": [
+      "list",
+      "vera8"
+     ],
+     "at": 1794780011000,
+     "exit": 0,
+     "stdout": [
+      {
+       "revision": 3,
+       "recovery_enabled": 0,
+       "plan_id": "0008aaaabbbbcccc:ship:00000002",
+       "agent_id": "0008aaaabbbbcccc",
+       "session": "vera8",
+       "title": "Ship the thing",
+       "status": "active",
+       "created_at": 1794780001000,
+       "updated_at": 1794780009000,
+       "completed_at": null,
+       "goal": {
+        "outcome": "The thing is shipped",
+        "limits": "No publication",
+        "owner_agent_id": "0008aaaabbbbcccc",
+        "native_session_id": "native-2",
+        "criteria": [
+         {
+          "id": "criterion-1",
+          "text": "It runs",
+          "evidence": ""
+         },
+         {
+          "id": "criterion-2",
+          "text": "It is documented",
+          "evidence": ""
+         }
+        ],
+        "history": [
+         {
+          "at": 1794780001000,
+          "kind": "created",
+          "revision": 0,
+          "detail": {
+           "outcome": "The thing is shipped"
+          }
+         },
+         {
+          "at": 1794780002000,
+          "kind": "step",
+          "revision": 1,
+          "detail": {
+           "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+           "from": "pending",
+           "status": "in_progress",
+           "reason": ""
+          }
+         },
+         {
+          "at": 1794780003000,
+          "kind": "checkpoint",
+          "revision": 2,
+          "detail": {
+           "progress": "Build launched",
+           "next_work": "Inspect its result",
+           "continuation": {
+            "kind": "dependency",
+            "key": "build-1",
+            "reason": "Waiting for build",
+            "due_at": 1794783602000
+           }
+          }
+         },
+         {
+          "at": 1794780009000,
+          "kind": "rebind",
+          "revision": 3,
+          "detail": {
+           "reason": "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one",
+           "from_native_session_id": "native-1",
+           "native_session_id": "native-2"
+          }
+         }
+        ],
+        "checkpoint": {
+         "at": 1794780003000,
+         "progress": "Build launched",
+         "next_work": "Inspect its result",
+         "evidence": {}
+        },
+        "continuation": {
+         "generation": 1,
+         "state": "waiting",
+         "reason": "Waiting for build",
+         "due_at": null,
+         "attempts": 0,
+         "lease_until": null,
+         "request_id": "",
+         "job_handle": "",
+         "dependency_key": "build-1",
+         "dependency_result": null
+        },
+        "recovery_limit": 5,
+        "documents": []
+       },
+       "history": [],
+       "subgoals": [],
+       "ledger": {
+        "event_count": 4,
+        "last_event_at": 1794780009000,
+        "delegation": null,
+        "accounting": []
+       },
+       "updater": {
+        "enabled": false,
+        "janitor_agent_id": null,
+        "last_run_at": null,
+        "last_error": null,
+        "goal_error": null,
+        "retry_at": null,
+        "last_receipt": null
+       },
+       "legacy": false,
+       "completion_verified": false,
+       "counts": {
+        "blocked": 0,
+        "completed": 0,
+        "pending": 2,
+        "removed": 0,
+        "in_progress": 1,
+        "deferred": 0,
+        "skipped": 0
+       },
+       "items": [
+        {
+         "required": 1,
+         "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+         "plan_id": "0008aaaabbbbcccc:ship:00000002",
+         "parent_id": null,
+         "position": 0,
+         "title": "Probe the behaviour",
+         "detail": "",
+         "status": "in_progress",
+         "created_at": 1794780001000,
+         "started_at": 1794780002000,
+         "completed_at": null,
+         "active_ms": 0,
+         "subtasks": [],
+         "elapsed_ms": 9000,
+         "paused": false
+        },
+        {
+         "required": 1,
+         "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+         "plan_id": "0008aaaabbbbcccc:ship:00000002",
+         "parent_id": null,
+         "position": 1,
+         "title": "Build it",
+         "detail": "the whole of it",
+         "status": "pending",
+         "created_at": 1794780001000,
+         "started_at": null,
+         "completed_at": null,
+         "active_ms": 0,
+         "subtasks": [
+          {
+           "required": 1,
+           "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+           "plan_id": "0008aaaabbbbcccc:ship:00000002",
+           "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+           "position": 0,
+           "title": "A part",
+           "detail": "",
+           "status": "pending",
+           "created_at": 1794780001000,
+           "started_at": null,
+           "completed_at": null,
+           "active_ms": 0,
+           "subtasks": [],
+           "elapsed_ms": 0,
+           "paused": false
+          }
+         ],
+         "elapsed_ms": 0,
+         "paused": false
+        }
+       ],
+       "completed_count": 0,
+       "total_count": 3,
+       "server_now": 1794780011000
+      },
+      {
+       "revision": 0,
+       "recovery_enabled": 0,
+       "plan_id": "0008aaaabbbbcccc:list:00000006",
+       "agent_id": "0008aaaabbbbcccc",
+       "session": "vera8",
+       "title": "A plan without a goal",
+       "status": "active",
+       "created_at": 1794780006000,
+       "updated_at": 1794780006000,
+       "completed_at": null,
+       "goal": null,
+       "history": [],
+       "legacy": true,
+       "completion_verified": false,
+       "counts": {
+        "blocked": 0,
+        "completed": 0,
+        "pending": 1,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
+       },
+       "items": [
+        {
+         "required": 1,
+         "item_id": "0008aaaabbbbcccc:list:00000006:probe",
+         "plan_id": "0008aaaabbbbcccc:list:00000006",
+         "parent_id": null,
+         "position": 0,
+         "title": "Probe the behaviour",
+         "detail": "",
+         "status": "pending",
+         "created_at": 1794780006000,
+         "started_at": null,
+         "completed_at": null,
+         "active_ms": 0,
+         "subtasks": [],
+         "elapsed_ms": 0,
+         "paused": false
+        }
+       ],
+       "completed_count": 0,
+       "total_count": 1,
+       "server_now": 1794780011000
+      },
+      {
+       "revision": 1,
+       "recovery_enabled": 0,
+       "plan_id": "0008aaaabbbbcccc:other:00000004",
+       "agent_id": "0008aaaabbbbcccc",
+       "session": "vera8",
+       "title": "Another goal",
+       "status": "cancelled",
+       "created_at": 1794780004000,
+       "updated_at": 1794780005000,
+       "completed_at": 1794780005000,
+       "goal": {
+        "outcome": "The thing is shipped",
+        "limits": "No publication",
+        "owner_agent_id": "0008aaaabbbbcccc",
+        "native_session_id": "native-1",
+        "criteria": [
+         {
+          "id": "criterion-1",
+          "text": "It runs",
+          "evidence": ""
+         },
+         {
+          "id": "criterion-2",
+          "text": "It is documented",
+          "evidence": ""
+         }
+        ],
+        "history": [
+         {
+          "at": 1794780004000,
+          "kind": "created",
+          "revision": 0,
+          "detail": {
+           "outcome": "The thing is shipped"
+          }
+         },
+         {
+          "at": 1794780005000,
+          "kind": "cancel",
+          "revision": 1,
+          "detail": {
+           "reason": "Not needed"
+          }
+         }
+        ],
+        "checkpoint": null,
+        "continuation": {
+         "generation": 1,
+         "state": "cancelled",
+         "reason": "Not needed",
+         "due_at": null,
+         "attempts": 0,
+         "lease_until": null,
+         "request_id": "",
+         "observed_state": "cancelled",
+         "observed_reason": "Not needed",
+         "observed_at": 1794780005000
+        },
+        "recovery_limit": 5,
+        "documents": []
+       },
+       "history": [],
+       "subgoals": [],
+       "ledger": {
+        "event_count": 2,
+        "last_event_at": 1794780005000,
+        "delegation": null,
+        "accounting": []
+       },
+       "updater": {
+        "enabled": false,
+        "janitor_agent_id": null,
+        "last_run_at": null,
+        "last_error": null,
+        "goal_error": null,
+        "retry_at": null,
+        "last_receipt": null
+       },
+       "legacy": false,
+       "completion_verified": false,
+       "counts": {
+        "blocked": 0,
+        "completed": 0,
+        "pending": 1,
+        "removed": 0,
+        "in_progress": 0,
+        "deferred": 0,
+        "skipped": 0
+       },
+       "items": [
+        {
+         "required": 1,
+         "item_id": "0008aaaabbbbcccc:other:00000004:probe",
+         "plan_id": "0008aaaabbbbcccc:other:00000004",
+         "parent_id": null,
+         "position": 0,
+         "title": "Probe the behaviour",
+         "detail": "",
+         "status": "pending",
+         "created_at": 1794780004000,
+         "started_at": null,
+         "completed_at": null,
+         "active_ms": 0,
+         "subtasks": [],
+         "elapsed_ms": 0,
+         "paused": false
+        }
+       ],
+       "completed_count": 0,
+       "total_count": 1,
+       "server_now": 1794780011000
+      }
+     ],
+     "stderr": "",
+     "native": "native-2"
+    },
+    {
+     "argv": [
+      "step",
+      "0008aaaabbbbcccc:ship:00000002",
+      "3",
+      "probe",
+      "completed",
+      "It behaves"
+     ],
+     "at": 1794780012000,
+     "exit": 0,
+     "stdout": {
+      "revision": 4,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780012000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-2",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        },
+        {
+         "at": 1794780009000,
+         "kind": "rebind",
+         "revision": 3,
+         "detail": {
+          "reason": "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one",
+          "from_native_session_id": "native-1",
+          "native_session_id": "native-2"
+         }
+        },
+        {
+         "at": 1794780012000,
+         "kind": "step",
+         "revision": 4,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "in_progress",
+          "status": "completed",
+          "reason": "It behaves"
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 5,
+       "last_event_at": 1794780012000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 1,
+       "pending": 2,
+       "removed": 0,
+       "in_progress": 0,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "It behaves",
+        "status": "completed",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": 1794780012000,
+        "active_ms": 10000,
+        "subtasks": [],
+        "elapsed_ms": 10000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "pending",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 1,
+      "total_count": 3,
+      "server_now": 1794780012000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 4).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "note": "the owner's next command, with the plan as it now reads",
+     "native": "native-2"
+    },
+    {
+     "argv": [
+      "step",
+      "0008aaaabbbbcccc:ship:00000002",
+      "4",
+      "build",
+      "in_progress"
+     ],
+     "at": 1794780013000,
+     "exit": 0,
+     "stdout": {
+      "revision": 5,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780013000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-2",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        },
+        {
+         "at": 1794780009000,
+         "kind": "rebind",
+         "revision": 3,
+         "detail": {
+          "reason": "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one",
+          "from_native_session_id": "native-1",
+          "native_session_id": "native-2"
+         }
+        },
+        {
+         "at": 1794780012000,
+         "kind": "step",
+         "revision": 4,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "in_progress",
+          "status": "completed",
+          "reason": "It behaves"
+         }
+        },
+        {
+         "at": 1794780013000,
+         "kind": "step",
+         "revision": 5,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 6,
+       "last_event_at": 1794780013000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 1,
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "It behaves",
+        "status": "completed",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": 1794780012000,
+        "active_ms": 10000,
+        "subtasks": [],
+        "elapsed_ms": 10000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780013000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 0,
+        "paused": false
+       }
+      ],
+      "completed_count": 1,
+      "total_count": 3,
+      "server_now": 1794780013000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 5).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-2"
+    },
+    {
+     "by": "host",
+     "argv": [
+      "carry",
+      "native-2",
+      "native-3",
+      "carried once more"
+     ],
+     "at": 1794780014000,
+     "exit": 0,
+     "stdout": [
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "stderr": "",
+     "native": "native-3"
+    },
+    {
+     "argv": [
+      "get",
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "at": 1794780015000,
+     "exit": 0,
+     "stdout": {
+      "revision": 6,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780014000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-3",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        },
+        {
+         "at": 1794780009000,
+         "kind": "rebind",
+         "revision": 3,
+         "detail": {
+          "reason": "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one",
+          "from_native_session_id": "native-1",
+          "native_session_id": "native-2"
+         }
+        },
+        {
+         "at": 1794780012000,
+         "kind": "step",
+         "revision": 4,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "in_progress",
+          "status": "completed",
+          "reason": "It behaves"
+         }
+        },
+        {
+         "at": 1794780013000,
+         "kind": "step",
+         "revision": 5,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780014000,
+         "kind": "rebind",
+         "revision": 6,
+         "detail": {
+          "reason": "carried once more",
+          "from_native_session_id": "native-2",
+          "native_session_id": "native-3"
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 7,
+       "last_event_at": 1794780014000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 1,
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "It behaves",
+        "status": "completed",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": 1794780012000,
+        "active_ms": 10000,
+        "subtasks": [],
+        "elapsed_ms": 10000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780013000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 2000,
+        "paused": false
+       }
+      ],
+      "completed_count": 1,
+      "total_count": 3,
+      "server_now": 1794780015000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 6).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-3"
+    },
+    {
+     "by": "host",
+     "argv": [
+      "carry",
+      "native-3",
+      "native-3",
+      "to the conversation it is in"
+     ],
+     "at": 1794780016000,
+     "exit": 0,
+     "stdout": [
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "stderr": "",
+     "note": "carried from where it is to where it is: written down all the same",
+     "native": "native-3"
+    },
+    {
+     "argv": [
+      "get",
+      "0008aaaabbbbcccc:ship:00000002"
+     ],
+     "at": 1794780017000,
+     "exit": 0,
+     "stdout": {
+      "revision": 7,
+      "recovery_enabled": 0,
+      "plan_id": "0008aaaabbbbcccc:ship:00000002",
+      "agent_id": "0008aaaabbbbcccc",
+      "session": "vera8",
+      "title": "Ship the thing",
+      "status": "active",
+      "created_at": 1794780001000,
+      "updated_at": 1794780016000,
+      "completed_at": null,
+      "goal": {
+       "outcome": "The thing is shipped",
+       "limits": "No publication",
+       "owner_agent_id": "0008aaaabbbbcccc",
+       "native_session_id": "native-3",
+       "criteria": [
+        {
+         "id": "criterion-1",
+         "text": "It runs",
+         "evidence": ""
+        },
+        {
+         "id": "criterion-2",
+         "text": "It is documented",
+         "evidence": ""
+        }
+       ],
+       "history": [
+        {
+         "at": 1794780001000,
+         "kind": "created",
+         "revision": 0,
+         "detail": {
+          "outcome": "The thing is shipped"
+         }
+        },
+        {
+         "at": 1794780002000,
+         "kind": "step",
+         "revision": 1,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780003000,
+         "kind": "checkpoint",
+         "revision": 2,
+         "detail": {
+          "progress": "Build launched",
+          "next_work": "Inspect its result",
+          "continuation": {
+           "kind": "dependency",
+           "key": "build-1",
+           "reason": "Waiting for build",
+           "due_at": 1794783602000
+          }
+         }
+        },
+        {
+         "at": 1794780009000,
+         "kind": "rebind",
+         "revision": 3,
+         "detail": {
+          "reason": "Antigravity pruned the conversation; Clarp continued it in a new one that opens with its record of the old one",
+          "from_native_session_id": "native-1",
+          "native_session_id": "native-2"
+         }
+        },
+        {
+         "at": 1794780012000,
+         "kind": "step",
+         "revision": 4,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+          "from": "in_progress",
+          "status": "completed",
+          "reason": "It behaves"
+         }
+        },
+        {
+         "at": 1794780013000,
+         "kind": "step",
+         "revision": 5,
+         "detail": {
+          "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "from": "pending",
+          "status": "in_progress",
+          "reason": ""
+         }
+        },
+        {
+         "at": 1794780014000,
+         "kind": "rebind",
+         "revision": 6,
+         "detail": {
+          "reason": "carried once more",
+          "from_native_session_id": "native-2",
+          "native_session_id": "native-3"
+         }
+        },
+        {
+         "at": 1794780016000,
+         "kind": "rebind",
+         "revision": 7,
+         "detail": {
+          "reason": "to the conversation it is in",
+          "from_native_session_id": "native-3",
+          "native_session_id": "native-3"
+         }
+        }
+       ],
+       "checkpoint": {
+        "at": 1794780003000,
+        "progress": "Build launched",
+        "next_work": "Inspect its result",
+        "evidence": {}
+       },
+       "continuation": {
+        "generation": 1,
+        "state": "waiting",
+        "reason": "Waiting for build",
+        "due_at": null,
+        "attempts": 0,
+        "lease_until": null,
+        "request_id": "",
+        "job_handle": "",
+        "dependency_key": "build-1",
+        "dependency_result": null
+       },
+       "recovery_limit": 5,
+       "documents": []
+      },
+      "history": [],
+      "subgoals": [],
+      "ledger": {
+       "event_count": 8,
+       "last_event_at": 1794780016000,
+       "delegation": null,
+       "accounting": []
+      },
+      "updater": {
+       "enabled": false,
+       "janitor_agent_id": null,
+       "last_run_at": null,
+       "last_error": null,
+       "goal_error": null,
+       "retry_at": null,
+       "last_receipt": null
+      },
+      "legacy": false,
+      "completion_verified": false,
+      "counts": {
+       "blocked": 0,
+       "completed": 1,
+       "pending": 1,
+       "removed": 0,
+       "in_progress": 1,
+       "deferred": 0,
+       "skipped": 0
+      },
+      "items": [
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:probe",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 0,
+        "title": "Probe the behaviour",
+        "detail": "It behaves",
+        "status": "completed",
+        "created_at": 1794780001000,
+        "started_at": null,
+        "completed_at": 1794780012000,
+        "active_ms": 10000,
+        "subtasks": [],
+        "elapsed_ms": 10000,
+        "paused": false
+       },
+       {
+        "required": 1,
+        "item_id": "0008aaaabbbbcccc:ship:00000002:build",
+        "plan_id": "0008aaaabbbbcccc:ship:00000002",
+        "parent_id": null,
+        "position": 1,
+        "title": "Build it",
+        "detail": "the whole of it",
+        "status": "in_progress",
+        "created_at": 1794780001000,
+        "started_at": 1794780013000,
+        "completed_at": null,
+        "active_ms": 0,
+        "subtasks": [
+         {
+          "required": 1,
+          "item_id": "0008aaaabbbbcccc:ship:00000002:part",
+          "plan_id": "0008aaaabbbbcccc:ship:00000002",
+          "parent_id": "0008aaaabbbbcccc:ship:00000002:build",
+          "position": 0,
+          "title": "A part",
+          "detail": "",
+          "status": "pending",
+          "created_at": 1794780001000,
+          "started_at": null,
+          "completed_at": null,
+          "active_ms": 0,
+          "subtasks": [],
+          "elapsed_ms": 0,
+          "paused": false
+         }
+        ],
+        "elapsed_ms": 4000,
+        "paused": false
+       }
+      ],
+      "completed_count": 1,
+      "total_count": 3,
+      "server_now": 1794780017000
+     },
+     "stderr": "",
+     "wake_prompt": "Continue your durable outcome commitment. Reassess current conditions and fresh results; choose your own next actions, collaborators and wake timing within the original authority. Earlier next-work text is provisional context, not a fixed script. Answering a side question or ending a turn does not complete this goal. Record a checkpoint with evidence and a continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\nGoal: 0008aaaabbbbcccc:ship:00000002 (plan revision 7).\nBefore acting, read the authoritative outcome, complete limits, criteria and checkpoint: clarp-goal get 0008aaaabbbbcccc:ship:00000002\nThe following previews are provisional context; they do not replace the full goal.\nOutcome: The thing is shipped\nLimits: No publication\nCheckpoint at: 1794780003000\nProgress: Build launched\nProvisional next work: Inspect its result\nContinuation: Waiting for build\nDependency result: null\nWorking documents (name, revision; retrieve with clarp-goal read): []",
+     "native": "native-3"
+    }
+   ]
   }
  ]
 }

@@ -72,7 +72,38 @@ class World:
                 db.conn().execute(f'UPDATE {table} SET agent_id=? WHERE agent_id=?', (self.agent_id, real))
         db.conn().commit()
         self.plan, self.revision = '', 0
+        self.native = ''
         self.steps: list[dict] = []
+
+    def bound(self, step: dict) -> dict:
+        """A step with the owner's conversation with its tool as it was bound then, where it was."""
+        if self.native:
+            step['native'] = self.native
+        return step
+
+    def bind(self, native: str) -> None:
+        """The owner's conversation with its tool is this one from now on."""
+        from lib import agents
+        agents.bind_backend_session(self.agent_id, native)
+        self.native = native
+
+    def carry(self, to: str, reason: str, note: str = '', frm: str | None = None) -> dict:
+        """The Host continued the owner's conversation with its tool in a new one
+        (`task_plans.carry_native_session`: a tool that lets go of old conversations, and a Host
+        that opens the new one with its own record of the old). Written down as `[carry, from, to,
+        reason]` under `by: host`, with the plans that moved; the owner's conversation is the new
+        one from then on."""
+        from lib import task_plans
+        self.now += STEP_MS
+        was = self.native if frm is None else frm
+        moved = task_plans.carry_native_session(self.agent_id, was, to, reason)
+        step = {'by': 'host', 'argv': ['carry', was, to, reason], 'at': self.now, 'exit': 0, 'stdout': moved, 'stderr': ''}
+        if frm is None:
+            self.bind(to)
+        if note:
+            step['note'] = note
+        self.steps.append(self.bound(step))
+        return step
 
     def token_hex(self, nbytes: int = 4) -> str:
         self.ids += 1
@@ -110,7 +141,7 @@ class World:
                 step['wake_prompt'] = self.wake_prompt(printed['plan_id'])
         if note:
             step['note'] = note
-        self.steps.append(step)
+        self.steps.append(self.bound(step))
         return step
 
 
@@ -133,7 +164,7 @@ class World:
                 step['wake_prompt'] = self.wake_prompt(result['plan_id'])
         if note:
             step['note'] = note
-        self.steps.append(step)
+        self.steps.append(self.bound(step))
         return step
 
 
@@ -160,7 +191,7 @@ class World:
         step['plan'] = task_plans.get(self.plan)
         if note:
             step['note'] = note
-        self.steps.append(step)
+        self.steps.append(self.bound(step))
         return step
 
 
@@ -349,9 +380,39 @@ def the_keeper_writes_beside_the_owner(w: World) -> None:
     w.keeper({}, 'No goal here.', note='refused: a plan that has no goal')
 
 
+CARRIED = ('Antigravity pruned the conversation; Clarp continued it in a new one that opens with its '
+           'record of the old one')
+
+
+def the_host_carries_goals_to_a_new_conversation(w: World) -> None:
+    w.bind('native-1')
+    w.run('create', '{session}', 'ship', 'Ship the thing', j(ITEMS), j(GOAL))
+    w.run('step', '{plan}', '{rev}', 'probe', 'in_progress')
+    due = w.now + 3_600_000
+    w.run('checkpoint', '{plan}', '{rev}', j({'progress': 'Build launched', 'next_work': 'Inspect its result',
+                                             'continuation': {'kind': 'dependency', 'key': 'build-1', 'reason': 'Waiting for build',
+                                                              'due_at': due}}),
+          note='a goal that waits: its wake is of the plan as it stands')
+    first = w.plan
+    w.run('create', '{session}', 'other', 'Another goal', j(ITEMS[:1]), j(GOAL))
+    w.run('cancel', '{plan}', '{rev}', j({'reason': 'Not needed'}))
+    w.run('create', '{session}', 'list', 'A plan without a goal', j(ITEMS[:1]))
+    w.carry('native-9', 'from a conversation no goal is bound to', frm='native-0', note='nothing moves')
+    w.run('get', first)
+    w.carry('native-2', CARRIED, note='the open goal follows; the cancelled one and the plan without a goal stay')
+    w.run('get', first, note='bound to the new conversation, one revision on, and its wake still of the plan as it stands')
+    w.run('list', '{session}')
+    w.run('step', first, '{rev}', 'probe', 'completed', 'It behaves', note="the owner's next command, with the plan as it now reads")
+    w.run('step', first, '{rev}', 'build', 'in_progress')
+    w.carry('native-3', 'carried once more')
+    w.run('get', first)
+    w.carry('native-3', 'to the conversation it is in', note='carried from where it is to where it is: written down all the same')
+    w.run('get', first)
+
+
 SCENARIOS = [a_goal_from_start_to_completion, what_the_tool_refuses, a_goal_is_paused_resumed_blocked_and_cancelled,
              a_plan_changes_and_keeps_its_notes, a_goal_waits_for_something, the_user_acts_on_a_goal,
-             the_keeper_writes_beside_the_owner]
+             the_keeper_writes_beside_the_owner, the_host_carries_goals_to_a_new_conversation]
 
 
 def main(argv: list[str]) -> int:
