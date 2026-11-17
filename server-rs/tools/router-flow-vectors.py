@@ -22,6 +22,7 @@ of the machine. No Host is touched or started, no model is asked anything, nothi
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -29,6 +30,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -45,6 +47,24 @@ SAID = [
     ('mike', 'user', 'Now bump the version.', 600), ('mike', 'assistant', 'Version bumped to 2.4.1 and tagged.', 590),
     ('anna', 'user', 'Draft the release notes   for\n2.4.', 500), ('anna', 'assistant', 'x' * 300, 480),
     ('zoe', 'user', 'Look into the login bug.', 4000),
+]
+
+
+# Words held against names: (what was said, the agents as (session, name)).
+SOUND_ALIKE = [
+    # Thirteen of sixteen signs alike: 0.8125, and of the two numbers as near it is the even one.
+    ('abcdefghijklmxyz is here', [('abcdefghijklmnop', 'P')]),
+    # Eleven of sixteen: 0.6875, the even one above.
+    ('abcdefghijkvwxyz is here', [('abcdefghijklmnop', 'P')]),
+    ('mark, are you there?', [('mike', 'Mike'), ('mark', 'Marc'), ('marko', 'Marko')]),
+    ('hey Zoë', [('zoe', 'Zoë')]),
+    # The thirteenth word is held against no name.
+    ('one two three four five six seven eight nine ten eleven twelve anna', [('anna', 'Anna')]),
+    # As alike as each other: in the order of the agents.
+    ('ANNA anna Anna', [('anna', 'Anna'), ('ana', 'Ana'), ('hanna', 'Hanna')]),
+    ('İstanbul calling', [('istanbul', 'İstanbul')]),
+    ('', [('anna', 'Anna')]),
+    ('x', [('', '')]),
 ]
 
 
@@ -79,7 +99,7 @@ STORIES = [
         message('for an agent nobody has', 'tell Bob hello', to('bob'), id='m-4'),
         message('for an agent that was put away', 'tell Gone hello', to('gone'), id='m-5'),
         message('the answer to what was asked: the held message goes', 'yes, Anna',
-                to('anna', 0.95, pending_id='{pending:m-3}', text_to_send='yes, Anna'), id='m-6'),
+                to('anna', 0.95, pending_id='held-m-3', text_to_send='yes, Anna'), id='m-6'),
         message('the model asks itself', 'do the thing', {'kind': 'clarify', 'confidence': 0.4, 'spoken_text': ' Which thing? ',
                                                            'phrase_key': 'which', 'reason': 'unclear'}, id='m-7'),
         message('the model cannot tell two apart', 'fix it', {'kind': 'ambiguous', 'target_session': 'anna', 'confidence': 0.5}, id='m-8'),
@@ -115,6 +135,25 @@ STORIES = [
                 id='s-11', session='mike', only=['mike', 'anna']),
         message('something nobody knows how to do', 'paint Mike blue',
                 {'kind': 'agent_control', 'control_action': 'paint', 'target_session': 'mike', 'confidence': 0.95}, id='s-12', session='mike'),
+        message('stop an agent', 'Anna, stop',
+                [{'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'anna', 'confidence': 0.9}] * 2, id='s-13'),
+        message('start an agent again: as it is known, whatever the model says of it', 'restart Zoe',
+                [{'kind': 'agent_control', 'control_action': 'restart', 'target_session': 'zoe', 'confidence': 0.9,
+                  'control_payload': {'name': 'Mallory', 'cwd': '/etc', 'backend': 'other', 'session': 'mike'}}] * 2, id='s-14'),
+        message('make a new agent: only its name is the model\'s to say', 'make a new agent called Nora',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.9,
+                 'control_payload': {'name': ' Nora ', 'cwd': '/etc', 'backend': 'other'}}, id='s-15'),
+        message('start an agent again that nobody has: a new one is made', 'resume Bob',
+                [{'kind': 'agent_control', 'control_action': 'resume', 'target_session': 'bob', 'confidence': 0.9}] * 2, id='s-16'),
+        message('making an agent fails', 'make a new agent called Broken',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.9, 'control_payload': {'name': 'Broken'}}, id='s-17'),
+        message('a command for a janitor', 'stop the delegator',
+                [{'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'clarp-message-delegator',
+                  'confidence': 0.95}] * 2, id='s-18'),
+        message('a command for the agent that is open, by no name', 'stop',
+                {'kind': 'agent_control', 'control_action': 'interrupt', 'confidence': 0.9}, id='s-19'),
+        message('the answer names what was held, and its time is up', 'yes, Anna, the notes',
+                to('anna', 0.95, pending_id='held-m-7'), id='s-20'),
     ]),
     ('what an app could place by no name', [
         message('the model finds whom it is for', 'are the notes done?', to('anna', 0.9), fallback=True, id='f-1',
@@ -138,6 +177,14 @@ STORIES = [
         message('paused while a message is with the model', 'Anna, one more', to('anna'), id='w-7', pause_at_model=True),
         message('a message while it is paused', 'Anna, and another', to('anna'), id='w-8'),
     ]),
+    ('a question is asked a second time about a message that is held', [
+        message('a message that is held', 'send the report', to('zoe', 0.6), id='r-1',
+                janitor={'enabled': True, 'options': {'fallback_only': False}}),
+        message('what is said to the question is not understood: the model asks again, of the same held message', 'what?',
+                {'kind': 'clarify', 'confidence': 0.4, 'pending_id': 'held-r-1', 'spoken_text': 'Was the report for Zoe?',
+                 'reason': 'unclear answer'}, id='r-2'),
+        message('the answer: what is given is what was held', 'yes', to('zoe', 0.95, pending_id='held-r-1'), id='r-3'),
+    ]),
 ]
 
 
@@ -157,13 +204,37 @@ def run() -> dict:
     clock = {'now': T0 - 5000 * S}
     db.now_ms = lambda: clock['now']
     orchestrator.now_ms = db.now_ms
-    from lib import orchestrator_context
-    orchestrator_context.now_ms = db.now_ms
+    from lib import agent_lifecycle, orchestrator_context, turn_lifecycle
+    # Every clock a story reads is the story's own: when an agent was made and what it was last
+    # doing, what was held and when, and how long a model took (a quarter of a second each time
+    # it is asked). A message is held under an id that says which message it is.
+    orchestrator_context.now_ms = agents.now_ms = turn_lifecycle.now_ms = db.now_ms
+    taken = {'seconds': 0.0}
+    orchestrator.time = types.SimpleNamespace(time=lambda: taken['seconds'])
+    held_as = {'id': ''}
+    orchestrator.uuid = types.SimpleNamespace(uuid4=lambda: held_as['id'])
+    # What the router asks of the Host beyond a message and a word aloud is written down and not done.
+    made: list = []
+    stopped: list = []
+
+    class Lifecycle:
+        """The Host making or starting an agent again: it writes down what it was asked for."""
+        def __init__(self, ctx):
+            pass
+
+        def create(self, payload):
+            made.append(dict(payload))
+            if payload.get('name') == 'Broken':
+                raise RuntimeError('no tool to run it with')
+            return types.SimpleNamespace(session=payload.get('session') or 'new-' + str(payload.get('name') or 'agent').lower())
+
+    agent_lifecycle.AgentLifecycleService = Lifecycle
+    orchestrator.backends.interrupt_any = stopped.append
     work = root / 'work'
     work.mkdir()
     ids = {}
     for persona, session, backend, voice in AGENTS:
-        ids[session] = agents.create_agent(persona=persona, voice_id=voice, cwd=str(work), session=session, backend=backend)
+        ids[session] = agents.create_agent(persona=persona, voice_id=voice, cwd='/srv/work', session=session, backend=backend)
     agents.set_archived(ids['gone'], True)
     janitor_builtins.ensure_builtins(str(work))
     router = janitor_builtins.get_builtin('message-delegator')
@@ -173,15 +244,11 @@ def run() -> dict:
     clock['now'] = T0
     agents.set_focus(ids['mike'])
 
-    pending: dict = {}
-
     def named(value):
         text = json.dumps(value)
         for session, agent_id in ids.items():
             text = text.replace(agent_id, f'id-{session}')
-        for raw, name in pending.items():
-            text = text.replace(raw, name)
-        return json.loads(text.replace(str(work), '/srv/work'))
+        return json.loads(text.replace(str(work), '/srv/janitors'))
 
     class Stream:
         """The apps, as far as the router tells them anything."""
@@ -211,6 +278,7 @@ def run() -> dict:
     def model(packet, settings):
         shown.append({'packet': json.loads(json.dumps(packet)), 'provider': settings.provider, 'model': settings.model,
                       'effort': settings.effort})
+        taken['seconds'] += 0.25
         if state['pause']:
             state['pause'] = False
             current = janitors.get(router['session'])
@@ -247,14 +315,7 @@ def run() -> dict:
             decide = one['decide']
             del answers[:]
             answers.extend(decide if isinstance(decide, list) else [decide])
-            # `{pending:m-3}`: the id under which the message of that id is held.
-            for index, answer in enumerate(answers):
-                if isinstance(answer, dict) and str(answer.get('pending_id', '')).startswith('{pending:'):
-                    wanted = answer['pending_id'][len('{pending:'):-1]
-                    held = db.conn().execute('SELECT pending_id FROM orchestrator_pending_utterances WHERE trace_id = ?',
-                                             (f'trace-{wanted}',)).fetchone()
-                    answers[index] = {**answer, 'pending_id': held['pending_id'] if held else ''}
-            del shown[:], given[:], ctx.said[:], ctx.stream.told[:]
+            del shown[:], given[:], ctx.said[:], ctx.stream.told[:], made[:], stopped[:]
             state['pause'] = bool(one.get('pause_at_model'))
             fails_with = one.get('dispatch')
 
@@ -269,6 +330,7 @@ def run() -> dict:
 
             message_id = one.get('id', f'auto-{len(told)}-{len(rows)}')
             requested = one.get('session', 'mike')
+            held_as['id'] = f'held-{message_id}'
             admission = prompt_admissions.PromptAdmission(
                 admission_id=f'adm-{message_id}', admission_version=1, authenticated_at_admission=True,
                 cooperative_principal='administrator', principal_id='', origin='user', sender_agent_id='',
@@ -283,14 +345,12 @@ def run() -> dict:
                 answered = dataclasses.asdict(outcome) if outcome is not None else None
             except Exception as broke:  # noqa: BLE001 - told by its kind: the Python Host breaks here
                 answered = {'broke': type(broke).__name__, 'said': str(broke)[:200]}
-            for held in db.conn().execute('SELECT pending_id FROM orchestrator_pending_utterances ORDER BY created_at, pending_id'):
-                pending.setdefault(held['pending_id'], f'<pending:{len(pending) + 1}>')
             decisions = [dict(row) for row in db.conn().execute(
                 'SELECT * FROM orchestrator_decisions WHERE trace_id = ? ORDER BY decision_id', (f'trace-{message_id}',))]
             held_now = [dict(row) for row in db.conn().execute(
                 'SELECT * FROM orchestrator_pending_utterances ORDER BY created_at, pending_id')]
             run_of = janitor_builtins.get_request_run(
-                'message-delegator', 'routing-' + __import__('hashlib').sha256(f'u-{message_id}'.encode()).hexdigest())
+                'message-delegator', 'routing-' + hashlib.sha256(f'u-{message_id}'.encode()).hexdigest())
             decide_shown = [str(d) if isinstance(d, Exception) else d for d in (decide if isinstance(decide, list) else [decide])]
             row = {
                 'what': one['what'], 'now': at, 'text': one['text'], 'id': message_id, 'session': requested,
@@ -299,6 +359,7 @@ def run() -> dict:
                 'dispatch_fails_with': fails_with, 'pause_at_model': bool(one.get('pause_at_model')),
                 'janitor': one.get('janitor', 'as it was'),
                 'shown': shown[:], 'given': given[:], 'said': ctx.said[:], 'told': ctx.stream.told[:],
+                'made': made[:], 'stopped': stopped[:],
                 'answered': answered, 'decisions': decisions, 'held': held_now,
                 'run': None if run_of is None else {key: run_of[key] for key in ('status', 'outcome', 'error', 'demand_result')},
                 'focus': agents.get_focus(),
@@ -308,20 +369,25 @@ def run() -> dict:
             }
             rows.append(named(row))
         told.append({'name': name, 'messages': rows})
+    alike = []
+    for said_words, people in SOUND_ALIKE:
+        listed = [{'session': session, 'persona': persona} for session, persona in people]
+        alike.append({'utterance': said_words, 'agents': listed, 'found': orchestrator_context._name_candidates(said_words, listed)})
+
     def state_of(session):
-        # What the agent was last doing, as the router reads it: written when the agent was made, by
-        # the clock of the machine and not the story's.
+        # What the agent was last doing, as the router reads it: written when the agent was made.
         row = orchestrator_context._latest_state(ids[session])
         return dict(row) if row else None
 
     return {'agents': [{'agent_id': f'id-{session}', 'session': session, 'persona': persona, 'backend': backend,
                         'voice_id': voice, 'cwd': '/srv/work', 'archived': session == 'gone',
-                        'created_at': T0 - 5000 * S, 'state': state_of(session),
+                        'created_at': agents.get_by_session(session)['created_at'], 'state': state_of(session),
                         'last_activity': agents.last_activity(ids[session])}
                        for persona, session, backend, voice in AGENTS],
             'said_before': [{'session': session, 'role': role, 'text': text, 'at': T0 - before * S, 'trace_id': f'before-{before}'}
                             for session, role, text, before in SAID],
-            'focus': 'id-mike', 'router': named({key: router[key] for key in ('agent_id', 'session', 'backend', 'model', 'effort',
+            'sound_alike': alike,
+            'focus': 'id-mike', 'router': named({key: router[key] for key in ('agent_id', 'session', 'name', 'enabled', 'backend', 'model', 'effort',
                                                                               'execution', 'options', 'attachments')}),
             'stories': told}
 
@@ -354,6 +420,18 @@ def main() -> int:
     out.append('}')
     OUT.write_text('\n'.join(out) + '\n')
     messages = [one for story in said['stories'] for one in story['messages']]
+    # The mark of what a model was shown is taken of the packet as it is written here: whoever reads
+    # this file can take it again.
+    for one in messages:
+        for asking in one['shown']:
+            packet = asking['packet']
+            stable = {key: packet[key] for key in ('utterance', 'requested_session', 'focus_session', 'context_scope',
+                                                   'fallback_request', 'agents', 'pending', 'candidate_name_matches')}
+            mark = hashlib.sha1(json.dumps(stable, sort_keys=True, separators=(',', ':')).encode()).hexdigest()[:16]
+            if mark != packet['context_summary']['hash']:
+                print(f'{one["what"]}: the mark of the packet as written is {mark}, the Host took '
+                      f'{packet["context_summary"]["hash"]}', file=sys.stderr)
+                return 1
     broke = [one['what'] for one in messages if isinstance(one['answered'], dict) and 'broke' in one['answered']]
     print(f'{OUT.relative_to(REPO)}: {len(said["stories"])} stories of {len(messages)} messages; the model was asked '
           f'{sum(len(one["shown"]) for one in messages)} times, {sum(len(one["given"]) for one in messages)} messages were given to an agent, '
