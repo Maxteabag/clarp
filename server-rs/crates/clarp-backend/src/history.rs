@@ -164,6 +164,41 @@ pub fn claude(transcript: &str) -> Vec<Value> {
     turns
 }
 
+/// What each turn of a transcript is in its conversation, as the Python Host marks the rows
+/// it reads from one (`server/lib/message_writes.py`, `_row_phases`; held by the same
+/// vectors): what the agent said is `commentary` where tool work follows it before the user
+/// speaks again, and `final` where none does, unless the turn says itself which it is
+/// (`kind`). A turn of tool work alone has none, nor has a turn of the user. The tools a
+/// turn itself used do not follow what it said.
+pub fn phases(turns: &[Value]) -> Vec<Value> {
+    let mut phases = vec![Value::Null; turns.len()];
+    let mut work_after = false;
+    for (index, turn) in turns.iter().enumerate().rev() {
+        match turn["role"].as_str() {
+            Some("user") => {
+                work_after = false;
+                continue;
+            }
+            Some("assistant") => {}
+            _ => continue,
+        }
+        let said = turn["text"].as_str().unwrap_or_default();
+        if !python::strip(said).is_empty() {
+            let by_itself = match turn["kind"].as_str() {
+                Some("final_answer" | "final") => Some("final"),
+                Some("commentary") => Some("commentary"),
+                _ => None,
+            };
+            let by_what_follows = if work_after { "commentary" } else { "final" };
+            phases[index] = json!(by_itself.unwrap_or(by_what_follows));
+        }
+        if something(&turn["tools"]) || something(&turn["display_cells"]) {
+            work_after = true;
+        }
+    }
+    phases
+}
+
 /// The model a session last ran on, as its transcript says: the one its newest answer
 /// names (a line of Claude Code), or its newest context of a turn (a rollout of Codex). An
 /// answer the tool made up names none. Empty where no line names one. It is what an agent

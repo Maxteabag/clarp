@@ -25,6 +25,7 @@ use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_backend::{history, past};
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::edge::App;
 use crate::{ids, wire};
@@ -75,12 +76,13 @@ pub(crate) enum Begins {
     /// An agent has the session already, and the request said to open what is there: that
     /// agent's session name.
     Open(String),
-    /// A session of its tool to continue, what was said in it, the agent whose session it
-    /// was forked from, when it was forked from an agent's, and the model the session last
-    /// ran on (empty where its transcript names none).
+    /// A session of its tool to continue, what was said in it (the turns of its
+    /// transcript), the agent whose session it was forked from, when it was forked from an
+    /// agent's, and the model the session last ran on (empty where its transcript names
+    /// none).
     With {
         session: String,
-        rows: Vec<ImportedRow>,
+        turns: Vec<Value>,
         parent: Option<String>,
         model: String,
     },
@@ -92,10 +94,9 @@ fn refused(status: StatusCode, word: &str, message: &str) -> Refused {
     (status, json!({ "error": word, "message": message }))
 }
 
-/// The agent whose tool's session this is: the one that continues it now, or the one whose
-/// conversation goes by this name (a session Claude Code was given its name for by the Host,
-/// or one an agent began with: an agent that takes a session up has a conversation of that
-/// name, so that the session stays its own whatever its tool calls it afterwards).
+/// The agent whose tool's session this is: the one that continues it now (the Python Host's
+/// rule, `agents_db.get_by_backend_session`), or the one whose conversation goes by this
+/// name: a session Claude Code was given its name for by the Host.
 fn owner_of(app: &App, session: &str) -> Option<(String, String)> {
     let directory = app.fleet.directory();
     let owns = |member: &&std::sync::Arc<crate::fleet::Member>| {
@@ -125,28 +126,26 @@ fn transcript_of(root: &Path, cwd: &str, session: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// The turns of a transcript as rows of a conversation that came from elsewhere, in the
-/// shape this Host's own rows have. A row is known by the session and its place in it; the
-/// answer that closes what a user asked is the final one.
-fn rows_of(session: &str, turns: &[Value]) -> Vec<ImportedRow> {
-    let short: String = session
-        .chars()
-        .filter(char::is_ascii_alphanumeric)
-        .take(12)
-        .collect();
+/// The turns of a transcript as rows of the conversation of the agent that begins with
+/// them, in the shape this Host's own rows have. A row is named as the Python Host names
+/// the rows it reads from a transcript: `msg-` and twenty signs of a digest of the agent,
+/// the session and the row's place in it, so that a row keeps its name and no two agents
+/// have a row of one name. What each is in the conversation is the Python Host's rule
+/// ([`history::phases`]).
+pub(crate) fn rows_of(agent_id: &str, session: &str, turns: &[Value]) -> Vec<ImportedRow> {
+    let phases = history::phases(turns);
     let mut at_ms = 0;
     let mut rows = Vec::with_capacity(turns.len());
-    for (number, turn) in turns.iter().enumerate() {
-        let of_the_agent = turn["role"] == "assistant";
+    for (number, (turn, phase)) in turns.iter().zip(phases).enumerate() {
         let said_at = turn["timestamp"].as_str().and_then(wire::from_iso);
         // A turn that does not say when it was said was said when the one before it was.
         at_ms = said_at.unwrap_or(at_ms).max(at_ms);
-        let next = turns.get(number + 1);
-        let closes = of_the_agent && next.is_none_or(|next| next["role"] != "assistant");
-        let id = format!("{}-{short}-{number}", if of_the_agent { "r" } else { "u" });
+        let digest = Sha256::digest(format!("{agent_id}\0{session}\0{number}").as_bytes());
+        let digest: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let id = format!("msg-{}", &digest[..20]);
         let row = json!({
             "id": id, "role": turn["role"], "text": turn["text"], "timestamp": wire::iso(at_ms),
-            "kind": null, "phase": if closes { json!("final") } else { Value::Null },
+            "kind": null, "phase": phase,
             "origin": "user", "trace_id": "", "tool_name": null, "tools": turn["tools"],
             "display_cells": [], "automated": false, "automation_kind": "",
             "sender_agent_id": "", "sender_name": "", "sender_session": "",
@@ -206,10 +205,9 @@ pub(crate) async fn begins(
             let why = "Session is no longer available in this directory";
             return Err(refused(StatusCode::NOT_FOUND, why, why));
         };
-        let rows = rows_of(&session, &history::claude(&transcript));
         return Ok(Begins::With {
             session,
-            rows,
+            turns: history::claude(&transcript),
             parent: None,
             model: history::model(&transcript),
         });
@@ -243,10 +241,9 @@ pub(crate) async fn begins(
             return Err(refused(StatusCode::INTERNAL_SERVER_ERROR, why, why));
         }
     };
-    let rows = rows_of(&session, &history::claude(&copy));
     Ok(Begins::With {
         session,
-        rows,
+        turns: history::claude(&copy),
         parent,
         model: history::model(&copy),
     })
@@ -270,19 +267,27 @@ mod tests {
             json!({ "role": "user", "text": "three", "tools": [], "timestamp": "long ago" }),
             json!({ "role": "assistant", "text": "four", "tools": [], "timestamp": "2027-01-15T07:00:00.000Z" }),
         ];
-        let rows = rows_of("0b6b2f4e-aaaa-bbbb", &turns);
+        let rows = rows_of("a1b2c3d4e5f60718", "0b6b2f4e-aaaa-bbbb", &turns);
+        // Each has a name of its own, of one shape, that is the same whenever it is read.
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            [
-                "u-0b6b2f4eaaaa-0",
-                "r-0b6b2f4eaaaa-1",
-                "r-0b6b2f4eaaaa-2",
-                "u-0b6b2f4eaaaa-3",
-                "r-0b6b2f4eaaaa-4"
-            ]
+        let named = |id: &&str| {
+            let signs = id.strip_prefix("msg-").unwrap_or_default();
+            signs.len() == 20 && signs.chars().all(|sign| sign.is_ascii_hexdigit())
+        };
+        assert!(ids.iter().all(named), "{ids:?}");
+        let other: std::collections::BTreeSet<&str> = ids.iter().copied().collect();
+        assert_eq!(other.len(), 5);
+        let again = rows_of("a1b2c3d4e5f60718", "0b6b2f4e-aaaa-bbbb", &turns);
+        assert_eq!(again[3].id, rows[3].id);
+        // The same turns are other rows for another agent: no two agents have a row of one name.
+        let another = rows_of("ffffffffffffffff", "0b6b2f4e-aaaa-bbbb", &turns);
+        assert!(
+            another
+                .iter()
+                .zip(&rows)
+                .all(|(theirs, ours)| theirs.id != ours.id)
         );
-        // The answer that closes what a user asked is the final one.
+        // What the agent said last before its user spoke again is the final answer.
         let phases: Vec<&Value> = rows.iter().map(|row| &row.row["phase"]).collect();
         assert_eq!(
             phases,

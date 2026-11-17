@@ -9194,13 +9194,25 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
 #[test]
 fn a_new_agent_begins_with_a_session_its_tool_kept() {
     let place = Place::new("past-sessions");
-    // A stand-in for Claude Code that writes down what it was started with, and answers.
+    // A stand-in for Claude Code that writes down what it was started with, and answers in
+    // the session it was started in, as the real one does: the one it is told to go on in,
+    // or the one it is given a name for.
     let started = place.root.join("started");
     let claude = place.root.join("claude");
+    let answers = r#"sid=stand-in
+prev=
+for arg in "$@"; do
+  case "$prev" in --resume|--session-id) sid="$arg" ;; esac
+  prev="$arg"
+done
+printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$sid\",\"model\":\"stand-in\"}"
+printf '%s\n' "{\"type\":\"assistant\",\"session_id\":\"$sid\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}"
+printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"$sid\",\"result\":\"on it\",\"num_turns\":1}"
+"#;
     let script = [
         "#!/bin/sh\nread message\n",
         &format!("echo \"$*\" >> \"{}\"\n", started.display()),
-        STAND_IN_ANSWERS,
+        answers,
     ]
     .concat();
     program(&claude, &script);
@@ -9338,8 +9350,10 @@ fn a_new_agent_begins_with_a_session_its_tool_kept() {
     );
     assert_eq!(status, 200, "{taken}");
     let agent = taken["session"].as_str().unwrap().to_string();
-    // It runs on the model the session last ran on: the request named none.
+    // It runs on the model the session last ran on: the request named none. And it is new:
+    // it has run no turn.
     assert_eq!(taken["agent"]["model"], "claude-kept-1", "{taken}");
+    assert_eq!(taken["agent"]["latest_state"], "spawned", "{taken}");
     assert_eq!(
         texts(&agent),
         vec![
@@ -9359,11 +9373,18 @@ fn a_new_agent_begins_with_a_session_its_tool_kept() {
         (&json!("Read"), &json!("ok"), &json!("A small readme.")),
         "{log}"
     );
+    // By the Python Host's rule for rows read from a transcript, both are final: no tool
+    // work follows what was said first but that turn's own.
     assert_eq!(
-        (&turns[1]["phase"], &turns[2]["phase"]),
-        (&Value::Null, &json!("final"))
+        (&turns[0]["phase"], &turns[1]["phase"], &turns[2]["phase"]),
+        (&Value::Null, &json!("final"), &json!("final"))
     );
     assert_eq!(turns[0]["timestamp"], "2027-01-15T08:00:00.000Z");
+    // Its conversation is its own: it does not go by the name of the session.
+    assert!(
+        log["conversation_id"] != kept && log["conversation_id"] != "",
+        "{log}"
+    );
     // Its next turn goes on in that session of its tool.
     host.send(&agent, "and the licence?", "p-1");
     wait_for("the answer after the session was taken up", || {

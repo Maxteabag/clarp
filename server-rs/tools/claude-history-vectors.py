@@ -5,7 +5,9 @@ function reads from made-up transcripts, written to
 `crates/clarp-backend/tests/fixtures/claude-history-vectors.json` with the lines it was given, so
 that the Rust Host's reading is held to it line by line. And the model a session last ran on, as
 the Python Host reads it off a transcript for an agent that takes the session up without naming a
-model (`server/lib/session_models.py`, `_read_model`).
+model (`server/lib/session_models.py`, `_read_model`); and what each turn is in its conversation
+(`commentary`, `final` or neither), as the Python Host marks the rows it reads from a transcript
+(`server/lib/message_writes.py`, `_row_phases`).
 
 It runs in a process of its own whose every home, data, config and cache directory is a new empty
 directory (the replay harness's own isolation, `tests/replay/host.py`), with no way out to any
@@ -151,6 +153,35 @@ MODELS = [
 ]
 
 
+def turn(role, said='', **more):
+    return {'role': role, 'text': said, 'tools': more.pop('tools', []), **more}
+
+
+CARD = [{'name': 'Read'}]
+# What each turn is in its conversation: a name, what it shows, and turns as a transcript is read.
+PHASED = [
+    ('said-then-work', 'what is said before tool work that follows it is commentary', [
+        turn('user', 'do it'), turn('assistant', 'looking', tools=CARD), turn('assistant', '', tools=CARD),
+        turn('assistant', 'changing', tools=CARD), turn('assistant', '', tools=CARD), turn('assistant', 'done')]),
+    ('its-own-tools', 'the tools a turn itself used do not follow what it said', [
+        turn('user', 'read it'), turn('assistant', 'reading', tools=CARD), turn('assistant', 'it says little')]),
+    ('by-its-kind', 'a turn that says what it is, is that', [
+        turn('user', 'go'), turn('assistant', 'one', kind='commentary'), turn('assistant', 'two', kind='final_answer'),
+        turn('assistant', 'three', kind='final'), turn('assistant', 'four', kind='another', tools=CARD),
+        turn('assistant', 'five', kind=None), turn('assistant', 'six', kind=7)]),
+    ('cells', 'a cell of its own is tool work too, and a turn of blanks said nothing', [
+        turn('user', 'go'), turn('assistant', 'aloud'), turn('assistant', '', display_cells=[{'kind': 'plan'}]),
+        turn('assistant', '   '), turn('assistant', 'end')]),
+    ('two-askings', 'tool work after the user spoke again follows nothing said before', [
+        turn('user', 'one'), turn('assistant', 'first'), turn('user', 'two'), turn('assistant', '', tools=CARD),
+        turn('assistant', 'second', tools=CARD)]),
+    ('of-nobody', 'a turn of neither is passed over, with its tools', [
+        turn('system', 'a note', tools=CARD), turn('assistant', 'before'), {'role': 'tool', 'tools': CARD},
+        turn('assistant', 'after'), {'text': 'no role at all'}, turn('assistant', None), {'role': 'assistant'}]),
+    ('nothing', 'no turns', []),
+]
+
+
 def run() -> dict:
     """Runs in a process of its own: the turns the Python Host reads from the transcripts above."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
@@ -161,7 +192,7 @@ def run() -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import claude_transcript, session_models
+    from lib import claude_transcript, message_writes, session_models
 
     def model_of(path):
         stat = path.stat()
@@ -172,15 +203,18 @@ def run() -> dict:
         written = [line if isinstance(line, str) else json.dumps(line) for line in lines]
         path = root / f'{name}.jsonl'
         path.write_text('\n'.join(written) + '\n')
-        out.append({'name': name, 'what': what, 'lines': written, 'turns': claude_transcript.parse_turns(path),
-                    'model': model_of(path)})
+        turns = claude_transcript.parse_turns(path)
+        out.append({'name': name, 'what': what, 'lines': written, 'turns': turns,
+                    'model': model_of(path), 'phases': message_writes._row_phases(turns)})
     models = []
     for name, what, lines in MODELS:
         written = [line if isinstance(line, str) else json.dumps(line) for line in lines]
         path = root / f'model-{name}.jsonl'
         path.write_text(''.join(line + '\n' for line in written))
         models.append({'name': name, 'what': what, 'lines': written, 'model': model_of(path)})
-    return {'transcripts': out, 'models': models}
+    phased = [{'name': name, 'what': what, 'turns': turns, 'phases': message_writes._row_phases(turns)}
+              for name, what, turns in PHASED]
+    return {'transcripts': out, 'models': models, 'phased': phased}
 
 
 def main() -> int:
@@ -197,7 +231,7 @@ def main() -> int:
     rows = said['transcripts']
     for number, row in enumerate(rows):
         out.append('  {"name": ' + json.dumps(row['name']) + ', "what": ' + json.dumps(row['what'])
-                   + ', "model": ' + json.dumps(row['model']) + ',')
+                   + ', "model": ' + json.dumps(row['model']) + ', "phases": ' + json.dumps(row['phases']) + ',')
         out.append('   "lines": ' + json.dumps(row['lines'], ensure_ascii=True) + ',')
         out.append('   "turns": [')
         out.extend('    ' + json.dumps(turn, ensure_ascii=True) + (',' if n < len(row['turns']) - 1 else '')
@@ -208,6 +242,11 @@ def main() -> int:
     models = said['models']
     out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(models) - 1 else '')
                for n, row in enumerate(models))
+    out.append(' ],')
+    out.append(' "phased": [')
+    phased = said['phased']
+    out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(phased) - 1 else '')
+               for n, row in enumerate(phased))
     out.append(' ]')
     out.append('}')
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -216,6 +255,7 @@ def main() -> int:
         f'{row["name"]}: {len(row["lines"])} lines, {len(row["turns"])} turns, '
         f'{sum(len(turn["tools"]) for turn in row["turns"])} tools, model {row["model"]!r}' for row in rows))
     print('models: ' + '; '.join(f'{row["name"]}: {row["model"]!r}' for row in models))
+    print('phases: ' + '; '.join(f'{row["name"]}: {row["phases"]}' for row in [*rows, *phased]))
     return 0
 
 

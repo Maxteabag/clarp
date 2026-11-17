@@ -1119,14 +1119,27 @@ itself as it is (`fork_session_id`). It is how a conversation held in a terminal
 - **What was said in it** is read from the session's transcript by the Python Host's reading
   (`claude_transcript.py`, `parse_turns`; here `history.rs`, held by `tools/claude-history-vectors.py`: 38
   lines, 14 turns, 13 tools): what a user wrote and what the agent answered, each tool as the card a
-  conversation shows with what came back, and nothing the tool wrote by itself. The agent's log takes these as
-  rows that came from elsewhere, the way it takes the conversation of an agent moved from the Python Host
-  (the kernel's `Adopt`), and the agent continues the session: its next turn starts its tool with `--resume`.
-- **The agent's conversation goes by the session's name**, as that of an agent moved here does. That is how a
-  session stays its agent's whatever the tool calls it afterwards: taken up a second time it is refused
-  (`session_in_use`, with the agent that has it), and a request that says to open what is there
-  (`open_existing`) is answered with that agent. An agent that is started again in place has a conversation of
-  a new name, and an agent that is removed has none: the session can be taken up again.
+  conversation shows with what came back, and nothing the tool wrote by itself. The agent's log takes them
+  in one write with what says that the agent took the session up (the kernel's `TakeUp`; an agent moved here
+  from another Host is `Adopt`ed), and the agent continues the session: its next turn starts its tool with
+  `--resume`. A row is named as the Python Host names the rows it reads from a transcript (`msg-` and twenty
+  signs of a digest of the agent, the session and the row's place), and is `commentary`, `final` or neither
+  by that Host's own rule for such rows (`message_writes._row_phases`, held by seven made-up conversations:
+  what the agent said is commentary where tool work follows it before its user speaks again, and the tools
+  a turn itself used do not count as following). The agent is new until its first turn (`spawned`), as on
+  the Python Host; one that came from another Host, where it had worked, is at rest.
+- **A session is an agent's while that agent's tool goes on in it** (the Python Host's rule,
+  `get_by_backend_session`): taken up a second time it is refused (`session_in_use`, with the agent that has
+  it), and a request that says to open what is there (`open_existing`) is answered with that agent. The
+  session of an agent that was removed, or started again in place, can be taken up.
+- **The agent's conversation is its own, under a name of its own.** The Python Host names an agent's
+  conversation after its tool's session, so an agent that takes up the session another agent had has that
+  agent's conversation, counted on from where it stood: that Host counts every row it has in one sequence.
+  This Host counts each agent's rows by themselves, so a reader that kept its place in the first agent's
+  conversation would read the second's from a place that means something else there. Under a new name the
+  conversation is read from its beginning, which is what an app does when it finds a name it has not. A
+  fork's conversation goes by the name of its copy, as on the Python Host: the copy is new, and nobody has
+  a place in it.
 - **A fork** is a copy of the transcript under a name of its own, every line saying the new session, written
   among the sessions of the directory the new agent works in, where its tool will look for it
   (`history::claude_forked`; the Python Host's `fork.py`). The new agent is the one's whose session it was,

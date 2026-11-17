@@ -92,9 +92,10 @@ pub fn state_kind(status: &Status) -> AgentStateKind {
         // It said so itself: work it left running goes on, or no longer does.
         (None, _) if status.resting == Some(Rest::Background) => AgentStateKind::Background,
         (None, _) if status.resting == Some(Rest::Idle) => AgentStateKind::Idle,
-        // An agent that came from another Host with its conversation, and has not run here yet.
-        (None, None) if status.head_revision > 0 => AgentStateKind::Idle,
-        // An agent that has never run a turn. The Python Host calls it `spawned`.
+        // An agent that came from another Host, where it had worked, and has not run here yet.
+        (None, None) if status.arrived => AgentStateKind::Idle,
+        // An agent that has never run a turn, also where it begins with a session its tool
+        // kept. The Python Host calls it `spawned`.
         (None, None) => AgentStateKind::Spawned,
         (None, Some(last)) => match &last.outcome {
             Outcome::Completed => AgentStateKind::Done,
@@ -1573,6 +1574,7 @@ mod tests {
             context_tokens: None,
             completed_at_ms: None,
             answered_by: None,
+            arrived: false,
         }
     }
 
@@ -1584,8 +1586,15 @@ mod tests {
         assert_eq!(state_name(&state_kind(&new)), "spawned");
         assert_eq!(
             name(None, None),
+            "spawned",
+            "it has a conversation and has run no turn: it began with a session its tool kept"
+        );
+        let mut came = status(None, None);
+        came.arrived = true;
+        assert_eq!(
+            state_name(&state_kind(&came)),
             "idle",
-            "it has a conversation and no turn here yet: it came from another Host"
+            "it came from another Host, where it had worked, and has run no turn here yet"
         );
         assert_eq!(name(Some(Activity::Thinking), None), "thinking");
         assert_eq!(
@@ -1873,6 +1882,7 @@ mod tests {
             "conv-1",
             "the name the Host chose"
         );
+        fresh.arrived = true;
         assert_eq!(
             state_kind(&fresh),
             AgentStateKind::Idle,
