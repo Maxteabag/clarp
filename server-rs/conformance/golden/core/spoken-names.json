@@ -5754,6 +5754,41 @@
   },
   {
    "data": {
+    "agent_id": "<id:3>",
+    "event_id": "<eid:agent-focus#1@81b1d3>",
+    "session": "claire",
+    "type": "agent-focus"
+   },
+   "event": null,
+   "id": "<eid:agent-focus#1@81b1d3>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "event_id": "<eid:transcript-updated#1@e2940b>",
+    "session": "nova",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@e2940b>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "namealfa",
+    "event_id": "<eid:agent-state#1@cfc612>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "nova",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@cfc612>"
+  },
+  {
+   "data": {
     "agent_id": "<id:1>",
     "detail": {
      "session": "nova"
@@ -5791,41 +5826,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@95ff8e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:3>",
-    "event_id": "<eid:agent-focus#1@81b1d3>",
-    "session": "claire",
-    "type": "agent-focus"
-   },
-   "event": null,
-   "id": "<eid:agent-focus#1@81b1d3>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "event_id": "<eid:transcript-updated#1@e2940b>",
-    "session": "nova",
-    "type": "transcript-updated"
-   },
-   "event": null,
-   "id": "<eid:transcript-updated#1@e2940b>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "namealfa",
-    "event_id": "<eid:agent-state#1@cfc612>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "nova",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@cfc612>"
   },
   {
    "data": {

@@ -1,0 +1,252 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "ok": true,
+    "request_id": "cal-<id:1>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 200,
+   "step": "an agent asks for an event"
+  },
+  {
+   "body": {
+    "ok": true,
+    "request_id": "cal-<id:2>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 200,
+   "step": "the least that can be said"
+  },
+  {
+   "body": {
+    "ok": true,
+    "request_id": "cal-<id:3>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 200,
+   "step": "padded, the zone under its other name, a word for all day, a number and a list for words"
+  },
+  {
+   "body": {
+    "ok": true,
+    "request_id": "cal-<id:4>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 200,
+   "step": "for an agent the Host has not"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "for nobody"
+  },
+  {
+   "body": {
+    "error": "title required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "no title"
+  },
+  {
+   "body": {
+    "error": "start required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "no start"
+  },
+  {
+   "body": {
+    "error": "end required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "no end"
+  },
+  {
+   "body": {
+    "error": "session required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "nothing said"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "a list for a request"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/calendar/request",
+   "status": 400,
+   "step": "what is no JSON"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "calendar",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "all_day": false,
+    "calendar": "Work",
+    "end": "2027-01-15T09:15:00+01:00",
+    "event_id": "<eid:calendar-request#1@9c9b9d>",
+    "location": "Room 4",
+    "notes": "synthetic notes",
+    "request_id": "cal-<id:1>",
+    "session": "claire",
+    "start": "2027-01-15T09:00:00+01:00",
+    "time_zone": "Europe/Oslo",
+    "title": "Synthetic standup",
+    "type": "calendar-request",
+    "url": "https://example.org/synthetic"
+   },
+   "event": null,
+   "id": "<eid:calendar-request#1@9c9b9d>"
+  },
+  {
+   "data": {
+    "all_day": false,
+    "calendar": "",
+    "end": "2027-01-15T09:15:00+01:00",
+    "event_id": "<eid:calendar-request#2@9c9b9d>",
+    "location": "",
+    "notes": "",
+    "request_id": "cal-<id:2>",
+    "session": "claire",
+    "start": "2027-01-15T09:00:00+01:00",
+    "time_zone": "",
+    "title": "Synthetic standup",
+    "type": "calendar-request",
+    "url": ""
+   },
+   "event": null,
+   "id": "<eid:calendar-request#2@9c9b9d>"
+  },
+  {
+   "data": {
+    "all_day": true,
+    "calendar": "",
+    "end": "2027-01-15T09:15:00+01:00",
+    "event_id": "<eid:calendar-request#3@9c9b9d>",
+    "location": "",
+    "notes": "['a', 1, None]",
+    "request_id": "cal-<id:3>",
+    "session": "claire",
+    "start": "2027-01-15T09:00:00+01:00",
+    "time_zone": "UTC",
+    "title": "5",
+    "type": "calendar-request",
+    "url": ""
+   },
+   "event": null,
+   "id": "<eid:calendar-request#3@9c9b9d>"
+  },
+  {
+   "data": {
+    "all_day": false,
+    "calendar": "",
+    "end": "2027-01-15T09:15:00+01:00",
+    "event_id": "<eid:calendar-request#1@4283dd>",
+    "location": "",
+    "notes": "",
+    "request_id": "cal-<id:4>",
+    "session": "nobody-there",
+    "start": "2027-01-15T09:00:00+01:00",
+    "time_zone": "",
+    "title": "Synthetic standup",
+    "type": "calendar-request",
+    "url": ""
+   },
+   "event": null,
+   "id": "<eid:calendar-request#1@4283dd>"
+  }
+ ]
+}

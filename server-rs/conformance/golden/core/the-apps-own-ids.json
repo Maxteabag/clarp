@@ -231,7 +231,7 @@
       "id": "<row:3>",
       "kind": null,
       "origin": "user",
-      "phase": "final",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -338,7 +338,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "Claude replay reply: synthetic ids charlie",
+      "last_completed_message": "You: synthetic ids charlie",
       "last_message": "Claude replay reply: synthetic ids charlie",
       "last_message_id": "<row:3>",
       "last_turn_end": "<time>",
@@ -1938,6 +1938,36 @@
   {
    "data": {
     "agent_id": "<id:5>",
+    "client_msg_id": "u-phone-bravo",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "desk-charlie",
+    "event_id": "<eid:queue-updated#2@dfa4af>",
+    "queue_depth": 2,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#2@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
     "detail": {
      "backend_session_id": "<id:4>",
      "dispatch": "claude",
@@ -1983,31 +2013,61 @@
    "data": {
     "agent_id": "<id:5>",
     "client_msg_id": "u-phone-bravo",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "event_id": "<eid:queue-updated#3@dfa4af>",
     "queue_depth": 1,
     "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
+    "queue_revision": 3,
+    "queue_started": true,
     "session": "claire",
     "type": "queue-updated"
    },
    "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
+   "id": "<eid:queue-updated#3@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "u-phone-bravo",
+    "event_id": "<eid:agent-state#2@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 1,
+    "queue_started": true,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@91d46a>"
   },
   {
    "data": {
     "agent_id": "<id:5>",
     "client_msg_id": "desk-charlie",
-    "event_id": "<eid:queue-updated#2@dfa4af>",
-    "queue_depth": 2,
+    "event_id": "<eid:queue-updated#4@dfa4af>",
+    "queue_depth": 0,
     "queue_paused": false,
-    "queue_revision": 2,
-    "queue_started": false,
+    "queue_revision": 4,
+    "queue_started": true,
     "session": "claire",
     "type": "queue-updated"
    },
    "event": null,
-   "id": "<eid:queue-updated#2@dfa4af>"
+   "id": "<eid:queue-updated#4@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "client_msg_id": "desk-charlie",
+    "event_id": "<eid:agent-state#3@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "claire",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@91d46a>"
   },
   {
    "data": {
@@ -2053,88 +2113,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "u-phone-bravo",
-    "event_id": "<eid:queue-updated#3@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 3,
-    "queue_started": true,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#3@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "u-phone-bravo",
-    "event_id": "<eid:agent-state#2@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 1,
-    "queue_started": true,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#2@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "badge": true,
-    "cause_message_id": "u-phone-alfa",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:6>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:1>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "desk-charlie",
-    "event_id": "<eid:queue-updated#4@dfa4af>",
-    "queue_depth": 0,
-    "queue_paused": false,
-    "queue_revision": 4,
-    "queue_started": true,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#4@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "desk-charlie",
-    "event_id": "<eid:agent-state#3@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "claire",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#3@91d46a>"
   },
   {
    "data": {
@@ -2313,6 +2291,28 @@
    },
    "event": null,
    "id": "<eid:agent-activity#12@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "badge": true,
+    "cause_message_id": "u-phone-alfa",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:6>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {
