@@ -34,11 +34,12 @@ METADATA_TABLES = frozenset({"transcript_import_checkpoints", "transcript_import
 # one of these switches being off says so itself.
 #     RM_N14_CONFIGURATION=hosts uv run --frozen --group dev python -m pytest tests/readmodel
 # The list is what the Hosts run, not what the importer could: a switch
-# joins it when it is switched on there (the seven of 16 Nov 2026).
+# joins it when it is switched on there (the nine of 17 Nov 2026).
 HOSTS_SWITCHES = {"carry_live_rows": True, "tail_yield_after_first_write": True,
                   "carry_settled_turns": True, "boundary_skips_dropped_records": True,
                   "tail_keeps_frontier_when_grown": True, "audit_grown_by_digest": True,
-                  "full_digest_while_parsing": True}
+                  "full_digest_while_parsing": True, "carry_live_rows_by_words": True,
+                  "tail_hashes_while_parsing": True}
 
 
 def configuration() -> str:
