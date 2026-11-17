@@ -16,6 +16,10 @@
 //! The rules and the library of templates are the Python Host's
 //! (`server/lib/tool_explanation_templates.py`, `tool_explanation_templates.json`), held by
 //! `tests/fixtures/tool-explanation-vectors.json`.
+//!
+//! Beside it: [`read`] is how a use is read as it comes from a turn or an app (the bounded
+//! fields, with secrets and what a heredoc only feeds withheld), and [`shapes`] is what
+//! parts a call has and under what shape each is remembered.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -24,6 +28,9 @@ use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::{portraits, python, tools};
+
+pub mod read;
+pub mod shapes;
 
 /// The library: every template with its kind of action, its parameters and their kinds,
 /// and its sentences by level. The Python Host's own file, copied by
