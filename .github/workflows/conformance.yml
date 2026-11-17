@@ -73,9 +73,10 @@ jobs:
           name: conformance-report
           path: conformance-report/
 
-  # One planted change each: the Python Host's answers are written down, the change is planted
-  # in a copy of it, and the corpus has to show it. No Rust is built here. As many as the suite
-  # has planted changes (`contract_plants.py`); `conformance` refuses another number.
+  # One planted change each: the Python Host's answers are written down once, the change is
+  # planted in a copy of it, and the corpus has to show it. A scenario the reference did not
+  # run to its end in is set aside and said (three at most). No Rust is built here. As many as
+  # the suite has planted changes (`contract_plants.py`); `conformance` refuses another number.
   proof:
     if: ${{ inputs.scenarios == '' }}
     runs-on: ubuntu-24.04
@@ -96,11 +97,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p conformance-proof
-          bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py record \
-            --build . --golden conformance-proof/golden | tee conformance-proof/console.txt
           bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py plants \
-            --build . --golden conformance-proof/golden --plant ${{ matrix.plant }} \
-            | tee -a conformance-proof/console.txt
+            --build . --fresh --plant ${{ matrix.plant }} | tee conformance-proof/console.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
