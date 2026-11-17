@@ -97,16 +97,17 @@ impl Service {
                 trace: &trace,
                 model,
                 holds: true,
-                ends: false,
+                ends: true,
             };
             pool.register(starting, now)
         })
     }
 
     /// An attempt of an agent's turn failed on its account. Whether the turn waits.
-    pub fn failed(self: &Arc<Self>, agent: &str, turn: TurnId) -> bool {
+    /// `plan`: the provider said that the account does not offer the turn's model.
+    pub fn failed(self: &Arc<Self>, agent: &str, turn: TurnId, plan: bool) -> bool {
         let trace = turn.0.to_string();
-        self.told(|pool, now| pool.request(agent, &trace, true, false, now))
+        self.told(|pool, now| pool.request(agent, &trace, true, plan, now))
     }
 
     /// Nothing of the agent's turn runs any more.
@@ -149,11 +150,16 @@ impl Service {
                     // An agent that is gone runs nothing.
                     None => self.stopped(&agent),
                 },
-                // A turn the pool ends is taken up like the others: it runs, fails on
-                // its account once more, and its user is told why.
-                Effect::Resume { agent, .. } | Effect::End { agent } => {
+                Effect::Resume { agent, .. } => {
                     if let Some(reached) = self.agent(&agent) {
                         reached.account_back();
+                    }
+                }
+                // No account's plan offers the turn's model: it ends with what the provider
+                // said of its own.
+                Effect::End { agent } => {
+                    if let Some(reached) = self.agent(&agent) {
+                        reached.account_end();
                     }
                 }
                 Effect::Ask { models } => self.ask(models),
@@ -270,8 +276,8 @@ struct OfAgent {
 }
 
 impl Pooled for OfAgent {
-    fn failed(&self, turn: TurnId, _now_ms: i64) -> bool {
-        self.service.failed(&self.agent, turn)
+    fn failed(&self, turn: TurnId, plan: bool, _now_ms: i64) -> bool {
+        self.service.failed(&self.agent, turn, plan)
     }
 
     fn stopped(&self, _now_ms: i64) {

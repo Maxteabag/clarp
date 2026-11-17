@@ -499,8 +499,9 @@ impl LiveTurn {
 /// ([`Actor::stop_for_an_account`], [`Actor::login_changed`]).
 pub trait Pooled: Send + Sync {
     /// An attempt of the agent's turn failed on its account. Whether the turn waits for
-    /// another account: where it does not, it ends on that failure.
-    fn failed(&self, turn: TurnId, now_ms: i64) -> bool;
+    /// another account: where it does not, it ends on that failure. `plan`: the provider
+    /// said that the account does not offer the turn's model.
+    fn failed(&self, turn: TurnId, plan: bool, now_ms: i64) -> bool;
     /// Nothing of the agent's turn runs any more, as the pool had asked.
     fn stopped(&self, now_ms: i64);
 }
@@ -2832,6 +2833,58 @@ impl Actor {
         Ok(out)
     }
 
+    /// The turn that waits for an account ends on the failure it waits on, with what the
+    /// provider said: its plan does not offer the turn's model, and the owner's selector
+    /// found no account whose plan does. A turn that waits for anything else waits on.
+    pub fn end_waiting(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        let mut out = Outputs::default();
+        let waits = match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) if parked.wait.is_for_an_account() => {
+                Some((parked.id, parked.kind.clone(), parked.reason.clone()))
+            }
+            _ => None,
+        };
+        let Some((turn, kind, reason)) = waits else {
+            return Ok(out);
+        };
+        let Some(live) = self.live.as_mut().filter(|live| live.turn == turn) else {
+            return Ok(out);
+        };
+        let model = self.profile.model.clone().unwrap_or_default();
+        let mut batch = self.recorder.batch();
+        // What is said of the end, as of an attempt that failed and is not tried again.
+        let told = failure_marker(Failure {
+            turn,
+            message_id: &live.message_id,
+            origin: &live.origin,
+            kind: &kind,
+            reason: &reason,
+            model: &model,
+            trace_id: live.trace_id.clone(),
+        });
+        if batch.command(Command::WaitOver { turn }, now_ms).is_err() {
+            return Ok(out);
+        }
+        if let Some(notice) = told {
+            if closed_by_marker(&live.last_row, &live.message_id) {
+                live.last_row = notice.id().to_string();
+            }
+            batch.item(written(&notice, now_ms)?);
+        }
+        if let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
+            cut_off(&mut batch, &mut live.calls, &end, now_ms)?;
+            batch.item(written(&end, now_ms)?);
+        }
+        let effects = batch.commit()?.effects;
+        self.unstored_changes = 0;
+        out.changed.conversation = true;
+        out.changed.status = true;
+        out.changed.queue = true;
+        self.forget_live();
+        self.carry_out(effects, &mut out)?;
+        Ok(out)
+    }
+
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
     /// on the one that is there now. A turn that waits for anything else goes on waiting.
     pub fn login_changed(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
@@ -3003,9 +3056,10 @@ impl Actor {
                                     recovery::Next::Account { until_ms } => {
                                         Some(Wait::Account { until_ms })
                                     }
-                                    recovery::Next::Pool => {
+                                    recovery::Next::Pool { plan } => {
                                         let pool = self.pool.as_ref();
-                                        let waits = pool.is_some_and(|pool| pool.failed(turn, t));
+                                        let waits =
+                                            pool.is_some_and(|pool| pool.failed(turn, plan, t));
                                         let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
                                         waits.then_some(Wait::Account { until_ms: t + most })
                                     }

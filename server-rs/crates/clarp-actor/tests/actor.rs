@@ -1603,3 +1603,156 @@ fn an_agent_that_arrives_from_another_host_brings_its_conversation_and_goes_on_i
         Some("sess-from-before")
     );
 }
+
+/// The pool of a tool's accounts, as a test holds it: it writes down what it is told, and says
+/// that a turn that failed on its account waits.
+#[derive(Default)]
+struct Pool {
+    told: std::sync::Mutex<Vec<String>>,
+}
+
+impl Pool {
+    fn told(&self) -> Vec<String> {
+        self.told.lock().unwrap().clone()
+    }
+}
+
+impl clarp_actor::Pooled for Pool {
+    fn failed(&self, turn: TurnId, plan: bool, _now_ms: i64) -> bool {
+        let said = format!("turn {} failed on its account, plan: {plan}", turn.0);
+        self.told.lock().unwrap().push(said);
+        true
+    }
+
+    fn stopped(&self, _now_ms: i64) {
+        self.told.lock().unwrap().push("stopped".to_string());
+    }
+}
+
+#[test]
+fn a_turn_the_pool_holds_for_its_plan_waits_and_ends_with_what_the_provider_said() {
+    let mut world = World::new("pool-plan");
+    world.profile.accounts = clarp_kernel::recovery::Accounts::Select;
+    let mut actor = world.open();
+    let pool = Arc::new(Pool::default());
+    actor.pooled(pool.clone());
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    // The provider refuses: the account's plan does not offer the model.
+    let refused = "This model is not available on your current plan";
+    world.write(1, Line::Err(refused.to_string()));
+    world.exits(1, Some(1), None);
+    world.hint(&mut actor);
+    // The pool was asked, and told that it is the plan. It says the turn waits: it does,
+    // and nothing in the conversation says that it failed.
+    assert_eq!(
+        pool.told(),
+        vec!["turn 1 failed on its account, plan: true"]
+    );
+    let waits = actor.waits_for_an_account();
+    assert!(
+        waits.is_some_and(|(turn, _)| turn == TurnId(1)),
+        "{waits:?}"
+    );
+    assert_eq!(actor.status().last, None);
+    assert_eq!(shown(&actor), vec![pair("u-1", "user: go")]);
+
+    // No account's plan offers the model, the pool finds: the turn ends, with what the
+    // provider said of its own.
+    let now = world.tick();
+    let out = actor.end_waiting(now).unwrap();
+    world.carry_out(&mut actor, out);
+    let status = actor.status();
+    let last = status.last.expect("the turn is over");
+    assert!(
+        matches!(&last.outcome, Outcome::Failed { reason, kind } if reason == refused && kind == "account_plan"),
+        "{:?}",
+        last.outcome
+    );
+    assert_eq!((status.live, actor.waits_for_an_account()), (None, None));
+    let rows = shown(&actor);
+    assert!(
+        rows.iter().any(|(_, says)| says.starts_with("notice:")),
+        "a row says why: {rows:#?}"
+    );
+    assert_eq!(world.took, vec![1], "it was not run a second time");
+    // Asked once more, with nothing waiting: nothing happens.
+    let now = world.tick();
+    let again = actor.end_waiting(now).unwrap();
+    assert!(again.actions.is_empty() && !again.changed.status);
+    // And the next message runs.
+    world.send(&mut actor, "u-2", "and this", Admission::Queue);
+    assert_eq!(world.took, vec![1, 2]);
+}
+
+#[test]
+fn a_turn_that_is_stopped_for_its_account_waits_and_is_taken_up() {
+    let mut world = World::new("pool-stop");
+    world.profile.accounts = clarp_kernel::recovery::Accounts::Select;
+    let mut actor = world.open();
+    let pool = Arc::new(Pool::default());
+    actor.pooled(pool.clone());
+    // Nothing runs: the pool is told so at once.
+    let now = world.tick();
+    let out = actor.stop_for_an_account(now).unwrap();
+    assert!(out.actions.is_empty());
+    assert_eq!(pool.told(), vec!["stopped"]);
+
+    // A turn runs. The account its tool runs on is out for another agent's turn: it is
+    // stopped, and the pool is told only when its process is gone.
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.says(1, r#"{"session": "s1"}"#);
+    world.hint(&mut actor);
+    let now = world.tick();
+    let out = actor.stop_for_an_account(now).unwrap();
+    assert!(matches!(
+        &out.actions[..],
+        [Action::Stop {
+            turn: TurnId(1),
+            ..
+        }]
+    ));
+    world.carry_out(&mut actor, out);
+    assert_eq!((world.stopped.clone(), pool.told().len()), (vec![1], 1));
+    world.exits(1, None, Some(15));
+    world.hint(&mut actor);
+    assert_eq!(pool.told(), vec!["stopped", "stopped"]);
+    // The turn did not end: it waits for an account, and its conversation says nothing of a
+    // failure.
+    let waits = actor.waits_for_an_account();
+    assert!(
+        waits.is_some_and(|(turn, _)| turn == TurnId(1)),
+        "{waits:?}"
+    );
+    assert_eq!(actor.status().last, None);
+    assert_eq!(shown(&actor), vec![pair("u-1", "user: go")]);
+
+    // The pool takes it up: its next attempt is launched.
+    let now = world.tick();
+    let out = actor.login_changed(now).unwrap();
+    assert!(
+        matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(1) && order.attempt == 2),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    world.says(1, r#"{"reply": "Done."}"#);
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        actor.status().last.map(|last| last.outcome),
+        Some(Outcome::Completed)
+    );
+    // A turn that completed all the same before the stop reached it is over, not waiting.
+    world.send(&mut actor, "u-2", "again", Admission::Queue);
+    let now = world.tick();
+    let out = actor.stop_for_an_account(now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(2, r#"{"reply": "Done before the stop."}"#);
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(actor.waits_for_an_account(), None);
+    assert_eq!(
+        actor.status().last.map(|last| last.outcome),
+        Some(Outcome::Completed)
+    );
+}
