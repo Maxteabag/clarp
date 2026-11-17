@@ -519,10 +519,11 @@ struct Remembered {
 
 impl Remembered {
     /// Takes what a turn's end says, where it says something. How full the conversation
-    /// is: what the tool said of that at its last answer; of a tool that says no such
-    /// thing, what the turn took in.
+    /// is: what the tool said of that at its last answer. A tool that says no such thing
+    /// has no gauge, as on the Python Host: Codex keeps its conversation within bounds by
+    /// itself, and what its turn took in says nothing of how full it is.
     fn take(&mut self, end: &TurnEnd) {
-        if let Some(tokens) = end.context_tokens.or(end.tokens_in) {
+        if let Some(tokens) = end.context_tokens {
             self.context_tokens = Some(tokens);
         }
         if end.status == "completed" {
