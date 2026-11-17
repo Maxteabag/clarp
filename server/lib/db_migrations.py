@@ -21,13 +21,13 @@ import time
 from . import db, db_schema
 
 
-# Additive performance-only exception at v127: a version bump makes rollback
+# Additive partial terminal-history index at v127: a version bump makes rollback
 # Hosts refuse startup. NEXT REAL VERSION MIGRATION must also run this CREATE
 # INDEX IF NOT EXISTS, so the versioned chain catches up. The v127 drift test
 # permits exactly this missing index before Host service startup, no others.
 _HOST_INDEX_NAME = "idx_background_jobs_agent_terminal"
 _HOST_INDEX_SQL = ("CREATE INDEX IF NOT EXISTS idx_background_jobs_agent_terminal "
-                   "ON background_jobs(agent_id, terminal_at)")
+                   "ON background_jobs(agent_id, terminal_at) WHERE terminal_at IS NOT NULL")
 _HOST_INDEX_WAIT_SEC = 0.1
 _HOST_INDEX_BUILD_SEC = 2.0
 
@@ -83,9 +83,13 @@ def ensure_host_indexes(connection, path) -> bool:
                 worker.set_progress_handler(None, 0)
                 if worker.in_transaction:
                     worker.rollback()
-                worker.close()
-            except sqlite3.Error as cleanup:
+            except Exception as cleanup:  # optional cleanup errors must not prevent startup
                 error = error or cleanup
+            finally:
+                try:
+                    worker.close()
+                except Exception as cleanup:  # still report one failed setup attempt
+                    error = error or cleanup
     if error is not None:
         _index_notice("failed", getattr(error, "sqlite_errorname", type(error).__name__))
         return False
