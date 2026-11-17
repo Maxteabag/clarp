@@ -402,8 +402,17 @@ machine runs with a selector: the logins are the machine's, and two Hosts must n
 Not there yet: a plan that does not offer a turn's model is not handed to the pool (the turn ends, as
 where someone else changes the login; the pool has the rule, the Host would have to end a waiting turn
 with what the provider said); the wait is not worded by model ("an account that serves ..."); the pool
-is not told when someone else changes the login (`Pool::served`); the reference has not been asked the
-same in a scenario.
+is not told when someone else changes the login (`Pool::served`).
+
+The reference was asked the same (17 Nov 2026, scenario `the-selector`): both Hosts are given an owner's
+file that names a selector (a stand-in that says an account serves, `conformance/fake_selector.py`), and
+the stand-in tool's account is out for the first process that is given the request and not for the next
+(`[qa-limit:1]`). The Python Host ran it to its end in every recording, the same way each time, and the
+Rust Host answered as it does in every body. Two things the Python Host told the apps and this Host did
+not: when the turn was taken up, that the agent thinks again (this Host had told that the turn waits,
+and nothing when the wait was over), and the send's own event once more. Both are told now, where a turn
+that waited for an account is taken up, in either mode; with that the scenario conforms, with nothing
+registered for it beyond two defects of the reference told by their shape (R6, R12).
 
 **Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
 Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token

@@ -2146,6 +2146,15 @@ impl Worker {
             }
             hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
         }
+        // A turn that waited for an account is taken up: the word is said once more, as the
+        // Python Host says it when it gives the turn to its tool anew.
+        if let (Some(live), Some(was)) = (&status.live, was_live)
+            && was.turn == live.turn
+            && waits_for_an_account(was)
+            && !waits_for_an_account(live)
+        {
+            hub.publish(wire::dispatched(&record, live, status.waiting.len()), now);
+        }
         // The mailbox was held or let go, or a waiting message was taken back: it left the
         // queue and no turn began for it. A hold that ended by itself, because the last
         // thing it held went to run, was told with that turn a moment ago.
@@ -2297,8 +2306,8 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
     // An agent that goes from thinking to answering is thinking still by its state, and
     // the apps are told all the same, as the Python Host tells them.
     let doing = match live.map(|live| &live.activity) {
-        // It could not begin: the account its tool runs on is out.
-        _ if live.is_some_and(|live| live.held_for_an_account) => "an account".to_string(),
+        // It waits for an account: when it is taken up the apps are told that it works again.
+        _ if live.is_some_and(waits_for_an_account) => "an account".to_string(),
         Some(Activity::Tool { name }) => name.clone(),
         Some(Activity::Responding) => wire::RESPONDING.to_string(),
         _ => String::new(),
@@ -2313,6 +2322,12 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
         // that it reconnects. They are not told when the next attempt begins.
         live.map_or(0, |live| live.failed_attempts),
     )
+}
+
+/// Whether a live turn waits for an account: between two attempts, or before its first.
+fn waits_for_an_account(live: &clarp_actor::LiveStatus) -> bool {
+    let parked = live.parked.as_ref();
+    live.held_for_an_account || parked.is_some_and(|parked| parked.wait.is_for_an_account())
 }
 
 /// Passes what the thread of one attempt of a turn says on to the agent's thread.
