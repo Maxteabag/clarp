@@ -155,6 +155,7 @@ name = "clarp-backend"
 version = "0.0.1"
 dependencies = [
  "clarp-kernel",
+ "clarp-speech",
  "clarp-spool",
  "jiff",
  "serde_json",

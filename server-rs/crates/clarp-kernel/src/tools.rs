@@ -12,6 +12,8 @@
 
 use serde_json::Value;
 
+pub mod cells;
+
 const LABEL_LIMIT: usize = 120;
 const COMMAND_LIMIT: usize = 2_000;
 

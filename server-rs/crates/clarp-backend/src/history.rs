@@ -21,6 +21,10 @@ use clarp_kernel::python;
 use clarp_kernel::tools;
 use serde_json::{Value, json};
 
+mod rollout;
+
+pub use rollout::{codex, codex_cell};
+
 /// What the tool writes into a conversation by itself, as a message of the user's: it
 /// begins with one of these marks.
 const WRITTEN_BY_THE_TOOL: [&str; 7] = [
