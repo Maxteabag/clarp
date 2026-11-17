@@ -1610,8 +1610,15 @@ connection relay under the name the phone is paired with. Each of these is true 
    profile's order stands, the Python Host's tool is found, sets that Host's environment and acts on
    that Host, under the agent's own session name (`docs/battle-test.md`, "Where the fence between the two
    Hosts did not hold"); **after**, the same wrapper is found and hands the call to this Host's tool, or
-   refuses. So no agent of the owner's moves before the wrappers are installed on its machine, and until
-   then no test agent here calls a Clarp tool from anything but bash.
+   refuses. So no agent of the owner's moves before the wrappers are installed on its machine.
+   **Installed on both machines on 17 Nov 2026 at 01:54** (the release owner's PR 390, release
+   `76ee2f6b`), and shown from this side on elitebook the same day in a real turn of Codex
+   (`docs/battle-test.md`, "The fence holds"): under `sh -lc` an agent's tool is the Python Host's
+   wrapper by its name, and its call reaches this Host; without this Host's share directory in the
+   turn it is refused. With that, a test agent here may call a Clarp tool as a skill does. Not part of
+   that fence: the nine `clarp-*` names on the owner's path that are his own scripts and no wrappers of
+   a Host (`clarp-prompt`, `clarp-contacts`, `clarp-master` and others); one of them, `clarp-prompt`,
+   calls `clarp-admin`, which is fenced. They are looked at again before an agent of his moves.
 4. **The phones' pairings are there.** The paired devices of the Python Host, each with the hash of its
    token, its scope and its name, are in the Rust Host before it dials: a phone presents the token it has.
 5. **Pushes have an account.** The Rust Host has a credential of its own at the push relay, given by the
