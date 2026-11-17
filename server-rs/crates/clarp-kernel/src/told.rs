@@ -268,6 +268,24 @@ pub fn restored(tool: &str, said: &[(bool, &str)], message: &str) -> String {
     )
 }
 
+/// A user's words without the Host's own record of a conversation before them: what stands
+/// between the two marks was told to the tool and is no part of what the user said. So a
+/// conversation that began as the continuation of another is read back from its tool's own
+/// transcript. A record without its end takes everything after its beginning with it. As
+/// the Python Host does it (`message_text._strip_block`).
+pub fn without_restored(text: &str) -> String {
+    let mut out = text.to_string();
+    while let Some(at) = out.find(RESTORED_OPEN) {
+        let (before, rest) = (&out[..at], &out[at + RESTORED_OPEN.len()..]);
+        let Some(end) = rest.find(RESTORED_CLOSE) else {
+            return before.trim_end_matches(crate::python::blank).to_string();
+        };
+        let after = &rest[end + RESTORED_CLOSE.len()..];
+        out = crate::python::strip(&format!("{before}{after}")).to_string();
+    }
+    out
+}
+
 /// What a Host knows of an agent that its tool is told.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Told {
@@ -449,6 +467,30 @@ impl Humanness {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_users_words_are_read_back_without_the_record_before_them() {
+        // What has no record is as it was, to the last space.
+        assert_eq!(without_restored("  Plain words.  "), "  Plain words.  ");
+        assert_eq!(without_restored(""), "");
+        // What `restored` put before a message is taken away again.
+        let told = restored(
+            "Antigravity",
+            &[(true, "The word is heron.")],
+            "What was it?",
+        );
+        assert_ne!(told, "What was it?");
+        assert_eq!(without_restored(&told), "What was it?");
+        // Twice, and with words of the user's before it.
+        let twice = format!("Before. {told} and {told}");
+        assert_eq!(
+            without_restored(&twice),
+            "Before. \n\nWhat was it? and \n\nWhat was it?"
+        );
+        // A record that was cut off takes what follows its beginning with it.
+        let cut = format!("Kept.  {RESTORED_OPEN}\nUser: and then nothing");
+        assert_eq!(without_restored(&cut), "Kept.");
+    }
 
     #[test]
     fn a_conversation_its_tool_let_go_of_is_told_again_before_the_message() {

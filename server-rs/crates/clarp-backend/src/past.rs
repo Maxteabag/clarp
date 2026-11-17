@@ -547,3 +547,230 @@ pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
     }
     newest.map(|(_, path)| path)
 }
+
+// ---- Antigravity ---------------------------------------------------------------------------
+//
+// agy keeps what is its own under `<home>/.gemini/antigravity-cli` (`base` below): the
+// conversations it still has, each a file `conversations/<name>.db`; what was said in each,
+// `brain/<name>/.system_generated/logs/transcript.jsonl` ([`crate::history::agy`]); since agy
+// 1.2 a catalogue of them with their titles and the directories they ran in
+// (`conversation_summaries.db`); and before that only the last conversation of each
+// directory (`cache/last_conversations.json`). The rule is the Python Host's
+// (`server/lib/agy_transcript.py`, `list_sessions`), held by
+// `tests/fixtures/agy-sessions-vectors.json`.
+
+/// A name that is the name of one thing in a directory, and not a way out of it.
+fn one_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\']) && name != "." && name != ".."
+}
+
+/// Whether agy still has the conversation of this name. It lets go of all but the newest
+/// few hundred, and what it lets go of leaves its transcript behind: only the conversation's
+/// own file counts. Where agy has no store at all on this machine nothing is known, and the
+/// conversation counts as kept (`conversation_exists`); so does a name that is no name of a
+/// file.
+pub fn agy_kept(base: &Path, conversation: &str) -> bool {
+    if conversation.contains(['/', '\\']) || conversation == ".." {
+        return true;
+    }
+    let store = base.join("conversations");
+    !store.is_dir() || store.join(format!("{conversation}.db")).exists()
+}
+
+/// The transcript of a conversation of agy, where there is one (`find_latest_jsonl`).
+pub fn agy_transcript(base: &Path, conversation: &str) -> Option<PathBuf> {
+    let path = base
+        .join("brain")
+        .join(conversation)
+        .join(".system_generated/logs/transcript.jsonl");
+    (one_name(conversation) && path.is_file()).then_some(path)
+}
+
+/// A text of a URI with every `%` and two digits read as the byte they stand for
+/// (`urllib.parse.unquote`).
+fn unquoted(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let digit = |at: usize| {
+        bytes
+            .get(at)
+            .and_then(|byte| char::from(*byte).to_digit(16))
+    };
+    let (mut out, mut at) = (Vec::with_capacity(bytes.len()), 0);
+    while at < bytes.len() {
+        let escaped = (bytes[at] == b'%')
+            .then(|| digit(at + 1).zip(digit(at + 2)))
+            .flatten();
+        match escaped.and_then(|(high, low)| u8::try_from(high * 16 + low).ok()) {
+            Some(byte) => {
+                out.push(byte);
+                at += 3;
+            }
+            None => {
+                out.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The directory a `file://` URI names (`urllib.parse.urlsplit(uri).path`, unquoted): what
+/// follows the machine's name, without a question and without a part.
+fn directory_of(uri: &str) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let rest: String = rest
+        .chars()
+        .filter(|sign| !matches!(sign, '\t' | '\r' | '\n'))
+        .collect();
+    let rest = &rest[..rest.find(['?', '#']).unwrap_or(rest.len())];
+    Some(unquoted(rest.find('/').map_or("", |at| &rest[at..])))
+}
+
+/// A directory the Host made for work of its own: one question to a tool, a dream
+/// (`_clarp_scratch`).
+fn scratch(workspace: &str) -> bool {
+    let temp = std::env::temp_dir();
+    let roots = [Path::new("/tmp"), Path::new("/var/tmp"), temp.as_path()];
+    roots.iter().any(|root| {
+        let under = Path::new(workspace).strip_prefix(root).ok();
+        let first = under.and_then(|rest| rest.components().next());
+        first.is_some_and(|first| first.as_os_str().to_string_lossy().starts_with("clarp-"))
+    })
+}
+
+/// The directories a row of agy's catalogue names: a list of URIs, written as JSON. What is
+/// no such list names none, but for an object, whose names are read as Python reads them.
+fn directories(held: &rusqlite::types::Value) -> Vec<String> {
+    let written = match held {
+        rusqlite::types::Value::Text(text) if !text.is_empty() => text.as_str(),
+        rusqlite::types::Value::Text(_)
+        | rusqlite::types::Value::Null
+        | rusqlite::types::Value::Integer(0) => "[]",
+        _ => return Vec::new(),
+    };
+    let uris: Vec<String> = match serde_json::from_str::<Value>(written) {
+        Ok(Value::Array(uris)) => {
+            let texts = uris.iter().filter_map(Value::as_str);
+            texts.map(str::to_string).collect()
+        }
+        Ok(Value::Object(named)) => named.keys().cloned().collect(),
+        _ => Vec::new(),
+    };
+    uris.iter().filter_map(|uri| directory_of(uri)).collect()
+}
+
+/// The conversations agy's own catalogue names, the last changed first: those that are no
+/// helper's within another, that ran in the directory asked for (or anywhere), that agy
+/// still has and that have a transcript. Not those of the Host's own scratch directories.
+fn agy_catalogued(
+    catalogue: &Path,
+    base: &Path,
+    wanted: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<Value>> {
+    use rusqlite::types::Value as Held;
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let db = rusqlite::Connection::open_with_flags(catalogue, flags)?;
+    db.busy_timeout(std::time::Duration::from_secs(1))?;
+    let mut asked = db.prepare(
+        "SELECT conversation_id, title, preview, workspace_uris FROM conversation_summaries \
+         WHERE nesting_depth = 0 ORDER BY last_modified_time DESC",
+    )?;
+    let read = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Vec<Held>> {
+        (0..4).map(|at| row.get(at)).collect()
+    };
+    let rows: Vec<Vec<Held>> = asked.query_map([], read)?.collect::<Result<_, _>>()?;
+    let mut listed: Vec<Value> = Vec::new();
+    for row in rows {
+        let [id, title, preview, uris] = row.as_slice() else {
+            continue;
+        };
+        let ran_in = directories(uris);
+        if ran_in.iter().any(|directory| scratch(directory)) {
+            continue;
+        }
+        if !wanted.is_empty() && !ran_in.iter().any(|directory| directory == wanted) {
+            continue;
+        }
+        let id = match id {
+            Held::Text(text) => text.clone(),
+            Held::Integer(number) => number.to_string(),
+            Held::Real(number) => python::float(*number),
+            _ => "None".to_string(),
+        };
+        // agy lets go of old conversations and keeps what its catalogue says of them, and
+        // some of their transcripts: only one it still has, with what was said in it, can
+        // be taken up.
+        let Some(transcript) = agy_transcript(base, &id).filter(|_| agy_kept(base, &id)) else {
+            continue;
+        };
+        listed.push(json!({
+            "id": id, "mtime": written(&transcript).1,
+            "preview": python::first(&indexed_text(preview), PREVIEW_MOST),
+            "title": indexed_text(title), "cwd": ran_in.first().cloned().unwrap_or_default(),
+        }));
+        if listed.len() >= limit {
+            break;
+        }
+    }
+    Ok(listed)
+}
+
+/// What an agy without a catalogue knows: the last conversation of each directory, the one
+/// whose transcript was written last first. Each is shown by what its user asked first.
+fn agy_last(base: &Path, wanted: &str, limit: usize) -> Vec<Value> {
+    let read = std::fs::read_to_string(base.join("cache/last_conversations.json")).ok();
+    let last = read.and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let Some(Value::Object(last)) = last else {
+        return Vec::new();
+    };
+    let of: Vec<(&str, Option<&Value>)> = if wanted.is_empty() {
+        let all = last.iter();
+        all.map(|(cwd, named)| (cwd.as_str(), Some(named)))
+            .collect()
+    } else {
+        vec![(wanted, last.get(wanted))]
+    };
+    let mut listed: Vec<Value> = Vec::new();
+    for (cwd, named) in of {
+        let Some(named) = named.filter(|named| python::truthy(named)) else {
+            continue;
+        };
+        let id = clarp_kernel::tools::cells::said(named);
+        let Some(transcript) = agy_transcript(base, &id) else {
+            continue;
+        };
+        let turns = std::fs::read_to_string(&transcript).map(|text| crate::history::agy(&text));
+        let asked_first = turns.unwrap_or_default().into_iter().find_map(|turn| {
+            let text = turn["text"].as_str().filter(|text| !text.is_empty())?;
+            (turn["role"] == "user").then(|| python::first(text, PREVIEW_MOST).to_string())
+        });
+        listed.push(json!({
+            "id": id, "mtime": written(&transcript).1, "preview": asked_first.unwrap_or_default(),
+            "title": "", "cwd": cwd,
+        }));
+    }
+    listed.sort_by_key(|session| std::cmp::Reverse(session["mtime"].as_i64()));
+    listed.truncate(limit);
+    listed
+}
+
+/// The conversations agy kept under `base` (`<home>/.gemini/antigravity-cli`): those that
+/// ran in `cwd`, or in every directory where `cwd` is empty, `limit` at most. Each as an app
+/// reads it: `id`, `mtime` in seconds, `preview`, `title`, `cwd`. From agy's catalogue where
+/// it has one that can be read, and from what an older agy kept otherwise.
+pub fn agy_sessions(base: &Path, cwd: &str, limit: usize) -> Vec<Value> {
+    let wanted = if cwd.is_empty() {
+        String::new()
+    } else {
+        plain(cwd)
+    };
+    let catalogue = base.join("conversation_summaries.db");
+    if catalogue.exists()
+        && let Ok(listed) = agy_catalogued(&catalogue, base, &wanted, limit)
+    {
+        return listed;
+    }
+    agy_last(base, &wanted, limit)
+}

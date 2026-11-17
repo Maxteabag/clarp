@@ -9443,8 +9443,8 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     for (tool, cannot, can) in [
         (
             "agy",
-            vec!["supports_compact", "resumable", "supports_resume"],
-            vec!["supports_routing"],
+            vec!["supports_compact"],
+            vec!["supports_routing", "supports_resume", "resumable"],
         ),
         (
             "claude",
@@ -18276,6 +18276,238 @@ say(type="turn.completed", usage={{"input_tokens": 5, "cached_input_tokens": 0, 
         (status, &opened["session"]),
         (200, &json!(session)),
         "{opened}"
+    );
+}
+
+#[test]
+fn a_new_agent_begins_with_a_conversation_antigravity_kept() {
+    let place = Place::new("agy-kept");
+    let (agy, started) = (place.root.join("agy-goes-on"), place.root.join("started"));
+    // A stand-in for Antigravity that goes on in the conversation it is given, and writes
+    // down how it was started.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, sys
+args = sys.argv[1:]
+conversation = args[args.index("--conversation") + 1] if "--conversation" in args else "a-new-one"
+with open({started}, "a") as out:
+    out.write(json.dumps({{"given": conversation if "--conversation" in args else None}}) + "\n")
+def say(event, **body):
+    print(json.dumps({{"event": event, **body}}), flush=True)
+usage = {{"input_tokens": 10, "output_tokens": 2, "thinking_tokens": 0}}
+say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": ".", "tools": []}})
+update = {{"conversation_id": conversation, "step_index": 1, "state": "DONE", "step_type": "agent_response",
+          "text_delta": "Picked up.", "usage": usage}}
+say("step_update", step_update=update)
+say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": "Picked up.", "usage": usage}})
+"#,
+        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
+    );
+    program(&agy, &script);
+    let work = place.root.join("work").to_str().unwrap().to_string();
+    std::fs::create_dir_all(&work).unwrap();
+
+    // What Antigravity kept on this machine: two conversations it still has, each with its
+    // transcript, and (an agy without a catalogue) the last conversation of each directory.
+    let own = place.root.join(".gemini/antigravity-cli");
+    let (kept, carried) = (
+        "c0ffee00-1111-2222-3333-444455556666",
+        "c0ffee00-9999-8888-7777-666655554444",
+    );
+    let step = |number: u32, kind: &str, more: Value| {
+        let mut step = json!({
+            "step_index": number, "type": kind, "status": "DONE",
+            "created_at": format!("2027-03-01T09:00:{number:02}Z"),
+        });
+        for (key, value) in more.as_object().unwrap() {
+            step[key] = value.clone();
+        }
+        step.to_string()
+    };
+    let asked = |number: u32, said: &str| {
+        let content = format!("<USER_REQUEST>\n{said}\n</USER_REQUEST>");
+        step(number, "USER_INPUT", json!({ "content": content }))
+    };
+    let ran = "Created At: 2027-03-01T09:00:01Z\nCompleted At: 2027-03-01T09:00:02Z\n\
+               Command exited with code 0.\n\nCommand output:\ntest result: ok. 7 passed\n";
+    let call = json!([{ "name": "run_command", "args": { "CommandLine": "\"cargo test\"" } }]);
+    let of_kept = [
+        asked(0, "do the tests pass?"),
+        step(
+            1,
+            "PLANNER_RESPONSE",
+            json!({ "tool_calls": call, "thinking": "I will run them." }),
+        ),
+        step(2, "GENERIC", json!({ "content": ran })),
+        step(3, "PLANNER_RESPONSE", json!({ "content": "They pass." })),
+    ];
+    // The other is one this Host carried over: it opens with the Host's own record of the
+    // conversation before it.
+    let record = "--- Clarp restored conversation ---\n[Antigravity no longer has this \
+                  conversation.]\n\nUser: The word is heron.\n\
+                  --- End Clarp restored conversation ---\n\nWhat was the word?";
+    let of_carried = [
+        asked(0, record),
+        step(1, "PLANNER_RESPONSE", json!({ "content": "Heron." })),
+    ];
+    for (name, lines) in [(kept, &of_kept[..]), (carried, &of_carried[..])] {
+        let logs = own.join(format!("brain/{name}/.system_generated/logs"));
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("transcript.jsonl"), lines.join("\n") + "\n").unwrap();
+        std::fs::create_dir_all(own.join("conversations")).unwrap();
+        std::fs::write(own.join(format!("conversations/{name}.db")), "").unwrap();
+    }
+    std::fs::create_dir_all(own.join("cache")).unwrap();
+    let last = json!({ work.as_str(): kept, "/srv/elsewhere": carried });
+    std::fs::write(own.join("cache/last_conversations.json"), last.to_string()).unwrap();
+
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = |body: Value| host.ask("POST", "/agents", Some(&body));
+    let cwd = work.as_str();
+
+    // The conversation is offered to whoever makes an agent of Antigravity in that
+    // directory, by what its user asked first; in every directory there are two.
+    let offered = host.get(&format!("/past-sessions?cwd={cwd}&backend=agy"));
+    let sessions = offered["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{offered}");
+    assert_eq!(
+        (
+            &sessions[0]["id"],
+            &sessions[0]["preview"],
+            &sessions[0]["cwd"]
+        ),
+        (&json!(kept), &json!("do the tests pass?"), &json!(cwd))
+    );
+    let nowhere = host.get("/past-sessions?cwd=/nowhere&backend=agy");
+    assert_eq!(nowhere["sessions"], json!([]));
+    let everywhere = host.get("/past-sessions?scope=all&backend=agy");
+    assert_eq!(everywhere["sessions"].as_array().unwrap().len(), 2);
+
+    // An agent begins with it: its conversation shows what was said and done in it, the
+    // command as a card and as a cell, and what the model thought.
+    let (status, gemma) =
+        made(json!({ "name": "Gemma", "backend": "agy", "cwd": cwd, "resume_session_id": kept }));
+    assert_eq!(status, 200, "{gemma}");
+    let session = gemma["session"].as_str().unwrap().to_string();
+    let turns = host.turns(&session);
+    let shown: Vec<(&str, &str, &Value)> = turns
+        .iter()
+        .map(|turn| {
+            (
+                turn["role"].as_str().unwrap(),
+                turn["text"].as_str().unwrap(),
+                &turn["phase"],
+            )
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("user", "do the tests pass?", &Value::Null),
+            ("assistant", "They pass.", &json!("final")),
+        ]
+    );
+    let card = &turns[1]["tools"][0];
+    assert_eq!(
+        (&card["name"], &card["status"], &card["result"]),
+        (
+            &json!("Bash"),
+            &json!("ok"),
+            &json!("test result: ok. 7 passed")
+        ),
+        "{card}"
+    );
+    assert_eq!(
+        turns[1]["display_cells"],
+        json!([
+            {
+                "id": "agy-think-1", "kind": "reasoning", "title": "Reasoned", "summary": "", "status": "ok",
+                "lines": [{ "label": "", "text": "I will run them.", "kind": "status" }],
+            },
+            {
+                "id": "step-2", "kind": "command", "title": "Ran", "summary": "cargo test", "status": "ok",
+                "lines": [{ "label": "", "text": "test result: ok. 7 passed", "kind": "output" }],
+            },
+        ])
+    );
+    let bound = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap();
+        let row = rows.iter().find(|agent| agent["session"] == session);
+        row.unwrap()["backend_session_id"].clone()
+    };
+    assert_eq!(bound(&session), kept);
+
+    // Its next turn continues Antigravity's own conversation, by its name.
+    host.send(&session, "and now?", "u-1");
+    wait_for("the turn to be over", || host.state(&session) == "done");
+    let starts = std::fs::read_to_string(&started).unwrap();
+    assert_eq!(starts.lines().count(), 1, "{starts}");
+    assert!(
+        starts.contains(kept),
+        "the conversation is continued: {starts}"
+    );
+    let said = host.conversation(&session);
+    assert_eq!(
+        said.last().unwrap(),
+        &("assistant".to_string(), "Picked up.".to_string())
+    );
+
+    // The conversation is that agent's now: it is opened, or it is in use. No copy of one
+    // is made, and what Antigravity has nothing written of is not there to take up.
+    let again = json!({ "name": "Dora", "backend": "agy", "cwd": cwd, "resume_session_id": kept });
+    let (status, why) = made(again.clone());
+    assert_eq!(
+        (status, &why["error"], &why["owner"]),
+        (409, &json!("session_in_use"), &json!(session)),
+        "{why}"
+    );
+    assert_eq!(
+        why["message"],
+        json!(format!(
+            "Antigravity session '{kept}' is already used by {session}."
+        ))
+    );
+    let mut open = again;
+    open["open_existing"] = json!(true);
+    let (status, opened) = made(open);
+    assert_eq!(
+        (status, &opened["session"]),
+        (200, &json!(session)),
+        "{opened}"
+    );
+    let (status, why) =
+        made(json!({ "name": "Fay", "backend": "agy", "cwd": cwd, "fork_session_id": carried }));
+    assert_eq!(
+        (status, &why["error"], &why["message"]),
+        (
+            400,
+            &json!("fork_unsupported"),
+            &json!("Antigravity does not support session forks.")
+        ),
+        "{why}"
+    );
+    let (status, why) = made(
+        json!({ "name": "Fay", "backend": "agy", "cwd": cwd, "resume_session_id": "no-such" }),
+    );
+    assert_eq!(status, 404, "{why}");
+
+    // A conversation that began as the continuation of another is read back without the
+    // record this Host put before its first message.
+    let (status, hera) =
+        made(json!({ "name": "Hera", "backend": "agy", "cwd": cwd, "resume_session_id": carried }));
+    assert_eq!(status, 200, "{hera}");
+    let rows = host.conversation(hera["session"].as_str().unwrap());
+    assert_eq!(
+        rows,
+        [
+            ("user".to_string(), "What was the word?".to_string()),
+            ("assistant".to_string(), "Heron.".to_string()),
+        ]
     );
 }
 
