@@ -72,6 +72,7 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
     let mut compared = 0;
     let mut prompts = 0;
     let mut users = 0;
+    let mut keeper = 0;
     let mut wrong: Vec<String> = Vec::new();
     for scenario in vectors["scenarios"].as_array().unwrap() {
         let name = scenario["name"].as_str().unwrap();
@@ -96,6 +97,75 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
             let at = step["at"].as_i64().unwrap();
             let verb = argv.first().map_or("", String::as_str);
             let context = format!("{name}, step {number} ({verb})");
+            // What the Goal keeper writes beside the owner's record is no command of the tool:
+            // it is written down as [updater, plan, what was asked], with the plan as it is
+            // read afterwards.
+            if step["by"] == "keeper" {
+                let asked: Value = serde_json::from_str(&argv[2]).unwrap();
+                let wanted: Vec<(String, String, String)> = asked["steps"]
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(item_id, wanted)| {
+                        let of = |key: &str| wanted[key].as_str().unwrap_or_default().to_string();
+                        (item_id.clone(), of("status"), of("note"))
+                    })
+                    .collect();
+                let sources: Vec<String> =
+                    serde_json::from_value(asked["source_refs"].clone()).unwrap();
+                let update = clarp_kernel::goals::Update {
+                    seen_revision: asked["seen_revision"].as_i64().unwrap(),
+                    steps: &wanted,
+                    progress: asked["progress"].as_str().unwrap(),
+                    next_work: asked["next_work"].as_str().unwrap(),
+                    model: asked["model"].as_str().unwrap(),
+                    source_refs: &sources,
+                    through_ms: asked["through_ms"].as_i64().unwrap(),
+                    through_event: asked["through_event"].as_i64().unwrap(),
+                    janitor_agent_id: asked["janitor_agent_id"].as_str().unwrap(),
+                };
+                match book.updater(&argv[1], &update, at) {
+                    Ok((change, changed)) => {
+                        let record = book.record(&change, at);
+                        let kept: clarp_kernel::goals::GoalRecord =
+                            serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+                        book.apply(&kept);
+                        let theirs = &step["stdout"];
+                        assert_eq!(step["exit"], 0, "{context}: written here, refused there");
+                        assert_eq!(
+                            serde_json::json!({ "changed_steps": changed, "stored": true }),
+                            *theirs,
+                            "{context}"
+                        );
+                    }
+                    Err(refused) => {
+                        assert_eq!(
+                            step["exit"], 1,
+                            "{context}: refused here ({refused:?}), written there"
+                        );
+                        assert_eq!(
+                            refused.said(),
+                            step["stderr"].as_str().unwrap(),
+                            "{context}"
+                        );
+                        let kind = match refused {
+                            clarp_kernel::goals::NotUpdated::Closed => "GoalClosed",
+                            clarp_kernel::goals::NotUpdated::OwnerAhead => "PlanChanged",
+                            clarp_kernel::goals::NotUpdated::Invalid(_) => "ValueError",
+                        };
+                        assert_eq!(kind, step["refused"].as_str().unwrap(), "{context}");
+                    }
+                }
+                let read = book.get(&argv[1], at).unwrap();
+                if read != step["plan"] {
+                    wrong.push(format!(
+                        "{context}: the plan after the keeper wrote\n  theirs: {}\n  ours:   {}",
+                        step["plan"], read
+                    ));
+                }
+                keeper += 1;
+                continue;
+            }
             // What an app asks for its user is written down as [action, plan, revision, data].
             let by_user = step["by"] == "user";
             let asked = if by_user {
@@ -215,5 +285,9 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
     assert!(
         users >= 12,
         "only {users} of the user's own steps were compared"
+    );
+    assert_eq!(
+        keeper, 17,
+        "what the Goal keeper wrote, and what it was refused"
     );
 }

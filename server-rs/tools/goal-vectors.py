@@ -137,6 +137,33 @@ class World:
         return step
 
 
+    def keeper(self, steps: dict, progress: str, next_work: str = '', note: str = '', **more) -> dict:
+        """What the Goal keeper writes beside the owner's own record (`task_plans.updater_apply`):
+        the statuses of steps and its own checkpoint. Written down as `[updater, plan, what it
+        asked]` under `by: keeper`, with what the write answered or the words it was refused
+        with, and the plan as it is read afterwards."""
+        from lib import task_plans
+        self.now += STEP_MS
+        asked = {'steps': {item.replace('{plan}', self.plan): wanted for item, wanted in steps.items()},
+                 'progress': progress, 'next_work': next_work,
+                 'seen_revision': more.pop('seen_revision', self.revision), 'model': more.pop('model', 'keeper-model'),
+                 'source_refs': more.pop('source_refs', ['message:m-1', 'job:j-1']),
+                 'through_ms': more.pop('through_ms', self.now - 500), 'through_event': more.pop('through_event', 3),
+                 'janitor_agent_id': 'keeper-agent', **more}
+        step = {'by': 'keeper', 'argv': ['updater', self.plan, json.dumps(asked)], 'at': self.now}
+        try:
+            result = task_plans.updater_apply(self.plan, **asked)
+        except (ValueError, TypeError) as exc:  # the store's own refusals, by their kind
+            step.update(exit=1, stdout=None, stderr=str(exc), refused=type(exc).__name__)
+        else:
+            step.update(exit=0, stdout=result, stderr='')
+        step['plan'] = task_plans.get(self.plan)
+        if note:
+            step['note'] = note
+        self.steps.append(step)
+        return step
+
+
 def j(value) -> str:
     return json.dumps(value)
 
@@ -282,8 +309,49 @@ def the_user_acts_on_a_goal(w: World) -> None:
     w.user('cancel', {'reason': 'Too late'}, note='refused: closed')
 
 
+def the_keeper_writes_beside_the_owner(w: World) -> None:
+    w.run('create', '{session}', 'ship', 'Ship the thing', j(ITEMS), j(GOAL))
+    w.run('step', '{plan}', '{rev}', 'probe', 'in_progress')
+    w.keeper({'{plan}:probe': {'status': 'completed', 'note': 'Evidence: PR #12 merged'},
+              '{plan}:build': {'status': 'in_progress', 'note': 'n' * 600},
+              '{plan}:part': {'status': 'blocked'},
+              '{plan}:no-such-step': {'status': 'completed'},
+              'probe': {'status': 'completed', 'note': 'a short id is no id here'}},
+             '  Probe merged; the build is under way.  ', '  Finish the build.  ')
+    w.run('get', '{plan}')
+    w.keeper({'{plan}:probe': {'status': 'in_progress', 'note': 'a step the keeper closed stays closed'},
+              '{plan}:build': {'status': 'in_progress'},
+              '{plan}:part': {'status': 'done'},
+              '{plan}:ship': None},
+             'Nothing changed, said again.', note='no step changes: what is closed stays closed, the same status is no change')
+    w.keeper({}, '', 'x', note='refused: a checkpoint needs its progress')
+    w.keeper({}, '   ', note='refused: space is no progress')
+    w.keeper({'{plan}:part': {'status': 'pending'}}, 'P' * 2100, 'N' * 1100, source_refs=[f'message:m-{n}' for n in range(50)],
+             through_ms=0, through_event=0, model='', note='long texts are cut, and no more than forty sources kept')
+    w.run('step', '{plan}', '{rev}', 'part', 'in_progress')
+    w.keeper({'{plan}:part': {'status': 'completed', 'note': 'Evidence: built'}}, 'Stale.', seen_revision=1,
+             note='refused: the owner changed the plan since the keeper read it')
+    w.keeper({'{plan}:part': {'status': 'completed', 'note': 'Evidence: built'}}, 'The part is built.',
+             note='a step that ran is closed: the time it ran is counted')
+    w.user('pause', {'reason': 'Waiting for a review'})
+    w.keeper({'{plan}:build': {'status': 'pending'}}, 'Paused by the user.',
+             note='a paused goal: the plan keeps its state; a step that ran has its time counted')
+    w.keeper({'{plan}:build': {'status': 'in_progress'}}, 'Still paused.',
+             note='a step that begins while the goal is paused has no start')
+    w.run('get', '{plan}')
+    w.user('resume', {'reason': 'Reviewed'})
+    for n in range(6):
+        w.keeper({'{plan}:build': {'status': 'pending' if n % 2 == 0 else 'in_progress'}}, f'Round {n}.')
+    w.run('get', '{plan}')
+    w.user('cancel', {'reason': 'Not needed'})
+    w.keeper({'{plan}:ship': {'status': 'completed'}}, 'Too late.', note='refused: the goal is closed')
+    w.run('create', '{session}', 'list', 'A plan without a goal', j(ITEMS[:1]))
+    w.keeper({}, 'No goal here.', note='refused: a plan that has no goal')
+
+
 SCENARIOS = [a_goal_from_start_to_completion, what_the_tool_refuses, a_goal_is_paused_resumed_blocked_and_cancelled,
-             a_plan_changes_and_keeps_its_notes, a_goal_waits_for_something, the_user_acts_on_a_goal]
+             a_plan_changes_and_keeps_its_notes, a_goal_waits_for_something, the_user_acts_on_a_goal,
+             the_keeper_writes_beside_the_owner]
 
 
 def main(argv: list[str]) -> int:
