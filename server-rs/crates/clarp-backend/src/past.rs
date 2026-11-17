@@ -290,3 +290,260 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
     listed.truncate(limit);
     listed
 }
+
+// ---- Codex -------------------------------------------------------------------------------
+//
+// Codex keeps every session as a rollout, `<home>/.codex/sessions/<year>/<month>/<day>/
+// rollout-<when>-<session>.jsonl`, and an index of its threads in a database of its own
+// (`<home>/.codex/state_5.sqlite`, the table `threads`). A session is listed by what the
+// index says of it, and the newest rollouts are looked into beside it, so that an index that
+// is missing or behind hides no session that is there. The rule is the Python Host's
+// (`server/lib/codex_transcript.py`, `list_sessions` and `find_latest_jsonl`), held by
+// `tests/fixtures/codex-sessions-vectors.json`.
+
+/// How many lines from the start of a rollout are read for what it says of itself.
+const ROLLOUT_HEAD_LINES: usize = 80;
+/// How many of the newest rollouts are looked into at least.
+const ROLLOUTS_LOOKED_INTO: usize = 200;
+
+/// The files under a directory, however deep, whose names are wanted. A directory that is
+/// only pointed at is not gone into.
+fn files_under(root: &Path, wanted: &dyn Fn(&str) -> bool) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => dirs.push(path),
+                Ok(_) if wanted(&entry.file_name().to_string_lossy()) => found.push(path),
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+/// What a rollout says of itself at its start: its session, where it ran, and what its user
+/// asked first.
+fn rollout_head(path: &Path) -> (String, String, String) {
+    use std::io::BufRead;
+    let (mut session, mut cwd, mut preview) = (String::new(), String::new(), String::new());
+    let Ok(file) = std::fs::File::open(path) else {
+        return (session, cwd, preview);
+    };
+    let mut lines = std::io::BufReader::new(file);
+    let mut line = Vec::new();
+    for _ in 0..ROLLOUT_HEAD_LINES {
+        line.clear();
+        if !matches!(lines.read_until(b'\n', &mut line), Ok(read) if read > 0) {
+            break;
+        }
+        let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&line) else {
+            continue;
+        };
+        let nothing = serde_json::Map::new();
+        let payload = record
+            .get("payload")
+            .and_then(Value::as_object)
+            .unwrap_or(&nothing);
+        let either = |name: &str| match text_of(payload.get(name)) {
+            said if said.is_empty() => text_of(record.get(name)),
+            said => said,
+        };
+        let kind = either("type");
+        if kind == "session_meta"
+            || record
+                .get("type")
+                .is_some_and(|kind| kind == "session_meta")
+        {
+            (session, cwd) = (either("id"), either("cwd"));
+        } else if kind == "user_message" && preview.is_empty() {
+            let asked = payload
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            preview = python::strip(asked.trim_start_matches('›')).to_string();
+        }
+        if !session.is_empty() && !cwd.is_empty() && !preview.is_empty() {
+            break;
+        }
+    }
+    (session, cwd, preview)
+}
+
+/// What a field of Codex's index holds, as a text: nothing, and what counts as nothing, is
+/// no text.
+fn indexed_text(value: &rusqlite::types::Value) -> String {
+    match value {
+        rusqlite::types::Value::Text(text) => text.clone(),
+        rusqlite::types::Value::Integer(number) if *number != 0 => number.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn indexed_whole(value: &rusqlite::types::Value) -> i64 {
+    match value {
+        rusqlite::types::Value::Integer(number) => *number,
+        rusqlite::types::Value::Real(number) => number.trunc() as i64,
+        rusqlite::types::Value::Text(text) => {
+            let read = python::int(text).and_then(|number| i64::try_from(number).ok());
+            read.unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+/// The sessions Codex's own index names, in the order it gives them: those a user wrote in,
+/// of one directory or of all, whose rollout is there.
+fn indexed(index: &Path, wanted: &str, limit: usize) -> rusqlite::Result<Vec<Value>> {
+    use rusqlite::types::Value as Held;
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let db = rusqlite::Connection::open_with_flags(index, flags)?;
+    db.busy_timeout(std::time::Duration::from_secs(1))?;
+    let of_one = if wanted.is_empty() {
+        ""
+    } else {
+        " AND cwd = ?2"
+    };
+    let question = format!(
+        "SELECT id,cwd,name,title,preview,first_user_message,updated_at,updated_at_ms,rollout_path \
+         FROM threads WHERE (has_user_event = 1 OR COALESCE(first_user_message, '') != ''){of_one} \
+         ORDER BY recency_at_ms DESC,updated_at_ms DESC LIMIT ?1"
+    );
+    let mut asked = db.prepare(&question)?;
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let read = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Vec<Held>> {
+        (0..9).map(|at| row.get(at)).collect()
+    };
+    let rows: Vec<Vec<Held>> = if wanted.is_empty() {
+        asked
+            .query_map(rusqlite::params![limit], read)?
+            .collect::<Result<_, _>>()?
+    } else {
+        asked
+            .query_map(rusqlite::params![limit, wanted], read)?
+            .collect::<Result<_, _>>()?
+    };
+    let mut listed: Vec<Value> = Vec::new();
+    for row in rows {
+        let [
+            id,
+            cwd,
+            name,
+            title,
+            preview,
+            first,
+            updated,
+            updated_ms,
+            rollout,
+        ] = row.as_slice()
+        else {
+            continue;
+        };
+        if !Path::new(&indexed_text(rollout)).is_file() {
+            continue;
+        }
+        let id = indexed_text(id);
+        if id.is_empty() {
+            continue;
+        }
+        let at = match indexed_whole(updated_ms) {
+            0 => indexed_whole(updated),
+            milliseconds => milliseconds.div_euclid(1000),
+        };
+        let or = |first: &Held, second: &Held| match indexed_text(first) {
+            said if said.is_empty() => indexed_text(second),
+            said => said,
+        };
+        let item = json!({
+            "id": id, "mtime": at, "preview": python::first(&or(preview, first), PREVIEW_MOST),
+            "title": python::first(&or(name, title), TITLE_MOST), "cwd": indexed_text(cwd),
+        });
+        match listed.iter_mut().find(|held| held["id"] == item["id"]) {
+            Some(held) => *held = item,
+            None => listed.push(item),
+        }
+    }
+    Ok(listed)
+}
+
+/// Codex's sessions under `sessions` (`<home>/.codex/sessions`): those that ran in `cwd`, or
+/// in every directory, the newest first, `limit` at most. `index`: Codex's own index of its
+/// threads, where there is one. Each as an app reads it: `id`, `mtime` in seconds,
+/// `preview`, `title`, `cwd`.
+pub fn codex_sessions(
+    sessions: &Path,
+    index: Option<&Path>,
+    cwd: &str,
+    all_projects: bool,
+    limit: usize,
+) -> Vec<Value> {
+    if !sessions.is_dir() {
+        return Vec::new();
+    }
+    let wanted = if cwd.is_empty() {
+        String::new()
+    } else {
+        plain(cwd)
+    };
+    let of_one = if all_projects { "" } else { wanted.as_str() };
+    let index = index.filter(|index| index.is_file());
+    // An index that cannot be read names nothing: the rollouts are looked into all the same.
+    let mut listed = index
+        .and_then(|index| indexed(index, of_one, limit).ok())
+        .unwrap_or_default();
+    let mut rollouts: Vec<(Option<SystemTime>, PathBuf)> = files_under(sessions, &|name| {
+        name.starts_with("rollout-") && name.ends_with(".jsonl")
+    })
+    .into_iter()
+    .map(|path| (written(&path).0, path))
+    .collect();
+    rollouts.sort_by(|one, other| other.0.cmp(&one.0).then_with(|| one.1.cmp(&other.1)));
+    for (_, path) in rollouts
+        .into_iter()
+        .take(ROLLOUTS_LOOKED_INTO.max(limit.saturating_mul(4)))
+    {
+        let (session, ran_in, preview) = rollout_head(&path);
+        if session.is_empty() || listed.iter().any(|held| held["id"] == session.as_str()) {
+            continue;
+        }
+        if !of_one.is_empty() && plain(&ran_in) != of_one {
+            continue;
+        }
+        listed.push(json!({
+            "id": session, "mtime": written(&path).1, "preview": python::first(&preview, PREVIEW_MOST),
+            "title": "", "cwd": ran_in,
+        }));
+    }
+    listed.sort_by_key(|item| std::cmp::Reverse(item["mtime"].as_i64().unwrap_or(0)));
+    listed.truncate(limit);
+    listed
+}
+
+/// The rollout of a session of Codex: the newest file under `sessions` whose name ends with
+/// the session's.
+pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
+    if session.is_empty() || !sessions.is_dir() {
+        return None;
+    }
+    let ending = format!("{session}.jsonl");
+    let named = files_under(sessions, &|name| name.ends_with(&ending));
+    let mut newest: Option<(SystemTime, PathBuf)> = None;
+    for path in named {
+        let Some(at) = written(&path).0 else {
+            continue;
+        };
+        let newer = newest
+            .as_ref()
+            .is_none_or(|(held, by)| at > *held || (at == *held && path < *by));
+        if newer {
+            newest = Some((at, path));
+        }
+    }
+    newest.map(|(_, path)| path)
+}

@@ -857,6 +857,21 @@ into one cell, since a call is a row of its own here. Held by the adapter's reco
 test, and a turn of a stand-in Codex through the Host (a command that fails with eight lines, a read, an
 edit of two files).
 
+**The sessions Codex kept** (17 Nov 2026), with the same reader. They are listed for whoever makes an
+agent (`GET /past-sessions?backend=codex`) as the Python Host lists them: by Codex's own index of its
+threads (the table `threads` of `state_5.sqlite`, opened to read and nothing else: those a user wrote in,
+whose rollout is there), and by the newest two hundred rollouts beside it, so that an index that is
+missing or behind hides nothing (`clarp-backend` `past.rs`, `codex_sessions`; held to 16 lists the Python
+Host's own function gave for 17 made-up files and 8 made-up threads, to how it finds the rollout of a
+session, and to the model it reads off one). An agent begins with one (`resume_session_id`): its
+conversation shows what was said and done in it, read from the rollout, the cells with it; it runs on the
+model the session last ran on; and its next turn is `codex exec resume` of that thread. A session is taken
+up wherever it ran, since Codex finds a thread by its name alone; one another agent has is opened or in
+use, in the Python Host's words. A copy of one is not made (`fork_session_id`): this Host has no app
+server of Codex to ask, and says so in the Python Host's own words for a tool that cannot fork. Held by a
+turn of a stand-in Codex through the Host: the session offered, taken up, shown, continued, and refused a
+second time.
+
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
 until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the
