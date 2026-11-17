@@ -32,6 +32,9 @@ fe87cf73356b  agent-is-told: its third reply (computed)
 303d269e2fc9  spoken-names: its third reply (computed)
 fac440df5e13  spoken-names: its fourth reply (computed)
 260663bc767f  spoken-names: the second reply of the scenario's own agent (computed)
+e06c199220a6  router: the second reply of the scenario's own agent
+5187a75b8f02  router: the second reply of the second agent (computed: the defect shows at a later turn or does not, from run to run)
+d7bd0121d397  router: its third reply (computed)
 
 # A notification's preview of what was said aloud does not show an emotion tag the engine
 # acts out (the Python Host shows "[sigh]" there: reference defect R10).
@@ -56,6 +59,8 @@ e5de879ae9b8  retried-turns: last_completed_message at rest, after the turn that
 f632d0f86f1d  spoken-names: last_completed_message at rest, after the fifth turn of the agent that was named
 219fb876c501  spoken-names: the same in the snapshot after its second turn (computed)
 5935024d3eb3  spoken-names: the same of the scenario's own agent, after its second turn (computed)
+9916a186a9b4  router: last_completed_message at rest, after the second turn of the scenario's own agent
+cce40563260b  router: the same of the second agent, after its third turn (computed)
 
 # The model that answered is shown after a turn that completed (the Python Host shows none
 # after some: reference defect R13).
