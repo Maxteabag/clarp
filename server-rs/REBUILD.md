@@ -1103,6 +1103,49 @@ steps made for the question, reproducible); this is built to its answers.
   restart), by `an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew` on a Host, and by
   the scenario `started-again`.
 
+**A new agent begins with a session its tool kept** (17 Nov 2026). An app's sheet for a new agent offers the
+sessions Claude Code kept in a directory (`GET /past-sessions`) and makes an agent that takes one up where it
+left off (`POST /agents` with `resume_session_id`), or that begins with a copy of one and leaves the session
+itself as it is (`fork_session_id`). It is how a conversation held in a terminal becomes an agent.
+
+- **What is offered** is read from the tool's own files (`<home>/.claude/projects/<project>/`): what a
+  project's index says of a session, else what the session's own transcript says (where it ran, what was
+  asked first, the name its user or the tool gave it); the newest first, 20 of a directory and 100 of every
+  directory (`clarp-backend` `past.rs`). By the Python Host's rule (`session_catalog.py`), held by its own
+  answers for a made-up directory of projects (`tools/past-sessions-vectors.py`: 26 files, 14 lists), but for
+  two things done otherwise on purpose and named in the test: the project of a directory is looked for under
+  the name Claude Code gives it (a dash for every sign that is no letter and no digit; R36), and a session an
+  index marks as a side chain is not offered (R37).
+- **What was said in it** is read from the session's transcript by the Python Host's reading
+  (`claude_transcript.py`, `parse_turns`; here `history.rs`, held by `tools/claude-history-vectors.py`: 38
+  lines, 14 turns, 13 tools): what a user wrote and what the agent answered, each tool as the card a
+  conversation shows with what came back, and nothing the tool wrote by itself. The agent's log takes these as
+  rows that came from elsewhere, the way it takes the conversation of an agent moved from the Python Host
+  (the kernel's `Adopt`), and the agent continues the session: its next turn starts its tool with `--resume`.
+- **The agent's conversation goes by the session's name**, as that of an agent moved here does. That is how a
+  session stays its agent's whatever the tool calls it afterwards: taken up a second time it is refused
+  (`session_in_use`, with the agent that has it), and a request that says to open what is there
+  (`open_existing`) is answered with that agent. An agent that is started again in place has a conversation of
+  a new name, and an agent that is removed has none: the session can be taken up again.
+- **A fork** is a copy of the transcript under a name of its own, every line saying the new session, written
+  among the sessions of the directory the new agent works in, where its tool will look for it
+  (`history::claude_forked`; the Python Host's `fork.py`). The new agent is the one's whose session it was,
+  unless the request names another, and the apps are told of it as of a fork (`agent-roster`, `forked`).
+- **Its model** is the one the session last ran on, unless the request names one: the model the newest
+  answer of the transcript names (`history::model`, by the Python Host's `_read_model`, held by five
+  transcripts made for it).
+- **Refused in words, and no agent made**: a session of Codex (`resume_unsupported`: this Host reads Claude
+  Code's sessions and no other tool's yet, and offers none of Codex's); a session that is not among those of
+  the directory the agent is to work in (404, `Session is no longer available in this directory`); a fork of
+  a session that is nowhere (`fork source not found`). The Python Host asks whether a session is there only
+  of a request that says to open what is there, and otherwise makes the agent, whose tool then looks for the
+  session in vain (`fork.py`'s own words: Claude Code finds a conversation only under the directory it is
+  started in). An agent whose session could not be taken up does not stay (`resume_failed`).
+- Held by the vectors, and by `a_new_agent_begins_with_a_session_its_tool_kept` on a Host whose user has a
+  home of their own: the session offered, the refusals, the agent that takes it up with its rows, its tool's
+  card and its model, its next turn in that session, the second taking refused and opened, a fork here and a
+  fork for another directory.
+
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one
 that finds whom a spoken message is for with its five options chosen (what its owner had set for the router

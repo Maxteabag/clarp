@@ -40,6 +40,7 @@ pub mod media;
 pub mod once;
 pub mod owner;
 pub mod pairing;
+pub mod past;
 pub mod peers;
 pub mod personas;
 pub mod places;

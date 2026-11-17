@@ -9191,6 +9191,298 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
     assert_eq!(as_row.unwrap()["persona"], "Nova Two");
 }
 
+#[test]
+fn a_new_agent_begins_with_a_session_its_tool_kept() {
+    let place = Place::new("past-sessions");
+    // A stand-in for Claude Code that writes down what it was started with, and answers.
+    let started = place.root.join("started");
+    let claude = place.root.join("claude");
+    let script = [
+        "#!/bin/sh\nread message\n",
+        &format!("echo \"$*\" >> \"{}\"\n", started.display()),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    // The Host's user has a home of their own, in which Claude Code kept one session of the
+    // directory the Host's agents work in.
+    let work = place.root.join("work");
+    let project: String = work
+        .to_str()
+        .unwrap()
+        .chars()
+        .map(|sign| {
+            if sign.is_ascii_alphanumeric() {
+                sign
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let projects = place.root.join(".claude").join("projects");
+    let kept = "0b6b2f4e-1111-4222-8333-444455556666";
+    let lines = [
+        json!({ "type": "user", "sessionId": kept, "cwd": work, "timestamp": "2027-01-15T08:00:00.000Z",
+                "message": { "role": "user", "content": "what is in the readme?" } }),
+        json!({ "type": "assistant", "sessionId": kept, "timestamp": "2027-01-15T08:00:02.000Z",
+                "message": { "role": "assistant", "content": [
+                    { "type": "text", "text": "Reading it." },
+                    { "type": "tool_use", "id": "c1", "name": "Read", "input": { "file_path": "/srv/app/README.md" } }] } }),
+        json!({ "type": "user", "sessionId": kept, "timestamp": "2027-01-15T08:00:03.000Z",
+                "message": { "role": "user", "content": [
+                    { "type": "tool_result", "tool_use_id": "c1", "content": "A small readme." }] } }),
+        json!({ "type": "assistant", "sessionId": kept, "timestamp": "2027-01-15T08:00:05.000Z",
+                "message": { "role": "assistant", "model": "claude-kept-1",
+                             "content": [{ "type": "text", "text": "It says little." }] } }),
+        json!({ "type": "custom-title", "customTitle": "About the readme", "sessionId": kept }),
+    ];
+    let written: Vec<String> = lines.iter().map(Value::to_string).collect();
+    std::fs::create_dir_all(projects.join(&project)).unwrap();
+    let transcript = projects.join(&project).join(format!("{kept}.jsonl"));
+    std::fs::write(&transcript, written.join("\n") + "\n").unwrap();
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    let made = |body: Value| host.ask("POST", "/agents", Some(&body));
+    let cwd = work.to_str().unwrap();
+    let texts = |session: &str| -> Vec<(String, String)> { host.conversation(session) };
+
+    // The session is offered to whoever makes an agent in that directory.
+    let offered = host.get(&format!("/past-sessions?cwd={cwd}&backend=claude"));
+    assert_eq!(
+        (&offered["cwd"], &offered["scope"]),
+        (&json!(cwd), &json!("workspace")),
+        "{offered}"
+    );
+    let sessions = offered["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{offered}");
+    assert_eq!(
+        (
+            &sessions[0]["id"],
+            &sessions[0]["preview"],
+            &sessions[0]["title"],
+            &sessions[0]["cwd"]
+        ),
+        (
+            &json!(kept),
+            &json!("what is in the readme?"),
+            &json!("About the readme"),
+            &json!(cwd)
+        )
+    );
+    assert_eq!(
+        host.get("/past-sessions?cwd=/nowhere")["sessions"],
+        json!([])
+    );
+    assert_eq!(
+        host.get("/past-sessions?scope=all")["sessions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        host.get(&format!("/past-sessions?cwd={cwd}&backend=codex"))["sessions"],
+        json!([])
+    );
+
+    // What cannot be taken up is refused in words, and makes no agent.
+    let (status, why) =
+        made(json!({ "name": "Zed", "backend": "codex", "resume_session_id": kept }));
+    assert_eq!(
+        (status, &why["error"]),
+        (400, &json!("resume_unsupported")),
+        "{why}"
+    );
+    let (status, why) = made(json!({ "name": "Zed", "resume_session_id": "no-such-session" }));
+    assert_eq!(
+        (status, &why["error"]),
+        (
+            404,
+            &json!("Session is no longer available in this directory")
+        ),
+        "{why}"
+    );
+    let (status, why) = made(json!({ "name": "Zed", "fork_session_id": "no-such-session" }));
+    assert_eq!(
+        (status, &why["error"]),
+        (404, &json!("fork source not found")),
+        "{why}"
+    );
+    // A session is taken up in the directory it was kept for: its tool finds it nowhere else.
+    let elsewhere = place.root.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let (status, why) = made(json!({ "name": "Zed", "cwd": elsewhere, "resume_session_id": kept }));
+    assert_eq!(
+        (status, &why["error"]),
+        (
+            404,
+            &json!("Session is no longer available in this directory")
+        ),
+        "{why}"
+    );
+    let made_by_somebody = |host: &Host| {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap().iter();
+        agents.filter(|agent| agent["is_janitor"] == false).count()
+    };
+    assert_eq!(made_by_somebody(&host), 0);
+
+    // An agent that takes the session up: its conversation shows what was said in it, the
+    // tool that was used with what came back, and the last answer as the one that closed.
+    let (status, taken) = made(
+        json!({ "name": "Taken", "backend": "claude", "cwd": cwd, "resume_session_id": kept }),
+    );
+    assert_eq!(status, 200, "{taken}");
+    let agent = taken["session"].as_str().unwrap().to_string();
+    // It runs on the model the session last ran on: the request named none.
+    assert_eq!(taken["agent"]["model"], "claude-kept-1", "{taken}");
+    assert_eq!(
+        texts(&agent),
+        vec![
+            said("user", "what is in the readme?"),
+            said("assistant", "Reading it."),
+            said("assistant", "It says little."),
+        ]
+    );
+    let log = host.get(&format!("/log?session={agent}&limit=100"));
+    let turns = log["turns"].as_array().unwrap();
+    assert_eq!(
+        (
+            &turns[1]["tools"][0]["name"],
+            &turns[1]["tools"][0]["status"],
+            &turns[1]["tools"][0]["result"]
+        ),
+        (&json!("Read"), &json!("ok"), &json!("A small readme.")),
+        "{log}"
+    );
+    assert_eq!(
+        (&turns[1]["phase"], &turns[2]["phase"]),
+        (&Value::Null, &json!("final"))
+    );
+    assert_eq!(turns[0]["timestamp"], "2027-01-15T08:00:00.000Z");
+    // Its next turn goes on in that session of its tool.
+    host.send(&agent, "and the licence?", "p-1");
+    wait_for("the answer after the session was taken up", || {
+        texts(&agent).contains(&said("assistant", "on it"))
+    });
+    let first = std::fs::read_to_string(&started).unwrap();
+    let first = first.lines().next().unwrap().to_string();
+    assert!(first.contains(&format!("--resume {kept}")), "{first}");
+    assert!(first.contains("--model claude-kept-1"), "{first}");
+    assert_eq!(texts(&agent).len(), 5);
+
+    // The session is that agent's now: taken up a second time it is in use, and a request
+    // that says to open what is there is answered with the agent that has it.
+    let again =
+        json!({ "name": "Second", "backend": "claude", "cwd": cwd, "resume_session_id": kept });
+    let (status, why) = made(again.clone());
+    assert_eq!(
+        (status, &why["error"], &why["owner"]),
+        (409, &json!("session_in_use"), &json!(agent)),
+        "{why}"
+    );
+    let mut open = again;
+    open["open_existing"] = json!(true);
+    let (status, opened) = made(open);
+    assert_eq!(
+        (status, &opened["session"], &opened["name"]),
+        (200, &json!(agent), &json!("Taken")),
+        "{opened}"
+    );
+
+    // A fork: a copy of the session under a name of its own, which another agent begins
+    // with. The session it was copied from stays as it is, and the new agent is the one's
+    // whose session it was.
+    let (status, forked) = made(json!({ "name": "Forked", "backend": "claude", "cwd": cwd,
+                                        "fork_session_id": kept, "model": "sonnet" }));
+    assert_eq!(status, 200, "{forked}");
+    assert_eq!(
+        forked["agent"]["model"], "sonnet",
+        "a model that is named is the agent's"
+    );
+    let fork = forked["session"].as_str().unwrap().to_string();
+    assert_eq!(texts(&fork)[..3], texts(&agent)[..3]);
+    wait_for("the apps to be told of a fork", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-roster"
+                && event["kind"] == "forked"
+                && event["session"] == fork.as_str()
+        })
+    });
+    let snapshot = host.get("/agents/snapshot");
+    let row_of = |session: &str| {
+        let agents = snapshot["agents"].as_array().unwrap();
+        agents
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(row_of(&fork)["parent_agent_id"], row_of(&agent)["agent_id"]);
+    let copies: Vec<PathBuf> = std::fs::read_dir(projects.join(&project))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| *path != transcript)
+        .collect();
+    assert_eq!(copies.len(), 1);
+    let copy = std::fs::read_to_string(&copies[0]).unwrap();
+    let name = copies[0].file_stem().unwrap().to_str().unwrap().to_string();
+    assert!(name != kept && copy.lines().count() == 5);
+    for line in copy.lines() {
+        let record: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(record["sessionId"], name.as_str(), "{line}");
+    }
+    assert!(std::fs::read_to_string(&transcript).unwrap().contains(kept));
+    host.send(&fork, "go on from the copy", "p-2");
+    wait_for("the fork's answer", || {
+        texts(&fork).contains(&said("assistant", "on it"))
+    });
+    let all = std::fs::read_to_string(&started).unwrap();
+    let last = all.lines().last().unwrap();
+    assert!(last.contains(&format!("--resume {name}")), "{all}");
+    assert!(last.contains("--model sonnet"), "{all}");
+    // Both are offered now, the copy with the same first words.
+    let offered = host.get(&format!("/past-sessions?cwd={cwd}"));
+    assert_eq!(
+        offered["sessions"].as_array().unwrap().len(),
+        2,
+        "{offered}"
+    );
+
+    // Forked for an agent that works in another directory, the copy is written where its
+    // tool will look for it: among the sessions of that directory.
+    let (status, away) = made(
+        json!({ "name": "Away", "backend": "claude", "cwd": elsewhere,
+                                      "fork_session_id": kept }),
+    );
+    assert_eq!(status, 200, "{away}");
+    assert_eq!(away["agent"]["model"], "claude-kept-1", "{away}");
+    let there: String = elsewhere
+        .to_str()
+        .unwrap()
+        .chars()
+        .map(|sign| {
+            if sign.is_ascii_alphanumeric() {
+                sign
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let written = std::fs::read_dir(projects.join(&there)).unwrap().count();
+    assert_eq!(written, 1);
+    assert_eq!(
+        std::fs::read_dir(projects.join(&project)).unwrap().count(),
+        2,
+        "and no second copy beside the session itself"
+    );
+}
+
 /// Writes a program a test runs in place of a real one.
 fn program(path: &std::path::Path, text: &str) {
     use std::os::unix::fs::PermissionsExt;
@@ -14758,7 +15050,9 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
 #[test]
 fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     let place = Place::new("not-yet");
-    let host = place.start();
+    // The Host's user has a home of their own, in which no tool kept anything.
+    let home = place.root.to_str().unwrap().to_string();
+    let host = place.start_in("", &[], &[("HOME", home.as_str())]);
     let made = |body: Value| host.ask("POST", "/agents", Some(&body));
     // The agents of the roster: the Host's own janitors are no agents anybody made.
     let agents = |host: &Host| {
@@ -14768,10 +15062,12 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     };
     host.new_agent("Echo");
 
-    // Taking up or forking a past session of a tool. (An agent is started again in place:
-    // that has a test of its own.)
+    // Taking up or forking a past session of a tool whose sessions this Host does not
+    // read. (Claude Code's are read, and an agent is started again in place: each has a
+    // test of its own.)
     for key in ["resume_session_id", "fork_session_id"] {
-        let (status, why) = made(json!({ "name": "Zed", key: "0b6b2f4e-synthetic" }));
+        let asked = json!({ "name": "Zed", "backend": "codex", key: "0b6b2f4e-synthetic" });
+        let (status, why) = made(asked);
         assert_eq!(
             (status, why["error"].as_str()),
             (400, Some("resume_unsupported")),
@@ -14803,8 +15099,8 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     assert_eq!(status, 200, "{plain}");
     assert_eq!(agents(&host), 2);
 
-    // The sessions a tool had in a directory: none is offered, in the Python Host's shape.
-    let home = std::env::var("HOME").unwrap();
+    // The sessions a tool had in a directory: none, where it kept none, in the Python
+    // Host's shape.
     let past = host.get("/past-sessions?cwd=~&backend=claude");
     assert_eq!(
         past,

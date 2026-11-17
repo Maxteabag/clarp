@@ -3,7 +3,9 @@
 the conversation of an agent (`server/lib/claude_transcript.py`, `parse_turns`): the turns its own
 function reads from made-up transcripts, written to
 `crates/clarp-backend/tests/fixtures/claude-history-vectors.json` with the lines it was given, so
-that the Rust Host's reading is held to it line by line.
+that the Rust Host's reading is held to it line by line. And the model a session last ran on, as
+the Python Host reads it off a transcript for an agent that takes the session up without naming a
+model (`server/lib/session_models.py`, `_read_model`).
 
 It runs in a process of its own whose every home, data, config and cache directory is a new empty
 directory (the replay harness's own isolation, `tests/replay/host.py`), with no way out to any
@@ -110,6 +112,44 @@ TRANSCRIPTS = [
     ]),
 ]
 
+# The model a session last ran on: a name, what it shows, and its lines.
+MODELS = [
+    ('the-newest', 'the model the newest answer names', [
+        user('one'),
+        agent([text('first')], model='claude-old'),
+        user('two'),
+        agent([text('second')], model='claude-new'),
+        user('three'),
+    ]),
+    ('not-made-up', 'an answer the tool made up names no model, nor does one that names none', [
+        agent([text('an answer')], model='claude-real'),
+        agent([text('made up')], model='<synthetic>'),
+        {'type': 'assistant', 'message': {'role': 'assistant', 'model': '', 'content': []}},
+        {'type': 'assistant', 'message': {'role': 'assistant', 'model': 7, 'content': []}},
+        {'type': 'assistant', 'message': {'role': 'assistant', 'content': []}},
+        {'type': 'assistant', 'message': 'no object'},
+        {'type': 'assistant', 'payload': 'no object', 'message': {'role': 'assistant', 'model': 'beside-a-payload-that-is-none'}},
+        {'type': 'user', 'message': {'role': 'user', 'model': 'a-users', 'content': 'x'}},
+        {'type': 'system', 'message': {'model': 'the-systems'}},
+        [1, 2, 3],
+        'this line is no JSON',
+        '',
+    ]),
+    ('of-a-rollout', 'the context of a turn names the model, as a rollout of Codex writes it', [
+        agent([text('an answer')], model='claude-before'),
+        {'type': 'turn_context', 'payload': {'model': 'of-the-turn', 'cwd': '/srv/work'}},
+        {'type': 'turn_context', 'payload': {'model': ''}},
+        {'type': 'turn_context', 'payload': {'cwd': '/srv/work'}},
+        {'type': 'turn_context', 'message': {'model': 'not-where-a-context-says-it'}},
+        {'type': 'response_item', 'payload': {'model': 'no-context-of-a-turn'}},
+    ]),
+    ('none', 'a transcript in which no answer names a model', [
+        user('one'),
+        {'type': 'assistant', 'message': {'role': 'assistant', 'content': [text('x')]}},
+    ]),
+    ('empty', 'a transcript of nothing', []),
+]
+
 
 def run() -> dict:
     """Runs in a process of its own: the turns the Python Host reads from the transcripts above."""
@@ -121,15 +161,26 @@ def run() -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import claude_transcript
+    from lib import claude_transcript, session_models
+
+    def model_of(path):
+        stat = path.stat()
+        return session_models._read_model(str(path), stat.st_mtime_ns, stat.st_size)
 
     out = []
     for name, what, lines in TRANSCRIPTS:
         written = [line if isinstance(line, str) else json.dumps(line) for line in lines]
         path = root / f'{name}.jsonl'
         path.write_text('\n'.join(written) + '\n')
-        out.append({'name': name, 'what': what, 'lines': written, 'turns': claude_transcript.parse_turns(path)})
-    return {'transcripts': out}
+        out.append({'name': name, 'what': what, 'lines': written, 'turns': claude_transcript.parse_turns(path),
+                    'model': model_of(path)})
+    models = []
+    for name, what, lines in MODELS:
+        written = [line if isinstance(line, str) else json.dumps(line) for line in lines]
+        path = root / f'model-{name}.jsonl'
+        path.write_text(''.join(line + '\n' for line in written))
+        models.append({'name': name, 'what': what, 'lines': written, 'model': model_of(path)})
+    return {'transcripts': out, 'models': models}
 
 
 def main() -> int:
@@ -145,19 +196,26 @@ def main() -> int:
     out = ['{', ' "transcripts": [']
     rows = said['transcripts']
     for number, row in enumerate(rows):
-        out.append('  {"name": ' + json.dumps(row['name']) + ', "what": ' + json.dumps(row['what']) + ',')
+        out.append('  {"name": ' + json.dumps(row['name']) + ', "what": ' + json.dumps(row['what'])
+                   + ', "model": ' + json.dumps(row['model']) + ',')
         out.append('   "lines": ' + json.dumps(row['lines'], ensure_ascii=True) + ',')
         out.append('   "turns": [')
         out.extend('    ' + json.dumps(turn, ensure_ascii=True) + (',' if n < len(row['turns']) - 1 else '')
                    for n, turn in enumerate(row['turns']))
         out.append('   ]}' + (',' if number < len(rows) - 1 else ''))
+    out.append(' ],')
+    out.append(' "models": [')
+    models = said['models']
+    out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(models) - 1 else '')
+               for n, row in enumerate(models))
     out.append(' ]')
     out.append('}')
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text('\n'.join(out) + '\n')
     print(f'{OUT.relative_to(REPO)}: ' + '; '.join(
         f'{row["name"]}: {len(row["lines"])} lines, {len(row["turns"])} turns, '
-        f'{sum(len(turn["tools"]) for turn in row["turns"])} tools' for row in rows))
+        f'{sum(len(turn["tools"]) for turn in row["turns"])} tools, model {row["model"]!r}' for row in rows))
+    print('models: ' + '; '.join(f'{row["name"]}: {row["model"]!r}' for row in models))
     return 0
 
 

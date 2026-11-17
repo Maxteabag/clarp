@@ -59,6 +59,19 @@ fn made_up(record: &Value) -> bool {
         || message["model"] == "<synthetic>"
 }
 
+/// Whether a value is something as the Python Host reads it (`if value`): not nothing, not
+/// false, not zero and not empty.
+fn something(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(yes) => *yes,
+        Value::Number(number) => number.as_f64() != Some(0.0),
+        Value::String(text) => !text.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(fields) => !fields.is_empty(),
+    }
+}
+
 /// What came back from a tool settles the use it answers: the newest use that is still
 /// open, of that id where the answer names one.
 fn settle(turns: &mut [Value], answer: &Value) {
@@ -70,14 +83,7 @@ fn settle(turns: &mut [Value], answer: &Value) {
     let id = said(["tool_use_id", "toolUseId"]).and_then(Value::as_str);
     let id = id.filter(|id| !id.is_empty());
     let failed = [&answer["is_error"], &answer["isError"]];
-    let failed = failed.iter().any(|flag| match flag {
-        Value::Bool(yes) => *yes,
-        Value::Null => false,
-        Value::Number(number) => number.as_f64() != Some(0.0),
-        Value::String(text) => !text.is_empty(),
-        Value::Array(items) => !items.is_empty(),
-        Value::Object(fields) => !fields.is_empty(),
-    });
+    let failed = failed.iter().any(|flag| something(flag));
     for turn in turns.iter_mut().rev() {
         let Some(cards) = turn["tools"].as_array_mut() else {
             continue;
@@ -156,4 +162,60 @@ pub fn claude(transcript: &str) -> Vec<Value> {
         turns.push(json!({ "role": role, "text": text, "tools": cards, "timestamp": at }));
     }
     turns
+}
+
+/// The model a session last ran on, as its transcript says: the one its newest answer
+/// names (a line of Claude Code), or its newest context of a turn (a rollout of Codex). An
+/// answer the tool made up names none. Empty where no line names one. It is what an agent
+/// that takes the session up runs on when whoever makes it names no model.
+///
+/// The rule is the Python Host's (`server/lib/session_models.py`, `_read_model`), held by
+/// the same vectors. That one looks in the last mebibyte of a transcript only; this reads
+/// all of what it is given.
+pub fn model(transcript: &str) -> String {
+    for line in transcript.lines().rev() {
+        let Ok(Value::Object(event)) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        // A line whose `payload` or `message` is something and no object names nothing.
+        let part = |key: &str| match event.get(key) {
+            Some(Value::Object(fields)) => Some(Some(fields)),
+            Some(other) if something(other) => None,
+            _ => Some(None),
+        };
+        let (Some(payload), Some(message)) = (part("payload"), part("message")) else {
+            continue;
+        };
+        let named = match event.get("type").and_then(Value::as_str) {
+            Some("turn_context") => payload.and_then(|fields| fields.get("model")),
+            Some("assistant") => message.and_then(|fields| fields.get("model")),
+            _ => None,
+        };
+        match named.and_then(Value::as_str) {
+            Some(model) if !model.is_empty() && model != "<synthetic>" => {
+                return model.to_string();
+            }
+            _ => {}
+        }
+    }
+    String::new()
+}
+
+/// A transcript of Claude Code as the transcript of another session of this name: every
+/// line that says which session it is of says the new one. The lines are otherwise as they
+/// were, and a line that is no JSON is left out. What an agent that is forked from a
+/// session begins with: the tool takes the copy up as a session of its own.
+pub fn claude_forked(transcript: &str, session: &str) -> String {
+    let mut copy = String::with_capacity(transcript.len());
+    for line in transcript.lines() {
+        let Ok(mut record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if let Some(of) = record.get_mut("sessionId") {
+            *of = json!(session);
+        }
+        copy.push_str(&record.to_string());
+        copy.push('\n');
+    }
+    copy
 }
