@@ -9,6 +9,9 @@ use serde_json::{Value, json};
 
 /// When the stories were looked at.
 const AT: &str = "2027-01-15T08:00:00Z";
+/// How many models Antigravity's answers in the vectors name, counted by the script that wrote
+/// them.
+const AGY_MODELS: usize = 15;
 
 fn vectors() -> Value {
     serde_json::from_str(include_str!("fixtures/model-catalogue-vectors.json")).unwrap()
@@ -46,6 +49,18 @@ fn what_claude_code_keeps_of_an_accounts_models_is_read_as_the_python_host_reads
 }
 
 #[test]
+fn what_antigravity_lists_is_read_as_the_python_host_reads_it() {
+    let vectors = vectors();
+    let mut models = 0;
+    for row in vectors["agy"].as_array().unwrap() {
+        let ours = catalogue::agy_models(row["said"].as_str().unwrap(), AT);
+        same(&json!(ours), &row["models"], &row["name"]);
+        models += ours.len();
+    }
+    assert_eq!(models, AGY_MODELS);
+}
+
+#[test]
 fn a_tool_is_told_as_the_python_host_tells_it_wherever_it_is_and_whatever_it_says() {
     let vectors = vectors();
     let (mut told, mut there, mut seen) = (0, 0, 0);
@@ -57,10 +72,10 @@ fn a_tool_is_told_as_the_python_host_tells_it_wherever_it_is_and_whatever_it_say
             out: said["out"].as_str().unwrap(),
             err: said["err"].as_str().unwrap(),
         });
-        // Codex is asked by a command, whose answer counts where it ended well; Claude Code
-        // keeps a file, which is there or is not.
+        // Codex and Antigravity are asked by a command, whose answer counts where it ended
+        // well; Claude Code keeps a file, which is there or is not.
         let models = match tool {
-            "codex" => story["models"]
+            "codex" | "agy" => story["models"]
                 .as_object()
                 .filter(|said| said["exit"] == 0)
                 .map(|said| said["out"].as_str().unwrap()),
@@ -80,7 +95,7 @@ fn a_tool_is_told_as_the_python_host_tells_it_wherever_it_is_and_whatever_it_say
         there += usize::from(ours["installed"] == true);
         seen += usize::from(ours["availability"] == "available");
     }
-    assert_eq!((told, there, seen), (16, 14, 9));
+    assert_eq!((told, there, seen), (22, 19, 11));
 }
 
 #[test]
@@ -124,5 +139,5 @@ fn the_whole_answer_is_shaped_as_the_python_hosts() {
         .collect();
     assert_eq!(tools, ["claude", "codex"]);
     // A tool this Host does not run has no row.
-    assert_eq!(catalogue::row("agy", &Found::default(), AT), json!({}));
+    assert_eq!(catalogue::row("grok", &Found::default(), AT), json!({}));
 }

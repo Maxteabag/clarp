@@ -133,9 +133,10 @@ impl Backend for Agy {
         "agy"
     }
 
-    /// As agy 1.5.10 says them (`agy --help`); the Python Host still knows the first three.
+    /// As the Python Host declares them. (agy 1.5.10 takes `xhigh` and `max` too, by its own
+    /// help; a model's name carries its effort anyway.)
     fn efforts(&self) -> &'static [&'static str] {
-        &["low", "medium", "high", "xhigh", "max"]
+        &["low", "medium", "high"]
     }
 
     fn launch(&self, spec: &TurnSpec) -> Launch {
