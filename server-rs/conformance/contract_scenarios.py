@@ -1662,6 +1662,32 @@ SCENARIOS.append({
     ],
 })
 
+USED = '/backend-usage'
+
+SCENARIOS.append({
+    'id': 'usage',
+    'what': "what a Host's own turns used, as an app's usage screen is told it: before any turn, after a "
+            'turn, after one that used its tools, and after one in which the tool died. (How much of an '
+            "account is left is each Host's own to ask a provider for, and is compared as its fields.)",
+    'steps': [
+        get(USED, 'what was used before any turn'),
+        send('synthetic word alfa', 'usedalfa'),
+        {'op': 'wait_reply', 'after': 'u-usedalfa'},
+        {'op': 'quiesce'},
+        get(USED, 'what was used after a turn'),
+        send('synthetic word bravo [qa-tools]', 'usedbravo'),
+        {'op': 'wait_reply', 'after': 'u-usedbravo'},
+        {'op': 'quiesce'},
+        get(USED, 'what was used after a turn with tools'),
+        send(SLOW + '[qa-crash] synthetic word delta', 'useddelta'),
+        {'op': 'wait_busy', 'busy': True},
+        {'op': 'wait_busy', 'busy': False},
+        {'op': 'quiesce'},
+        get(USED, 'what was used after a turn in which the tool died'),
+        SNAPSHOT,
+    ],
+})
+
 PLACE = '/location'
 
 SCENARIOS.append({
