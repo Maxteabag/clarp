@@ -11316,15 +11316,6 @@
   },
   {
    "data": {
-    "event_id": "<eid:agent-roster#3@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#3@390048>"
-  },
-  {
-   "data": {
     "action": "started",
     "agent_id": "<id:4>",
     "call_id": null,
@@ -11345,6 +11336,15 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@13f604>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#3@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#3@390048>"
   },
   {
    "data": {
@@ -11443,42 +11443,6 @@
   },
   {
    "data": {
-    "event_id": "<eid:agent-roster#12@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#12@390048>"
-  },
-  {
-   "data": {
-    "event_id": "<eid:agent-roster#13@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#13@390048>"
-  },
-  {
-   "data": {
-    "event_id": "<eid:agent-roster#14@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#14@390048>"
-  },
-  {
-   "data": {
-    "event_id": "<eid:agent-roster#15@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#15@390048>"
-  },
-  {
-   "data": {
     "agent_id": "<id:4>",
     "detail": {
      "reason": "deleted"
@@ -11556,6 +11520,42 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@bc6085>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#12@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#12@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#13@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#13@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#14@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#14@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#15@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#15@390048>"
   },
   {
    "data": {

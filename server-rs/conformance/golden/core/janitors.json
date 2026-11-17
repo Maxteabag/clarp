@@ -11470,15 +11470,6 @@
   },
   {
    "data": {
-    "event_id": "<eid:agent-roster#15@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#15@390048>"
-  },
-  {
-   "data": {
     "agent_id": "<id:4>",
     "detail": {
      "reason": "deleted"
@@ -11556,6 +11547,15 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@bc6085>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#15@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#15@390048>"
   },
   {
    "data": {
