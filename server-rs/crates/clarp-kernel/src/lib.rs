@@ -39,6 +39,7 @@ pub mod portraits;
 pub mod presence;
 pub mod push;
 pub mod python;
+pub mod quota;
 pub mod recovery;
 pub mod requests;
 pub mod rings;
