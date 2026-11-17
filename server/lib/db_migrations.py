@@ -14,8 +14,88 @@ here stays reachable as `db._migrate`, `db._migrate_to_vN` and so on.
 from __future__ import annotations
 
 import sqlite3
+import os
+import sys
+import time
 
 from . import db, db_schema
+
+
+# Additive partial terminal-history index at v127: a version bump makes rollback
+# Hosts refuse startup. NEXT REAL VERSION MIGRATION must also run this CREATE
+# INDEX IF NOT EXISTS, so the versioned chain catches up. The v127 drift test
+# permits exactly this missing index before Host service startup, no others.
+_HOST_INDEX_NAME = "idx_background_jobs_agent_terminal"
+_HOST_INDEX_SQL = ("CREATE INDEX IF NOT EXISTS idx_background_jobs_agent_terminal "
+                   "ON background_jobs(agent_id, terminal_at) WHERE terminal_at IS NOT NULL")
+_HOST_INDEX_WAIT_SEC = 0.1
+_HOST_INDEX_BUILD_SEC = 2.0
+
+
+def _index_notice(outcome: str, reason: str) -> None:
+    # A mandatory startup/retry line must not wait for optional telemetry's
+    # writer, or recurse through db.conn while a connection is opening.
+    line = (f"{time.strftime('%H:%M:%S')} databaseIndexEnsure index={_HOST_INDEX_NAME} "
+            f"outcome={outcome} reason={reason}")
+    try:
+        print(line, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        try:
+            os.write(2, (line + "\n").encode("ascii", "replace"))
+        except OSError:
+            return  # stderr is unavailable; optional setup must not stop Host startup
+
+
+def ensure_host_indexes(connection, path) -> bool:
+    """Bounded optional index creation; user_version and all rows stay put.
+
+    A dedicated connection confines the short busy/progress budgets and a
+    rollback to this attempt. Existing indexes need only the initial read.
+    The caller has already registered its normal connection. Ordinary errors
+    produce one fixed, content-free line and leave the Host running.
+    """
+    if db._SERVICE != "host":
+        return False
+    worker = None
+    created = False
+    error = None
+    try:
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                              (_HOST_INDEX_NAME,)).fetchone():
+            return True
+        worker = sqlite3.connect(str(path), timeout=_HOST_INDEX_WAIT_SEC, isolation_level=None)
+        worker.execute("BEGIN IMMEDIATE")
+        # Waiting for another writer must not spend the build allowance.
+        deadline = time.monotonic() + _HOST_INDEX_BUILD_SEC
+        worker.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+        # Two service processes may have observed absence. Only the creator
+        # emits ready, and neither changes the version or existing indexes.
+        if not worker.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                              (_HOST_INDEX_NAME,)).fetchone():
+            worker.execute(_HOST_INDEX_SQL)
+            created = True
+        worker.execute("COMMIT")
+    except Exception as exc:  # noqa: BLE001 - an optional speedup cannot make startup fail
+        error = exc
+    finally:
+        if worker is not None:
+            try:
+                worker.set_progress_handler(None, 0)
+                if worker.in_transaction:
+                    worker.rollback()
+            except Exception as cleanup:  # optional cleanup errors must not prevent startup
+                error = error or cleanup
+            finally:
+                try:
+                    worker.close()
+                except Exception as cleanup:  # still report one failed setup attempt
+                    error = error or cleanup
+    if error is not None:
+        _index_notice("failed", getattr(error, "sqlite_errorname", type(error).__name__))
+        return False
+    if created:
+        _index_notice("ready", "created")
+    return True
 
 
 def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
