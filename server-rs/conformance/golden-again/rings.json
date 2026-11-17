@@ -1574,7 +1574,7 @@
     "file": "<id:6>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 20,
+    "latest_revision": 21,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -1599,7 +1599,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 5,
+      "revision": 6,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1621,7 +1621,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 9,
+      "revision": 10,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1651,7 +1651,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 10,
+      "revision": 11,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1673,7 +1673,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 11,
+      "revision": 12,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1695,7 +1695,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 20,
+      "revision": 21,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1731,7 +1731,7 @@
     "file": "<id:9>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 19,
+    "latest_revision": 20,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -1778,7 +1778,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 4,
+      "revision": 5,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1808,7 +1808,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 12,
+      "revision": 13,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1830,7 +1830,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 13,
+      "revision": 14,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1861,7 +1861,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 14,
+      "revision": 15,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1883,7 +1883,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 18,
+      "revision": 19,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1913,7 +1913,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 19,
+      "revision": 20,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1982,7 +1982,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 19,
+      "head_revision": 20,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -2072,7 +2072,7 @@
       "effort": "",
       "focused": false,
       "goal": null,
-      "head_revision": 20,
+      "head_revision": 21,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -3689,6 +3689,32 @@
   },
   {
    "data": {
+    "agent_id": "<id:4>",
+    "event_id": "<eid:delivery-updated#1@0e9287>",
+    "message_id": "u-ringzero",
+    "session": "claire",
+    "type": "delivery-updated"
+   },
+   "event": null,
+   "id": "<eid:delivery-updated#1@0e9287>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
+    "client_msg_id": "ringzero",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
     "agent_id": "<id:1>",
     "detail": {
      "session": "nova"
@@ -3726,32 +3752,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@95ff8e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "event_id": "<eid:delivery-updated#1@0e9287>",
-    "message_id": "u-ringzero",
-    "session": "claire",
-    "type": "delivery-updated"
-   },
-   "event": null,
-   "id": "<eid:delivery-updated#1@0e9287>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "ringzero",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {

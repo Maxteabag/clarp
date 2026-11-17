@@ -2161,6 +2161,28 @@
   {
    "data": {
     "agent_id": "<id:5>",
+    "badge": true,
+    "cause_message_id": "u-phone-alfa",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:6>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -2246,28 +2268,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#10@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "badge": true,
-    "cause_message_id": "u-phone-alfa",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:6>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:1>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {

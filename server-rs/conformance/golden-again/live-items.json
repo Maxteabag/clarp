@@ -304,13 +304,13 @@
      "agent_id": "<id:1>",
      "runtime_instance": "<instance>",
      "runtime_release": "in-process",
-     "server_id": "<id:12>"
+     "server_id": "<id:14>"
     },
     "delivery_stop_generation": 0,
     "file": "<id:4>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 10,
+    "latest_revision": 11,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -350,14 +350,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:6>",
+      "id": "msg-<id:11>",
       "kind": null,
       "origin": "user",
       "phase": "commentary",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 7,
+      "revision": 2,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -384,14 +384,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "msg-<id:11>",
+      "id": "msg-<id:12>",
       "kind": null,
       "origin": "user",
       "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 8,
+      "revision": 3,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -419,14 +419,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:10>",
+      "id": "msg-<id:13>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 10,
+      "revision": 4,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -435,15 +435,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:3>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 2,
-       "turn_id": "<id:3>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:3>"
      }
     ]
    },
@@ -503,7 +495,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 10,
+      "head_revision": 11,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -516,7 +508,7 @@
       "last_activity": "<time>",
       "last_completed_message": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",
       "last_message": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",
-      "last_message_id": "live-<id:10>",
+      "last_message_id": "msg-<id:13>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -2223,6 +2215,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "shown-1",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -3150,6 +3157,47 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "conv": "<id:4>",
+    "epoch": "<id:2>",
+    "lseq": "<lseq>",
+    "ops": [
+     {
+      "conv": "<id:4>",
+      "op": "turn",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 2,
+       "turn_id": "<id:3>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:3>",
+       "turn_started_ms": null
+      },
+      "conv": "<id:4>",
+      "op": "status"
+     }
+    ],
+    "server_now_ms": "<time>",
+    "session": "claire",
+    "type": "live"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:4>",
      "dispatch": "claude",
@@ -3280,62 +3328,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "conv": "<id:4>",
-    "epoch": "<id:2>",
-    "lseq": "<lseq>",
-    "ops": [
-     {
-      "conv": "<id:4>",
-      "op": "turn",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 2,
-       "turn_id": "<id:3>",
-       "worked_ms": "<duration>"
-      }
-     },
-     {
-      "activity": {
-       "headline": null,
-       "item_id": null,
-       "running_tools": 0,
-       "since_ms": "<time>",
-       "state": "idle",
-       "tool": null,
-       "turn_id": "<id:3>",
-       "turn_started_ms": null
-      },
-      "conv": "<id:4>",
-      "op": "status"
-     }
-    ],
-    "server_now_ms": "<time>",
-    "session": "claire",
-    "type": "live"
-   },
-   "event": null,
-   "id": null
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "shown-1",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -3386,7 +3378,7 @@
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#1@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:13>",
+    "notification_id": "pn-<id:15>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",

@@ -436,6 +436,28 @@
   },
   {
    "data": {
+    "agent_id": "<id:7>",
+    "badge": true,
+    "cause_message_id": "u-slow",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic long task",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "live-<id:4>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
     "action": "thinking",
     "agent_id": "<id:7>",
     "call_id": null,
@@ -501,28 +523,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#8@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "badge": true,
-    "cause_message_id": "u-slow",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:8>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic long task",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "live-<id:4>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {

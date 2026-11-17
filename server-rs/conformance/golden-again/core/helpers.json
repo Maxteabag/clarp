@@ -9133,6 +9133,21 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "client_msg_id": "halfa",
+    "event_id": "<eid:agent-state#1@7169e8>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "helper-one",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@7169e8>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "session": "helper-one"
     },
@@ -9169,21 +9184,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@626a03>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "halfa",
-    "event_id": "<eid:agent-state#1@7169e8>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "helper-one",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@7169e8>"
   },
   {
    "data": {
@@ -9316,16 +9316,6 @@
   },
   {
    "data": {
-    "event_id": "<eid:agent-roster#1@fb02d3>",
-    "kind": "helper-state",
-    "session": "helper-one",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#1@fb02d3>"
-  },
-  {
-   "data": {
     "agent_id": "<id:2>",
     "detail": {
      "backend_session_id": "<id:5>",
@@ -9344,6 +9334,16 @@
    },
    "event": null,
    "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#1@fb02d3>",
+    "kind": "helper-state",
+    "session": "helper-one",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#1@fb02d3>"
   },
   {
    "data": {
