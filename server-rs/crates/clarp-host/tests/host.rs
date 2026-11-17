@@ -9548,6 +9548,92 @@ say(type="result", subtype="success", is_error=False, result="on it", num_turns=
 }
 
 #[test]
+fn every_state_a_turn_passes_through_is_told_in_order_however_fast_its_tool_is() {
+    let place = Place::new("states");
+    let claude = place.root.join("claude");
+    // A stand-in for Claude Code that prints a whole turn in one breath, in one write: it
+    // uses a tool, is given what the tool returned, and answers. Read in one piece or in
+    // several, what the agent passed through is the same.
+    let script = r#"#!/usr/bin/env python3
+import json, sys
+sys.stdin.readline()
+said = {"id": "msg_2", "role": "assistant", "model": "stand-in", "content": [{"type": "text", "text": "One file."}]}
+used = {"id": "msg_1", "role": "assistant", "model": "stand-in",
+        "content": [{"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}}]}
+back = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "a.txt"}]}
+lines = [
+    {"type": "system", "subtype": "init", "session_id": "stand-in", "model": "stand-in"},
+    {"type": "assistant", "session_id": "stand-in", "message": used},
+    {"type": "user", "session_id": "stand-in", "message": back},
+    {"type": "assistant", "session_id": "stand-in", "message": said},
+    {"type": "result", "subtype": "success", "is_error": False, "session_id": "stand-in", "result": "One file.", "num_turns": 1},
+]
+sys.stdout.write("".join(json.dumps(line) + "\n" for line in lines))
+sys.stdout.flush()
+"#;
+    program(&claude, script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let (_, made) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({ "name": "Stately", "backend": "claude" })),
+    );
+    let agent = made["session"].as_str().unwrap().to_string();
+    let heard = host.listen();
+    // The states the clients were told of the agent so far: what it was in, and within
+    // thinking whether it was answering.
+    let told = || -> Vec<(String, String)> {
+        let heard = heard.lock().unwrap();
+        let states = heard.iter().filter(|event| {
+            event["type"] == "agent-state"
+                && event["session"] == agent.as_str()
+                && event["detail"].is_object()
+        });
+        states
+            .map(|event| {
+                let kind = event["kind"].as_str().unwrap_or("").to_string();
+                let phase = event["detail"]["phase"].as_str().unwrap_or("").to_string();
+                (kind, phase)
+            })
+            .collect()
+    };
+    let ended = |turns: usize| {
+        let done = told().iter().filter(|(kind, _)| kind == "done").count();
+        done == turns && host.state(&agent) == "done"
+    };
+
+    host.send(&agent, "what is here?", "u-1");
+    wait_for("the first turn to be told as done", || ended(1));
+    // It thought, used a tool, thought again and was done: each told, in that order. The
+    // tool printed all of it at once; the states in the middle are told all the same. (An
+    // answer that comes as one whole message is no phase of its own: one that is streamed
+    // is told as answering.)
+    let first = told();
+    let kinds = |told: &[(String, String)]| -> Vec<String> {
+        let states = told.iter().filter(|(kind, _)| kind != "spawned");
+        states.map(|(kind, _)| kind.clone()).collect()
+    };
+    assert_eq!(
+        kinds(&first),
+        ["thinking", "tool", "thinking", "done"],
+        "{first:?}"
+    );
+
+    // The same turn again is told the same way: what is told follows from what the tool
+    // printed, and not from how it happened to be read.
+    host.send(&agent, "and now?", "u-2");
+    wait_for("the second turn to be told as done", || ended(2));
+    let both = kinds(&told());
+    assert_eq!(
+        both,
+        [
+            "thinking", "tool", "thinking", "done", "thinking", "tool", "thinking", "done"
+        ]
+    );
+}
+
+#[test]
 fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     let place = Place::new("model-options");
     // Stand-ins for the tools: each says its version, and Codex and Antigravity list their

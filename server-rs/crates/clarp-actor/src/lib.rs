@@ -209,6 +209,13 @@ pub struct Outputs {
     /// Host carried the conversation over: from which name to which. What is bound to the
     /// agent's conversation with its tool (its goals) follows.
     pub carried: Vec<(String, String)>,
+    /// What the agent was doing at each point where the turn that holds it moved on to
+    /// something else while its tool's output was read (it began to use a tool, to answer), in
+    /// order, as its status stood then. Whoever tells clients of the agent's state tells each
+    /// of these before the state at the end: what an app is told of an agent's states then
+    /// follows from what its tool printed, and not from how much of it one read happened to
+    /// hold.
+    pub passed: Vec<Status>,
     /// Lines of a spool that were not records. They were passed over; the operator should know.
     pub damaged_lines: usize,
 }
@@ -2747,8 +2754,12 @@ impl Actor {
             let mut signals = Vec::new();
             let mut shown: Vec<String> = Vec::new();
             let mut aloud: Vec<Spoken> = Vec::new();
-            for record in &read.records {
+            // Where this reading stops before the end of what was read: after the record in
+            // which the turn moved on to something else.
+            let mut stopped_at: Option<u64> = None;
+            for (place, record) in read.records.iter().enumerate() {
                 let t = record.t;
+                let doing = told_activity(batch.agent());
                 // What the shim says about the process means the same for every backend. A
                 // command the agent refuses is about a turn that is no longer live: late news.
                 match &record.entry {
@@ -2988,7 +2999,14 @@ impl Actor {
                     }
                     batch.item(written(&piece, t)?);
                 }
+                // The turn moved on to something else: what was read up to here is written
+                // down by itself, and how the agent stood is noted, before what came after.
+                if !live.over && told_activity(batch.agent()) != doing {
+                    stopped_at = Some(read.ends.get(place).copied().unwrap_or(read.next_offset));
+                    break;
+                }
             }
+            let read_until = stopped_at.unwrap_or(read.next_offset);
             if live.over
                 && batch
                     .agent()
@@ -3022,10 +3040,10 @@ impl Actor {
             }
             let wrote = !batch.is_empty();
             if wrote {
-                batch.cursor(turn, read.next_offset, now_ms);
+                batch.cursor(turn, read_until, now_ms);
             }
             let committed = batch.commit()?;
-            live.offset = read.next_offset;
+            live.offset = read_until;
             for line in &aloud {
                 self.speech.apply(line);
                 out.changed.speech = true;
@@ -3049,6 +3067,22 @@ impl Actor {
                 self.forget_live();
             }
             self.carry_out(committed.effects, out)?;
+            if let Some(until) = stopped_at {
+                // What could not be read after that point is found again by the next reading.
+                let again = read.damaged.iter().filter(|line| line.offset >= until);
+                out.damaged_lines = out.damaged_lines.saturating_sub(again.count());
+                out.passed.push(self.status());
+            }
         }
+    }
+}
+
+/// What an app is told the turn that holds the agent is doing: a turn that has not started
+/// yet, or waits between two attempts, is told as thinking.
+fn told_activity(agent: &clarp_kernel::agent::Agent) -> Option<Activity> {
+    match agent.live() {
+        Some(Turn::Running(turn)) => Some(turn.activity.clone()),
+        Some(_) => Some(Activity::Thinking),
+        None => None,
     }
 }

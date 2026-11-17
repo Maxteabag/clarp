@@ -122,6 +122,9 @@ pub struct Damaged {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Read1 {
     pub records: Vec<Record>,
+    /// The offset after each record's line, in the order of the records: where a reader that
+    /// takes the records up to one of them goes on.
+    pub ends: Vec<u64>,
     pub damaged: Vec<Damaged>,
     /// The offset after the last whole line. The server stores this with what it took.
     pub next_offset: u64,
@@ -179,7 +182,10 @@ impl SpoolReader {
                 break;
             }
             match serde_json::from_slice::<Record>(&line[..line.len() - 1]) {
-                Ok(record) => found.records.push(record),
+                Ok(record) => {
+                    found.records.push(record);
+                    found.ends.push(found.next_offset + read as u64);
+                }
                 Err(error) => found.damaged.push(Damaged {
                     offset: found.next_offset,
                     why: error.to_string(),
