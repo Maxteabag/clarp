@@ -148,6 +148,8 @@ pub struct Asked<'a> {
 pub struct Batch {
     pub level: u8,
     pub model: String,
+    /// The janitor the things were asked of, as it was then ([`Janitor::identity`]).
+    pub identity: String,
     /// Each a number as its `id`, what is shown of the part, and the values of its slots.
     pub requests: Vec<Value>,
 }
@@ -626,10 +628,12 @@ impl Desk {
     }
 
     /// What the model is to be asked now, if anything: the parts nobody answered of up to
-    /// eight things that wait, the longest first, all for one reader. `None`: nothing waits
-    /// that is due, or the model is being asked already. What the janitor would no longer
-    /// explain as it is now is dropped unasked.
-    pub fn claim(&mut self, janitor: Option<&Janitor>, now: i64) -> Option<Batch> {
+    /// eight things that wait, the longest first, all for one reader and asked of one
+    /// janitor. `None`: nothing waits that is due, or the model is being asked already.
+    /// `current`: whether a janitor is still what it was when the things were asked of it;
+    /// what one that is paused or set otherwise since would have explained is dropped
+    /// unasked.
+    pub fn claim(&mut self, current: &dyn Fn(&str) -> bool, now: i64) -> Option<Batch> {
         loop {
             self.tidy(now);
             if self.jobs.iter().any(|job| job.running) {
@@ -652,8 +656,7 @@ impl Desk {
                 .collect();
             taken.sort_by_key(|place| self.jobs[*place].created_at);
             taken.truncate(AT_ONCE);
-            let current = janitor.and_then(|janitor| janitor.identity.as_deref());
-            if current != Some(identity.as_str()) {
+            if !current(&identity) {
                 // The janitor is paused or set otherwise since: nothing of this is said.
                 let keys: Vec<String> = taken
                     .iter()
@@ -701,8 +704,19 @@ impl Desk {
             return Some(Batch {
                 level,
                 model,
+                identity,
                 requests,
             });
+        }
+    }
+
+    /// Puts back what [`Desk::claim`] handed out, unasked: the janitor is at another
+    /// request. It is due again after `delay_ms`.
+    pub fn abandon(&mut self, now: i64, delay_ms: i64) {
+        self.asking.clear();
+        for job in self.jobs.iter_mut().filter(|job| job.running) {
+            job.running = false;
+            job.available_at = job.available_at.max(now + delay_ms);
         }
     }
 
