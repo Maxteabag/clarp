@@ -648,11 +648,16 @@ impl ClaudeInterpreter {
                 });
             }
             "rate_limit_event" => {
-                let status = text_of(&event["rate_limit_info"]["status"]);
+                let info = &event["rate_limit_info"];
+                let status = text_of(&info["status"]);
                 // The account is out. The turn ends on it, and its end says so: nothing
                 // is put into the conversation at this moment.
                 if matches!(status, "rejected" | "blocked") {
                     self.usage_limit = true;
+                }
+                // What it says of the account's windows with that is told on.
+                if info["unifiedWindows"].is_object() {
+                    out.push(Signal::Limits(info.clone()));
                 }
             }
             _ => {}

@@ -1,0 +1,3388 @@
+{
+ "began_ms": 1900000000000,
+ "stories": [
+  {
+   "name": "nothing-seen",
+   "steps": [
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "unknown",
+      "observed_at": null,
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "No structured usage evidence for this provider",
+       "kind": "unavailable"
+      },
+      "windows": []
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "Nothing was said of the account yet"
+  },
+  {
+   "name": "both-windows",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 37.5
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 82.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 37.5,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 82.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 37.5,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 82.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 3600,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 37.5,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 82.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 3601,
+     "provider": {
+      "freshness": "stale",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "stale",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "unknown"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 37.5,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "stale",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "unknown"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 82.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "Both windows, asked at once, an hour on, and a second after that"
+  },
+  {
+   "name": "the-newer-word",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 10.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 40.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 10.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 40.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "at": 600,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 12.5
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 40.5
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 12.5,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 40.5,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 600,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:56:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:56:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 12.5,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:56:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 40.5,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "A newer word takes the place of the older"
+  },
+  {
+   "name": "only-five-hours",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 20.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 20.0,
+       "window_minutes": 300
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 20.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "at": 60,
+     "on": "claude-account-one",
+     "said": {
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 55.0
+      }
+     },
+     "windows": {
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 55.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 60,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:47:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 55.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "The five hours alone, then the week alone: the newer word is all there is"
+  },
+  {
+   "name": "no-window",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "refused": "Claude usage endpoint returned no usable limits",
+     "said": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "unknown",
+      "observed_at": null,
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "No structured usage evidence for this provider",
+       "kind": "unavailable"
+      },
+      "windows": []
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "An answer with no window in it is no word"
+  },
+  {
+   "name": "a-window-with-no-figure",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": null
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 44.0
+      }
+     },
+     "windows": {
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 44.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 44.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "A window that does not say how much is used is left out"
+  },
+  {
+   "name": "the-week-for-apps",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 5.0
+      },
+      "seven_day": {
+       "resets_at": 1900360060,
+       "utilization": 12.0
+      },
+      "seven_day_oauth_apps": {
+       "resets_at": 1900360000,
+       "utilization": 61.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 5.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 61.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 5.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 61.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "The week that counts is the one for apps where the provider says one"
+  },
+  {
+   "name": "past-its-reset",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900000300,
+       "utilization": 60.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 30.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T17:51:40Z",
+       "used_percentage": 60.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 30.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T17:51:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 60.0,
+        "window_id": "puw-2b1fd371a3ce71740612f27ca832b820"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 30.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 301,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T17:51:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 60.0,
+        "window_id": "puw-2b1fd371a3ce71740612f27ca832b820"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 30.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "A window whose reset is past, by a word that is young"
+  },
+  {
+   "name": "no-reset",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "utilization": 97.0
+      },
+      "seven_day": {
+       "resets_at": "",
+       "utilization": 44.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "",
+       "used_percentage": 97.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "",
+       "used_percentage": 44.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 97.0,
+        "window_id": "puw-c2dcb4f1b3dfbc87846102d4cd5bf2dc"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 44.0,
+        "window_id": "puw-948ec2d3a8b5be85ca986cb823ded91c"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "A window that does not say when it begins anew"
+  },
+  {
+   "name": "a-reset-in-words",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40+00:00",
+       "utilization": 9.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 9.0,
+       "window_minutes": 300
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 9.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "A reset said as a moment in words"
+  },
+  {
+   "name": "another-account",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 90.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 10.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 90.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 10.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 90.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 10.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-other",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "unknown",
+      "observed_at": null,
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "No structured usage evidence for this provider",
+       "kind": "unavailable"
+      },
+      "windows": []
+     },
+     "used_up": {}
+    },
+    {
+     "active": null,
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 90.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 10.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "at": 60,
+     "on": "claude-account-other",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 20.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 30.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 20.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 30.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-other",
+     "asked": true,
+     "at": 60,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:47:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 20.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 30.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 60,
+     "provider": {
+      "freshness": "unknown",
+      "observed_at": null,
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "No structured usage evidence for this provider",
+       "kind": "unavailable"
+      },
+      "windows": []
+     },
+     "used_up": {}
+    },
+    {
+     "active": null,
+     "asked": true,
+     "at": 60,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:47:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 20.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 30.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "The Host is on another account than the one the word is of"
+  },
+  {
+   "name": "no-account-known",
+   "steps": [
+    {
+     "at": 0,
+     "on": null,
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 50.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 20.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 20.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": null,
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 20.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 20.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-other",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 20.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "A word of an account nobody could tell"
+  },
+  {
+   "name": "used-up",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 3600,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 3601,
+     "provider": {
+      "freshness": "stale",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "stale",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "unknown"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "stale",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "unknown"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "The five hours are used up"
+  },
+  {
+   "name": "the-week-is-used-up",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 12.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 100.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 12.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 12.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-21T21:46:40Z",
+       "state": "exhausted",
+       "window": "seven_day"
+      }
+     }
+    }
+   ],
+   "what": "The week is used up while the five hours are not"
+  },
+  {
+   "name": "both-used-up",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 100.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-21T21:46:40Z",
+       "state": "exhausted",
+       "window": "seven_day"
+      }
+     }
+    }
+   ],
+   "what": "Both are used up: the later reset counts"
+  },
+  {
+   "name": "over-all-of-it",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 104.5
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 104.5,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 104.5,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "More than all of a window is said to be used"
+  },
+  {
+   "name": "nearly-used-up",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 99.9
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 99.9
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 99.9,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 99.9,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 99.9,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 99.9,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "Nearly all of a window is used"
+  },
+  {
+   "name": "used-up-with-no-reset",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 100.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-c2dcb4f1b3dfbc87846102d4cd5bf2dc"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": null,
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "Used up, and one of the two does not say when it begins anew"
+  },
+  {
+   "name": "used-up-and-the-week-says-no-reset",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "utilization": 100.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "",
+       "used_percentage": 100.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-948ec2d3a8b5be85ca986cb823ded91c"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": null,
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "Both used up, and it is the week that does not say when it begins anew"
+  },
+  {
+   "name": "used-up-and-grown-old-then-said-again",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 3660,
+     "provider": {
+      "freshness": "stale",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "stale",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "unknown"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "stale",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "unknown"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "at": 3660,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.5
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.5,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 3660,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T18:47:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T18:47:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T18:47:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.5,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T18:47:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "Used up, an hour and more on, and said again"
+  },
+  {
+   "name": "used-up-and-a-turn-completed-since",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    },
+    {
+     "at": 30,
+     "ended": {
+      "kind": "done",
+      "tool": "claude"
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 30,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "Used up, and a turn of Claude completed after that was said"
+  },
+  {
+   "name": "used-up-and-a-turn-completed-in-the-same-moment",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "at": 0,
+     "ended": {
+      "kind": "done",
+      "tool": "claude"
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 1,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "A turn that completed in the moment it was said proves nothing"
+  },
+  {
+   "name": "used-up-and-a-turn-of-another-tool-completed",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "at": 30,
+     "ended": {
+      "kind": "done",
+      "tool": "codex"
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 30,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "A turn of another tool says nothing of this account"
+  },
+  {
+   "name": "used-up-and-a-turn-ended-otherwise",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "at": 30,
+     "ended": {
+      "kind": "interrupted",
+      "tool": "claude"
+     }
+    },
+    {
+     "at": 30,
+     "ended": {
+      "kind": "error",
+      "tool": "claude"
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 30,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "A turn that was cut off or failed says nothing of it either"
+  },
+  {
+   "name": "used-up-again-after-a-turn-completed",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "at": 30,
+     "ended": {
+      "kind": "done",
+      "tool": "claude"
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 30,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    },
+    {
+     "at": 60,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 50.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 50.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 60,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:47:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:47:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    },
+    {
+     "at": 90,
+     "ended": {
+      "kind": "done",
+      "tool": "claude"
+     }
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 90,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:47:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:47:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 50.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {}
+    }
+   ],
+   "what": "Used up, a turn completed, and it is said to be used up again"
+  },
+  {
+   "name": "used-up-and-another-account",
+   "steps": [
+    {
+     "at": 0,
+     "on": "claude-account-one",
+     "said": {
+      "five_hour": {
+       "resets_at": 1900014400,
+       "utilization": 100.0
+      },
+      "seven_day": {
+       "resets_at": 1900360000,
+       "utilization": 10.0
+      }
+     },
+     "windows": {
+      "five_hour": {
+       "resets_at": "2030-03-17T21:46:40Z",
+       "used_percentage": 100.0,
+       "window_minutes": 300
+      },
+      "seven_day": {
+       "resets_at": "2030-03-21T21:46:40Z",
+       "used_percentage": 10.0,
+       "window_minutes": 10080
+      }
+     }
+    },
+    {
+     "active": "claude-account-other",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "unknown",
+      "observed_at": null,
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "No structured usage evidence for this provider",
+       "kind": "unavailable"
+      },
+      "windows": []
+     },
+     "used_up": {}
+    },
+    {
+     "active": "claude-account-one",
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 10.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    },
+    {
+     "active": null,
+     "asked": true,
+     "at": 0,
+     "provider": {
+      "freshness": "fresh",
+      "observed_at": "2030-03-17T17:46:40Z",
+      "provider_id": "claude",
+      "provider_instance_id": "a-host:claude",
+      "source": {
+       "detail": "anthropic-oauth-usage",
+       "kind": "provider_reported"
+      },
+      "windows": [
+       {
+        "freshness": "fresh",
+        "kind": "five_hour",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-17T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 100.0,
+        "window_id": "puw-0488f7e9df88106440e4cbcf6cc05387"
+       },
+       {
+        "freshness": "fresh",
+        "kind": "seven_day",
+        "limit": {
+         "episode_id": null,
+         "provider_limit_event_id": null,
+         "state": "normal"
+        },
+        "observed_at": "2030-03-17T17:46:40Z",
+        "resets_at": "2030-03-21T21:46:40Z",
+        "scope": "account",
+        "source": {
+         "detail": "anthropic-oauth-usage",
+         "kind": "provider_reported"
+        },
+        "unit": "percent",
+        "used_percentage": 10.0,
+        "window_id": "puw-4b70597efd9ea6b60eb345d821b4c5a7"
+       }
+      ]
+     },
+     "used_up": {
+      "claude": {
+       "observed_at": "2030-03-17T17:46:40Z",
+       "provider_id": "claude",
+       "reason": "usage_limit",
+       "resets_at": "2030-03-17T21:46:40Z",
+       "state": "exhausted",
+       "window": "five_hour"
+      }
+     }
+    }
+   ],
+   "what": "Used up, and the Host is on another account"
+  }
+ ]
+}

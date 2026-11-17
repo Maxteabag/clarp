@@ -16,6 +16,13 @@
 //! A turn that fails for a usage limit is a limit too, of which nothing more is known: it is
 //! told as a hard limit and stands until a turn of the tool completes.
 //!
+//! Claude Code says of its account as it runs: with its answers it prints how much of the
+//! five hours and of the week is used and when each begins anew. The newest it said in a turn
+//! comes with the turn's end, is read (`clarp_backend::limits::claude`), and is kept as the
+//! one word there is of that account (`clarp_kernel::standing`), shown and counted as used
+//! up by the Python Host's rule for Claude. Whose account it is, is what Claude Code's own
+//! files say of who is logged in, kept as a keyed digest like a login of Codex.
+//!
 //! Whose account a record is of is told by the login the tool is on when the record is
 //! read. The file the tool keeps its login in is read for the account and the token, and of
 //! both only a keyed digest is kept (the key is this Host's own, drawn once), so that
@@ -29,7 +36,9 @@ use std::path::Path;
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, UNIX_EPOCH};
 
+use clarp_kernel::conversation::LimitsSaid;
 use clarp_kernel::quota::{self, Kept, Login, Shown, Tool};
+use clarp_kernel::standing::Standing;
 use clarp_ports::clock::Clock;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -51,6 +60,9 @@ pub const SEEN_IN: &str = "rollout/token_count";
 const LOOKED_EVERY: Duration = Duration::from_secs(300);
 /// The tool whose records are read.
 pub const CODEX: &str = "codex";
+/// The tool that says of its account as it runs, and what is said of where its word is from.
+pub const CLAUDE: &str = "claude";
+pub const SAID_BY_CLAUDE: &str = "claude-code/rate_limit_event";
 
 /// What a record is kept and told with.
 #[derive(Clone, Copy)]
@@ -98,9 +110,9 @@ pub struct Desk {
     /// What is kept: read from the fleet once, and written back with every change. One at a
     /// time reads and changes it.
     known: tokio::sync::Mutex<Known>,
-    /// Which accounts were used up when that was last looked at: to tell when it is no
-    /// longer as it was.
-    last: std::sync::Mutex<Option<Arc<UsedUp>>>,
+    /// Which accounts were used up when that was last looked at, and which tools were
+    /// looked at at all: to tell when it is no longer as it was.
+    last: std::sync::Mutex<Option<(Arc<UsedUp>, Vec<String>)>>,
 }
 
 impl Desk {
@@ -108,7 +120,17 @@ impl Desk {
     /// account's limits is read, kept, and what follows from it told, and so is what
     /// follows from how the turn ended. A tool that writes no such record, and a turn that
     /// wrote none, leave the windows as they are.
-    pub async fn turn_ended(&self, with: With<'_>, tool: &str, session: &str, how: Ending) {
+    pub async fn turn_ended(
+        &self,
+        with: With<'_>,
+        tool: &str,
+        session: &str,
+        how: Ending,
+        said: Option<LimitsSaid>,
+    ) {
+        if tool == CLAUDE {
+            return self.claude_turn_ended(with, how, said).await;
+        }
         if tool != CODEX {
             return;
         }
@@ -150,7 +172,65 @@ impl Desk {
         for event in events {
             with.hub.publish(event, with.now_ms);
         }
-        self.looked(with, tool, &kept, on.as_ref());
+        self.looked(with, tool, kept.used_up(of, login, with.now_ms));
+    }
+
+    /// A turn of Claude Code ended: the newest it said of its account's windows in the turn
+    /// is kept as the word there is of that account, in the place of the one before, and a
+    /// turn that completed is remembered as one the account served.
+    async fn claude_turn_ended(&self, with: With<'_>, how: Ending, said: Option<LimitsSaid>) {
+        let word = said.map(|said| (clarp_backend::limits::claude(&said.said), said.at_ms));
+        let any = |windows: &Value| windows.as_object().is_some_and(|said| !said.is_empty());
+        let word = word.filter(|(windows, _)| any(windows));
+        let mut known = self.known.lock().await;
+        let Some(before) = known.standing(with.fleet).await else {
+            return;
+        };
+        let mut kept = before.clone();
+        // The key that accounts are named with is drawn with the first word there is.
+        let account = known.claude_account(with, word.is_some()).await;
+        if let Some((windows, at_ms)) = &word {
+            let at_ms = (*at_ms).min(with.now_ms);
+            // Kept once: a Host that starts again tells the last turn of every agent once
+            // more, and of two agents' words the newer stands.
+            if kept.seen_at_ms().is_none_or(|seen| at_ms > seen) {
+                kept.seen(windows, account.as_deref(), SAID_BY_CLAUDE, at_ms);
+            }
+        }
+        if let Ending::Completed(at_ms) = how {
+            kept.completed(at_ms.min(with.now_ms));
+        }
+        if kept != before {
+            known.keep_standing(with.fleet, kept.clone()).await;
+        }
+        let instance = format!("{}:{CLAUDE}", with.server_id);
+        let of = Tool {
+            instance: &instance,
+            provider: CLAUDE,
+        };
+        self.looked(
+            with,
+            CLAUDE,
+            kept.used_up(of, account.as_deref(), with.now_ms),
+        );
+    }
+
+    /// What an app's usage screen is shown of Claude, on the account Claude Code is on now.
+    pub async fn asked_claude(&self, with: With<'_>) -> Value {
+        let mut known = self.known.lock().await;
+        let account = known.claude_account(with, false).await;
+        let kept = known.standing(with.fleet).await.unwrap_or_default();
+        let instance = format!("{}:{CLAUDE}", with.server_id);
+        let of = Tool {
+            instance: &instance,
+            provider: CLAUDE,
+        };
+        self.looked(
+            with,
+            CLAUDE,
+            kept.used_up(of, account.as_deref(), with.now_ms),
+        );
+        kept.provider(of, account.as_deref(), with.now_ms)
     }
 
     /// What an app's usage screen is shown of a tool, on the login the tool is on now. A
@@ -175,44 +255,59 @@ impl Desk {
         for event in &shown.events {
             with.hub.publish(event.clone(), with.now_ms);
         }
-        self.looked(with, tool, &kept, on.as_ref());
+        self.looked(with, tool, kept.used_up(of, login, with.now_ms));
         shown
     }
 
-    /// Which accounts are used up now: looked at afresh.
+    /// Which accounts are used up now: looked at afresh, tool by tool.
     pub async fn used_up(&self, with: With<'_>) -> Arc<UsedUp> {
         let mut known = self.known.lock().await;
         let on = known.login(with, CODEX, false).await;
         let kept = known.of(with.fleet, CODEX).await.unwrap_or_default();
-        self.looked(with, CODEX, &kept, on.as_ref())
-    }
-
-    /// Looks whether a tool's account is used up, and remembers it. Where an app would show
-    /// another thing of it than at the last look (which window, until when), the apps are
-    /// told to read their agents' rows again. The first look tells nothing: nothing is
-    /// known to have changed.
-    fn looked(&self, with: With<'_>, tool: &str, kept: &Kept, on: Option<&Named>) -> Arc<UsedUp> {
-        let instance = format!("{}:{tool}", with.server_id);
+        let instance = format!("{}:{CODEX}", with.server_id);
         let of = Tool {
             instance: &instance,
-            provider: tool,
+            provider: CODEX,
         };
-        let now = kept.used_up(of, on.map(Named::login), with.now_ms);
+        let login = on.as_ref().map(Named::login);
+        self.looked(with, CODEX, kept.used_up(of, login, with.now_ms));
+        let account = known.claude_account(with, false).await;
+        let kept = known.standing(with.fleet).await.unwrap_or_default();
+        let instance = format!("{}:{CLAUDE}", with.server_id);
+        let of = Tool {
+            instance: &instance,
+            provider: CLAUDE,
+        };
+        self.looked(
+            with,
+            CLAUDE,
+            kept.used_up(of, account.as_deref(), with.now_ms),
+        )
+    }
+
+    /// Remembers whether a tool's account is used up now (`now`: what an agent's row says
+    /// of it then). Where an app would show another thing of it than at the last look (which
+    /// window, until when), the apps are told to read their agents' rows again. The first
+    /// look at a tool tells nothing: nothing is known to have changed.
+    fn looked(&self, with: With<'_>, tool: &str, now: Option<Value>) -> Arc<UsedUp> {
         let shown = |all: &UsedUp| {
             let said = all.get(tool)?;
             Some((said["window"].clone(), said["resets_at"].clone()))
         };
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut all: UsedUp = last.as_deref().cloned().unwrap_or_default();
+        let (before, looked_at) = last.get_or_insert_with(Default::default);
+        let mut all: UsedUp = before.as_ref().clone();
         match now {
             Some(said) => all.insert(tool.to_string(), said),
             None => all.remove(tool),
         };
-        let changed = last
-            .as_deref()
-            .is_some_and(|before| shown(before) != shown(&all));
+        let first_look = !looked_at.iter().any(|at| at == tool);
+        if first_look {
+            looked_at.push(tool.to_string());
+        }
+        let changed = !first_look && shown(before) != shown(&all);
         let all = Arc::new(all);
-        *last = Some(all.clone());
+        *before = all.clone();
         drop(last);
         if changed {
             let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
@@ -260,6 +355,8 @@ struct Known {
     kept: BTreeMap<String, Kept>,
     /// The key that logins are named with, once it was read or drawn.
     key: Option<Vec<u8>>,
+    /// The word there is of the Claude account, once it was read.
+    standing: Option<Standing>,
 }
 
 impl Known {
@@ -281,6 +378,46 @@ impl Known {
             let _ = fleet.keep(KIND, tool.to_string(), Some(written)).await;
         }
         self.kept.insert(tool.to_string(), kept);
+    }
+
+    /// The word there is of the Claude account: read from the fleet the first time. `None`
+    /// where the fleet cannot be asked.
+    async fn standing(&mut self, fleet: &FleetHandle) -> Option<Standing> {
+        if let Some(kept) = &self.standing {
+            return Some(kept.clone());
+        }
+        let written = fleet.kept(KIND, CLAUDE.to_string()).await.ok()?;
+        let read = written.and_then(|bytes| serde_json::from_slice::<Standing>(&bytes).ok());
+        let kept = read.unwrap_or_default();
+        self.standing = Some(kept.clone());
+        Some(kept)
+    }
+
+    async fn keep_standing(&mut self, fleet: &FleetHandle, kept: Standing) {
+        if let Ok(written) = serde_json::to_vec(&kept) {
+            let _ = fleet.keep(KIND, CLAUDE.to_string(), Some(written)).await;
+        }
+        self.standing = Some(kept);
+    }
+
+    /// The account Claude Code is on, named with this Host's key. `None`: it is on no login
+    /// that holds (none, or one that ran out), nothing in its files says whose it is, or
+    /// there is no key yet and none is to be drawn.
+    async fn claude_account(&mut self, with: With<'_>, draw: bool) -> Option<String> {
+        let file = clarp_backend::by_id(CLAUDE)?.login_file(with.home)?;
+        let key = self.key(with.fleet, draw).await?;
+        let now_ms = with.now_ms;
+        let read = tokio::task::spawn_blocking(move || {
+            // A login that is there and has not run out, as the Python Host asks for one.
+            let (there, expires_ms) = crate::logins::credential(CLAUDE, &file);
+            if !there || (expires_ms != 0 && expires_ms <= now_ms) {
+                return None;
+            }
+            claude_marker(file.parent()?)
+        });
+        let marker = read.await.ok().flatten()?;
+        let named = format!("claude-account\0{marker}");
+        Some(name_of(&key, "claude-account", &named))
     }
 
     /// The key that logins are named with: read from the fleet the first time, and drawn
@@ -411,18 +548,58 @@ fn named(login_file: &[u8], key: &[u8], since_ms: i64) -> Option<Named> {
         (!text.is_empty()).then_some(text)
     };
     let (token, account) = (said("access_token")?, said("account_id")?);
-    let of = |kind: &str, what: String| {
-        let digest: String = keyed(key, what.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        format!("{kind}-{}", &digest[..24])
-    };
     Some(Named {
-        generation: of("auth", format!("auth\0{account}\0{token}")),
-        account: of("account", format!("account\0{account}")),
+        generation: name_of(key, "auth", &format!("auth\0{account}\0{token}")),
+        account: name_of(key, "account", &format!("account\0{account}")),
         since_ms,
     })
+}
+
+/// A name for something of a login that says nothing of it: its kind, and a keyed digest of
+/// what it is.
+fn name_of(key: &[u8], kind: &str, what: &str) -> String {
+    let digest: String = keyed(key, what.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("{kind}-{}", &digest[..24])
+}
+
+/// What tells one Claude account from another across renewals of its login, as the Python
+/// Host finds it (`_claude_account_marker`): who Claude Code's own file says is logged in
+/// (the account, its organization, the address, the last without its capitals); else the
+/// profile that is in place, where profiles are kept; else what the login file itself says
+/// of them. Never a token. `config` is Claude Code's own directory.
+fn claude_marker(config: &Path) -> Option<String> {
+    let read =
+        |file: &Path| -> Option<Value> { serde_json::from_slice(&std::fs::read(file).ok()?).ok() };
+    let who = |said: &Value, by: &str| -> Option<String> {
+        let part = |name: &str| said[name].as_str().unwrap_or("").trim().to_string();
+        let (account, organization) = (part("accountUuid"), part("organizationUuid"));
+        let address = part("emailAddress").to_lowercase();
+        let any = !(account.is_empty() && organization.is_empty() && address.is_empty());
+        any.then(|| format!("{by}:{account}\0{organization}\0{address}"))
+    };
+    let named = std::env::var_os("CLAUDE_CONFIG_FILE").filter(|named| !named.is_empty());
+    let mut files: Vec<std::path::PathBuf> = named.map(Into::into).into_iter().collect();
+    files.push(config.join(".claude.json"));
+    files.extend(config.parent().map(|above| above.join(".claude.json")));
+    let logged_in = files.iter().filter_map(|file| read(file));
+    let by_its_file = logged_in
+        .filter(|said| said["oauthAccount"].is_object())
+        .find_map(|said| who(&said["oauthAccount"], "oauth"));
+    let by_profile = || {
+        let profile = std::fs::read_to_string(config.join("profiles/.current_profile")).ok()?;
+        let profile = profile.trim();
+        (!profile.is_empty()).then(|| format!("profile:{profile}"))
+    };
+    let by_login = || {
+        who(
+            &read(&config.join(".credentials.json"))?["claudeAiOauth"],
+            "cred",
+        )
+    };
+    by_its_file.or_else(by_profile).or_else(by_login)
 }
 
 /// HMAC-SHA-256 (RFC 2104) of a message under a key.
@@ -578,5 +755,70 @@ mod tests {
         assert_eq!(taken(1_000, 900, Some(1_000), 5_000), None);
         assert_eq!(taken(1_000, 900, Some(2_000), 5_000), None);
         assert_eq!(taken(1_001, 900, Some(1_000), 5_000), Some(1_001));
+    }
+
+    #[test]
+    fn a_claude_account_is_told_by_who_claude_code_says_is_logged_in() {
+        let above = std::env::temp_dir().join(format!("clarp-claude-who-{}", crate::ids::hex(6)));
+        let config = above.join("claude");
+        std::fs::create_dir_all(config.join("profiles")).unwrap();
+        let write = |file: &Path, said: Value| std::fs::write(file, said.to_string()).unwrap();
+        // Nothing says who: no marker.
+        assert_eq!(claude_marker(&config), None);
+        // The login file itself says who, where nothing else does.
+        let login = json!({ "accessToken": "a-token", "accountUuid": "acct-1" });
+        write(
+            &config.join(".credentials.json"),
+            json!({ "claudeAiOauth": login }),
+        );
+        assert_eq!(claude_marker(&config).unwrap(), "cred:acct-1\0\0");
+        // The profile that is in place counts before that.
+        std::fs::write(config.join("profiles/.current_profile"), " work \n").unwrap();
+        assert_eq!(claude_marker(&config).unwrap(), "profile:work");
+        // Claude Code's own file counts before both: beside its directory, and in it first.
+        let who = json!({ "accountUuid": " acct-2 ", "organizationUuid": "org-2", "emailAddress": "Someone@Example.Org" });
+        write(&above.join(".claude.json"), json!({ "oauthAccount": who }));
+        let beside = "oauth:acct-2\0org-2\0someone@example.org";
+        assert_eq!(claude_marker(&config).unwrap(), beside);
+        write(
+            &config.join(".claude.json"),
+            json!({ "oauthAccount": { "organizationUuid": "org-3" } }),
+        );
+        assert_eq!(claude_marker(&config).unwrap(), "oauth:\0org-3\0");
+        // A file that names nobody is passed over for the next.
+        write(&config.join(".claude.json"), json!({ "oauthAccount": {} }));
+        assert_eq!(claude_marker(&config).unwrap(), beside);
+        write(&config.join(".claude.json"), json!({ "numStartups": 4 }));
+        assert_eq!(claude_marker(&config).unwrap(), beside);
+        std::fs::write(config.join(".claude.json"), "not json").unwrap();
+        assert_eq!(claude_marker(&config).unwrap(), beside);
+        // The name made of a marker says nothing of it, and is the same for the same.
+        let named = name_of(
+            b"a key",
+            "claude-account",
+            &format!("claude-account\0{beside}"),
+        );
+        assert_eq!(named.len(), "claude-account-".len() + 24);
+        assert!(
+            !named.contains("acct") && !named.contains("someone"),
+            "{named}"
+        );
+        assert_eq!(
+            named,
+            name_of(
+                b"a key",
+                "claude-account",
+                &format!("claude-account\0{beside}")
+            )
+        );
+        assert_ne!(
+            named,
+            name_of(
+                b"another key",
+                "claude-account",
+                &format!("claude-account\0{beside}")
+            )
+        );
+        std::fs::remove_dir_all(&above).unwrap();
     }
 }

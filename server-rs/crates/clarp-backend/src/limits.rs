@@ -134,6 +134,39 @@ pub fn window(payload: &Value) -> Option<Value> {
     Some(Value::Object(out))
 }
 
+/// What Claude Code says of its account's windows as it runs (the `rate_limit_info` of a
+/// `rate_limit_event` in its stream, `unifiedWindows`): the five hours and the week, each
+/// with how much of it is used, as a part of the whole, and when it begins anew, in seconds.
+/// Read into windows as the Host keeps them: how much in percent, the reset as a moment,
+/// and how long the window is. A window that does not say how much is used is left out; one
+/// that does not say when it begins anew says nothing for that. An empty answer where
+/// nothing of the kind is said.
+///
+/// This reading is this Host's own, by what the tool printed on the machine it was written
+/// on: the Python Host has the same two windows from the provider, asked with the account's
+/// login, and there the figure is a percentage already.
+pub fn claude(info: &Value) -> Value {
+    let mut windows = Map::new();
+    for (kind, minutes) in [("five_hour", 300), ("seven_day", 10_080)] {
+        let said = &info["unifiedWindows"][kind];
+        let part = said["utilization"].as_f64().filter(|part| part.is_finite());
+        let Some(part) = part else {
+            continue;
+        };
+        // In percent, to four places: a part of the whole times a hundred is seldom the
+        // number a person would write.
+        let used = (part * 1_000_000.0).round() / 10_000.0;
+        let resets_at = said["resetsAt"].as_f64().and_then(moment);
+        let window = serde_json::json!({
+            "used_percentage": used,
+            "resets_at": resets_at.unwrap_or_default(),
+            "window_minutes": minutes,
+        });
+        windows.insert(kind.to_string(), window);
+    }
+    Value::Object(windows)
+}
+
 /// Whether a bucket of limits says of itself that it is Codex's own.
 fn codex_by_name(bucket: &Value) -> bool {
     let named = bucket.get("limitId").and_then(Value::as_str);

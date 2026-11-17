@@ -19,6 +19,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
+use clarp_kernel::conversation::LimitsSaid;
 use clarp_kernel::usage::{self, Used};
 use clarp_ports::clock::Clock;
 use serde_json::{Map, Value, json};
@@ -50,6 +51,8 @@ pub enum Told {
         tool: String,
         session: String,
         how: quota::Ending,
+        /// What the tool said of its account's windows during the turn, where it said so.
+        said: Option<LimitsSaid>,
     },
 }
 
@@ -75,9 +78,14 @@ impl Tally {
 
     /// A turn of a tool ended in a session of the tool's own, whatever became of the turn:
     /// a tool that writes what is left of its account wrote it there. Does not wait.
-    pub fn over(&self, tool: &str, session: &str, how: quota::Ending) {
+    pub fn over(&self, tool: &str, session: &str, how: quota::Ending, said: Option<LimitsSaid>) {
         let (tool, session) = (tool.to_string(), session.to_string());
-        let _ = self.tx.send(Told::Over { tool, session, how });
+        let _ = self.tx.send(Told::Over {
+            tool,
+            session,
+            how,
+            said,
+        });
     }
 }
 
@@ -107,7 +115,12 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
     while let Some(told) = told.recv().await {
         let (name, used) = match told {
             Told::Used(name, used) => (name, used),
-            Told::Over { tool, session, how } => {
+            Told::Over {
+                tool,
+                session,
+                how,
+                said,
+            } => {
                 let with = quota::With {
                     fleet: &fleet,
                     hub: &works.hub,
@@ -115,7 +128,8 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
                     home: &home,
                     now_ms: clock.now_ms(),
                 };
-                works.limits.turn_ended(with, &tool, &session, how).await;
+                let ended = works.limits.turn_ended(with, &tool, &session, how, said);
+                ended.await;
                 continue;
             }
         };
@@ -153,6 +167,7 @@ async fn told(State(app): State<App>) -> Json<Value> {
         now_ms: now,
     };
     let left = app.limits.asked(with, quota::CODEX).await;
+    let of_claude = app.limits.asked_claude(with).await;
     let kept = app.fleet.kept_all(KIND).await.unwrap_or_default();
     let kept: Vec<Used> = kept
         .iter()
@@ -184,6 +199,8 @@ async fn told(State(app): State<App>) -> Json<Value> {
         .map(|tool| {
             let provider = if *tool == quota::CODEX {
                 left.provider.clone()
+            } else if *tool == quota::CLAUDE {
+                of_claude.clone()
             } else {
                 json!({
                     "freshness": "unknown", "observed_at": null, "provider_id": tool,
@@ -255,11 +272,12 @@ mod tests {
         assert!(before(1_800_000_000_124) > first && before(1_800_000_000_123) < first);
         assert_eq!(before(-5), "0000000000000");
         // And a turn that is over says in which session of its tool it was.
-        tally.over("codex", "a-thread", quota::Ending::Completed(7));
+        tally.over("codex", "a-thread", quota::Ending::Completed(7), None);
         let over = Told::Over {
             tool: "codex".to_string(),
             session: "a-thread".to_string(),
             how: quota::Ending::Completed(7),
+            said: None,
         };
         assert_eq!(told.try_recv().unwrap(), over);
     }

@@ -162,6 +162,10 @@ pub enum Signal {
     Context {
         tokens: u64,
     },
+    /// What the tool says of its account's windows as it runs: how much of each is used and
+    /// when it begins anew, in the tool's own words ([`limits`] reads them). The newest of a
+    /// turn is told with the turn's end.
+    Limits(serde_json::Value),
     /// What the tool says its conversation has cost so far, in millionths of a dollar: the
     /// running total of its session, not the turn's share (Claude Code's `total_cost_usd`,
     /// which it carries over when it continues a session). The actor tells the turn's share.

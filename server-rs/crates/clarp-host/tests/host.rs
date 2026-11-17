@@ -21686,3 +21686,220 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         quota_of(&host, &cody).is_null()
     });
 }
+
+#[test]
+fn what_claude_code_says_of_its_accounts_windows_is_shown_and_marks_its_agents_when_used_up() {
+    let place = Place::new("claude-windows");
+    let own = place.root.join("claude-own");
+    std::fs::create_dir_all(&own).unwrap();
+    // A login that holds, and who Claude Code says is logged in: both made up.
+    let token = json!({ "accessToken": "a-token", "expiresAt": now_ms() + 86_400_000 });
+    let login = json!({ "claudeAiOauth": token });
+    std::fs::write(own.join(".credentials.json"), login.to_string()).unwrap();
+    let logged_in = |account: &str| {
+        let who = json!({ "accountUuid": account, "emailAddress": "Someone@Example.Org" });
+        let said = json!({ "oauthAccount": who });
+        std::fs::write(own.join(".claude.json"), said.to_string()).unwrap();
+    };
+    logged_in("an-account");
+    // A stand-in for Claude Code that says of its account's windows, as Claude Code does as it
+    // runs, what the test wrote down for it; then it answers, or goes away without an answer
+    // while the test has it fail.
+    let claude = place.root.join("claude-says-its-windows");
+    let script = r#"#!/usr/bin/env python3
+import json, pathlib, sys
+sys.stdin.readline()
+own = pathlib.Path(__file__).resolve().parent / "claude-own"
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="system", subtype="init", session_id="stand-in", model="stand-in")
+said = own / "windows.json"
+if said.exists():
+    say(type="rate_limit_event", session_id="stand-in", rate_limit_info=json.loads(said.read_text()))
+if (own / "fails").exists():
+    sys.exit(1)
+message = {"id": "msg_1", "role": "assistant", "model": "stand-in", "content": [{"type": "text", "text": "on it"}]}
+say(type="assistant", session_id="stand-in", message=message)
+say(type="result", subtype="success", is_error=False, session_id="stand-in", result="on it", num_turns=1,
+    usage={"input_tokens": 12, "output_tokens": 3})
+"#;
+    program(&claude, script);
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLAUDE_CONFIG_DIR", own.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    let told_again = |heard: &Arc<Mutex<Vec<Value>>>| -> usize {
+        let all = heard.lock().unwrap();
+        let again =
+            |event: &&Value| event["type"] == "agent-roster" && event["kind"] == "backend-quota";
+        all.iter().filter(again).count()
+    };
+    // The windows as Claude Code says them: a part of the whole, and the second each begins
+    // anew: the five hours in four hours, the week in four days.
+    let seconds = now_ms() / 1000;
+    let says = |five: f64, week: f64| {
+        let window = |part: f64, resets: i64| json!({ "utilization": part, "resetsAt": resets, "status": "allowed" });
+        let said = json!({
+            "status": "allowed", "rateLimitType": "five_hour", "resetsAt": seconds + 4 * 3_600,
+            "overageStatus": "rejected", "isUsingOverage": false,
+            "unifiedWindows": {
+                "five_hour": window(five, seconds + 4 * 3_600),
+                "seven_day": window(week, seconds + 96 * 3_600),
+            },
+        });
+        std::fs::write(own.join("windows.json"), said.to_string()).unwrap();
+    };
+    let of_claude = |host: &Host| host.get("/backend-usage")["providers"]["claude"].clone();
+    let quota_of = |host: &Host, session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let row = agents.iter().find(|agent| agent["session"] == session);
+        row.unwrap()["backend_quota"].clone()
+    };
+    let made = host.post("/agents", json!({ "name": "Clara", "backend": "claude" }));
+    let clara = made["session"].as_str().unwrap().to_string();
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+
+    // The Host says that its agents' rows tell of a used-up account.
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["backend_quota"],
+        3
+    );
+    // Before any turn nothing was said of the account.
+    let nothing = of_claude(&host);
+    assert_eq!(nothing["source"]["kind"], "unavailable");
+    assert_eq!(nothing["windows"], json!([]));
+    assert_eq!(quota_of(&host, &clara), Value::Null);
+
+    // A turn in which Claude Code says its windows: they are shown, in percent.
+    says(0.375, 0.82);
+    host.send(&clara, "one", "u-1");
+    let windows = |host: &Host| of_claude(host)["windows"].as_array().cloned().unwrap();
+    wait_for("the windows to be shown", || windows(&host).len() == 2);
+    let told = host.get("/backend-usage");
+    let shown = &told["providers"]["claude"];
+    let instance = format!("{}:claude", told["computer_id"].as_str().unwrap());
+    assert_eq!(shown["provider_instance_id"], instance.as_str());
+    assert_eq!(shown["freshness"], "fresh");
+    let from = json!({ "kind": "provider_reported", "detail": "claude-code/rate_limit_event" });
+    assert_eq!(shown["source"], from);
+    let (five, week) = (&shown["windows"][0], &shown["windows"][1]);
+    assert_eq!(
+        (
+            &five["kind"],
+            &five["used_percentage"],
+            &five["freshness"],
+            &five["limit"]["state"]
+        ),
+        (
+            &json!("five_hour"),
+            &json!(37.5),
+            &json!("fresh"),
+            &json!("normal")
+        ),
+        "{five}"
+    );
+    assert_eq!(
+        (
+            &week["kind"],
+            &week["used_percentage"],
+            &week["scope"],
+            &week["unit"]
+        ),
+        (
+            &json!("seven_day"),
+            &json!(82.0),
+            &json!("account"),
+            &json!("percent")
+        ),
+        "{week}"
+    );
+    let resets = five["resets_at"].as_str().unwrap();
+    assert!(resets.len() == 20 && resets.ends_with('Z'), "{resets}");
+    // The row of Claude among the tools stays what this Host counted itself.
+    let rows = told["backends"].as_array().unwrap();
+    let row = rows.iter().find(|row| row["backend"] == "claude").unwrap();
+    assert_eq!(row["source"], "clarp-turn-accounting");
+    assert_eq!(quota_of(&host, &clara), Value::Null);
+
+    // Claude Code says that all of the five hours is used, and the turn does not complete:
+    // the account is taken for used up, and every agent of Claude says so, and none of Codex.
+    says(1.0, 0.83);
+    std::fs::write(own.join("fails"), "").unwrap();
+    host.send(&clara, "two", "u-2");
+    wait_for("the row to say that the account is used up", || {
+        !quota_of(&host, &clara).is_null()
+    });
+    let said = quota_of(&host, &clara);
+    assert_eq!(
+        (
+            &said["state"],
+            &said["provider_id"],
+            &said["reason"],
+            &said["window"]
+        ),
+        (
+            &json!("exhausted"),
+            &json!("claude"),
+            &json!("usage_limit"),
+            &json!("five_hour")
+        ),
+        "{said}"
+    );
+    assert_eq!(said["resets_at"], windows(&host)[0]["resets_at"]);
+    assert_eq!(quota_of(&host, &cody), Value::Null);
+    wait_for("the apps to be told", || told_again(&heard) == 1);
+
+    // A turn completes, though Claude Code says the same in it: an account that served a
+    // turn was not used up.
+    std::fs::remove_file(own.join("fails")).unwrap();
+    host.send(&clara, "three", "u-3");
+    wait_for("the row to say nothing again", || {
+        quota_of(&host, &clara).is_null()
+    });
+    wait_for("the apps to be told again", || told_again(&heard) == 2);
+    assert_eq!(windows(&host)[0]["used_percentage"], 100.0);
+
+    // The Host is killed and started: what was said, and that a turn completed since, is
+    // kept.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    assert_eq!(windows(&host)[0]["used_percentage"], 100.0);
+    assert_eq!(quota_of(&host, &clara), Value::Null);
+
+    // Another account is logged in: nothing of the account before is shown as its own.
+    logged_in("another-account");
+    assert_eq!(of_claude(&host)["windows"], json!([]));
+    logged_in("an-account");
+    assert_eq!(windows(&host).len(), 2);
+
+    // Nothing of who is logged in is anywhere in what the Host keeps.
+    let mut kept = Vec::new();
+    let mut dirs = vec![place.root.join("data")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                kept.extend(std::fs::read(&path).unwrap_or_default());
+            }
+        }
+    }
+    let kept = String::from_utf8_lossy(&kept).to_lowercase();
+    assert!(
+        kept.contains("claude-code/rate_limit_event"),
+        "nothing was kept"
+    );
+    for secret in [
+        "an-account",
+        "another-account",
+        "a-token",
+        "someone@example.org",
+    ] {
+        assert!(!kept.contains(secret), "{secret} is in what the Host keeps");
+    }
+}
