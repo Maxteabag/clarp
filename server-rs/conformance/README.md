@@ -94,7 +94,9 @@ that answers within the instant its Host needs for its own bookkeeping, which th
 in thirteen runs 25 of 122 recordings of the reference were left so, and it failed each of the
 last three. Two things follow. The stand-in takes half a second before it does anything in
 the first turn of a conversation, as every real tool does (`fake_claude.py`,
-`CLARP_QA_ANSWER_AFTER`), for both Hosts; in no other turn, since a moment in every turn turned
+`CLARP_QA_ANSWER_AFTER`), for both Hosts, unless that turn is slow by its own mark and is there
+to be stopped or queued behind (run 44101297003: stopped before it had written anything, such
+a turn differed in 138 places in six scenarios); in no other turn, since a moment in every turn turned
 another race of the reference the other way (run 44096945408: a reply that closes a later
 turn was left without its mark in a quarter of such rows instead of a sixth, defect R6, and
 the run differed at 21 places nobody had seen it differ at). And

@@ -70,6 +70,8 @@ cce40563260b  router: the same of the second agent, after its third turn (comput
 961155cc0b66  approval: the agent's model after its answer was delivered and answered
 6a2b3966fcbf  turn-timer: the agent's model while its first turn is timed
 6389f02a8160  turn-timer: the same, after that turn
+c0a2b172559d  send-after-stop: the agent's model after the turn that followed a stopped one (both recordings of the reference showed none: the suite run here on 17 Nov 2026, nine scenarios against both Hosts)
+37e34e387826  the-apps-own-ids: the agent's model at rest, after its third turn (run 44101297003: both recordings of the reference showed none)
 
 # The answer to a discard says the artifact is not pinned (the Python Host says pinned true
 # beside pinned_at null: reference defect R15).
