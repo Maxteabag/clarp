@@ -8,13 +8,15 @@
 //! itself, and the routes, which answer as the Python Host's do
 //! (`server/lib/janitor_http.py`): the same statuses, bodies and words.
 //!
-//! **What runs: a scheduled task.** A janitor whose job is a scheduled task is turned on, and
-//! then runs when its schedule says: the runner here looks every two seconds at what the
-//! book says is due ([`clarp_kernel::janitors::runs`]), hands a run to the janitor's own
-//! mailbox as a message the Host sends by itself, and tells the book how the turn stands.
-//! No other job runs yet: turning such a janitor on is refused in words, with the Python
-//! Host's word for a Host that cannot run it (`janitor_runtime_unavailable`), and the
-//! janitors of the Host's own are installed paused, where the Python Host starts three.
+//! **What runs: a scheduled task, and the router.** A janitor whose job is a scheduled task
+//! is turned on, and then runs when its schedule says: the runner here looks every two
+//! seconds at what the book says is due ([`clarp_kernel::janitors::runs`]), hands a run to
+//! the janitor's own mailbox as a message the Host sends by itself, and tells the book how
+//! the turn stands. The janitor that finds whom a spoken message is for runs too, once for
+//! each message, when it is on ([`crate::router`]). No other job runs yet: turning such a
+//! janitor on is refused in words, with the Python Host's word for a Host that cannot run
+//! it (`janitor_runtime_unavailable`), and the janitors of the Host's own are installed
+//! paused, where the Python Host starts three.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,9 +56,9 @@ const OWN_TOOL: &str = "codex";
 const FROM_A_JANITOR: &str = "janitor";
 
 /// What an app is told when it turns on a janitor whose job does not run here.
-const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task and no other job yet: \
-                          this janitor is made, set and paused here, and nothing starts it. \
-                          Nothing was turned on.";
+const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task and the router of spoken \
+                          messages, and no other job yet: this janitor is made, set and paused \
+                          here, and nothing starts it. Nothing was turned on.";
 
 /// The janitors of this Host. `None` until the book was read where it is kept.
 #[derive(Default)]
@@ -66,7 +68,7 @@ pub struct Desk {
 
 /// What the book asks of the Host around it: the fleet as it stands, the machine's zones,
 /// the pictures the Host ships.
-struct Around<'a> {
+pub(crate) struct Around<'a> {
     app: &'a App,
     directory: Arc<Directory>,
 }
@@ -184,7 +186,7 @@ impl Desk {
     /// One change of the book and of the agents it is about: the book is kept, then what
     /// has to become of an agent is done, and the janitor is read as it then is. Nobody
     /// else reads or changes the book meanwhile.
-    async fn change(
+    pub(crate) async fn change(
         &self,
         app: &App,
         key: &str,
@@ -254,6 +256,18 @@ impl Desk {
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
         }
         Ok(begun)
+    }
+
+    /// One look at the book, or one change of it, by another desk of the Host that keeps
+    /// its runs here: the router of spoken messages, whose every message is routed in a
+    /// run of its janitor. Kept when it changed anything.
+    pub(crate) async fn with<T>(
+        &self,
+        app: &App,
+        change: impl FnOnce(&mut Book, &dyn World, i64) -> T,
+    ) -> Result<T, Unavailable> {
+        let changed = self.update(app, |book, around, now_ms| change(book, around, now_ms));
+        Ok(changed.await?.0)
     }
 
     /// One change of the book by the Host itself, kept when it changed anything. Answers
@@ -801,7 +815,8 @@ async fn change(
                 return bad("enabled must be true or false");
             };
             let on = *on;
-            if on && agent["template_id"] != runs::SCHEDULED_TASK {
+            let runs_here = [runs::SCHEDULED_TASK, clarp_kernel::router::JOB];
+            if on && !runs_here.iter().any(|job| agent["template_id"] == *job) {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);
                 return refusal(&told);
             }

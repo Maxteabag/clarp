@@ -653,8 +653,8 @@ after "hey", "ok" and the like, by the name as written or, for the first word, b
 for Bella; the measure is Python's `difflib`, which the kernel already had for diffs); the address is taken
 off; that agent is the open one from then on. Without a name the message stays with the agent that is open,
 then with the one the app named. What was typed, or dictated for the open agent, is for the agent it names,
-as before. The router that asks a model is not built: an app that asks it (`/orchestrator/route-delegation`)
-is answered as by a Host whose router is off and asks its user. A name the message spells out is taken off
+as before. The router that asks a model came on 17 Nov (below); off, which is how it comes, an app that asks
+it (`/orchestrator/route-delegation`) is answered as by a Host whose router is off and asks its user. A name the message spells out is taken off
 through its end where it ends as a word, all its words and its letters however they are composed, as the
 Python Host does since its fixes of reference defects R23 and R27 (16 Nov 2026). One thing is not copied:
 the word a name was found in is taken off whole, where the Python Host leaves the agent the end of a word
@@ -1003,8 +1003,72 @@ a turn in the janitor's own conversation.
   agent is made as a janitor on the model its tool has for janitors, it is given its job, and what was
   answered is kept as the answer. Sent again it makes nothing; under the same id with other settings it is
   refused.
-- Not yet: the jobs that are no scheduled task (the turn's end and the goal keeper, the workers that answer
-  one request, the label keeper), and a janitor's own goals and published files.
+- Not yet: the jobs that are no scheduled task and no routing (the turn's end and the goal keeper, the
+  explainer of a tool's use, the label keeper), and a janitor's own goals and published files.
+
+**The router of spoken messages** (17 Nov 2026). The owner's own words for what this is for: hands-free,
+without names. A message that is dictated hands-free and is not said to be for the agent it names can be
+shown to a model that says whom it is for. On the Python Host that is the job of one of the Host's own
+janitors (`message-delegator`), and so it is here: the router is on when that janitor is, set as that janitor
+is set, and every message is routed in a run of that janitor, under an id made of the message's own, so that
+a message sent twice is decided once. The Host installs the janitor paused: the router is off until its owner
+turns it on.
+
+- **The rules are the kernel's** (`clarp-kernel` `router.rs`, `router/packet.rs`, `router/flow.rs`), read
+  from the Python Host's router (`lib/orchestrator.py` and the three files split from it, 1,900 lines) and
+  held to it by vectors made by driving that Host's own code. The pure rules: when the router takes a message
+  at all, what a model is told, the object found in what it answered, the decision read from it, when it is
+  asked once more with every agent in view (`tools/router-vectors.py`). What a model is shown, the packet,
+  with its mark: the message, the agent it was said to and the one that is open with what they were last told
+  and said, every other agent by its name, the messages that are held, and the agents whose names sound like
+  a word of the message (Python's `difflib`, and a score rounded as Python rounds). And a message's way, in
+  four steps with the asking between them: `begin` (whether the router takes the message, the run it is
+  routed in, a message sent again), `answered` (what is made of an answer, and the second asking), `apply`
+  (what is done: a message given to an agent, a word aloud, a message held while its user is asked, an agent
+  opened, stopped or started) and `finish` (what is kept: the decision, the receipt of the run, what the apps
+  are told). `tools/router-flow-vectors.py` drives the Python Host's `OrchestratorService` through 53
+  messages in six stories with a model that answers what each story says and a Host around it that writes
+  down what it is asked to do; `tests/router_flow_vectors.rs` holds this router to it message by message:
+  the 73 packets as text, what was given, said and held, the decisions as rows, the runs with their receipts.
+- **Three things it does otherwise, on purpose**, each named in that test with what the Python Host did, and
+  each a finding in that Host (R32 to R34 in `docs/reference-defects.md`): a held message keeps its own words
+  when its user is asked a second time; no agent is made of a name alone; and nobody's status is told as
+  another's.
+- **The Host's side** (`clarp-host` `router.rs`). The router's book (its decisions, the newest two hundred;
+  what it holds; what it gave each agent) is kept with the fleet, and changed together with the janitors'
+  book in which its runs are. A dictated message is shown to it before it goes on (`edge.rs`, `sent_from`):
+  first whether there is a router at all, which is a look at the janitors' book and costs nothing; then the
+  agents are read. What the router asks of the Host is done by what the Host already has: a message is given
+  by a send that says whom it is for, as the message came in (a held message as it came in then, under its
+  own id); an agent is opened as an app opens it and stopped as an app stops it; a word aloud is a clip in
+  the agent's voice or the router's, played whichever agent is open, where an engine of this Host can say it.
+- **Whom the model is, and how it is asked.** A tool of the Host, Codex or Claude Code, asked one question
+  outside every conversation (`once.rs`), with the question on standard input. The Python Host gives it as an
+  argument of the command line, where every process of the machine can read it and where Linux takes no
+  more than 128 KiB (R35); it can also ask the OpenAI API and a typed decision model, which this Host has
+  not built in and refuses in words when it is set to one.
+- **How much a model is shown when everyone is in view.** The Python Host shows the last ten messages of
+  every agent that is not put away. Measured on the owner's Host on 17 Nov (read-only, by a query of the
+  check's own): 204 such agents, half a megabyte of question. Here every agent is in view by its name and
+  what it is doing, and the last words are shown of the twenty that were last active, and always of the agent
+  the message was said to and of the one that is open. Of an agent's conversation the model is shown what
+  people and other agents wrote to it and what it answered, and not what the Host sends by itself on its
+  schedule.
+- **The routes** are the Python Host's, in its shapes and words: `POST /orchestrator/route-delegation` (a
+  send that asks for the router), `GET` and `POST /orchestrator/settings` (the janitor is what is read and
+  set; the providers are the tools of this Host), `GET /orchestrator/decisions`, `POST
+  /orchestrator/addressing` (how a message that names nobody finds its agent on the apps' side: the Host
+  keeps what was chosen). Turning the janitor on from its own screen is allowed for this job now.
+- Held on a Host by `a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on` (`tests/host.rs`),
+  with a stand-in for Codex that answers by rule and writes down what it was started with and shown: a
+  message said to one agent and given to another, the question on standard input and nowhere on the command
+  line, the same message again (answered, nobody given it twice, no model asked), the same id for other
+  words (409), a message held and then given in its own words when its user says yes, a question about an
+  agent, a command that opens an agent, a model that fails (the message goes where it was said to), what is
+  kept through a restart, and the router turned off again.
+- Not yet: starting an agent again in place by voice (it is said as what failed, and comes with starting an
+  agent again in place at all); phrases kept ready-spoken; a model's fallbacks; the two providers that are no
+  tool. In a call, only those of the call who can take speech are shown, as there.
 
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one

@@ -861,6 +861,36 @@ impl Mouth {
         made.map(|(name, _)| name)
     }
 
+    /// Something said aloud outside every turn and told to the apps at once, as a clip
+    /// that is played whichever agent is open: a question the router of spoken messages
+    /// asks as an agent, or a word of its own (a speaker with no session). Where nothing on
+    /// this Host can say it, nothing is said. Answers whether it was.
+    pub(crate) async fn announce(&self, speaker: &AgentRecord, text: &str) -> bool {
+        let Some((name, _)) = self.clip_of(speaker, text.to_string(), "").await else {
+            return false;
+        };
+        let session = Some(speaker.session.as_str()).filter(|session| !session.is_empty());
+        self.hub
+            .publish(wire::announcement(session, &name), self.now_ms());
+        true
+    }
+
+    /// Plays again what an agent last said aloud: its newest clip, told to the apps once
+    /// more. Answers whether it has one.
+    pub(crate) async fn again(&self, member: &Member) -> bool {
+        let view = member.agent.view();
+        let lines = view.speech.lines().iter().rev();
+        let last = lines
+            .filter_map(|line| wire::audio_kept(&member.record, line))
+            .next();
+        let Some(mut clip) = last else {
+            return false;
+        };
+        clip["replay"] = json!(true);
+        self.hub.publish(clip, self.now_ms());
+        true
+    }
+
     /// A clip of `text` in an agent's voice, under a name that begins with `prefix`: its
     /// name and its file.
     async fn clip_of(

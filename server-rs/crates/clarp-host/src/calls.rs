@@ -407,13 +407,14 @@ impl Desk {
         Ok(Ok(Rings::rung(&ring, delivery, app.clock.now_ms())))
     }
 
-    /// Where a message that carries a call goes: the session of the agent that takes it.
-    /// `Err` is what the sender is told instead (the call is over, nobody can take speech).
+    /// Where a message that carries a call goes: the session of the agent that takes it,
+    /// and everybody of the call who can take speech. `Err` is what the sender is told
+    /// instead (the call is over, nobody can take speech).
     pub async fn route(
         &self,
         app: &App,
         (caller, call_id, session): (&str, &str, &str),
-    ) -> Result<Result<String, Refused>, Unavailable> {
+    ) -> Result<Result<(String, Vec<String>), Refused>, Unavailable> {
         let asker = Asker {
             caller,
             call_id,
@@ -424,7 +425,31 @@ impl Desk {
                 calls.route(asker, session, at, out)
             })
             .await?;
-        Ok(routed.map(|routed| routed["session"].as_str().unwrap_or("").to_string()))
+        Ok(routed.map(|routed| {
+            let reachable = routed["reachable"].as_array();
+            let reachable = reachable.map(|all| all.iter().filter_map(Value::as_str));
+            let reachable = reachable.map(|all| all.map(str::to_string).collect());
+            let session = routed["session"].as_str().unwrap_or("").to_string();
+            (session, reachable.unwrap_or_default())
+        }))
+    }
+
+    /// A message of a call went to this agent by another way than the call's own: the
+    /// router of spoken messages found it. The agent takes the floor.
+    pub async fn routed(
+        &self,
+        app: &App,
+        (caller, call_id, session): (&str, &str, &str),
+    ) -> Result<(), Unavailable> {
+        let asker = Asker {
+            caller,
+            call_id,
+            ..Asker::default()
+        };
+        self.ask(app, |calls, at, _, out| {
+            calls.routed(asker, session, at, out)
+        })
+        .await
     }
 }
 

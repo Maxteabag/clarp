@@ -117,7 +117,7 @@ pub fn state_name(kind: &AgentStateKind) -> String {
 }
 
 /// When the state an app shows began. An agent that never ran has been as it is since it was made.
-fn state_since(record: &AgentRecord, status: &Status) -> i64 {
+pub(crate) fn state_since(record: &AgentRecord, status: &Status) -> i64 {
     match (&status.live, &status.last) {
         (Some(live), _) => live.started_at_ms,
         (None, Some(last)) => last.ended_at_ms,
@@ -627,6 +627,19 @@ pub fn audio_across(record: &AgentRecord, clip: u64, name: &str, trace_id: Optio
         fields.insert("herald".to_string(), json!(true));
     }
     event
+}
+
+/// A clip of something said outside every turn: a question the router of spoken messages
+/// asks as an agent, or a word of its own (`session`: none). No line of any agent's, and
+/// played whichever agent is open.
+pub fn announcement(session: Option<&str>, name: &str) -> Value {
+    json!({
+        "type": "audio",
+        "url": format!("/audio/{name}"),
+        "name": name,
+        "session": session,
+        "herald": true,
+    })
 }
 
 /// The clip that says an agent has something for its user: no line of the agent's, and

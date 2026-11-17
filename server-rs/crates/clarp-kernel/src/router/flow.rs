@@ -278,6 +278,8 @@ pub struct Routing {
     packet: Value,
     /// The packet with every agent in view, while the model is asked once more.
     wider: Option<Value>,
+    /// The model is being asked that second time.
+    widening: bool,
     decided: Option<(Decision, Map<String, Value>)>,
     text: String,
     requested_session: String,
@@ -359,6 +361,25 @@ fn sha256(text: &str) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// The id of the run a message is routed in: made of the id its sender gave it, so that a
+/// message that is sent again finds the run it has. A message that came with no id is
+/// known by its trace.
+pub fn request_id(came: Option<&Came>, trace_id: &str) -> Value {
+    let client = match came {
+        Some(came) => {
+            let id = python::strip(&came.client_id);
+            let marked = id.starts_with("u-");
+            if marked {
+                id.to_string()
+            } else {
+                format!("u-{id}")
+            }
+        }
+        None => trace_id.to_string(),
+    };
+    json!(format!("routing-{}", sha256(&client)))
+}
+
 /// The agent a session name or an id names.
 fn lookup<'a>(agents: &'a [Member], key: &str) -> Option<&'a Member> {
     let key = python::strip(key);
@@ -412,6 +433,27 @@ fn settings_of(
         timeout_ms: time.unwrap_or(unset.timeout_ms),
         voice_id: voice.map_or(unset.voice_id, str::to_string),
     }
+}
+
+/// How the router of a Host is set: as the janitor of the Host's own keeps it whose job
+/// routing is. `None`: the Host has no such janitor.
+pub fn settings(janitors: &Janitors, world: &dyn World) -> Option<Settings> {
+    let own = janitors
+        .builtins
+        .iter()
+        .find(|(_, role)| role.as_str() == JOB);
+    let (id, _) = own?;
+    let config = janitors.configs.get(id)?;
+    let agent = world.agent(id)?;
+    let provider = config.execution.get("provider").and_then(Value::as_str);
+    let options = Value::Object(config.options.clone());
+    Some(settings_of(
+        Some(&options),
+        config.enabled,
+        provider.unwrap_or_default(),
+        &agent.model,
+        &agent.effort,
+    ))
 }
 
 /// A decision turned into a question to the user: in the model's own words where it gave
@@ -759,21 +801,7 @@ impl Book {
                 ..Outcome::default()
             })
         };
-        // The run of a message is known by the id its sender gave it: sent again, a
-        // message finds the run it has.
-        let client = match message.came {
-            Some(came) => {
-                let id = python::strip(&came.client_id);
-                let known = id.starts_with("u-");
-                if known {
-                    id.to_string()
-                } else {
-                    format!("u-{id}")
-                }
-            }
-            None => message.trace_id.to_string(),
-        };
-        let request = json!(format!("routing-{}", sha256(&client)));
+        let request = request_id(message.came, message.trace_id);
         let target = lookup(around.agents, message.requested_session);
         let target = target.map(|agent| agent.agent_id.clone());
         let weighed = json!({
@@ -878,6 +906,7 @@ impl Book {
             settings,
             packet,
             wider: None,
+            widening: false,
             decided: None,
             text: message.text.to_string(),
             requested_session: message.requested_session.to_string(),
@@ -898,7 +927,8 @@ impl Book {
         answer: Result<Map<String, Value>, String>,
         around: &mut Around<'_>,
     ) -> Next {
-        if routing.wider.is_some() {
+        if routing.widening {
+            routing.widening = false;
             let wider = routing.wider.take();
             if let (Ok(raw), Some(wider)) = (answer, wider) {
                 routing.decided = Some((Decision::read(&raw), raw));
@@ -948,7 +978,19 @@ impl Book {
         }
         let wider = self.packet_for(&routing.message(), &routing.settings, true, around);
         routing.wider = Some(wider);
+        routing.widening = true;
         Next::AskAgain
+    }
+
+    /// Makes the packet with every agent in view anew, from agents that are given whole.
+    /// For a Host that gives [`Book::answered`] only what a first asking shows (the last
+    /// words of the agent a message was said to and of the one that is open), and reads
+    /// the others' only when a model is in fact asked a second time.
+    pub fn widen(&self, routing: &mut Routing, around: &Around<'_>) {
+        if routing.widening {
+            let wider = self.packet_for(&routing.message(), &routing.settings, true, around);
+            routing.wider = Some(wider);
+        }
     }
 
     /// Holds a message while its user is asked whom it was for, and asks. A message that

@@ -181,6 +181,8 @@ pub struct App {
     pub heartbeat: Arc<crate::heartbeat::Desk>,
     /// The janitors: what is kept of each agent that has a job of maintenance.
     pub janitors: Arc<crate::janitors::Desk>,
+    /// The router of spoken messages: what it decided, and what it holds.
+    pub router: Arc<crate::router::Desk>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
@@ -375,6 +377,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::heartbeat::routes())
         .merge(crate::forks::routes())
         .merge(crate::janitors::routes())
+        .merge(crate::router::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
@@ -1488,7 +1491,7 @@ fn client_name(given: &str) -> Option<String> {
 }
 
 /// Who wrote a message that says it comes from another agent.
-fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
+pub(crate) fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
     let directory = app.fleet.directory();
     let name = match named? {
         Value::String(name) => name.as_str(),
@@ -1541,6 +1544,8 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         .chars()
         .take(64)
         .collect();
+    // The caller, and those of the call who can take speech, for a message that carries one.
+    let mut in_call: Option<(&str, Vec<String>)> = None;
     // A message that says nothing is refused before its call is asked.
     if !call_id.is_empty() && !python::strip(&request.text).is_empty() {
         let caller = match principal {
@@ -1553,12 +1558,47 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         };
         let desk = app.calls.clone();
         match desk.route(app, (caller, &call_id, named)).await {
-            Ok(Ok(session)) => request.session = session,
+            Ok(Ok((session, reachable))) => {
+                request.session = session;
+                in_call = Some((caller, reachable));
+            }
             Ok(Err(refused)) => {
                 let status = StatusCode::from_u16(refused.status).unwrap_or(StatusCode::CONFLICT);
                 return (status, Json(refused.body)).into_response();
             }
             Err(unavailable) => return ApiError::from(unavailable).into_response(),
+        }
+    }
+    // What was dictated hands-free and is not said to be for the agent it names is shown
+    // to the router of spoken messages first, when there is one: it may give the message
+    // to another agent, ask its user whom it was for, or do what was asked for in it.
+    let dictated = request.hands_free == Some(true) && request.force_session != Some(true);
+    if dictated && !python::strip(&request.text).is_empty() {
+        let trace = match request.trace_id.as_deref().map(python::strip) {
+            Some(named) if !named.is_empty() => named.to_string(),
+            _ => ids::hex(8),
+        };
+        request.trace_id = Some(trace.clone());
+        let asked = match python::strip(&request.session) {
+            "" => addressed::DEFAULT_SESSION.to_string(),
+            asked => asked.to_string(),
+        };
+        // In a call, nobody but those of the call who can take speech can be meant.
+        let only = in_call.as_ref().map(|(_, reachable)| reachable.as_slice());
+        match crate::router::route(app, &request, &trace, &asked, only).await {
+            Ok(crate::router::Routed::NotMine) => {}
+            Ok(crate::router::Routed::Answered(status, answer)) => {
+                if let (Some((caller, _)), true) = (&in_call, answer.ok) {
+                    // Another agent of the call got it: the floor is that agent's.
+                    if !answer.session.is_empty() && answer.session != asked {
+                        let desk = app.calls.clone();
+                        let to = (*caller, call_id.as_str(), answer.session.as_str());
+                        let _ = desk.routed(app, to).await;
+                    }
+                }
+                return (status, Json(answer)).into_response();
+            }
+            Err(refused) => return refused.into_response(),
         }
     }
     match send_message(app, request).await {
