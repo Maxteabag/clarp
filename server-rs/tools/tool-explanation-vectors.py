@@ -5,7 +5,9 @@ the bounded fields that are read of an activity, with what a heredoc only feeds 
 `server/lib/tool_explanation_templates.py`, `lookup`: the scripted template that fits, with what
 it says at each of the five levels of detail, or why none fits): what its own functions make of
 made-up uses of tools, written to `crates/clarp-kernel/tests/fixtures/tool-explanation-vectors.json`
-for the Rust Host's reading to be held to, use by use.
+for the Rust Host's reading to be held to, use by use. The library of templates itself
+(`server/lib/tool_explanation_templates.json`) is copied beside the Rust that reads it
+(`crates/clarp-kernel/src/explain-templates.json`), byte for byte.
 
 It runs in a process of its own whose every home, data, config and cache directory is a new empty
 directory (the replay harness's own isolation, `tests/replay/host.py`), with no way out to any
@@ -18,6 +20,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +28,8 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'tool-explanation-vectors.json'
+LIBRARY = REPO / 'server' / 'lib' / 'tool_explanation_templates.json'
+LIBRARY_COPY = HERE.parent / 'crates' / 'clarp-kernel' / 'src' / 'explain-templates.json'
 # The key a Host signs the shape of an unknown program's or tool's use with (`_identity`): each Host
 # draws its own. The stories are told under this one, so that they can be told again.
 KEY = 'synthetic-identity-key-' + '0123456789abcdef' * 2
@@ -166,11 +171,14 @@ def main() -> int:
     out.append('}')
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text('\n'.join(out) + '\n')
+    shutil.copyfile(LIBRARY, LIBRARY_COPY)
     import collections
     templates_used = collections.Counter(row['route'].get('template_id') for row in rows if 'route' in row and row['route'].get('template_id'))
     reasons = collections.Counter(row['route'].get('reason') for row in rows if 'route' in row and not row['route'].get('template_id'))
     print(f'{OUT.relative_to(REPO)}: {len(rows)} uses; a template fits {sum(templates_used.values())} '
           f'({len(templates_used)} templates), none fits {sum(reasons.values())}, refused {sum("refused" in row for row in rows)}')
+    print(f'  {LIBRARY_COPY.relative_to(REPO)}: the library, version {said["version"]}, '
+          f'{sum(1 for row in rows for text in row.get("said", []) if text is not None)} sentences said of these uses')
     print('  templates:', dict(templates_used.most_common()))
     print('  reasons:', dict(reasons.most_common()))
     return 0

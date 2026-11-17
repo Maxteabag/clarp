@@ -382,6 +382,25 @@ pub fn truthy(value: &Value) -> bool {
     }
 }
 
+// The signs Python takes for digits (`str.isdigit`): the decimal digits of every script,
+// and the raised, lowered, circled and dotted ones (128 signs, the same since Unicode 6).
+static DIGITS: LazyLock<Regex> = LazyLock::new(|| {
+    let signs = concat!(
+        r"^[\p{Nd}\u{b2}\u{b3}\u{b9}\u{1369}-\u{1371}\u{19da}\u{2070}\u{2074}-\u{2079}",
+        r"\u{2080}-\u{2089}\u{2460}-\u{2468}\u{2474}-\u{247c}\u{2488}-\u{2490}\u{24ea}",
+        r"\u{24f5}-\u{24fd}\u{24ff}\u{2776}-\u{277e}\u{2780}-\u{2788}\u{278a}-\u{2792}",
+        r"\u{10a40}-\u{10a43}\u{10e60}-\u{10e68}\u{11052}-\u{1105a}\u{1f100}-\u{1f10a}]+$",
+    );
+    // Written here, as the pattern above: one that does not compile is a mistake in this file.
+    #[allow(clippy::expect_used)]
+    Regex::new(signs).expect("a pattern of this module compiles")
+});
+
+/// Whether a text is digits and nothing else, and not empty (`str.isdigit`).
+pub fn isdigit(text: &str) -> bool {
+    DIGITS.is_match(text)
+}
+
 /// Whether Python counts a sign as blank (`str.isspace`, and `\s` in a pattern): what
 /// Unicode calls white space, and the four separators of information below the space.
 pub fn blank(sign: char) -> bool {
@@ -406,6 +425,26 @@ pub fn first(text: &str, count: usize) -> &str {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_text_is_digits_when_python_says_so() {
+        for digits in [
+            "0",
+            "1234567890",
+            "\u{663}",
+            "\u{b2}",
+            "\u{2460}\u{2461}",
+            "4\u{2082}",
+        ] {
+            assert!(isdigit(digits), "{digits}");
+        }
+        // A fraction, a Roman numeral and a numeral of Han are numbers and no digits.
+        for none in [
+            "", "-1", "1.5", "1a", " 1", "\u{bd}", "\u{2167}", "\u{4e00}",
+        ] {
+            assert!(!isdigit(none), "{none}");
+        }
+    }
 
     #[test]
     fn base64_is_read_as_python_reads_it_strictly() {
