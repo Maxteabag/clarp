@@ -1,0 +1,292 @@
+//! The sessions a tool kept on a machine: what a person who makes an agent is offered to
+//! take up again.
+//!
+//! Claude Code keeps every session as a file of lines under the directory of its project,
+//! `<home>/.claude/projects/<the directory it ran in, with a dash for every sign that is no
+//! letter and no digit>/<session>.jsonl`, and may keep an index of them beside those files
+//! (`sessions-index.json`). A session is listed by what the index says of it where the index
+//! names it, and otherwise by what its own file says: where it ran, what was asked first,
+//! and the title it was given, by its user or by the tool.
+//!
+//! The rule is the Python Host's (`server/lib/session_catalog.py`, `list_claude_sessions`),
+//! held by `tests/fixtures/past-sessions-vectors.json`. Two things are done otherwise, on
+//! purpose, and named in the test:
+//!
+//! - A project is looked for under the name Claude Code gives it. The Python Host puts a
+//!   dash for every slash only, and so offers nothing for a directory whose path has a dot,
+//!   an underscore or a space.
+//! - A session the index marks as a side chain (the transcript of a helper inside a turn)
+//!   is not offered. The Python Host leaves it out where it reads the index and then offers
+//!   it after all, as a transcript the index does not name.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use clarp_kernel::python;
+use serde_json::{Value, json};
+
+/// How many lines from the start of a transcript are read, how much of its end, and how
+/// much of what was asked first and of a title is shown.
+const HEAD_LINES: usize = 120;
+const TAIL_BYTES: u64 = 64 * 1024;
+const PREVIEW_MOST: usize = 240;
+const TITLE_MOST: usize = 160;
+/// A moment that is counted in more than this is counted in milliseconds.
+const MOST_SECONDS: i64 = 10_000_000_000;
+
+/// A path as it is compared: without a slash at its end and without a slash said twice.
+/// Nothing at all is the directory one is in.
+fn plain(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    match (path.starts_with('/'), parts.is_empty()) {
+        (true, _) => format!("/{}", parts.join("/")),
+        (false, true) => ".".to_string(),
+        (false, false) => parts.join("/"),
+    }
+}
+
+/// The name Claude Code gives the project of a directory: a dash for every sign of its
+/// path that is no letter and no digit.
+pub fn claude_project(cwd: &str) -> String {
+    let dashed = |sign: char| {
+        if sign.is_ascii_alphanumeric() {
+            sign
+        } else {
+            '-'
+        }
+    };
+    plain(cwd).chars().map(dashed).collect()
+}
+
+/// A value as Python's `str()` makes a text of it, where nothing and what counts as
+/// nothing is no text.
+fn text_of(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) if number.as_f64() != Some(0.0) => number.to_string(),
+        Some(Value::Bool(true)) => "True".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(yes)) => *yes,
+        Some(Value::Number(number)) => number.as_f64() != Some(0.0),
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(fields)) => !fields.is_empty(),
+    }
+}
+
+/// When a file was last written, in whole seconds. A file that cannot be asked: 0.
+fn written(path: &Path) -> (Option<SystemTime>, i64) {
+    let at = std::fs::metadata(path)
+        .and_then(|file| file.modified())
+        .ok();
+    let seconds = at.and_then(|at| at.duration_since(SystemTime::UNIX_EPOCH).ok());
+    let seconds = seconds.map_or(0, |since| {
+        i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+    });
+    (at, seconds)
+}
+
+/// What a line of a transcript says a user asked: the text of a user's message, or the
+/// first part of it that is text.
+fn asked(event: &Value) -> String {
+    if event["type"] != "user" {
+        return String::new();
+    }
+    match &event["message"]["content"] {
+        Value::String(text) => python::strip(text).to_string(),
+        Value::Array(parts) => {
+            let text = parts.iter().find(|part| part["type"] == "text");
+            let text = text.map(|part| text_of(part.get("text")));
+            python::strip(&text.unwrap_or_default()).to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+/// What a transcript says of its session: where it ran, what was asked first, and its
+/// title: the one its user gave it, else the one the tool made. Its first lines are read,
+/// and its end, where a name that was given later stands.
+fn read(path: &Path) -> Option<Value> {
+    let bytes = std::fs::read(path).ok()?;
+    let (mut cwd, mut preview) = (String::new(), String::new());
+    let (mut made, mut given) = (String::new(), String::new());
+    let mut take = |line: &str| {
+        let Ok(Value::Object(event)) = serde_json::from_str::<Value>(line) else {
+            return;
+        };
+        let event = Value::Object(event);
+        let said = |key: &str| Some(text_of(event.get(key))).filter(|text| !text.is_empty());
+        cwd = said("cwd").unwrap_or(std::mem::take(&mut cwd));
+        if preview.is_empty() {
+            preview = asked(&event);
+        }
+        if event["type"] == "custom-title" {
+            given = said("customTitle").unwrap_or(std::mem::take(&mut given));
+        }
+        made = said("aiTitle").unwrap_or(std::mem::take(&mut made));
+    };
+    // A line ends where a new one begins, however that is written.
+    let whole = String::from_utf8_lossy(&bytes);
+    let whole = whole.replace("\r\n", "\n").replace('\r', "\n");
+    for line in whole.split_inclusive('\n').take(HEAD_LINES) {
+        take(line);
+    }
+    let size = bytes.len() as u64;
+    let from = usize::try_from(size.saturating_sub(TAIL_BYTES)).unwrap_or(0);
+    let tail = String::from_utf8_lossy(&bytes[from..]);
+    let mut lines = python::splitlines(&tail);
+    if size > TAIL_BYTES && !lines.is_empty() {
+        lines.remove(0); // the end of a line that began before
+    }
+    for line in lines {
+        take(line);
+    }
+    let id = path.file_stem()?.to_string_lossy().into_owned();
+    let title = if given.is_empty() { made } else { given };
+    Some(json!({
+        "id": id, "mtime": written(path).1, "preview": python::first(&preview, PREVIEW_MOST),
+        "title": python::first(&title, TITLE_MOST), "cwd": cwd,
+    }))
+}
+
+/// The files of a directory, in the order of their names.
+fn files_of(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    paths.sort();
+    paths
+}
+
+/// The moment an index says a session was last written: in seconds or in milliseconds, or
+/// as a date with its time and its zone. What says neither: 0.
+fn moment(entry: &Value) -> i64 {
+    let counted = match &entry["fileMtime"] {
+        Value::Number(number) => number.as_i64().or(number.as_f64().map(|n| n as i64)),
+        _ => None,
+    };
+    match counted.unwrap_or(0) {
+        0 => {
+            let said = text_of(entry.get("modified"));
+            let read = said.parse::<jiff::Timestamp>();
+            read.map_or(0, |moment| moment.as_second())
+        }
+        milliseconds if milliseconds > MOST_SECONDS => milliseconds / 1000,
+        seconds => seconds,
+    }
+}
+
+/// Claude Code's sessions under `projects` (`<home>/.claude/projects`): those of the
+/// project of `cwd`, or of every project, the newest first, `limit` at most. Each as an app
+/// reads it: `id`, `mtime` in seconds, `preview`, `title`, `cwd`.
+pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: usize) -> Vec<Value> {
+    if !projects.is_dir() {
+        return Vec::new();
+    }
+    let own = projects.join(claude_project(cwd));
+    let dirs: Vec<PathBuf> = if all_projects {
+        let all = files_of(projects).into_iter();
+        all.filter(|path| path.is_dir()).collect()
+    } else {
+        vec![own]
+    };
+    let wanted = if cwd.is_empty() {
+        String::new()
+    } else {
+        plain(cwd)
+    };
+    // What the indexes say, in the order they say it. A session named twice is listed by
+    // the newer word of it.
+    let mut listed: Vec<Value> = Vec::new();
+    let mut place: BTreeMap<String, usize> = BTreeMap::new();
+    let mut named: BTreeSet<String> = BTreeSet::new();
+    let mut put = |item: Value, listed: &mut Vec<Value>| {
+        let id = item["id"].as_str().unwrap_or_default().to_string();
+        match place.get(&id) {
+            Some(at) if item["mtime"].as_i64() > listed[*at]["mtime"].as_i64() => {
+                listed[*at] = item
+            }
+            Some(_) => {}
+            None => {
+                place.insert(id, listed.len());
+                listed.push(item);
+            }
+        }
+    };
+    for dir in &dirs {
+        let index = std::fs::read(dir.join("sessions-index.json")).ok();
+        let index = index.and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        let entries = index.as_ref().and_then(|index| index["entries"].as_array());
+        for entry in entries
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.is_object())
+        {
+            let id = text_of(entry.get("sessionId"));
+            if id.is_empty() {
+                continue;
+            }
+            if truthy(entry.get("isSidechain")) {
+                // No session of its own: also not as a transcript the index does not name.
+                named.insert(id);
+                continue;
+            }
+            let declared = PathBuf::from(text_of(entry.get("fullPath")));
+            let beside = dir.join(format!("{id}.jsonl"));
+            if !declared.is_file() && !beside.is_file() {
+                continue;
+            }
+            named.insert(id.clone());
+            let ran_in = text_of(entry.get("projectPath"));
+            let elsewhere = !wanted.is_empty() && !ran_in.is_empty() && plain(&ran_in) != wanted;
+            if !all_projects && elsewhere {
+                continue;
+            }
+            let title = match text_of(entry.get("customTitle")) {
+                title if title.is_empty() => text_of(entry.get("summary")),
+                title => title,
+            };
+            let item = json!({
+                "id": id, "mtime": moment(entry),
+                "preview": python::first(&text_of(entry.get("firstPrompt")), PREVIEW_MOST),
+                "title": python::first(&title, TITLE_MOST), "cwd": ran_in,
+            });
+            put(item, &mut listed);
+        }
+    }
+    // The transcripts no index names, the newest first: an index may be missing, or behind.
+    let mut unnamed: Vec<(Option<SystemTime>, PathBuf)> = Vec::new();
+    for dir in &dirs {
+        for path in files_of(dir) {
+            let transcript = path.extension().is_some_and(|ending| ending == "jsonl");
+            let id = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned());
+            if transcript && path.is_file() && id.is_some_and(|id| !named.contains(&id)) {
+                unnamed.push((written(&path).0, path));
+            }
+        }
+    }
+    unnamed.sort_by(|one, other| other.0.cmp(&one.0).then_with(|| one.1.cmp(&other.1)));
+    for (_, path) in unnamed.into_iter().take(limit) {
+        let Some(item) = read(&path) else {
+            continue;
+        };
+        let ran_in = item["cwd"].as_str().unwrap_or_default();
+        if !all_projects && !wanted.is_empty() && !ran_in.is_empty() && ran_in != wanted {
+            continue;
+        }
+        put(item, &mut listed);
+    }
+    listed.sort_by_key(|item| std::cmp::Reverse(item["mtime"].as_i64().unwrap_or(0)));
+    listed.truncate(limit);
+    listed
+}

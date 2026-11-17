@@ -18,6 +18,7 @@ use clarp_spool::Record;
 
 pub mod claude;
 pub mod codex;
+pub mod past;
 pub mod scripted;
 
 /// The environment variable that tells a tool, its hooks and its skills which agent they work for.
