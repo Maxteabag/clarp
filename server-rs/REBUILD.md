@@ -1031,8 +1031,9 @@ Python Host's, in its words: started, already at it, no such agent, no live sess
 for the tool (Codex, whose `exec` has no command for it, and Antigravity, whose print mode takes twelve
 commands as messages and none for this: measured with agy 1.5.10, where `/compress` went to the model).
 Held through the Host
-with a stand-in that does what the recording shows. Not tried on the installed Host with the real tool
-yet.
+with a stand-in that does what the recording shows, and tried on the Host installed on elitebook with the
+real tool on Sonnet (17 Nov, 16:37: from 31,381 tokens to 8,878, the row compacting meanwhile, the third
+turn knowing what the first two said; `docs/battle-test.md`).
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
