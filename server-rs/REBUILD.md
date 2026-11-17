@@ -1726,20 +1726,25 @@ connection relay under the name the phone is paired with. Each of these is true 
 
 ### Known weaknesses of the Rust Host, to mend
 
-- **Which states of an agent an app is told depends on how its tool's output happens to be read**
-  (found 17 Nov 2026, conformance run 44111344344). An app is told an agent's state (`agent-state`,
-  `agent-activity`) when what there is to read of the tool has been read: the state at the end of a
-  read. A state the agent passed through within one read (using a tool, answering) is not told, and one
-  a read happens to end in is. With a real tool, which takes seconds between one thing and the next,
-  every state is told; with a tool that prints a whole turn in one breath the answer depends on whether
-  the breath is read in one piece. The stand-in of the conformance suite is such a tool: asked after a
-  moment's pause, the Host was already reading when the breath began, read it in two, and told a state
-  it had never told in that scenario before (`tool-turns`: using a tool; `live-items`: answering). The
-  suite now asks this Host without the pause, which hides it and does not mend it. To mend: what is
-  told of an agent's states is to follow from what was written down of the turn (every move the tool
-  made, in order: `Command::TurnMoved` is in the log), not from where a read ended
-  (`clarp-host` `agent.rs`, `show`, which compares the state with the one last told). Then the
-  differences from the Python Host in those two scenarios are registered once, as they then are.
+- **The states a turn passed through are left out when the agent's next turn began in the same
+  breath.** This is what is left of a weakness found on 17 Nov 2026 (conformance run 44111344344):
+  an app was told the state an agent was in when what there was to read of its tool had been
+  read, so a state passed through within one read (using a tool, answering) was not told and one
+  a read happened to end in was. With a real tool, which takes seconds between one thing and the
+  next, every state was told; with a tool that prints a whole turn in one breath the answer
+  depended on whether the breath was read in one piece. Mended the same day: the reading of a
+  turn's spool stops after the record in which the turn moved on to something else, what was
+  read up to there is written down by itself, and how the agent stood then is handed on
+  (`clarp-spool` `Read1.ends`; `clarp-actor` `pump`, `Outputs.passed`); the Host tells each such
+  state, in order, before the state at the end (`clarp-host` `agent.rs`, `show`). What is told
+  follows from what the tool printed. Held through the Host with a stand-in that prints a whole
+  turn with a tool in one write, and in the conformance suite, which asks this Host through the
+  same stand-in as the reference again: three runs with the stand-in's pause and one without gave
+  the same events. Left: where a turn's last states, its end and the beginning of the agent's
+  next turn (a message that had waited) are read in one breath, the end is told and the next
+  turn's states are, and what the turn passed through just before its end is not. To mend by
+  telling an agent's states from the log itself (`Command::TurnMoved` is in it) and not from what
+  one pass of the actor hands on.
 
 ## 8. Roles
 

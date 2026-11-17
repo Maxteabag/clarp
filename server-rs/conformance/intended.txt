@@ -152,18 +152,31 @@ d7ad60d66fcb  speech-in: catalog, of what the Host listens with
 2bd8cf8a3e99  speech-in: engine, of what the Host listens with
 af7214e69d60  speech-in: turn_taking, of what the Host listens with
 
-# A streamed turn, on the older channel. While the stream is read the Python Host tells each
-# phase it goes through as a state of its own: the model's thinking has begun (agent-state with
-# phase thinking, and the activity once more), then its answer (phase responding). The Rust Host
-# tells the state the agent is in when what there is to read has been read. The stand-in prints
-# a whole turn in one breath, so here that is the turn's end; a turn that takes time is told
-# as answering when its answer begins to stream. Four events less, and the numbers of the two
-# after them.
-22ee4b5ac928  live-items: the phases of a streamed turn that was read in one breath are not told after the fact
-a17ab1e29ef6  live-items: the number of the event that says the turn is done
-12cf02cde459  live-items: the same number, as the id of the event on the wire
-63dbe08dc856  live-items: the number of the activity that says the turn is done
-ad6466823c3e  live-items: the same number, as the id of the event on the wire
+# What an agent is doing while its turn runs, on the older channel (`agent-state`,
+# `agent-activity`). The Rust Host tells every state a turn passes through, in order, as the
+# tool's own output says it: thinking, using a tool (with what the tool does), thinking again,
+# answering where the answer is streamed, done. The Python Host learns that Claude Code uses a
+# tool from the hooks its plugin has Claude Code run (`PreToolUse`, `PostToolUse`:
+# plugin/hooks/hooks.json), and the stand-in runs no hooks: of a turn of the stand-in the Python
+# Host tells the beginning and the end, and of a streamed one the phases of the stream. With the
+# real Claude Code both Hosts tell the tools. So the Rust Host has more events here; each run of
+# them is registered as what it is. The events after them stand at later places in their lane,
+# which the suite tells by itself (`its place`, conformance/README.md).
+16ab55c8166e  tool-turns: the five tools of the first turn, each with the thinking before it
+be9938501a25  tool-turns: the five tools of the second turn, each with the thinking after it
+5ec691e52367  past-sessions: the five tools of the turn, each with the thinking before it
+# A streamed turn with two tools. The Python Host tells the first phase of the stream as a
+# state of its own (an `agent-state` that says thinking as the one before it did, and the
+# activity once more), then the answer. The Rust Host does not say again what it has said: it
+# tells the answer when it begins, the two tools with the thinking between them, the thinking
+# after the second and the answer again. The differ pairs the Python Host's second `thinking`
+# with the Rust Host's thinking after the second tool. That one is the turn's own state and no
+# phase of a stream, so its detail names the conversation and where the turn's message came
+# from, and no phase.
+d3fd2f55286e  live-items: answering, then the two tools with the thinking between them
+ec43f007ab53  live-items: the thinking after the second tool: its detail names the conversation
+90f256fd3f66  live-items: the same event: it is no phase of the stream
+822ab15ef3ea  live-items: the same event: it says where the turn's message came from
 
 # Defect R19 of the reference: in the first streamed turn of a conversation, the row the answer
 # was written into while it grew is not the row the conversation keeps. Its live item and its
