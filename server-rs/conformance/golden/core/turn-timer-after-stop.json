@@ -5037,6 +5037,26 @@
    "data": {
     "agent_id": "<id:2>",
     "detail": {
+     "message": "Turn stopped",
+     "source": "user_stop",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    },
+    "event_id": "<eid:agent-state#1@7da00e>",
+    "kind": "interrupted",
+    "persona": "Claire",
+    "session": "claire",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@7da00e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
      "origin": "user",
@@ -5087,40 +5107,6 @@
      "stop_actor_verified": false,
      "stop_reason": ""
     },
-    "event_id": "<eid:agent-state#1@7da00e>",
-    "kind": "interrupted",
-    "persona": "Claire",
-    "session": "claire",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@7da00e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:2>",
-    "event_id": "<eid:queue-updated#1@4e1693>",
-    "queue_depth": 0,
-    "queue_paused": true,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@4e1693>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:2>",
-    "detail": {
-     "message": "Turn stopped",
-     "source": "user_stop",
-     "stop_actor": "user",
-     "stop_actor_verified": false,
-     "stop_reason": ""
-    },
     "event_id": "<eid:agent-state#3@0952e1>",
     "kind": "interrupted",
     "persona": "Claire",
@@ -5157,6 +5143,20 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "event_id": "<eid:queue-updated#1@4e1693>",
+    "queue_depth": 0,
+    "queue_paused": true,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@4e1693>"
   },
   {
    "data": {

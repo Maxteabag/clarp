@@ -2077,7 +2077,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 6,
+    "latest_revision": 5,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -2117,14 +2117,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "msg-<id:4>",
+      "id": "live-<id:4>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 2,
+      "revision": 5,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -2133,7 +2133,15 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:2>"
+      "trace_id": "<id:2>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:2>",
+       "worked_ms": "<duration>"
+      }
      }
     ]
    },
@@ -2331,7 +2339,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 6,
+      "head_revision": 5,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -2344,7 +2352,7 @@
       "last_activity": "<time>",
       "last_completed_message": "Claude replay reply: synthetic heartbeat alfa",
       "last_message": "Claude replay reply: synthetic heartbeat alfa",
-      "last_message_id": "msg-<id:4>",
+      "last_message_id": "live-<id:4>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -4058,7 +4066,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:7>",
+    "source_message_id": "live-<id:4>",
     "type": "user-notification",
     "unread": true
    },

@@ -1849,6 +1849,21 @@
   {
    "data": {
     "agent_id": "<id:7>",
+    "client_msg_id": "hotel",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -1889,66 +1904,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "client_msg_id": "hotel",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "detail": {
-     "dispatch": "clarp",
-     "duration_ms": "<duration>",
-     "origin": "user",
-     "tokens_in": 5,
-     "tokens_out": 7,
-     "trace_id": "<id:1>"
-    },
-    "event_id": "<eid:agent-state#3@0952e1>",
-    "kind": "done",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#3@0952e1>"
-  },
-  {
-   "data": {
-    "action": "done",
-    "agent_id": "<id:7>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#4@0952e1>",
-    "file_path": "",
-    "kind": "done",
-    "persona": "Claire",
-    "phase": "done",
-    "session": "claire",
-    "started_at_ms": null,
-    "state": "idle",
-    "status": "ok",
-    "summary": "Done",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": null,
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#4@0952e1>"
   },
   {
    "data": {
@@ -1994,24 +1949,47 @@
   {
    "data": {
     "agent_id": "<id:7>",
-    "badge": true,
-    "cause_message_id": "u-hotel",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:8>",
-    "origin": "user",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "user",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
     "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic running task",
-    "push": true,
-    "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:4>",
-    "type": "user-notification",
-    "unread": true
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
    },
    "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:7>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
   },
   {
    "data": {
@@ -2101,6 +2079,28 @@
    },
    "event": null,
    "id": "<eid:agent-activity#8@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "badge": true,
+    "cause_message_id": "u-hotel",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic running task",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "live-<id:4>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {

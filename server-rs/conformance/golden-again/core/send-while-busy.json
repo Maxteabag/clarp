@@ -145,6 +145,28 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
+      "trace_id": "<id:2>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:3>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 0,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: synthetic replacement india",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
       "trace_id": "<id:2>",
       "turn": {
        "ended_at_ms": "<time>",
@@ -226,7 +248,7 @@
       "last_activity": "<time>",
       "last_completed_message": "Claude replay reply: synthetic replacement india",
       "last_message": "Claude replay reply: synthetic replacement india",
-      "last_message_id": "<row:2>",
+      "last_message_id": "<row:3>",
       "last_turn_end": "<time>",
       "latest_state": "done",
       "latest_state_ts": "<time>",
@@ -1809,6 +1831,21 @@
   {
    "data": {
     "agent_id": "<id:4>",
+    "client_msg_id": "hotel",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:4>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -1826,21 +1863,6 @@
    },
    "event": null,
    "id": "<eid:agent-state#1@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:4>",
-    "client_msg_id": "hotel",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -2066,7 +2088,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "<row:2>",
+    "source_message_id": "<row:3>",
     "type": "user-notification",
     "unread": true
    },
