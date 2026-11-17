@@ -341,29 +341,26 @@ def activate_accounting() -> int:
     return int(row["value"])
 
 
-def record_ended_turn(agent_id: str, trace_id: str, last_answer: str) -> None:
+def record_ended_turn(agent_id: str, trace_id: str, last_answer: str, *,
+                      origin: str, turn: dict | None) -> None:
     """First authoritative reading wins, with claim and counter in one commit.
 
     Both writers call AFTER their message transaction commits. Only Host-owned,
     successfully settled heartbeat turns qualify; the interrupted-failure retry
-    path has its own existing accounting. Neither outcome also seals the turn.
+    path has its own existing accounting. The writers pass the provenance and
+    immutable Host turn snapshot they already read; accounting never searches
+    message or turn history. Neither outcome also seals the turn. Conflict
+    receipts use a separate key prefix and outcome, never a turn lookup key.
     """
-    if not agent_id or not trace_id:
+    if (origin != "heartbeat" or not agent_id or not trace_id or turn is None
+            or turn["settled_at"] is None or turn["outcome"] != "completed"):
         return
     try:
         database = conn()
         if database.in_transaction:
             raise RuntimeError("heartbeat accounting requires committed messages")
         activation = activate_accounting()
-        turn = database.execute(
-            "SELECT started_at,settled_at,outcome FROM turns WHERE agent_id=? AND trace_id=? "
-            "ORDER BY started_at DESC LIMIT 1", (agent_id, trace_id)).fetchone()
-        if (turn is None or int(turn["started_at"]) < activation
-                or turn["settled_at"] is None or turn["outcome"] != "completed"):
-            return
-        if database.execute("SELECT 1 FROM messages WHERE agent_id=? AND trace_id=? "
-                            "AND role='user' AND origin='heartbeat' LIMIT 1",
-                            (agent_id, trace_id)).fetchone() is None:
+        if int(turn["started_at"]) < activation:
             return
         skip, clean = strip_heartbeat_ack(last_answer)
         outcome = "noop" if skip else (
@@ -374,46 +371,57 @@ def record_ended_turn(agent_id: str, trace_id: str, last_answer: str) -> None:
         if existing is not None and existing["outcome"] == outcome:
             return
         conflict = None
-        # Serialize the cache update with the commit, preserving volatile flood
-        # history. Never publish an uncommitted streak into the process cache.
+        # SQLite may wait for another writer. Status readers share the cache
+        # mutex, so no writer admission or transaction runs under that mutex.
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            inserted = database.execute(
+                "INSERT OR IGNORE INTO heartbeat_accounting(accounting_key,agent_id,outcome,counted_at) "
+                "VALUES(?,?,?,?)",
+                (key, agent_id, outcome, now_ms())).rowcount == 1
+            if inserted and outcome != "neither":
+                threshold = _dormant_after_noops()
+                database.execute(
+                    "INSERT INTO heartbeat_state(agent_id,last_started,noop_streak,dormant,"
+                    "last_wake_signal_ms,updated_at) VALUES(?,0,?,?,0,?) "
+                    "ON CONFLICT(agent_id) DO UPDATE SET "
+                    "noop_streak=CASE WHEN ?='noop' THEN noop_streak+1 ELSE 0 END,"
+                    "dormant=CASE WHEN ?='activity' THEN 0 WHEN ?>0 AND noop_streak+1>=? "
+                    "THEN 1 ELSE dormant END,updated_at=excluded.updated_at",
+                    (agent_id, 1 if outcome == "noop" else 0,
+                     int(outcome == "noop" and threshold == 1), now_ms(),
+                     outcome, outcome, threshold, threshold))
+            elif not inserted:
+                first = database.execute("SELECT outcome FROM heartbeat_accounting "
+                                         "WHERE accounting_key=?", (key,)).fetchone()["outcome"]
+                if first != outcome:
+                    logged = database.execute(
+                        "INSERT OR IGNORE INTO heartbeat_accounting "
+                        "(accounting_key,agent_id,outcome,counted_at) VALUES(?,?,?,?)",
+                        (f"heartbeat-conflict:{key}", agent_id, "conflict", now_ms()))
+                    if logged.rowcount == 1:
+                        conflict = f"agent={agent_id} turn={trace_id} first={first} later={outcome}"
+            snapshot = database.execute("SELECT noop_streak,dormant FROM heartbeat_state "
+                                        "WHERE agent_id=?", (agent_id,)).fetchone()
+            database.execute("COMMIT")
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
         with _STATE_LOCK:
-            database.execute("BEGIN IMMEDIATE")
-            try:
-                inserted = database.execute(
-                    "INSERT OR IGNORE INTO heartbeat_accounting(accounting_key,agent_id,outcome,counted_at) "
-                    "VALUES(?,?,?,?)",
-                    (key, agent_id, outcome, now_ms())).rowcount == 1
-                if inserted and outcome != "neither":
-                    threshold = _dormant_after_noops()
-                    database.execute(
-                        "INSERT INTO heartbeat_state(agent_id,last_started,noop_streak,dormant,"
-                        "last_wake_signal_ms,updated_at) VALUES(?,0,?,?,0,?) "
-                        "ON CONFLICT(agent_id) DO UPDATE SET "
-                        "noop_streak=CASE WHEN ?='noop' THEN noop_streak+1 ELSE 0 END,"
-                        "dormant=CASE WHEN ?='activity' THEN 0 WHEN ?>0 AND noop_streak+1>=? "
-                        "THEN 1 ELSE dormant END,updated_at=excluded.updated_at",
-                        (agent_id, 1 if outcome == "noop" else 0,
-                         int(outcome == "noop" and threshold == 1), now_ms(),
-                         outcome, outcome, threshold, threshold))
-                elif not inserted:
-                    first = database.execute("SELECT outcome FROM heartbeat_accounting "
-                                             "WHERE accounting_key=?", (key,)).fetchone()["outcome"]
-                    if first != outcome:
-                        logged = database.execute(
-                            "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
-                            (f"heartbeat.accounting_conflict:{key}", f"{first}/{outcome}", now_ms()))
-                        if logged.rowcount == 1:
-                            conflict = f"agent={agent_id} turn={trace_id} first={first} later={outcome}"
-                snapshot = database.execute("SELECT noop_streak,dormant FROM heartbeat_state "
-                                            "WHERE agent_id=?", (agent_id,)).fetchone()
-                database.execute("COMMIT")
-            except BaseException:
-                if database.in_transaction:
-                    database.execute("ROLLBACK")
-                raise
             cached = _STATE_BY_AGENT.get(agent_id)
-            if cached is not None and snapshot is not None:
-                cached.noop_streak, cached.dormant = int(snapshot["noop_streak"]), bool(snapshot["dormant"])
+            if cached is not None:
+                # Another counter can commit and publish before this one gets
+                # the mutex. Re-read the committed row instead of publishing
+                # our older transaction's snapshot over that newer cache.
+                latest = database.execute("SELECT noop_streak,dormant FROM heartbeat_state "
+                                          "WHERE agent_id=?", (agent_id,)).fetchone()
+                if latest is not None:
+                    cached.noop_streak = int(latest["noop_streak"])
+                    cached.dormant = bool(latest["dormant"])
+        if inserted and outcome == "noop":
+            log("heartbeatNoop", f"agent={agent_id} streak={int(snapshot['noop_streak'])} "
+                f"dormant={bool(snapshot['dormant'])}")
         if conflict is not None:
             log("heartbeatAccountingConflict", conflict)
     except Exception as exc:  # noqa: BLE001 - a derived count cannot break message delivery

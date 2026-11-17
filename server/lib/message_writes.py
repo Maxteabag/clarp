@@ -848,23 +848,29 @@ def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_i
             raise _CheckpointCleanupUncertain(primary, cleanup) from cleanup
 
 
-def _account_heartbeat_turn(agent_id: str, trace: str, answer: str | None = None) -> None:
+def _account_heartbeat_turn(agent_id: str, trace: str, answer: str | None = None, *,
+                            turn: dict, backend_session_id: str) -> None:
     # An AGY terminal payload owns its text even when the transcript differs.
     # It commits before the Host settles; restamp calls here after settlement.
+    if turn["settled_at"] is None or turn["outcome"] != "completed":
+        return
     terminal = conn().execute(
         "SELECT a.terminal_status,m.text FROM agy_turn_authority a LEFT JOIN messages m "
-        "ON m.message_id=a.authoritative_message_id WHERE a.agent_id=? AND a.trace_id=? "
-        "ORDER BY a.updated_at DESC LIMIT 1", (agent_id, trace)).fetchone()
+        "ON m.message_id=a.authoritative_message_id WHERE a.agent_id=? "
+        "AND a.backend_session_id=? AND a.trace_id=?",
+        (agent_id, backend_session_id, trace)).fetchone()
     if terminal is not None and terminal["terminal_status"] in {"success", "empty"}:
         answer = str(terminal["text"] or "")
     if answer is not None:
-        heartbeat.record_ended_turn(agent_id, trace, answer)
+        heartbeat.record_ended_turn(agent_id, trace, answer, origin="heartbeat", turn=turn)
 
 
 def _account_imported_heartbeats(writer, agent_id: str) -> None:
     for trace, answer in writer.heartbeat_answers.items():
-        if trace in writer.heartbeat_completed:
-            _account_heartbeat_turn(agent_id, trace, answer)
+        if (trace in writer.heartbeat_completed
+                and (answer.strip() or trace in writer.heartbeat_boundaries)):
+            _account_heartbeat_turn(agent_id, trace, answer,
+                turn=writer.heartbeat_completed[trace], backend_session_id=writer.heartbeat_session)
 
 
 def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
@@ -1208,6 +1214,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     """
     out: list[dict[str, Any]] = []
     database.heartbeat_answers = {}
+    database.heartbeat_boundaries = set()
+    database.heartbeat_session = backend_session_id
     if out_seqs is not None:
         out_seqs.clear()
     latest_revision = 0
@@ -1216,9 +1224,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     if not hasattr(database, "heartbeat_completed"):
         # Revalidation may see a turn settle while this import waited for its
         # writer. That cannot certify the earlier partial transcript snapshot.
-        database.heartbeat_completed = frozenset(
-            row["trace_id"] for row in turn_index._rows
-            if row["settled_at"] is not None and row["outcome"] == "completed")
+        database.heartbeat_completed = {
+            row["trace_id"]: dict(row) for row in turn_index._rows
+            if row["settled_at"] is not None and row["outcome"] == "completed"}
     touched_traces: set[str] = set()
     newest_trace = ""
     provenance = _ClientProvenance(database, agent_id, backend_session_id,
@@ -1446,6 +1454,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 )
                 if current_origin == "heartbeat" and current_request_trace:
                     database.heartbeat_answers.setdefault(current_request_trace, "")
+                    database.heartbeat_boundaries.add(current_request_trace)
                 # Nothing is written at this position, so whatever an earlier
                 # import left here would outlive it. When the parser starts
                 # hiding a message every later turn shifts down, and the old
@@ -1496,6 +1505,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if row.row_trace and origin == "heartbeat":
             answers = database.heartbeat_answers
             answers.setdefault(row.row_trace, "")
+            if role == "user":
+                database.heartbeat_boundaries.add(row.row_trace)
             raw = strip_hidden_blocks(str(turn.get("text") or ""))
             if role == "assistant" and raw.strip():
                 answers[row.row_trace] = raw
@@ -1668,7 +1679,7 @@ def turn_stamp(database, agent_id: str, trace_id: str):
         """SELECT started_at, settled_at, outcome FROM turns WHERE agent_id = ? AND trace_id = ?
             ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
     rows = database.execute(
-        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json
+        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json, origin
              FROM messages WHERE agent_id = ? AND trace_id = ?
             ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
     if not rows:
@@ -1684,7 +1695,8 @@ def turn_stamp(database, agent_id: str, trace_id: str):
     return turn, rows, summary
 
 
-def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
+def stamp_turn(database, agent_id: str, trace_id: str, next_revision, *,
+               heartbeat_turns: dict | None = None) -> int:
     from . import message_turns
     """Re-stamp one turn's rows (inside the caller's write transaction).
     Returns the highest revision written, 0 when nothing changed."""
@@ -1694,6 +1706,11 @@ def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
     if stamped is None:
         return 0
     turn, rows, summary = stamped
+    if heartbeat_turns is not None and turn is not None:
+        for row in rows:
+            if row["origin"] == "heartbeat":
+                heartbeat_turns[trace_id] = (dict(turn), row["backend_session_id"])
+                break
     outcome = turn["outcome"] if turn is not None else None
     highest = 0
     last = rows[-1]["message_id"]
@@ -1732,10 +1749,12 @@ def restamp_turn(agent_id: str, trace_id: str) -> None:
     if own:
         database.execute("BEGIN IMMEDIATE")
     try:
-        stamp_turn(database, agent_id, trace_id, _next_revision)
+        heartbeat_turns = {}
+        stamp_turn(database, agent_id, trace_id, _next_revision, heartbeat_turns=heartbeat_turns)
         if own:
             database.execute("COMMIT")
-            _account_heartbeat_turn(agent_id, trace_id)
+            for trace, (turn, session) in heartbeat_turns.items():
+                _account_heartbeat_turn(agent_id, trace, turn=turn, backend_session_id=session)
     except Exception:
         if own and database.in_transaction:
             database.execute("ROLLBACK")
