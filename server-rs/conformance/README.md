@@ -15,8 +15,8 @@ they are; what is new is a corpus that only does what a client can do, and a sec
 |---|---|
 | `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would. A step sends JSON, or a body as it is (`raw`: a file an agent publishes or a user attaches); it may say when it is sent (`body_now`: an app's report of itself) and keep something of its answer for a later step (`save`: a cursor) |
 | `contract_plants.py` | Deliberate changes to a copy of the Python server that the suite must see. A reviewer adds their own |
-| `conform.py` | The driver: `record`, `plants`, `compare`, `cross` |
-| `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand |
+| `conform.py` | The driver: `record`, `plants`, `compare`, `cross`; `selftest` tries its own rule for a reference that wavers, and starts no Host |
+| `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand. `golden-more/` is beside them when a run recorded a scenario a third time (below): it is committed with them, and removed when the next run made none |
 | `intended.txt` | Ids of differences that are meant to be there (the reasoning is in `../docs/differences.md`) |
 
 ## Running it
@@ -68,6 +68,25 @@ decided place by place and not scenario by scenario (run 43703416886: in `turn-t
 Python Host showed the agent's model in one recording and none in the other, and wrote two
 rows in either order).
 
+One defect the two recordings can share. In the first turn of a conversation the reference
+sometimes replaces the row a reply was written into while the turn ran by the transcript's row:
+the reply's notification then names a row the conversation does not have, and the turn's summary
+is on no row (defect R19 in `../docs/reference-defects.md`; in some runs, in some scenarios).
+Two recordings that both have it agree with each other, and neither is the answer the reference
+gives when it does not: run 43985072956 ended with two differences in `who-is-told` for that
+reason alone, where the run before it, on the same crates and the same corpus, had none. A
+recording says of itself that it has the defect: one of its notifications names no row though
+the conversation, as that capture read it, has the answer to the same message. No other Host is
+looked at to tell it. So a scenario whose every recording carries that mark is recorded again,
+up to three times, and the first answer without the mark is kept as one more recording
+(`golden-more/`): one more of the ways the reference answers, held to the same rule as the
+other two. Where the mark is there every time, that is how the reference answers, nothing is
+added, and the differences are differences. The report says which it was. The rule is tried on
+captures made for it before every run that records (`conform.py selftest`: a sound recording is
+not marked, one that never read the answer is not marked, a sound third answer is kept and
+nothing asked after it, a mark every time adds nothing, a try that did not run to its end is no
+answer, and a scenario with one sound recording is not recorded again).
+
 ## What is compared as what a client may rely on
 
 Some things are each Host's own choice, and comparing their values would only compare the
@@ -91,6 +110,6 @@ no other scenario reads it while an agent is busy.
 
 ## When the Python Host changes
 
-`golden/` and `golden-again/` are the Python Host at the commit the workflow ran on. After a
+`golden/` and `golden-again/` (and `golden-more/`, when a run made one) are the Python Host at the commit the workflow ran on. After a
 change to the contract (a bump of `HOST_CONTRACT`), or to the corpus or the view in
 `conform.py`, run the workflow again and commit what it recorded.
