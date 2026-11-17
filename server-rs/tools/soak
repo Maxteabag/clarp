@@ -328,13 +328,18 @@ def restart(args) -> int:
         print(f"restart: {why} {detail}".rstrip(), flush=True)
         return 3
 
-    # The agents of the exercise: made once, kept for the next one.
+    # The agents of the exercise are made anew each time. A tool that continues a thread is
+    # sent the whole thread again with every call, so agents kept from one exercise to the next
+    # cost more with each: the three Codex threads of seventeen exercises had taken 2.5 to 3.8
+    # million input tokens each, of an account that then ran out.
     there = snapshot(host)
     if not there and host.ask("GET", "/server-info")[0] != 200:
         return gave_up("host_unreachable")
     for i, session in enumerate(sessions, 1):
         if session in there:
-            continue
+            status, said = host.ask("DELETE", f"/agents/{session}")
+            if status != 200:
+                return gave_up("agent_not_removed", f"{session}: {status} {said}")
         named = f"Restart {i}" if args.backend == "claude" else f"Restart {args.backend.capitalize()} {i}"
         asked_for = {"name": named, "session": session, "backend": args.backend, "cwd": str(cwd)}
         if model:

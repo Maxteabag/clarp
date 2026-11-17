@@ -580,12 +580,40 @@ def run() -> dict:
     sys.path.insert(0, str(REPO / 'server'))
     from lib import codex_tool_cells, codex_transcript
 
+    # The one thing the Rust Host does otherwise (defect R41 of the reference): a cell made of an
+    # older record keeps the marks of that record when what came back for its call is put on it,
+    # so that it is still left out where the same turn has the item too. The Python Host makes
+    # the cell anew there and loses the marks: the cell of a call then stands beside the cells of
+    # what the call ran. Mended here in the reference's own function, to say what is meant.
+    as_it_is = codex_transcript._attach_output
+
+    def mended(turns, call_id, output):
+        marks = {}
+        for turn in turns:
+            for cell in turn.get('display_cells') or []:
+                if '_legacy_turn_id' in cell:
+                    marks[id(turn), cell.get('id')] = (cell['_legacy_turn_id'], cell.get('_legacy_category'))
+        as_it_is(turns, call_id, output)
+        for turn in turns:
+            for cell in turn.get('display_cells') or []:
+                held = marks.get((id(turn), cell.get('id')))
+                if held and '_legacy_turn_id' not in cell:
+                    cell['_legacy_turn_id'], cell['_legacy_category'] = held
+
     out = []
     for name, what, lines in ROLLOUTS:
         wrote = [line if isinstance(line, str) else json.dumps(line) for line in lines]
         path = root / f'{name}.jsonl'
         path.write_text('\n'.join(wrote) + '\n')
-        out.append({'name': name, 'what': what, 'lines': wrote, 'turns': codex_transcript.parse_turns(path)})
+        row = {'name': name, 'what': what, 'lines': wrote, 'turns': codex_transcript.parse_turns(path)}
+        codex_transcript._attach_output = mended
+        try:
+            otherwise = codex_transcript.parse_turns(path)
+        finally:
+            codex_transcript._attach_output = as_it_is
+        if otherwise != row['turns']:
+            row['turns_mended'] = otherwise
+        out.append(row)
     ids = [{'of': text, 'id': codex_tool_cells._safe_id('cell', text)} for text in IDS]
     return {'rollouts': out, 'ids': ids}
 
@@ -608,10 +636,14 @@ def main() -> int:
         out.extend('    ' + json.dumps(line, ensure_ascii=True) + (',' if n < len(row['lines']) - 1 else '')
                    for n, line in enumerate(row['lines']))
         out.append('   ],')
-        out.append('   "turns": [')
-        out.extend('    ' + json.dumps(turn, ensure_ascii=True) + (',' if n < len(row['turns']) - 1 else '')
-                   for n, turn in enumerate(row['turns']))
-        out.append('   ]}' + (',' if number < len(rows) - 1 else ''))
+        for key in ('turns', 'turns_mended'):
+            if key not in row:
+                continue
+            out.append(f'   "{key}": [')
+            out.extend('    ' + json.dumps(turn, ensure_ascii=True) + (',' if n < len(row[key]) - 1 else '')
+                       for n, turn in enumerate(row[key]))
+            out.append('   ]' + (',' if key == 'turns' and 'turns_mended' in row else ''))
+        out.append('  }' + (',' if number < len(rows) - 1 else ''))
     out.append(' ],')
     out.append(' "ids": [')
     ids = told['ids']
@@ -625,6 +657,9 @@ def main() -> int:
     print(f'{OUT.relative_to(REPO)}: ' + '; '.join(
         f'{row["name"]}: {len(row["lines"])} lines, {len(row["turns"])} turns, {cells(row)} cells, {tools(row)} tools'
         for row in rows))
+    print('mended (R41): ' + '; '.join(f'{row["name"]}: {cells(row)} cells as it is, '
+                                       f'{sum(len(t.get("display_cells") or []) for t in row["turns_mended"])} mended'
+                                       for row in rows if 'turns_mended' in row))
     print(f'totals: {len(rows)} rollouts, {sum(len(row["lines"]) for row in rows)} lines, '
           f'{sum(len(row["turns"]) for row in rows)} turns, {sum(cells(row) for row in rows)} cells, '
           f'{sum(tools(row) for row in rows)} tools, {len(ids)} ids')
