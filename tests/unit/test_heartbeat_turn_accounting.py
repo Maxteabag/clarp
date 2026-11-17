@@ -20,14 +20,14 @@ def _activate(monkeypatch, at=1000):
     scheduler.stop()
 
 
-def _turn(monkeypatch, *, start=2000, trace='heartbeat-1'):
+def _turn(monkeypatch, *, start=2000, trace='heartbeat-1', origin='heartbeat'):
     aid = agents.create_agent(persona='Nia', voice_id='v', cwd='/tmp', session='nia')
     agents.start_runtime(aid, 'nia')
     agents.open_turn(agent_id=aid, source='pwa', trace_id=trace)
     db.conn().execute('UPDATE turns SET started_at=? WHERE agent_id=?', (start, aid))
     message_store.record_user_message(agent_id=aid, backend_session_id='b-1',
-        client_msg_id='prompt', text=heartbeat.HEARTBEAT_PROMPT,
-        origin='heartbeat', trace_id=trace)
+        client_msg_id='prompt', text=heartbeat.HEARTBEAT_PROMPT if origin == 'heartbeat' else 'Ordinary request',
+        origin=origin, trace_id=trace)
     turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED, {'trace_id': trace})
     return aid
 
@@ -45,14 +45,17 @@ def _end(aid):
     turn_lifecycle.transition(aid, TurnEvent.PROCESS_EXITED_OK, {'trace_id': 'heartbeat-1'})
 
 
-def _live(aid, answer):
+def _live(aid, answer, trace='heartbeat-1'):
+    turn = db.conn().execute('SELECT started_at,settled_at,outcome FROM turns '
+        'WHERE agent_id=? AND trace_id=?', (aid, trace)).fetchone()
     message_store.apply_final_assistant_side_effects(agent_id=aid, backend_session_id='b-1',
-        trace_id='heartbeat-1', row={'id': 'terminal', 'text': answer})
+        trace_id=trace, row={'id': 'terminal', 'text': answer, '_heartbeat_turn': dict(turn)})
 
 
 def _ledger(aid):
     return [tuple(r) for r in db.conn().execute(
-        'SELECT accounting_key,outcome FROM heartbeat_accounting WHERE agent_id=?', (aid,))]
+        "SELECT accounting_key,outcome FROM heartbeat_accounting WHERE agent_id=? "
+        "AND outcome IN ('noop','activity','neither')", (aid,))]
 
 
 def _streak(aid):
@@ -292,8 +295,7 @@ def test_ended_noop_reaches_dormancy_and_activity_resets_it(monkeypatch, thresho
         origin='heartbeat', trace_id='heartbeat-2')
     turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED, {'trace_id': 'heartbeat-2'})
     turn_lifecycle.transition(aid, TurnEvent.PROCESS_EXITED_OK, {'trace_id': 'heartbeat-2'})
-    message_store.apply_final_assistant_side_effects(agent_id=aid, backend_session_id='b-1',
-        trace_id='heartbeat-2', row={'id': 'terminal-2', 'text': 'Fixed the branch.'})
+    _live(aid, 'Fixed the branch.', trace='heartbeat-2')
     assert _streak(aid) == 0
     assert heartbeat._state_for(aid).dormant is False
 
