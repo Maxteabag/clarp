@@ -705,6 +705,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
         if database.in_transaction:
             database.execute("COMMIT")
         recover()
+        _account_imported_heartbeats(writer, agent_id)
         return out
     except _WriteNeeded:
         if database.in_transaction:
@@ -716,7 +717,9 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             database.execute("ROLLBACK")
         raise
     prepared = prelude.for_pass()
+    completed = writer.heartbeat_completed
     writer = _ImportWriter(database, locked=True)
+    writer.heartbeat_completed = completed
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
         out = _store_transcript_turns_txn(
@@ -728,6 +731,7 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             _write_checkpoint(writer, database, on_stored, captured)
         writer.finish()
         recover(writer)
+        _account_imported_heartbeats(writer, agent_id)
         return out
     except _CheckpointCleanupUncertain:
         raise  # never turn cleanup uncertainty into a whole-import SQL retry
@@ -842,6 +846,25 @@ def _recertify_full_checkpoint(database, binding, *, agent_id, backend_session_i
                 raise cleanup from primary
             # SQLITE_BUSY must not authorize replay of committed products.
             raise _CheckpointCleanupUncertain(primary, cleanup) from cleanup
+
+
+def _account_heartbeat_turn(agent_id: str, trace: str, answer: str | None = None) -> None:
+    # An AGY terminal payload owns its text even when the transcript differs.
+    # It commits before the Host settles; restamp calls here after settlement.
+    terminal = conn().execute(
+        "SELECT a.terminal_status,m.text FROM agy_turn_authority a LEFT JOIN messages m "
+        "ON m.message_id=a.authoritative_message_id WHERE a.agent_id=? AND a.trace_id=? "
+        "ORDER BY a.updated_at DESC LIMIT 1", (agent_id, trace)).fetchone()
+    if terminal is not None and terminal["terminal_status"] in {"success", "empty"}:
+        answer = str(terminal["text"] or "")
+    if answer is not None:
+        heartbeat.record_ended_turn(agent_id, trace, answer)
+
+
+def _account_imported_heartbeats(writer, agent_id: str) -> None:
+    for trace, answer in writer.heartbeat_answers.items():
+        if trace in writer.heartbeat_completed:
+            _account_heartbeat_turn(agent_id, trace, answer)
 
 
 def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
@@ -991,6 +1014,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
             _write_checkpoint(writer, database, on_stored, captured)
         if database.in_transaction:
             database.execute("COMMIT")
+        _account_imported_heartbeats(writer, agent_id)
         return out
     except _WriteNeeded:
         if database.in_transaction:
@@ -1000,8 +1024,10 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
             database.execute("ROLLBACK")
         raise
     prepared = prelude.for_pass()
+    completed = writer.heartbeat_completed
     writer = _TailWriter(database) if yield_after_first_write \
         else _ImportWriter(database, locked=True)
+    writer.heartbeat_completed = completed
     try:
         prepared = _revalidate_import_prelude(writer, agent_id, backend_session_id, prepared)
         guard(prepared)
@@ -1013,6 +1039,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
         if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
         writer.finish()
+        _account_imported_heartbeats(writer, agent_id)
         return out
     except Exception:
         if database.in_transaction:
@@ -1180,11 +1207,18 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     ``start_seq + len(turns)`` turns in all.
     """
     out: list[dict[str, Any]] = []
+    database.heartbeat_answers = {}
     if out_seqs is not None:
         out_seqs.clear()
     latest_revision = 0
     prelude = prelude or _prepare_import_prelude(database, agent_id, backend_session_id, turns)
     turn_index, phases = prelude.turn_index, prelude.phases
+    if not hasattr(database, "heartbeat_completed"):
+        # Revalidation may see a turn settle while this import waited for its
+        # writer. That cannot certify the earlier partial transcript snapshot.
+        database.heartbeat_completed = frozenset(
+            row["trace_id"] for row in turn_index._rows
+            if row["settled_at"] is not None and row["outcome"] == "completed")
     touched_traces: set[str] = set()
     newest_trace = ""
     provenance = _ClientProvenance(database, agent_id, backend_session_id,
@@ -1360,14 +1394,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 current_heartbeat_key = ""
         elif role == "assistant":
             text = strip_hidden_blocks(text)
-            heartbeat_accounting = ""
             # Each token counts only in its own automation's turn (AUT-07).
             skip, text = origins.ack_for_origin(
                 heartbeat.strip_heartbeat_ack(text), text, token=heartbeat.HEARTBEAT_OK,
                 origin=current_origin, own="heartbeat")
             if skip:
-                if current_origin == "heartbeat":
-                    heartbeat_accounting = "noop"
                 text = "Heartbeat check: no action needed."
             # The probe only transforms; the locked pass records, once.
             skip, text = dreaming.process_assistant_text(
@@ -1381,18 +1412,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 if database.locked and current_origin == "leader_tick":
                     team_leader.record_leader_noop(agent_id)
                 text = "Leader check: no action needed."
-            if (
-                current_origin == "heartbeat"
-                and not heartbeat_accounting
-                and not heartbeat.is_neutral_heartbeat_status(text)
-            ):
-                heartbeat_accounting = "activity"
             if said is not None and text != str(turn.get("text") or ""):
                 # Stored under other words than the transcript's: a reply
                 # that takes a live row over is matched by these.
                 said.append((reply_trace, _strip_voice_markup(text)))
-        else:
-            heartbeat_accounting = ""
         # A user turn already owned by a durable client row → don't import a
         # second copy; the client row stands in for it (matched by send order).
         if role == "user" and turn.get("id") is None:
@@ -1421,6 +1444,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 current_heartbeat_key = (
                     client_msg_id if current_origin == "heartbeat" else ""
                 )
+                if current_origin == "heartbeat" and current_request_trace:
+                    database.heartbeat_answers.setdefault(current_request_trace, "")
                 # Nothing is written at this position, so whatever an earlier
                 # import left here would outlive it. When the parser starts
                 # hiding a message every later turn shifts down, and the old
@@ -1468,12 +1493,12 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             # the whole transcript, and an untouched turn's summary stands.
             touched_traces.add(row.row_trace)
         latest_revision = max(latest_revision, revision)
-        if role == "assistant" and not unchanged and database.locked:
-            if heartbeat_accounting == "noop":
-                heartbeat.record_heartbeat_noop_once(agent_id, current_heartbeat_key)
-            elif heartbeat_accounting == "activity":
-                heartbeat.record_heartbeat_activity_once(
-                    agent_id, current_heartbeat_key)
+        if row.row_trace and origin == "heartbeat":
+            answers = database.heartbeat_answers
+            answers.setdefault(row.row_trace, "")
+            raw = strip_hidden_blocks(str(turn.get("text") or ""))
+            if role == "assistant" and raw.strip():
+                answers[row.row_trace] = raw
         if role == "assistant" and database.locked:
             trace_id = str(turn.get("trace_id") or "")
             team_store.capture_assistant_message(
@@ -1710,6 +1735,7 @@ def restamp_turn(agent_id: str, trace_id: str) -> None:
         stamp_turn(database, agent_id, trace_id, _next_revision)
         if own:
             database.execute("COMMIT")
+            _account_heartbeat_turn(agent_id, trace_id)
     except Exception:
         if own and database.in_transaction:
             database.execute("ROLLBACK")

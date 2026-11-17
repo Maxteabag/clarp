@@ -242,120 +242,44 @@ def test_noop_streak_survives_scheduler_restart(monkeypatch):
     assert reloaded.dormant is True
 
 
-def test_transcript_replay_accumulates_noop_streak_once_per_new_turn(monkeypatch):
+def test_unattributed_historical_heartbeat_replay_never_changes_the_streak(monkeypatch):
     _heartbeat_test_env(monkeypatch, dormant_after=3)
     aid = _agent("domi")
-    bsid = "backend-replay"
-    turns = [
-        {"role": "user", "text": "What is the plan?", "timestamp": "1"},
-        {"role": "assistant", "text": "We should keep the scope tight.", "timestamp": "2"},
-    ]
-    noop_calls: list[str] = []
-    activity_calls: list[str] = []
-    original_noop = heartbeat._record_heartbeat_noop  # noqa: SLF001
-    original_activity = heartbeat._record_heartbeat_activity  # noqa: SLF001
-
-    def record_noop(agent_id: str) -> None:
-        noop_calls.append(agent_id)
-        original_noop(agent_id)
-
-    def record_activity(agent_id: str) -> None:
-        activity_calls.append(agent_id)
-        original_activity(agent_id)
-
-    monkeypatch.setattr(heartbeat, "_record_heartbeat_noop", record_noop)
-    monkeypatch.setattr(heartbeat, "_record_heartbeat_activity", record_activity)
-
-    for i in range(3):
-        turns.extend([
-            {
-                "role": "user",
-                "text": heartbeat.HEARTBEAT_PROMPT,
-                "timestamp": str(3 + (i * 2)),
-            },
-            {
-                "role": "assistant",
-                "text": "Heartbeat check. File, goal, tree.",
-                "timestamp": str(4 + (i * 3)),
-            },
-            {
-                "role": "assistant",
-                "text": "HEARTBEAT_OK",
-                "timestamp": str(5 + (i * 3)),
-            },
-        ])
-        message_store.store_transcript_turns(
-            agent_id=aid,
-            backend_session_id=bsid,
-            source_file="/tmp/replayed-transcript.jsonl",
-            turns=list(turns),
-        )
-        assert len(noop_calls) == i + 1
-        assert heartbeat._state_for(aid).noop_streak == i + 1  # noqa: SLF001
-
-    state = heartbeat._state_for(aid)  # noqa: SLF001
-    assert state.noop_streak == 3
-    assert state.dormant is True
-    assert activity_calls == []
-
-    message_store.store_transcript_turns(
-        agent_id=aid,
-        backend_session_id=bsid,
-        source_file="/tmp/replayed-transcript.jsonl",
-        turns=list(turns),
-    )
-
-    assert len(noop_calls) == 3
-    assert heartbeat._state_for(aid).noop_streak == 3  # noqa: SLF001
-    assert activity_calls == []
-
-    replayed_with_changed_timestamps = [
-        {**turn, "timestamp": f"{turn.get('timestamp')}-replayed"}
-        for turn in turns
-    ]
-    message_store.store_transcript_turns(
-        agent_id=aid,
-        backend_session_id=bsid,
-        source_file="/tmp/replayed-transcript.jsonl",
-        turns=replayed_with_changed_timestamps,
-    )
-
-    assert len(noop_calls) == 3
-    assert heartbeat._state_for(aid).noop_streak == 3  # noqa: SLF001
-    assert activity_calls == []
+    turns = [{"role": "user", "text": heartbeat.HEARTBEAT_PROMPT, "timestamp": "1"},
+             {"role": "assistant", "text": "Earlier work.", "timestamp": "2"},
+             {"role": "assistant", "text": "HEARTBEAT_OK", "timestamp": "3"}]
+    for replay in (turns, turns, [{**row, "timestamp": row["timestamp"] + "-replayed"}
+                                 for row in turns]):
+        message_store.store_transcript_turns(agent_id=aid, backend_session_id="backend-replay",
+            source_file="/tmp/replayed-transcript.jsonl", turns=replay)
+        assert heartbeat._state_for(aid).noop_streak == 0
+        assert db.conn().execute("SELECT COUNT(*) FROM heartbeat_accounting").fetchone()[0] == 0
 
 
-def test_assistant_only_heartbeat_deltas_share_one_accounting_key(monkeypatch):
-    """Incremental watcher reads must not count every streamed delta as a run."""
+def test_assistant_only_heartbeat_deltas_share_one_ended_host_turn(monkeypatch):
+    """A delta lacking the prompt still uses its Host turn, once settled."""
+    from lib import settings_store, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+    from tests.unit.test_log_turn_summary import _iso
     _heartbeat_test_env(monkeypatch, dormant_after=3)
     aid = _agent("delta-heartbeat")
-    bsid = "backend-delta-heartbeat"
-    message_store.record_user_message(
-        agent_id=aid,
-        backend_session_id=bsid,
-        client_msg_id="heartbeat-run-1",
-        text=heartbeat.HEARTBEAT_PROMPT,
-        origin="heartbeat",
-    )
-
-    message_store.store_transcript_turns(
-        agent_id=aid,
-        backend_session_id=bsid,
-        source_file="/tmp/heartbeat-assistant-only-deltas.jsonl",
-        turns=[
-            {
-                "id": f"assistant-delta-{index}",
-                "role": "assistant",
-                "text": "HEARTBEAT_OK",
-                "timestamp": str(index),
-            }
-            for index in range(10)
-        ],
-    )
-
-    state = heartbeat._state_for(aid)  # noqa: SLF001
-    assert state.noop_streak == 1
-    assert state.dormant is False
+    agents_db.start_runtime(aid, "delta-heartbeat")
+    settings_store.set_int(heartbeat.KEY_ACCOUNTING_ACTIVATION, 1)
+    agents_db.open_turn(agent_id=aid, source="pwa", trace_id="delta-turn")
+    began = db.conn().execute("SELECT started_at FROM turns WHERE agent_id=?", (aid,)).fetchone()[0]
+    message_store.record_user_message(agent_id=aid, backend_session_id="backend-delta-heartbeat",
+        client_msg_id="heartbeat-run-1", text=heartbeat.HEARTBEAT_PROMPT,
+        origin="heartbeat", trace_id="delta-turn")
+    turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED, {"trace_id": "delta-turn"})
+    turn_lifecycle.transition(aid, TurnEvent.PROCESS_EXITED_OK, {"trace_id": "delta-turn"})
+    for count in (1, 10, 10):
+        message_store.store_transcript_turns(agent_id=aid, backend_session_id="backend-delta-heartbeat",
+            source_file="/tmp/heartbeat-assistant-only-deltas.jsonl", turns=[
+                {"id": f"assistant-delta-{index}", "role": "assistant", "text": "HEARTBEAT_OK",
+                 "timestamp": _iso(began + index + 1)} for index in range(count)])
+        assert heartbeat._state_for(aid).noop_streak == 1
+        assert heartbeat._state_for(aid).dormant is False
+        assert db.conn().execute("SELECT COUNT(*) FROM heartbeat_accounting").fetchone()[0] == 1
 
 
 def test_user_turn_wakes_dormant_heartbeat_at_base_interval(monkeypatch):
@@ -593,7 +517,7 @@ def test_heartbeat_prompt_and_noop_are_tagged_in_messages():
     ]
     assert all(m["automated"] for m in visible)
     assert {m["automation_kind"] for m in visible} == {"heartbeat"}
-    assert heartbeat._state_for(aid).noop_streak == 1  # noqa: SLF001
+    assert heartbeat._state_for(aid).noop_streak == 0  # no Host turn authority
 
     message_store.store_transcript_turns(
         agent_id=aid,
