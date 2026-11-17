@@ -271,9 +271,8 @@ def pending_heartbeat_agents(*, now: float | None = None,
         state = _state_for(agent_id)
         _wake_from_external_signal(agent_id, state)
         reason = _skip_reason(snapshot=_gather_snapshot(agent, now), state=state, now=now)
-        if reason == "dormant":
-            with _STATE_LOCK:
-                state.dormant = True
+        if reason == "dormant" and not state.dormant:
+            _record_policy_dormancy(agent_id)
         if reason:
             log("heartbeatSkip", f"agent={agent_id} session={session} reason={reason}")
             continue
@@ -628,8 +627,8 @@ def _gather_snapshot(agent: dict, now: float) -> _AgentSnapshot:
 def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float) -> str:
     """Why this agent gets no heartbeat now, or "" when it is due.
 
-    Pure over the snapshot and the in-memory schedule state. A "dormant"
-    answer for a long-interrupted agent is recorded on ``state`` by the caller.
+    Pure over the snapshot and the in-memory schedule state. Selection owns
+    persistence of the long-interrupted agent's dormancy decision.
     """
     latest = snapshot.latest
     latest_kind = latest.get("kind")
@@ -720,12 +719,18 @@ def keeper_owns_heartbeat(agent: dict) -> bool:
 
 
 def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
-    """Authoritative profile projection for cadence, backoff, and dormancy."""
+    """Read-only cadence/backoff projection; selection owns durable policy."""
     current = time.time() if now is None else now
     agent_id = agent["agent_id"]
-    current_state = _state_for(agent_id)
-    _wake_from_external_signal(agent_id, current_state)
-    state = _state_snapshot(_state_for(agent_id))
+    with _STATE_LOCK:
+        cached = _STATE_BY_AGENT.get(agent_id)
+        state = _state_snapshot(cached) if cached is not None else None
+    if state is None:
+        state = _load_persisted_state(agent_id)
+    latest_signal = _latest_wake_signal_ms(agent_id)
+    if latest_signal > 0 and latest_signal > state.last_wake_signal_ms:
+        state.last_wake_signal_ms = latest_signal
+        _reset_backoff_locked(state)  # only our private snapshot is changed
     latest = agents_db.latest_state(agent_id) or {}
     latest_kind = latest.get("kind")
     is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
@@ -735,8 +740,6 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
         else 0.0
     )
     if is_interrupted and interrupted_at and (current - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
-        with _STATE_LOCK:
-            current_state.dormant = True
         state.dormant = True
     interval = int(_effective_interval_sec(state, is_interrupted=is_interrupted))
     next_at = None
@@ -868,6 +871,19 @@ def _wake_from_external_signal(agent_id: str, state: _HeartbeatState) -> None:
         failed=failed)
     if changed:
         log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
+
+
+def _record_policy_dormancy(agent_id: str) -> None:
+    stamp = now_ms()
+    _snapshot, changed = _change_state(agent_id, lambda database: _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,dormant,updated_at) VALUES(?,1,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET dormant=1,updated_at=excluded.updated_at "
+        "WHERE dormant=0", (agent_id, stamp)),
+        # A failed policy write is logged by the protocol and retried by the
+        # next selection. A projection still applies the age gate meanwhile.
+        failed=lambda state: False)
+    if changed:
+        log("heartbeatDormant", f"agent={agent_id} reason=interrupted-age")
 
 
 def _latest_wake_signal_ms(agent_id: str) -> int:
