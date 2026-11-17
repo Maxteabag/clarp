@@ -341,8 +341,7 @@ the scenario `failed-turns` holds. Not there: a selector of this Host's own, for
 only Host. Not held by a scenario: what the apps are told while a turn waits for an account is read from
 the Python Host's code (`activity.py`, `live_core.py`, `turn_launcher._pause_for_account`), not recorded.
 
-**The account pool, for a Host that is alone on its machine** (17 Nov 2026; in the kernel, not yet used by
-the Host). Where no Python Host runs beside it, nobody changes the login when an account is out: the Rust
+**The account pool, for a Host that is alone on its machine** (17 Nov 2026). Where no Python Host runs beside it, nobody changes the login when an account is out: the Rust
 Host has to run the owner's selector itself. What that takes is the Python Host's coordinator
 (`server/lib/account_failover.py`, 785 lines, and the plan it asks, `policies/failover.py`), whose every rule
 was paid for by an incident there: the selector changes the login the whole machine uses, so every running
@@ -369,9 +368,42 @@ replaced by its agent's next turn, and gives the wait up after half a minute (th
 later pass, and are let go at their half hour all the same). That the tests can fail was tried: 23 wrong
 rules were planted into the pool one at a time. The first round missed one (a trial whose turn its user
 had stopped proved its model), which was a situation nobody had written; with it written, all 23 are
-caught. To come: the Host's side (`accounts = "select"`, the owner's command for each tool, the actor
-parked and taken up by the pool, the selector run without a shell and nothing it prints kept), a test
-through the Host with a stand-in selector, and the same asked of the reference.
+caught.
+
+The Host uses it in a third mode (`--accounts select`, beside `none` and `follow`). The owner's selectors
+are read from the owner's file (`--speech-keys`), under the Python Host's own names (`[agents]
+claude_account_switch_command`, `codex_account_switch_command`); a tool without one has no pool, and a
+turn of it that fails on its account ends and says so. For a tool that has one (`clarp-host` `pool.rs`):
+before an attempt of a turn is launched the pool is asked whether it has to wait, and one that does is
+not launched (the launch is held by the agent's thread and carried out when the pool takes the turn up;
+the agent's row and state say that it waits for an account meanwhile); an attempt that fails on a limit
+or a sign-in asks the pool whether the turn waits (`recovery::Next::Pool`), and waits like one that waits
+where someone else changes the login; a running turn the pool wants stopped is stopped without being
+ended (`Actor::stop_for_an_account`: its attempt is over, the turn is parked for an account, also when
+its process went without a word in its spool), and the pool is told when nothing of it runs; a turn the
+pool takes up is tried again, and the tool is told so in the Python Host's envelope; a turn that is over
+or that its user stopped is taken out of the pool. The selector is run as a program of its own, without
+a shell, in a group of its own, given the models on its standard input as the Python Host gives them,
+for five minutes at most, after which it is ended with whatever it started; of what it prints nothing is
+kept and nothing is logged, only what kind of answer it was. A turn that waited for an account when the
+Host stopped is handed back to the pool when the Host starts, with the time its wait began; a turn that
+ran on while the Host was down is the pool's again when it is found, and is stopped for its account if a
+recovery is under way; the turn of an agent that is removed is let go. Held through
+the Host with a stand-in tool and a stand-in selector
+(`a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turns_up`): a slow turn of one
+agent runs when another agent's turn meets the limit; the selector is asked once, for the models of
+both, and no process of the tool ran while it did; both turns are taken up, each told so and neither
+given its message a second time, and neither conversation says that anything failed; a limit met again
+soon after is not asked for at once (the relapse rule); a turn of a third agent that is to start
+meanwhile waits and says so; and a stop ends a waiting turn, also one that never began. That this test
+can fail was tried with six wrong behaviours planted into the Host one at a time. `tools/install-host`
+takes `--accounts select`, never chooses it by itself, and refuses it while the Python Host of the
+machine runs with a selector: the logins are the machine's, and two Hosts must not both change them.
+Not there yet: a plan that does not offer a turn's model is not handed to the pool (the turn ends, as
+where someone else changes the login; the pool has the rule, the Host would have to end a waiting turn
+with what the provider said); the wait is not worded by model ("an account that serves ..."); the pool
+is not told when someone else changes the login (`Pool::served`); the reference has not been asked the
+same in a scenario.
 
 **Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
 Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token

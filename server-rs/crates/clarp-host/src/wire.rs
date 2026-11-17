@@ -186,10 +186,10 @@ fn reconnecting(live: &LiveStatus) -> Option<(u32, i64)> {
 
 /// What a live turn that waits for an account says it waits for: when it waits for one.
 fn waiting_for_account(live: &LiveStatus, backend: &str) -> Option<String> {
-    live.parked
-        .as_ref()
-        .filter(|parked| parked.wait.is_for_an_account())
-        .map(|_| failures::account_wait_message(backend, Some("")))
+    let parked = live.parked.as_ref();
+    let waits = parked.is_some_and(|parked| parked.wait.is_for_an_account());
+    // A turn that could not begin because the account is out waits for one just the same.
+    (waits || live.held_for_an_account).then(|| failures::account_wait_message(backend, Some("")))
 }
 
 /// What the user is told of a turn that failed: its kind, and the Python Host's words for it
@@ -1586,6 +1586,7 @@ mod tests {
                 tools: Vec::new(),
                 stopping: false,
                 parked: None,
+                held_for_an_account: false,
                 failed_attempts: 0,
             }),
             last: last.map(|outcome| Settled {

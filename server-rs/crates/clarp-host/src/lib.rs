@@ -51,6 +51,7 @@ pub mod peers;
 pub mod personas;
 pub mod places;
 pub mod plans;
+pub mod pool;
 pub mod process;
 pub mod push;
 pub mod pusher;

@@ -41,6 +41,11 @@ pub enum Accounts {
     /// again when the login has changed, and now and then meanwhile. This Host never changes
     /// a login itself, and never stops a turn because another turn's account is out.
     Follow,
+    /// This Host runs the owner's selector itself: it is alone on its machine, and nobody
+    /// else puts another login in place. What follows a failure on an account is said by
+    /// the pool of the tool's accounts (`accounts::Pool`), which stops the tool's running
+    /// turns before the selector changes the login and takes them up after.
+    Select,
 }
 
 impl Accounts {
@@ -49,6 +54,7 @@ impl Accounts {
         match name {
             "none" => Some(Self::None),
             "follow" => Some(Self::Follow),
+            "select" => Some(Self::Select),
             _ => None,
         }
     }
@@ -57,6 +63,7 @@ impl Accounts {
         match self {
             Self::None => "none",
             Self::Follow => "follow",
+            Self::Select => "select",
         }
     }
 }
@@ -82,6 +89,9 @@ pub enum Next {
     Retry { after_ms: i64 },
     /// The turn waits for an account, and is tried at this time at the latest.
     Account { until_ms: i64 },
+    /// The turn failed on its account, on a Host that runs the selector itself: the pool of
+    /// the tool's accounts says whether it waits or ends.
+    Pool,
     /// The turn ends on this failure.
     Fail,
 }
@@ -96,6 +106,10 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
                 after_ms: BACKOFF_BASE_MS << (tries - 1),
             }
         }
+        // A plan that does not offer the model still ends the turn here, as where someone
+        // else changes the login: the pool can wait for an account whose plan has it, and
+        // the Host does not ask it to yet.
+        failures::USAGE_LIMIT | failures::AUTH if accounts == Accounts::Select => Next::Pool,
         failures::USAGE_LIMIT | failures::AUTH if accounts == Accounts::Follow => {
             let since = failed.account_wait_since_ms.unwrap_or(failed.now_ms);
             let left = since + ACCOUNT_WAIT_MOST_MS - failed.now_ms;
@@ -150,7 +164,7 @@ mod tests {
 
     #[test]
     fn a_failure_that_passes_is_tried_three_times_in_all() {
-        for accounts in [Accounts::None, Accounts::Follow] {
+        for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
             for kind in [failures::CONNECTION, failures::TIMEOUT] {
                 assert_eq!(
                     after_failed_attempt(failed(kind, 1), accounts),
@@ -242,6 +256,29 @@ mod tests {
     }
 
     #[test]
+    fn on_a_host_that_runs_the_selector_the_pool_says_what_follows_a_failure_on_an_account() {
+        for kind in [failures::USAGE_LIMIT, failures::AUTH] {
+            // However often the turn has waited: the pool keeps that count.
+            for attempt in [1, 2, 9] {
+                let next = after_failed_attempt(failed(kind, attempt), Accounts::Select);
+                assert_eq!(next, Next::Pool, "{kind}, attempt {attempt}");
+            }
+        }
+        for kind in [
+            failures::ACCOUNT_PLAN,
+            failures::TRANSIENT,
+            failures::INTERRUPTED,
+            failures::RUNNER_EXIT,
+            failures::NOT_STARTED,
+            failures::UNKNOWN,
+            failures::CLEAN,
+        ] {
+            let next = after_failed_attempt(failed(kind, 1), Accounts::Select);
+            assert_eq!(next, Next::Fail, "{kind}");
+        }
+    }
+
+    #[test]
     fn waits_for_an_account_use_up_no_tries_against_a_bad_line() {
         // The third attempt of a turn that waited twice for an account is its first try
         // against this failure.
@@ -278,6 +315,10 @@ mod tests {
              </clarp-account-recovery>"
         );
         assert_eq!(Accounts::by_name("follow"), Some(Accounts::Follow));
+        assert_eq!(
+            Accounts::by_name(Accounts::Select.name()),
+            Some(Accounts::Select)
+        );
         assert_eq!(
             Accounts::by_name(Accounts::None.name()),
             Some(Accounts::None)

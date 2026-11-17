@@ -11032,6 +11032,179 @@ fn a_turn_whose_account_is_out_waits_and_is_taken_up_when_the_login_has_changed(
 }
 
 #[test]
+fn a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turns_up() {
+    let place = Place::new("select");
+    let at = |name: &str| place.root.join(name);
+    let (out_of_usage, given, running) = (at("out"), at("given"), at("running"));
+    let (asked, ran_meanwhile) = (at("asked"), at("ran-meanwhile"));
+    std::fs::create_dir_all(&running).unwrap();
+    std::fs::create_dir_all(&given).unwrap();
+    // A stand-in for Claude Code. Its account is out, for a message that says `limited`, for
+    // as long as a file says so. A message that says `slow` is worked on for a long time.
+    // A turn that is taken up answers at once. Each of its processes writes down what it
+    // was given, in a file of its own, and for as long as it runs there is a file that says so.
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\n",
+        &format!("printf '%s\\n' \"$message\" > \"{}/$$\"\n", given.display()),
+        &format!("here=\"{}/$$\"\n: > \"$here\"\n", running.display()),
+        "trap 'rm -f \"$here\"; kill $waits 2>/dev/null; exit 143' TERM INT\n",
+        "case \"$message\" in\n*clarp-account-recovery*) ;;\n*)\n",
+        &format!("if [ -e \"{}\" ]; then case \"$message\" in *limited*)\n", out_of_usage.display()),
+        init,
+        "printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
+        "rm -f \"$here\"\nexit 1\n;; esac; fi\n",
+        "case \"$message\" in *slow*)\n",
+        init,
+        "sleep 60 &\nwaits=$!\nwait $waits\n;; esac\n",
+        ";;\nesac\n",
+        init,
+        "printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_'$$'\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+        "rm -f \"$here\"\n",
+    ]
+    .concat();
+    let claude = at("claude");
+    program(&claude, &script);
+    // The owner's selector: it writes down what it was given and how many of the tool's
+    // processes ran while it did, puts "another account" in place (the limit is over), and
+    // says that an account serves.
+    let selector = at("selector");
+    let script = [
+        "#!/bin/sh\n",
+        &format!(
+            "cat >> \"{}\"\necho >> \"{}\"\n",
+            asked.display(),
+            asked.display()
+        ),
+        &format!(
+            "ls \"{}\" | wc -l >> \"{}\"\n",
+            running.display(),
+            ran_meanwhile.display()
+        ),
+        &format!("rm -f \"{}\"\n", out_of_usage.display()),
+        "printf '%s' '{\"available\": true}'\n",
+    ]
+    .concat();
+    program(&selector, &script);
+    let owners = at("owner.toml");
+    let named = format!(
+        "[agents]\nclaude_account_switch_command = [\"{}\"]\n",
+        selector.display()
+    );
+    std::fs::write(&owners, named).unwrap();
+    let host = place.start_in(
+        "",
+        &[
+            "--accounts",
+            "select",
+            "--speech-keys",
+            owners.to_str().unwrap(),
+        ],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let made = |name: &str| -> String {
+        let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
+        made["session"].as_str().unwrap().to_string()
+    };
+    let (first, second, third) = (made("First"), made("Second"), made("Third"));
+    let row = |agent: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == agent)
+            .cloned()
+            .unwrap()
+    };
+    let lines = |file: &std::path::Path| -> Vec<String> {
+        let text = std::fs::read_to_string(file).unwrap_or_default();
+        text.lines().map(str::to_string).collect()
+    };
+    let runs = || std::fs::read_dir(&running).unwrap().count();
+    // What each process of the tool was given, in no order.
+    let was_given = || -> Vec<String> {
+        let files = std::fs::read_dir(&given).unwrap();
+        files
+            .map(|file| std::fs::read_to_string(file.unwrap().path()).unwrap())
+            .collect()
+    };
+
+    // The second agent works on something that takes long. Then the first agent's turn
+    // meets the limit of the account both run on.
+    host.send(&second, "slow work", "alpha");
+    wait_for("the slow turn to run", || runs() == 1);
+    std::fs::write(&out_of_usage, "").unwrap();
+    host.send(&first, "limited work", "bravo");
+
+    // The Host stops what runs of the tool, asks the selector once, for the models of both,
+    // and takes both turns up. Nothing of the tool ran while the selector did.
+    wait_for("both answers", || {
+        host.state(&first) == "done" && host.state(&second) == "done"
+    });
+    assert_eq!(lines(&asked), vec![r#"{"models": [""]}"#.to_string()]);
+    assert_eq!(lines(&ran_meanwhile), vec!["0".to_string()]);
+    assert_eq!(runs(), 0);
+    // Each turn ran twice: once into the limit or the stop, once taken up. The tool, which
+    // has the turn in its session, was told so and not given the message a second time.
+    let said = was_given();
+    let taken_up: Vec<&String> = said
+        .iter()
+        .filter(|line| line.contains("<clarp-account-recovery>"))
+        .collect();
+    assert_eq!((said.len(), taken_up.len()), (4, 2), "{said:#?}");
+    for words in ["slow work", "limited work"] {
+        assert!(
+            taken_up
+                .iter()
+                .any(|line| line.contains("Original request:") && line.contains(words)),
+            "{words}: {taken_up:#?}"
+        );
+    }
+    // Neither conversation says that anything failed: nothing has.
+    for agent in [&first, &second] {
+        let rows = host.turns(agent);
+        assert_eq!(rows.len(), 2, "{rows:#?}");
+        assert_eq!(rows[1]["turn"]["status"], json!("completed"), "{rows:#?}");
+        assert_eq!(row(agent)["live_activity"]["state"], json!("idle"));
+    }
+
+    // The limit is met again, soon after the selector's answer: that answer did not hold,
+    // and the selector is asked again a minute later, not at once. The turn waits, and says
+    // what it waits for. A turn of another agent that is to start meanwhile waits too,
+    // though it would have run fine: nothing of the tool runs while a recovery is under way.
+    std::fs::write(&out_of_usage, "").unwrap();
+    host.send(&first, "limited again", "charlie");
+    let waits = |agent: &str| row(agent)["live_activity"]["state"] == "limited";
+    wait_for("the turn to wait for an account", || waits(&first));
+    host.send(&third, "plain work", "delta");
+    wait_for("the new turn to wait too", || waits(&third));
+    assert_eq!((host.turns(&third).len(), runs()), (1, 0));
+    assert_eq!(row(&first)["latest_state"], json!("thinking"));
+    // Its user stops the turn that met the limit: it ends there. The other waits on, in
+    // the recovery that is under way.
+    let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": first })));
+    assert_eq!(status, 200);
+    wait_for("the stop", || host.state(&first) == "interrupted");
+    assert!(waits(&third));
+    assert_eq!(
+        lines(&asked).len(),
+        1,
+        "the selector is not asked again within the minute"
+    );
+    // And its user stops the turn that never began: it ends there, with nothing run.
+    let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": third })));
+    assert_eq!(status, 200);
+    wait_for("the stop", || host.state(&third) == "interrupted");
+    assert_eq!(
+        (was_given().len(), runs()),
+        (5, 0),
+        "four attempts before, and the limited one"
+    );
+}
+
+#[test]
 fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
     // no Host anything itself: it calls clarp-admin and clarp-agent-bg by name. Here those

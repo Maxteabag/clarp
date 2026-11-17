@@ -27,7 +27,12 @@
 #                  someone else on this machine puts another login in place (a Python Host
 #                  with an account selector: this Host never changes a login itself), `none`
 #                  where nobody does and the turn ends and says so. Default: `follow` when the
-#                  Python Host on this machine has a selector, else `none`
+#                  Python Host on this machine has a selector, else `none`. `select`: this
+#                  Host runs the owner's selector itself (the commands the owner's file names,
+#                  `--speech-keys`, under [agents]), for a machine on which it is the only
+#                  Host: never chosen by itself, and refused while the Python Host of this
+#                  machine runs with a selector of its own, since the logins are the machine's
+#                  and two Hosts must not both change them
 #   --whisper      the Python that runs the Host's own engine that listens (speech to text): one
 #                  that has faster-whisper. Default: the Python Host's own on this machine, when it
 #                  has the library; it is run where it is, with the model that Host is set to and
@@ -87,7 +92,7 @@ while [ $# -gt 0 ]; do
         --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none] [--relay on|off] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -143,7 +148,14 @@ accounts="${chosen[accounts]:-}"
 if [ -z "$accounts" ]; then
     if grep -q '^[a-z]*_account_switch_command' "$python_config" 2>/dev/null; then accounts=follow; else accounts=none; fi
 fi
-case "$accounts" in follow|none) ;; *) echo "install-host: --accounts $accounts: follow or none" >&2; exit 2 ;; esac
+case "$accounts" in follow|none|select) ;; *) echo "install-host: --accounts $accounts: follow, none or select" >&2; exit 2 ;; esac
+if [ "$accounts" = select ] && grep -q '^[a-z]*_account_switch_command' "$python_config" 2>/dev/null \
+    && systemctl --user is-active --quiet clarp.service 2>/dev/null; then
+    echo "install-host: --accounts select: the Python Host of this machine runs and has a selector of accounts." >&2
+    echo "  The logins are the machine's: two Hosts must not both change them. Use --accounts follow" >&2
+    echo "  beside it, or stop that Host first." >&2
+    exit 2
+fi
 # Speech in. The Host's own engine is a worker run by a Python that has faster-whisper: the
 # Python Host's own interpreter on this machine, where it is, unless another is named. Which
 # model it runs is the one that Host is set to (its name and how its numbers are kept are read
@@ -490,6 +502,8 @@ if [ -n "$push_relay" ]; then pushes="through $push_relay"; else pushes="nowhere
 echo "it listens on $listen as \"$name\"; pushes go $pushes"
 if [ "$accounts" = follow ]; then
     echo "a turn whose account is out waits for another login (the other Host's selector puts it in place)"
+elif [ "$accounts" = select ]; then
+    echo "a turn whose account is out waits while this Host runs the owner's selector (the commands under [agents] in the owner's file)"
 else
     echo "a turn whose account is out ends and says so (nobody on this machine changes logins)"
 fi

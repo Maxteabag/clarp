@@ -29,6 +29,36 @@ pub fn text_at(root: &Table, path: &[&str]) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
+/// The owner's selectors of accounts, by tool: the program that puts another login in place
+/// when an account of that tool is out, with its arguments (`[agents]
+/// claude_account_switch_command`, `codex_account_switch_command`, as the Python Host reads
+/// them: a list of texts, none of them empty; anything else is no selector).
+pub fn selectors(file: &Table) -> Vec<(&'static str, Vec<String>)> {
+    let Some(agents) = file.get("agents").and_then(|agents| agents.as_table()) else {
+        return Vec::new();
+    };
+    let named = [
+        ("claude", "claude_account_switch_command"),
+        ("codex", "codex_account_switch_command"),
+    ];
+    let mut selectors = Vec::new();
+    for (tool, key) in named {
+        let Some(words) = agents.get(key).and_then(|command| command.as_array()) else {
+            continue;
+        };
+        let command: Vec<String> = words
+            .iter()
+            .filter_map(|word| word.as_str())
+            .filter(|word| !word.is_empty())
+            .map(str::to_string)
+            .collect();
+        if !command.is_empty() && command.len() == words.len() {
+            selectors.push((tool, command));
+        }
+    }
+    selectors
+}
+
 /// The texts of a table that maps names to texts (`[gemini_tts.voices]`), in the order the
 /// owner wrote them. What is no text in it is passed over.
 pub fn texts_at(root: &Table, path: &[&str]) -> Vec<(String, String)> {
