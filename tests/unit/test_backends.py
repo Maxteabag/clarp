@@ -316,7 +316,8 @@ assert catalogue.get('unknown') is None
 assert catalogue.get('deep-seek').required_binary == 'opencode'
 assert catalogue.for_provider('openai') == 'codex'
 assert catalogue.for_provider('unmatched') == 'unmatched'
-assert catalogue.get('codex').fallback_models[0] == ('gpt-6.1-sol', 'GPT-6.1 Sol')
+assert catalogue.get('codex').fallback_models[:2] == (
+    ('gpt-6.2-sol', 'GPT-6.2-Sol'), ('gpt-6.2-astra', 'GPT-6.2-Astra'))
 loaded = [name for name in sys.modules if name.startswith('lib.')]
 assert loaded == ['lib.backend_catalogue'], loaded
 """], cwd=_SERVER_DIR, capture_output=True, text=True, check=False)
