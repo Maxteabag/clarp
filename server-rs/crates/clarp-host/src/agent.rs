@@ -1910,7 +1910,7 @@ impl Worker {
                     end.ended_at_ms,
                     end.tokens_in,
                     end.tokens_out,
-                    None,
+                    end.cost_micros.map(|micros| micros as f64 / 1_000_000.0),
                 )
             {
                 let agent_id = &self.setup.record.agent_id;

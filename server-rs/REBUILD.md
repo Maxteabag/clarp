@@ -721,8 +721,8 @@ go. The use belongs to the Host: an agent that is removed takes none of it along
 and was removed has still spent what it spent). The other half is how much of an account is left, which the
 Python Host asks the providers with the accounts' own logins: this Host asks nobody yet, and says that it
 does not in the part of the answer that is for it. Codex's row is counted the same way here; the Python Host
-has for it what Codex itself reports of its limits. What a turn cost, where Claude Code says so, is not
-counted yet. Reading for this found a number this Host had wrong since the first turn it ran: what a turn
+has for it what Codex itself reports of its limits. What a turn cost is counted where the tool says so
+(Claude Code does, to the millionth of a dollar here). Reading for this found a number this Host had wrong since the first turn it ran: what a turn
 took in was counted as `input_tokens` alone, where the Python Host counts with it what the turn wrote to
 the cache and read from it (`turn_stop._result_detail`), and a turn of Claude Code that goes on in a long
 conversation reads nearly all of what it takes in from the cache. No scenario saw it, because the suite's

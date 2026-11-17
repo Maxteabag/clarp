@@ -434,6 +434,7 @@ struct LiveTurn {
     model: Option<String>,
     tokens: Option<(u64, u64)>,
     context: Option<u64>,
+    cost: Option<u64>,
     interpreter: Box<dyn Interpreter>,
     /// How far the turn's spool has been read. Never behind the position in the log.
     offset: u64,
@@ -457,6 +458,7 @@ impl LiveTurn {
             model: self.model.clone(),
             tokens: self.tokens,
             context: self.context,
+            cost: self.cost,
         }
     }
 }
@@ -698,6 +700,7 @@ struct Facts {
     model: Option<String>,
     tokens: Option<(u64, u64)>,
     context: Option<u64>,
+    cost: Option<u64>,
 }
 
 /// How the turn that has just ended in this batch ended, for the row that closed it.
@@ -709,6 +712,7 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     end.tokens_in = facts.tokens.map(|(tokens_in, _)| tokens_in);
     end.tokens_out = facts.tokens.map(|(_, tokens_out)| tokens_out);
     end.context_tokens = facts.context;
+    end.cost_micros = facts.cost;
     Some(Entry::TurnEnd(end))
 }
 
@@ -928,6 +932,7 @@ impl Actor {
                 model: None,
                 tokens: None,
                 context: None,
+                cost: None,
                 offset: 0,
                 drafts: Vec::new(),
                 tools: Vec::new(),
@@ -2275,6 +2280,8 @@ impl Actor {
             model,
             tokens,
             context,
+            // What an attempt cost is the attempt's own: the next one says its own.
+            cost: None,
             interpreter,
             offset: 0,
             drafts: Vec::new(),
@@ -2345,7 +2352,7 @@ impl Actor {
         let until = self.recorder.spool_offset(turn);
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
-        let (mut model, mut tokens, mut context) = (None, None, None);
+        let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
         let mut interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
@@ -2401,6 +2408,7 @@ impl Actor {
                             tokens_out,
                         } => tokens = Some((tokens_in, tokens_out)),
                         Signal::Context { tokens: held } => context = Some(held),
+                        Signal::Cost { micros } => cost = Some(micros),
                         Signal::Glimpse(glimpse) => {
                             let _ = self.shown.show(&glimpse, Some(&name), record.t);
                         }
@@ -2434,6 +2442,7 @@ impl Actor {
             model,
             tokens,
             context,
+            cost,
             interpreter,
             offset,
             drafts,
@@ -2725,6 +2734,10 @@ impl Actor {
                         }
                         Signal::Context { tokens } => {
                             live.context = Some(tokens);
+                            continue;
+                        }
+                        Signal::Cost { micros } => {
+                            live.cost = Some(micros);
                             continue;
                         }
                         Signal::Reply(mut reply) => {

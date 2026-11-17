@@ -9199,7 +9199,7 @@ fn what_the_hosts_own_turns_used_is_counted_for_an_apps_usage_screen() {
     let script = "#!/bin/sh\nread message\n\
 printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
 printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
-printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1,\"usage\":{\"input_tokens\":12,\"output_tokens\":3}}'\n";
+printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1,\"usage\":{\"input_tokens\":12,\"output_tokens\":3},\"total_cost_usd\":0.0125}'\n";
     program(&claude, script);
     let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
     let host = place.start_in("", &[], &world);
@@ -9243,7 +9243,7 @@ printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,
         of(&host, "claude")["totals"]["five_hour"]["turns"] == 1
     });
     let one = of(&host, "claude");
-    let window = json!({ "turns": 1, "tokens_in": 12, "tokens_out": 3, "cost_usd": null,
+    let window = json!({ "turns": 1, "tokens_in": 12, "tokens_out": 3, "cost_usd": 0.0125,
                          "window_minutes": 300 });
     assert_eq!(one["totals"]["five_hour"], window, "{one}");
     assert_eq!(one["totals"]["seven_day"]["window_minutes"], 10_080);
@@ -9265,6 +9265,10 @@ printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,
         ),
         (&json!(24), &json!(6)),
         "{two}"
+    );
+    assert_eq!(
+        two["totals"]["seven_day"]["cost_usd"], 0.025,
+        "what the two turns cost"
     );
     // Codex ran nothing here, and how much of an account is left is not asked of anybody.
     assert_eq!(of(&host, "codex")["totals"]["seven_day"]["turns"], 0);

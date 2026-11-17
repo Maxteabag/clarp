@@ -248,6 +248,9 @@ pub struct TurnEnd {
     /// every step of the turn anew.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u64>,
+    /// What the tool said the turn cost, in millionths of a dollar, where it said so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micros: Option<u64>,
 }
 
 impl TurnEnd {
@@ -273,6 +276,7 @@ impl TurnEnd {
             tokens_in: None,
             tokens_out: None,
             context_tokens: None,
+            cost_micros: None,
         })
     }
 }
@@ -522,6 +526,7 @@ mod tests {
                 tokens_in: None,
                 tokens_out: None,
                 context_tokens: None,
+                cost_micros: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

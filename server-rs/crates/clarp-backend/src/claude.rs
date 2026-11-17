@@ -624,6 +624,14 @@ impl ClaudeInterpreter {
                         tokens_out: count("output_tokens"),
                     });
                 }
+                // What it says the turn cost: what the calls would be billed at, also on
+                // an account that pays by the month.
+                let cost = event["total_cost_usd"].as_f64();
+                if let Some(cost) = cost.filter(|cost| cost.is_finite() && *cost >= 0.0) {
+                    out.push(Signal::Cost {
+                        micros: (cost * 1_000_000.0).round() as u64,
+                    });
+                }
                 self.result = Some(ResultFacts {
                     is_error: event["is_error"].as_bool().unwrap_or(false),
                     text: text_of(&event["result"]).to_string(),
@@ -976,6 +984,7 @@ mod tests {
                         | Signal::Model(_)
                         | Signal::Usage { .. }
                         | Signal::Context { .. }
+                        | Signal::Cost { .. }
                 )
             })
             .cloned()
@@ -1100,6 +1109,24 @@ mod tests {
             tokens_in: 1957,
             tokens_out: 20
         }));
+        // What a turn cost is told where the tool says it, to the millionth of a dollar.
+        let costing = |said: &str| {
+            let result = format!(
+                r#"{{"type":"result","subtype":"success","is_error":false,"result":"x","total_cost_usd":{said}}}"#
+            );
+            let signals = read(&[INIT, &result], (Some(0), None));
+            let mut costs = signals.into_iter().filter_map(|signal| match signal {
+                Signal::Cost { micros } => Some(micros),
+                _ => None,
+            });
+            costs.next()
+        };
+        assert_eq!(costing("0.0125"), Some(12_500));
+        assert_eq!(costing("0.01234567"), Some(12_346));
+        assert_eq!(costing("0"), Some(0));
+        assert_eq!(costing("null"), None);
+        assert_eq!(costing("-1"), None);
+        assert_eq!(costing("\"0.5\""), None);
         // What it does not say counts as none; a turn that says nothing of its use says none.
         assert_eq!(used(r#"{"output_tokens":3}"#), Some((0, 3)));
         assert_eq!(used(r#"{"cache_read_input_tokens":40}"#), Some((40, 0)));
