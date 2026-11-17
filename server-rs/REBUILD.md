@@ -341,6 +341,38 @@ the scenario `failed-turns` holds. Not there: a selector of this Host's own, for
 only Host. Not held by a scenario: what the apps are told while a turn waits for an account is read from
 the Python Host's code (`activity.py`, `live_core.py`, `turn_launcher._pause_for_account`), not recorded.
 
+**The account pool, for a Host that is alone on its machine** (17 Nov 2026; in the kernel, not yet used by
+the Host). Where no Python Host runs beside it, nobody changes the login when an account is out: the Rust
+Host has to run the owner's selector itself. What that takes is the Python Host's coordinator
+(`server/lib/account_failover.py`, 785 lines, and the plan it asks, `policies/failover.py`), whose every rule
+was paid for by an incident there: the selector changes the login the whole machine uses, so every running
+turn of the tool is stopped first (a tool that runs writes the old account back over the new login when it
+refreshes its token) and taken up after; a selector that gives no answer has said nothing about the
+accounts; a turn waits half an hour at most and then runs and fails where its user sees it; an answer for
+some models takes up those turns and leaves the others waiting while the pool works, one of which, let go
+at its own half hour, is the trial for the rest; a turn that meets the limit again soon after it was taken
+up is asked for later each time (one, two, four, eight minutes) and ends at the fifth; a plan that does not
+offer a model stops nobody else and ends its turn after three answers without that model; a recovery that
+was under way when a Host stopped is taken up by the one that starts, with the time it began. Here it is a
+machine that does nothing by itself (`clarp-kernel` `accounts.rs`, `Pool`): it is told what happened (a
+turn is about to start, a turn failed on its account, a timer came due, a turn has stopped, the selector
+answered, a turn was stopped by its user or is over, the login was changed by someone else) and answers
+what is to be done (pause, hold, stop, take up, end, ask the selector for these models, tell me again
+after so long). It is held to the Python coordinator itself: `tools/account-pool-vectors.py` drives that
+code through 37 made-up situations (431 steps, 457 things done) with a clock, a selector and timers the
+script holds, and the pool has to answer and do the same at every step, in the same order, and stand the
+same afterwards; the plan by itself over 1,080 cases; what a selector printed and how it ended over 30
+(the selector there is a real process). One thing differs by nature and has tests of its own: the Python
+coordinator stops a turn in place and goes on, and this pool asks for the stop and is told when it is
+done. A pass that waits so goes on when the turn stops, ends by itself, is stopped by its user or is
+replaced by its agent's next turn, and gives the wait up after half a minute (the others wait on for a
+later pass, and are let go at their half hour all the same). That the tests can fail was tried: 23 wrong
+rules were planted into the pool one at a time. The first round missed one (a trial whose turn its user
+had stopped proved its model), which was a situation nobody had written; with it written, all 23 are
+caught. To come: the Host's side (`accounts = "select"`, the owner's command for each tool, the actor
+parked and taken up by the pool, the selector run without a shell and nothing it prints kept), a test
+through the Host with a stand-in selector, and the same asked of the reference.
+
 **Who may ask has three answers** (15 Nov 2026). The administrator, with the Host's own token, from the
 Host's machine. A paired device, with a token of its own and a scope. And an agent's own tools, with the token
 their turn was given (`CLARP_TOOL_TOKEN`, `clarp_host::tool_token`): it follows from the administrator's token,
