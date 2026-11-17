@@ -653,6 +653,15 @@
    "opencode": "opencode",
    "deepseek": "deepseek",
    "muse": "muse"
+  },
+  "default_models": {
+   "claude": "",
+   "codex": "gpt-6-sol",
+   "agy": "",
+   "grok": "",
+   "opencode": "",
+   "deepseek": "",
+   "muse": ""
   }
  },
  "roles": [

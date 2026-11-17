@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use super::adaptive::{self, State};
+use super::creation::Creation;
 use super::runs::{Progress, Run};
 use super::{
     Attachment, Kept, Named, Refused, attachment_values, execution, option_patch, option_values,
@@ -61,6 +62,11 @@ pub trait World {
     fn base_interval(&self, expression: &str, zone: &str, now_ms: i64) -> i64;
     /// The first time after `from_ms` that a schedule names, if it names one within a year.
     fn next_run(&self, expression: &str, zone: &str, from_ms: i64) -> Option<i64>;
+    /// A directory that is there: the one a path names, or, where it names none that is,
+    /// the home of whoever runs the Host.
+    fn directory(&self, path: &str) -> String;
+    /// Twelve signs nobody has drawn before, for the name of a session.
+    fn drawn(&mut self) -> String;
     /// Where the picture of this name is fetched.
     fn face(&self, file: &str) -> String;
 }
@@ -134,6 +140,8 @@ pub struct Book {
     pub runs: BTreeMap<String, Run>,
     /// What the runner keeps of each trigger between two looks, by the trigger's id.
     pub progress: BTreeMap<String, Progress>,
+    /// The requests for a janitor that is made as a new agent, by the id each came under.
+    pub creations: BTreeMap<String, Creation>,
 }
 
 /// A change a request asks for: the fields it names. One it does not name, or names as
@@ -192,7 +200,7 @@ impl Kept for Keeping<'_> {
 }
 
 /// Whether a model and an effort are ones the job can be run with.
-fn model_fits(
+pub(super) fn model_fits(
     world: &dyn World,
     backend: &str,
     model: Option<&Value>,
@@ -234,7 +242,7 @@ fn model_fits(
 }
 
 /// The first trigger of a job, as a request would ask for it.
-fn default_trigger(template_id: &str) -> Result<Value, Refused> {
+pub(super) fn default_trigger(template_id: &str) -> Result<Value, Refused> {
     Ok(json!([{ "trigger_id": template(template_id)?["default_trigger_id"] }]))
 }
 
@@ -256,7 +264,11 @@ impl Book {
         own
     }
 
-    fn scope_of(&self, given: &Value, world: &dyn World) -> Result<Map<String, Value>, Refused> {
+    pub(super) fn scope_of(
+        &self,
+        given: &Value,
+        world: &dyn World,
+    ) -> Result<Map<String, Value>, Refused> {
         let agent = |id: &str| {
             world
                 .agent(id)
@@ -269,7 +281,7 @@ impl Book {
         Ok(taken.shown().as_object().cloned().unwrap_or_default())
     }
 
-    fn attachments_of(
+    pub(super) fn attachments_of(
         &self,
         given: &Value,
         agent_id: &str,

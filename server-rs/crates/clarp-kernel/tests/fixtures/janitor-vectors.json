@@ -25,7 +25,7 @@
   {"trigger_id": "tool-explanation-requested", "version": 1, "name": "When a tool explanation is requested", "kind": "demand", "defaults": {}}
  ],
  "turn_templates": ["scheduled-prompt", "task-labels"],
- "providers": {"routing": ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"], "isolating": ["agy"], "backend_of": {"openai": "codex", "local": "local", "claude": "claude", "codex": "codex", "agy": "agy", "grok": "grok", "opencode": "opencode", "deepseek": "deepseek", "muse": "muse"}},
+ "providers": {"routing": ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"], "isolating": ["agy"], "backend_of": {"openai": "codex", "local": "local", "claude": "claude", "codex": "codex", "agy": "agy", "grok": "grok", "opencode": "opencode", "deepseek": "deepseek", "muse": "muse"}, "default_models": {"claude": "", "codex": "gpt-6-sol", "agy": "", "grok": "", "opencode": "", "deepseek": "", "muse": ""}},
  "roles": ["message-delegator", "tool-explainer", "audio-bookkeeper", "heartbeat-decider", "quota-monitor", "label-auditor", "goal-keeper"],
  "optional_roles": ["account-hotseat"],
  "own_ids": {"audio-bookkeeper": "64ec70b5-eab5-5d21-b961-4997e204d74e", "goal-keeper": "e24442f7-0e1e-57fb-9fce-ff579e87a2cf", "heartbeat-decider": "a358bf56-f11e-5b19-a860-5531843fe013", "label-auditor": "6a65e11f-224e-563c-9786-798679e93d4d", "message-delegator": "6e6bf19b-68ea-5f3e-8ac4-07c7acd78f5c", "quota-monitor": "79a5cb05-dc07-5cf5-b788-5e008a25c968", "tool-explainer": "e72df736-82de-59a6-9afe-8f6c08b89e73"},

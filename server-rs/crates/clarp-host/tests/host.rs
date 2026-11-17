@@ -7127,7 +7127,15 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
         host.ask("POST", "/janitors", Some(&json!([1]))).1,
         json!({ "error": "Expected a JSON object" })
     );
-    assert_eq!(post("/janitors", json!({ "name": "A new one" })).0, 501);
+    // A new agent as a janitor needs the id of its request (the test after next).
+    assert_eq!(
+        post("/janitors", json!({ "name": "A new one" })),
+        told(
+            400,
+            "invalid_janitor",
+            "A stable creation request_id is required"
+        )
+    );
     let (status, made) = post("/janitors", json!({ "session": worker }));
     assert_eq!(status, 200, "{made}");
     let made = &made["janitor"];
@@ -8001,6 +8009,173 @@ fn a_pause_cuts_a_janitors_run_off_and_its_turn_is_taken_back() {
     // Nothing of it runs any more: no second run is made while it is paused.
     std::thread::sleep(Duration::from_millis(1_000));
     assert_eq!(runs().len(), 1);
+}
+
+#[test]
+fn a_janitor_is_made_as_a_new_agent_once_however_often_its_request_is_sent() {
+    let place = Place::new("janitor-made-new");
+    let host = place.start();
+    let post = |body: &Value| host.ask("POST", "/janitors", Some(body));
+    let refused =
+        |status: u16, code: &str, why: &str| (status, json!({ "error": why, "code": code }));
+    let work = place.root.join("work");
+    let agents = |host: &Host| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let before = agents(&host).len();
+
+    // What cannot be made is refused whole, in the Python Host's words, and nothing is made.
+    assert_eq!(
+        post(&json!({ "name": "A new one" })),
+        refused(
+            400,
+            "invalid_janitor",
+            "A stable creation request_id is required"
+        )
+    );
+    assert_eq!(
+        post(&json!({ "name": " ", "request_id": "r0" })),
+        refused(400, "invalid_janitor", "A short Janitor name is required")
+    );
+    assert_eq!(
+        post(&json!({ "name": "X", "backend": "abacus", "request_id": "r0" })),
+        refused(400, "invalid_janitor", "Choose an available agent backend")
+    );
+    assert_eq!(
+        post(&json!({ "name": "X", "session": "", "request_id": "r0" })),
+        refused(
+            400,
+            "invalid_janitor",
+            "Unsupported new Janitor configuration field"
+        )
+    );
+    assert_eq!(
+        post(&json!({ "name": "X", "template_id": "no-such-job", "request_id": "r0" })),
+        refused(400, "unsupported_template", "Unsupported maintenance job")
+    );
+    assert_eq!(agents(&host).len(), before);
+
+    // Made: an agent of its own, a janitor from its first moment, paused, with its job, on
+    // the model its tool has for janitors and where it was told to work.
+    let asked = json!({
+        "name": "Night Sweeper", "backend": "codex", "cwd": work, "request_id": "request-one",
+        "template_id": "scheduled-prompt", "options": { "instructions": "Sweep." },
+        "attachments": [{
+            "attachment_id": "made-nightly", "trigger_id": "schedule",
+            "config": { "cron": "15 3 * * *", "timezone": "Europe/Oslo" },
+        }],
+    });
+    let (status, made) = post(&asked);
+    assert_eq!(status, 200, "{made}");
+    let janitor = &made["janitor"];
+    let session = janitor["session"].as_str().unwrap().to_string();
+    let drawn = session.strip_prefix("nightsweeper-").unwrap_or_default();
+    assert!(
+        drawn.len() == 12 && drawn.chars().all(|sign| sign.is_ascii_hexdigit()),
+        "{session}"
+    );
+    assert_eq!(
+        (
+            &janitor["name"],
+            &janitor["is_janitor"],
+            &janitor["enabled"],
+            &janitor["revision"],
+            &janitor["template_id"],
+            &janitor["backend"],
+            &janitor["model"],
+            &janitor["effort"],
+            &janitor["attachments"][0]["attachment_id"],
+            &janitor["options"]["instructions"]
+        ),
+        (
+            &json!("Night Sweeper"),
+            &json!(true),
+            &json!(false),
+            &json!(1),
+            &json!("scheduled-prompt"),
+            &json!("codex"),
+            &json!("gpt-6-sol"),
+            &json!("low"),
+            &json!("made-nightly"),
+            &json!("Sweep.")
+        ),
+        "{janitor}"
+    );
+    let rows = agents(&host);
+    assert_eq!(rows.len(), before + 1);
+    let row = rows.iter().find(|row| row["session"] == session).unwrap();
+    assert_eq!(
+        (&row["is_janitor"], &row["role"], &row["agent_id"]),
+        (&json!(true), &json!("janitor"), &janitor["agent_id"]),
+        "{row}"
+    );
+
+    // Sent again, the request makes nothing and is answered with what was answered. Under
+    // the same id with other settings it is refused.
+    assert_eq!(post(&asked), (200, made.clone()));
+    assert_eq!(agents(&host).len(), before + 1);
+    let mut other = asked.clone();
+    other["name"] = json!("Another");
+    assert_eq!(
+        post(&other),
+        refused(
+            409,
+            "creation_conflict",
+            "This creation request refers to different settings"
+        )
+    );
+    // It is a janitor like any other: turned on with the revision it was made with.
+    let (status, on) = host.ask(
+        "POST",
+        &format!("/janitors/{session}/enabled"),
+        Some(&json!({ "expected_revision": 1, "enabled": true })),
+    );
+    assert_eq!(
+        (status, &on["janitor"]["enabled"]),
+        (200, &json!(true)),
+        "{on}"
+    );
+
+    // The agents' own tool makes one the same way, and says the id of its request first.
+    let (code, out, err) = tool(
+        &host,
+        &place.root,
+        None,
+        &[
+            "clarp-admin",
+            "janitor",
+            "create",
+            "--name",
+            "By The Tool",
+            "--backend",
+            "codex",
+            "--cwd",
+            "work",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let said: Value = serde_json::from_str(err.lines().next().unwrap_or_default()).unwrap();
+    let request_id = said["request_id"].as_str().unwrap();
+    assert_eq!(request_id.len(), 36, "{request_id}");
+    let by_tool: Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        by_tool["janitor"]["session"]
+            .as_str()
+            .unwrap()
+            .starts_with("bythetool-"),
+        "{by_tool}"
+    );
+    assert_eq!(by_tool["janitor"]["template_id"], json!("task-labels"));
+    assert_eq!(agents(&host).len(), before + 2);
+
+    // The Host is killed and comes back: the request is still answered as it was.
+    host.kill();
+    let host = place.start();
+    assert_eq!(host.ask("POST", "/janitors", Some(&asked)), (200, made));
+    assert_eq!(agents(&host).len(), before + 2);
 }
 
 /// The id of the agent a session names, as its row in the snapshot has it.

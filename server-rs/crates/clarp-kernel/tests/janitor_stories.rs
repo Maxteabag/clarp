@@ -70,6 +70,15 @@ impl World for Host {
         None
     }
 
+    fn directory(&self, path: &str) -> String {
+        path.to_string()
+    }
+
+    fn drawn(&mut self) -> String {
+        self.drawn += 1;
+        format!("{:012x}", self.drawn)
+    }
+
     fn face(&self, file: &str) -> String {
         self.faces.get(file).cloned().unwrap_or_default()
     }
