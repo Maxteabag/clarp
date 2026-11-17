@@ -13,10 +13,9 @@
 //! settings made up for it (`tests/fixtures/told-vectors.json`, written by
 //! `server-rs/tools/told-vectors.py`).
 //!
-//! One thing is not copied. The Python Host tells Claude Code how human to sound and never
-//! how much to say while it works: the hook leaves that clause out, so the setting holds
-//! for every tool but the one most agents run on (reference defect R21). Here every tool is
-//! told it.
+//! How much an agent says while it works is told to every tool. The Python Host's hook for
+//! Claude Code left that clause out until 17 Nov 2026 (reference defect R21, mended there);
+//! since then the two Hosts say the same to every tool.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
