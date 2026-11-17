@@ -530,6 +530,12 @@ def settle(value, sessions):
             item = '<time>'
         elif key == 'retry_after_s' and isinstance(item, int) and not isinstance(item, bool):
             item = '<seconds>'  # how long an agent waits before it rings again: what is left of a minute
+        elif key == 'mtime' and isinstance(item, int) and not isinstance(item, bool) and item > 0:
+            item = '<time>'  # when a session a tool kept was last written: a reading of that file's clock
+        elif key == 'message' and isinstance(item, str):
+            # What a refusal says in words names the session of a tool it is about ("Claude session
+            # '...' is already used by ..."): the name is a draw of the tool's, or of the Host's.
+            item = normalize.UUID.sub('<a session>', item)
         elif key in ('opening_audio_url', 'audio_url') and isinstance(item, str):
             item = RING_CLIP.sub(r'/audio/<time>\1', item)
         elif key == 'agents' and isinstance(item, list):
@@ -657,14 +663,18 @@ def ranked(value, held: dict, row=False, conversation=''):
 
 
 def agent_rows(http) -> dict:
-    """The ids of the rows an agent wrote, named in the order a client first reads them. An id
-    is the Host's own choice; what a client relies on is that the same row has the same id
-    wherever it is named."""
+    """The ids of the rows a Host named itself, in the order a client first reads them: the rows
+    an agent wrote, and the rows of a user that a Host read from a tool's transcript (`msg-`: a
+    message a client sent keeps the id its client gave it, and is compared as that). An id is
+    the Host's own choice; what a client relies on is that the same row has the same id wherever
+    it is named."""
     names: dict = {}
     for exchange in http:
         body = exchange['body']
         for turn in (body.get('turns') or ()) if isinstance(body, dict) else ():
-            if isinstance(turn, dict) and turn.get('role') == 'assistant' and isinstance(turn.get('id'), str):
+            if not isinstance(turn, dict) or not isinstance(turn.get('id'), str):
+                continue
+            if turn.get('role') == 'assistant' or (turn.get('role') == 'user' and turn['id'].startswith('msg-')):
                 names.setdefault(turn['id'], f'<row:{len(names) + 1}>')
     return names
 
@@ -831,6 +841,28 @@ def own_face(address: str, sessions: dict) -> str:
     return address.replace(agent_id, f'<agent:{sessions[agent_id]}>', 1) if agent_id in sessions else address
 
 
+def own_conversations(value, found: dict) -> dict:
+    """The conversations a capture shows under a name a Host made up for them: an agent's row
+    names its conversation and the session of its tool, and the two are not one name. Such a
+    conversation is named here by its agent, wherever its name is written. A conversation that
+    goes by the name of its tool's session is named as the session is, by the harness's
+    normalizer, in the order the ids appear in. (The Rust Host gives an agent that takes a
+    session up a conversation of its own, since that session may have been another agent's
+    conversation: docs/differences.md. Named in order, the one more id would shift every id
+    that comes after it.)"""
+    if isinstance(value, list):
+        for item in value:
+            own_conversations(item, found)
+    elif isinstance(value, dict):
+        conversation, of_tool, session = (value.get(key) for key in ('conversation_id', 'backend_session_id', 'session'))
+        if all(isinstance(name, str) and name for name in (conversation, of_tool, session)) \
+                and conversation != of_tool and normalize.UUID.fullmatch(conversation):
+            found.setdefault(conversation, f'<conversation:{session}>')
+        for item in value.values():
+            own_conversations(item, found)
+    return found
+
+
 def published(value, found: dict) -> dict:
     """The ids of the files a capture's agents published, each with the name it is given here."""
     if isinstance(value, list):
@@ -939,6 +971,9 @@ def seen_by_a_client(raw: dict) -> dict:
     janitors_made = made_new(raw['http'], {})
     if janitors_made:
         raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
+    conversations = own_conversations([exchange['body'] for exchange in raw['http']], {})
+    if conversations:
+        raw = {**raw, 'http': by_name(raw['http'], conversations), 'sse': by_name(raw['sse'], conversations)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})
