@@ -89,6 +89,19 @@ pub struct Apart {
     pub keeps: Vec<&'static str>,
 }
 
+/// What a tool is given of its user's home when it answers one question in a home of its
+/// own: a tool that keeps every conversation it ever had in its user's home, and lets go
+/// of the oldest, would otherwise forget its agents' conversations for the questions a
+/// Host asks it all day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnHome {
+    /// What is linked there from the user's home, by its place in it: the tool's login, so
+    /// that a login that is made anew reaches it.
+    pub linked: &'static [&'static str],
+    /// What is copied there: the settings the tool would otherwise ask its user for.
+    pub copied: &'static [&'static str],
+}
+
 /// How to start the tool for one turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
@@ -210,6 +223,12 @@ pub trait Backend: Send + Sync {
     /// with. `None` for a tool that has no such way; it is then asked as for any question
     /// ([`Backend::once`]), in a directory of its own.
     fn reads(&self, _reading: &Reading) -> Option<Apart> {
+        None
+    }
+
+    /// What the tool needs of its user's home to answer one question in a home of its own
+    /// ([`Backend::once`], [`Backend::reads`]). `None`: it answers in its user's home.
+    fn own_home(&self) -> Option<OwnHome> {
         None
     }
 }

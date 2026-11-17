@@ -34,7 +34,8 @@ use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Backend, ErrorTail, Interpreter, Launch, LiveReply, SESSION_ENV, Signal, TurnSpec, shorten,
+    Apart, Backend, ErrorTail, Interpreter, Launch, LiveReply, OwnHome, Question, Reading,
+    SESSION_ENV, Signal, TurnSpec, shorten,
 };
 
 /// How much of what a tool gave back is kept with the call.
@@ -60,6 +61,48 @@ const TOOL_NAMES: [(&str, &str); 10] = [
     ("list_dir", "LS"),
     ("search_web", "WebSearch"),
     ("read_url_content", "WebFetch"),
+];
+
+/// Antigravity keeps every conversation under its user's home and lets go of all but the
+/// newest five hundred or so. What a Host asks it once (a janitor's question, the router's)
+/// would push its agents' conversations out within hours, and a conversation that is gone
+/// is silently begun anew. Such a question is therefore asked in a home of its own that has
+/// Antigravity's login, linked, and its settings, copied, and nothing else: as the Python
+/// Host does (`backend/agy.py`, `isolated_home`).
+const OWN_HOME: OwnHome = OwnHome {
+    linked: &[
+        ".gemini/oauth_creds.json",
+        ".gemini/google_accounts.json",
+        ".gemini/installation_id",
+        ".gemini/antigravity-cli/antigravity-oauth-token",
+        ".gemini/antigravity-cli/installation_id",
+    ],
+    copied: &[
+        ".gemini/antigravity-cli/settings.json",
+        ".gemini/antigravity-cli/cache/onboarding.json",
+    ],
+};
+/// How long Antigravity gives itself for a question it only reads for.
+const READS_WITHIN: &str = "120s";
+/// What of the Host's environment Antigravity is left with when it only reads: where it
+/// is, who it runs as, and how it reaches its provider. Its home is the one made for it.
+const KEPT_APART: [&str; 16] = [
+    "PATH",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "XDG_RUNTIME_DIR",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
 ];
 
 pub struct Agy {
@@ -90,8 +133,9 @@ impl Backend for Agy {
         "agy"
     }
 
+    /// As agy 1.5.10 says them (`agy --help`); the Python Host still knows the first three.
     fn efforts(&self) -> &'static [&'static str] {
-        &["low", "medium", "high"]
+        &["low", "medium", "high", "xhigh", "max"]
     }
 
     fn launch(&self, spec: &TurnSpec) -> Launch {
@@ -149,6 +193,104 @@ impl Backend for Agy {
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(AgyInterpreter::new(turn, name))
+    }
+
+    fn own_home(&self) -> Option<OwnHome> {
+        Some(OWN_HOME)
+    }
+
+    /// One `agy --print` whose answer is printed as one JSON object with how it ended
+    /// ([`Self::answered`]): as the Python Host asks Antigravity one question
+    /// (`backend/agy.py`, `routing_cmd`), which reads the answer as plain text.
+    fn once(&self, question: &Question) -> Option<Launch> {
+        let mut args: Vec<String> = ["--dangerously-skip-permissions", "--output-format", "json"]
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect();
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        match (given(&question.model), given(&question.effort)) {
+            (Some(model), _) => {
+                args.push("--model".to_string());
+                args.push(model);
+            }
+            (None, Some(effort)) => {
+                args.push("--effort".to_string());
+                args.push(effort.trim().to_lowercase());
+            }
+            (None, None) => {}
+        }
+        args.push(format!("--print={}", question.prompt));
+        Some(Launch {
+            program: self.program.clone(),
+            args,
+            env: Vec::new(),
+            stdin: Vec::new(),
+        })
+    }
+
+    /// One `agy --print` in its sandbox, with its commands and skills off, for no longer
+    /// than two minutes, and held to the shape its answer has to have: as the Python Host
+    /// runs a janitor's question apart (`isolated_run`), which says the shape in words.
+    fn reads(&self, reading: &Reading) -> Option<Apart> {
+        let mut args: Vec<String> = [
+            "--sandbox",
+            "--disable-slash-commands",
+            "--print-timeout",
+            READS_WITHIN,
+            "--output-format",
+            "json",
+            "--json-schema",
+            "{dir}/schema.json",
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+        if let Some(model) = reading
+            .model
+            .clone()
+            .filter(|model| !model.trim().is_empty())
+        {
+            args.push("--model".to_string());
+            args.push(model);
+        }
+        args.push(format!(
+            "--print={}\n\n{}",
+            reading.instructions, reading.asked
+        ));
+        Some(Apart {
+            launch: Launch {
+                program: self.program.clone(),
+                args,
+                env: Vec::new(),
+                stdin: Vec::new(),
+            },
+            files: vec![("schema.json".to_string(), reading.schema.clone())],
+            keeps: KEPT_APART.to_vec(),
+        })
+    }
+
+    /// The answer in what Antigravity printed for one question: one JSON object, with how
+    /// the question ended and what was answered.
+    fn answered(&self, printed: &str) -> Result<String, String> {
+        let from = printed.find('{');
+        let read = from.and_then(|from| serde_json::from_str::<Value>(printed[from..].trim()).ok());
+        let Some(said) = read else {
+            let tail: String = printed.trim().chars().rev().take(300).collect();
+            let tail: String = tail.chars().rev().collect();
+            return Err(format!("agy returned no JSON: {tail}"));
+        };
+        match &said["status"] {
+            Value::Null => {}
+            Value::String(status) if status == "SUCCESS" => {}
+            status => {
+                let why = text_of(&said["error"]);
+                return Err(shorten(&format!("agy status {status}: {why}"), 300));
+            }
+        }
+        match text_of(&said["response"]).trim() {
+            "" => Err("agy returned no answer".to_string()),
+            answer => Ok(answer.to_string()),
+        }
     }
 }
 
@@ -588,6 +730,84 @@ mod tests {
             ..spec()
         });
         assert_eq!(effort.args[5..7], ["--effort", "high"]);
+    }
+
+    #[test]
+    fn one_question_is_asked_apart_and_its_answer_read_from_what_is_printed() {
+        let agy = Agy::new();
+        let asked = agy
+            .once(&Question {
+                prompt: "Who is this for?".to_string(),
+                model: Some("gemini-4-hydrogen-low".to_string()),
+                effort: Some("high".to_string()),
+            })
+            .unwrap();
+        assert_eq!(
+            asked.args,
+            [
+                "--dangerously-skip-permissions",
+                "--output-format",
+                "json",
+                "--model",
+                "gemini-4-hydrogen-low",
+                "--print=Who is this for?",
+            ]
+        );
+        let home = agy.own_home().unwrap();
+        assert!(home.linked.contains(&".gemini/oauth_creds.json"));
+        assert!(
+            home.copied
+                .contains(&".gemini/antigravity-cli/settings.json")
+        );
+        // To read and nothing else: in its sandbox, held to a shape, and with no more of the
+        // Host's environment than it needs. Its home is not the Host's.
+        let reads = agy
+            .reads(&Reading {
+                instructions: "Keep the books.".to_string(),
+                asked: "GOAL AS RECORDED: ...".to_string(),
+                schema: r#"{"type":"object"}"#.to_string(),
+                model: None,
+                effort: None,
+            })
+            .unwrap();
+        assert_eq!(
+            reads.launch.args,
+            [
+                "--sandbox",
+                "--disable-slash-commands",
+                "--print-timeout",
+                "120s",
+                "--output-format",
+                "json",
+                "--json-schema",
+                "{dir}/schema.json",
+                "--print=Keep the books.\n\nGOAL AS RECORDED: ...",
+            ]
+        );
+        assert_eq!(
+            reads.files,
+            [(
+                "schema.json".to_string(),
+                r#"{"type":"object"}"#.to_string()
+            )]
+        );
+        assert!(reads.keeps.contains(&"PATH") && !reads.keeps.contains(&"HOME"));
+        // What it prints: one object, after whatever it wrote before it.
+        let fine = "warming up\n{\"conversation_id\":\"c\",\"status\":\"SUCCESS\",\"response\":\" {\\\"a\\\": 1}\\n\"}\n";
+        assert_eq!(agy.answered(fine), Ok("{\"a\": 1}".to_string()));
+        let failed = r#"{"status":"ERROR","error":"sign-in rejected"}"#;
+        assert_eq!(
+            agy.answered(failed),
+            Err("agy status \"ERROR\": sign-in rejected".to_string())
+        );
+        assert_eq!(
+            agy.answered("no login"),
+            Err("agy returned no JSON: no login".to_string())
+        );
+        assert_eq!(
+            agy.answered(r#"{"status":"SUCCESS","response":""}"#),
+            Err("agy returned no answer".to_string())
+        );
     }
 
     #[test]

@@ -12,11 +12,11 @@
 //! This is how the Python Host asks a tool one question (`lib/orchestrator_model.py`,
 //! `call_model`), except that there the question is on the command line.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use clarp_backend::{Launch, Question, Reading};
+use clarp_backend::{Launch, OwnHome, Question, Reading};
 use tokio::io::AsyncWriteExt as _;
 
 /// The least time a question is given.
@@ -60,9 +60,59 @@ pub async fn ask(
 ) -> Result<String, Unanswered> {
     let none = || Unanswered::NoSuchTool(backend.to_string());
     let tool = clarp_backend::by_id(backend).ok_or_else(none)?;
-    let launch = tool.once(question).ok_or_else(none)?;
-    let printed = run(&launch, cwd, within).await?;
-    tool.answered(&printed).map_err(Unanswered::NoAnswer)
+    let mut launch = tool.once(question).ok_or_else(none)?;
+    // A tool that answers in a home of its own is given one for this question, and it is
+    // taken away afterwards with whatever the tool kept of the question.
+    let apart = match tool.own_home() {
+        Some(given) => {
+            let place = a_place("asking")?;
+            let home = own_home(&place, &given);
+            launch.env.push(("HOME".to_string(), home?));
+            Some(place)
+        }
+        None => None,
+    };
+    let printed = run(&launch, cwd, within).await;
+    if let Some(place) = apart {
+        let _ = std::fs::remove_dir_all(&place);
+    }
+    tool.answered(&printed?).map_err(Unanswered::NoAnswer)
+}
+
+/// A directory of the Host's own for one question, that nobody else may look into.
+fn a_place(what: &str) -> Result<PathBuf, Unanswered> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    let place = std::env::temp_dir().join(format!("clarp-{what}-{}", crate::ids::hex(8)));
+    let made = std::fs::DirBuilder::new().mode(0o700).create(&place);
+    made.map_err(|error| Unanswered::NotStarted(format!("{}: {error}", place.display())))?;
+    Ok(place)
+}
+
+/// Makes a tool's own home in `place` (`home`), with what it is given of its user's: the
+/// login linked, the settings copied, and beside it an empty directory to work in
+/// (`work`). What its user has not got is left out. Answers the home.
+fn own_home(place: &Path, given: &OwnHome) -> Result<String, Unanswered> {
+    let failed = |error: std::io::Error| Unanswered::NotStarted(error.to_string());
+    let users = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let home = place.join("home");
+    std::fs::create_dir_all(&home).map_err(failed)?;
+    std::fs::create_dir_all(place.join("work")).map_err(failed)?;
+    let both = given.linked.iter().map(|relative| (relative, true));
+    for (relative, linked) in both.chain(given.copied.iter().map(|relative| (relative, false))) {
+        let (theirs, ours) = (users.join(relative), home.join(relative));
+        if !theirs.exists() {
+            continue;
+        }
+        if let Some(parent) = ours.parent() {
+            std::fs::create_dir_all(parent).map_err(failed)?;
+        }
+        if linked {
+            std::os::unix::fs::symlink(&theirs, &ours).map_err(failed)?;
+        } else {
+            std::fs::copy(&theirs, &ours).map_err(failed)?;
+        }
+    }
+    Ok(home.to_string_lossy().into_owned())
 }
 
 /// Has a tool read something and answer in a shape it is given, for `within` at most:
@@ -75,12 +125,24 @@ pub async fn read(
     reading: &Reading,
     within: Duration,
 ) -> Result<String, Unanswered> {
-    use std::os::unix::fs::DirBuilderExt as _;
     let none = || Unanswered::NoSuchTool(backend.to_string());
     let tool = clarp_backend::by_id(backend).ok_or_else(none)?;
-    let place = std::env::temp_dir().join(format!("clarp-reading-{}", crate::ids::hex(8)));
-    let made = std::fs::DirBuilder::new().mode(0o700).create(&place);
-    made.map_err(|error| Unanswered::NotStarted(format!("{}: {error}", place.display())))?;
+    let place = a_place("reading")?;
+    // A tool that answers in a home of its own has it here, and works beside it: what it
+    // reads for is not where its login is linked.
+    let (home, works_in) = match tool.own_home().map(|given| own_home(&place, &given)) {
+        Some(Ok(home)) => (Some(home), place.join("work")),
+        Some(Err(why)) => {
+            let _ = std::fs::remove_dir_all(&place);
+            return Err(why);
+        }
+        None => (None, place.clone()),
+    };
+    let at_home = |launch: &mut Launch| {
+        if let Some(home) = &home {
+            launch.env.push(("HOME".to_string(), home.clone()));
+        }
+    };
     let printed = match tool.reads(reading) {
         Some(apart) => {
             let here = place.to_string_lossy();
@@ -88,9 +150,10 @@ pub async fn read(
             for arg in &mut launch.args {
                 *arg = arg.replace("{dir}", &here);
             }
+            at_home(&mut launch);
             let mut given = apart.files.iter();
             match given.try_for_each(|(name, holds)| std::fs::write(place.join(name), holds)) {
-                Ok(()) => run_with(&launch, &place, within, Some(&apart.keeps)).await,
+                Ok(()) => run_with(&launch, &works_in, within, Some(&apart.keeps)).await,
                 Err(error) => Err(Unanswered::NotStarted(error.to_string())),
             }
         }
@@ -106,7 +169,10 @@ pub async fn read(
                 effort: reading.effort.clone(),
             };
             match tool.once(&question) {
-                Some(launch) => run_with(&launch, &place, within, None).await,
+                Some(mut launch) => {
+                    at_home(&mut launch);
+                    run_with(&launch, &works_in, within, None).await
+                }
                 None => Err(none()),
             }
         }
