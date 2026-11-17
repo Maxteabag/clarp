@@ -740,7 +740,43 @@ turn anew, so a turn of thirty steps says thirty times what the conversation hol
 the last answer was made from, which Claude Code says with every answer; that is now told by itself
 (`Signal::Context`), kept with the turn's end, and what the gauge shows. A tool that says no such thing
 has no gauge, as on the Python Host, which shows one for Claude Code alone: Codex keeps its conversation
-within bounds by itself. This Host had shown what a Codex turn took in as its gauge.
+within bounds by itself. This Host had shown what a Codex turn took in as its gauge. The whole corpus then
+showed where the two Hosts part on the gauge (run 44033908756, and 44038730172 for the scenario alone):
+after a turn that failed at the provider the Python Host shows 0. Claude Code writes the error where an
+answer would be, as a message that used nothing, and that Host reads its zeros as the size of the
+conversation (defect R38; in Claude Code's own transcripts on elitebook there are 8,256 such messages, each
+with a usage of zero, 8,164 of them after an answer that held something). Here such a message says why the
+turn failed and nothing of the conversation: the gauge stays what the last answer said. Three registered
+differences, one cause.
+
+**What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
+most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
+every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain
+sentence under a tool's row for a reader who chose not to read commands, at the level of detail the reader
+chose. The Python Host has it in 3,900 lines over nine modules; here it is built in stages, and first the
+layer that asks nobody, which answers most uses. `clarp-kernel` `explain.rs` is that layer. A use is read: a
+shell command is split at the shell's operators with nothing run (what only changes how it runs is taken
+off: assignments, `timeout 60`, `env A=1`, `nice`; a `cd` before it is where it runs; a `| head` after it
+only shortens what is shown; heredocs are lifted out and told by what reads them), or the fields of a named
+tool are taken, or an exploration's or a patch's lines. It is told as one of nineteen kinds there are
+templates for (a directory listed, a file read, a text searched for, a repository's state asked, ...), or as
+none, with the reason, of which there are seventeen: several commands at once, a program that changes
+things, a script, another's rights, an upload, a program nobody listed, and so on. The reason decides who
+may be asked instead, and a use that could change or send something is never given a template that would
+say less than it does. What a use names is said only where it is of its kind (a path, a pattern, a host, a
+name) and stands literally in what the use shows. Then the template's sentence for the reader's level is
+filled. The library of templates is the Python Host's own file, copied byte for byte by the tool that
+writes the vectors. The shape of a use nobody listed is signed with a key the Host draws for itself (HMAC
+of the shape as Python writes it), as there: nothing of the use is kept, and nobody without the key can
+try a guess against a signature. Held by `tool-explanation-vectors.json`: 543 uses and what the Python
+Host's own `lookup` answers for each at the five levels (a template fits 253, none fits 290, 1,010
+sentences), each compared as a value and as text; the first 256 were written for what uses look like, the
+rest for each branch of the reading, among them what Python and Rust would read apart if nobody looked
+(which signs are digits, which are blank, where a pattern's end is). The Rust agreed on all of them at
+its first build, which says the reference was read before it was written. Not built yet, in this order:
+the reading of a use as it comes from a turn (what a heredoc only feeds is withheld there, which needs the
+layer of shapes), the shapes and the table of what was learned, the service that answers an app
+(`POST /tool-explanations`) and puts the sentence into a live item, and the model for what no template fits.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
