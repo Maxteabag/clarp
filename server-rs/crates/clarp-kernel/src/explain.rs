@@ -20,7 +20,8 @@
 //! Beside it: [`read`] is how a use is read as it comes from a turn or an app (the bounded
 //! fields, with secrets and what a heredoc only feeds withheld), [`shapes`] is what parts a
 //! call has and under what shape each is remembered, [`learned`] is what a model said of a
-//! shape before, and [`desk`] is where an app asks and is answered.
+//! shape before, [`desk`] is where an app asks and is answered, and [`rows`] is how an
+//! explanation is put on the row of a tool while its turn is shown.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -33,6 +34,7 @@ use crate::{portraits, python, tools};
 pub mod desk;
 pub mod learned;
 pub mod read;
+pub mod rows;
 pub mod shapes;
 
 /// The library: every template with its kind of action, its parameters and their kinds,
