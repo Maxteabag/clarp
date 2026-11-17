@@ -8,11 +8,16 @@ The Python Host builds a Claude agent's conversation from that file, so without
 it the reference has no conversation to compare. The Rust Host does not read it.
 
 It reads one stream-json user message from stdin and answers with system/init,
-an assistant message and a result. It takes a moment before it answers
-(``$CLARP_QA_ANSWER_AFTER`` seconds, half a second unless told otherwise), as every real tool
-does: the Python Host leaves an agent busy for good when its first turn is over before the
-Host has written down that it began (its defect R43), and a stand-in that answers in the
-same instant makes the reference fail at random. The prompt is the user's words: a text block that
+an assistant message and a result. In the first turn of a conversation (started without
+``--resume``) it takes a moment before it does anything (``$CLARP_QA_ANSWER_AFTER`` seconds,
+half a second unless told otherwise), as every real tool does: the Python Host leaves an
+agent busy for good when its first turn is over before the Host has written down that it
+began (its defect R43), and a stand-in that is done in the same instant makes the reference
+fail at random. The moment is taken there and nowhere else. Taken in every turn, between
+the user's words and the answer in the transcript, it turned another race of the reference
+the other way (a reply that closes a later turn left without its mark, defect R6: in a
+quarter of such rows instead of a sixth, conformance run 44096945408, which then differed
+at 21 places nobody had seen it differ at). The prompt is the user's words: a text block that
 begins with ``<system-reminder>`` is what a Host says with them (the Rust Host says after
 the user's words what the Python Host says by a hook this stand-in does not run), and is
 no part of it. Markers in the prompt:
@@ -70,8 +75,8 @@ import time
 import uuid
 
 PROC = uuid.uuid4().hex[:12]
-# How long the tool works before it answers a turn. No real tool answers within the instant
-# in which its Host is still writing down that the turn began.
+# How long the tool takes before it does anything in the first turn of a conversation. No real
+# tool is done within the instant in which its Host is still writing down that the turn began.
 ANSWER_AFTER_S = float(os.environ.get('CLARP_QA_ANSWER_AFTER') or 0.5)
 
 
@@ -342,11 +347,15 @@ def main() -> int:
         os._exit(143)
     signal.signal(signal.SIGTERM, on_term)
     log('start', resume='--resume' in args)
+    # The moment a tool takes, in the first turn of a conversation and before anything else:
+    # what it then writes (the session, the user's words and its answer in its transcript, its
+    # answer and its result on its output) comes in one piece, as it does in every later turn.
+    if '--resume' not in args:
+        stopped.wait(ANSWER_AFTER_S)
     emit({'type': 'system', 'subtype': 'init', 'session_id': session, 'cwd': os.getcwd(),
           'model': 'replay-fake', 'tools': []})
     path = transcript(session)
     asked = record(path, session, 'user', None, {'role': 'user', 'content': text})
-    stopped.wait(ANSWER_AFTER_S)
     if '[qa-slow]' in text:
         stopped.wait(3)
     drops = re.search(r'\[qa-drops:(\d+)\]', text)
