@@ -58,6 +58,15 @@ impl World for Host {
         schedule::next_run(expression, zone, from_ms).unwrap()
     }
 
+    fn directory(&self, path: &str) -> String {
+        path.to_string()
+    }
+
+    fn drawn(&mut self) -> String {
+        self.drawn += 1;
+        format!("{:012x}", self.drawn)
+    }
+
     fn face(&self, _file: &str) -> String {
         String::new()
     }

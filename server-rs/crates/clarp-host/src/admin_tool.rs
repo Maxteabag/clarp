@@ -1307,6 +1307,9 @@ async fn janitor(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
         }
         Ok(body)
     };
+    // What the tool says before it asks: the id of a request for a new janitor, so that the
+    // request can be sent again whatever becomes of its answer.
+    let mut said_first = String::new();
     let done: Result<Value, ToolAnswer> = async {
         let path = format!("/janitors/{}", quoted(first));
         let run_path = format!("/janitor-runs/{}", quoted(first));
@@ -1445,7 +1448,6 @@ async fn janitor(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
                     let carried = body.get("request_id").filter(|id| !id.is_null());
                     carried.map(|id| id.as_str().map_or_else(|| id.to_string(), str::to_string))
                 });
-                let mut told = String::new();
                 if truthy(&body, "session") {
                     if supplied.is_some() {
                         let why = "--request-id is only for creating a new identity; conversion uses its existing session";
@@ -1461,14 +1463,10 @@ async fn janitor(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
                     let Some(request_id) = request_id else {
                         return Err(failed("request_id must be a UUID"));
                     };
-                    told = format!("{}\n", python::dumps(&json!({ "request_id": request_id })));
+                    said_first = format!("{}\n", python::dumps(&json!({ "request_id": request_id })));
                     body.insert("request_id".to_string(), json!(request_id));
                 }
-                let sent = janitor_sent(app, dry, Method::POST, "/janitors", Some(Value::Object(body)));
-                sent.await.map_err(|mut refused| {
-                    refused.stderr = format!("{told}{}", refused.stderr);
-                    refused
-                })
+                janitor_sent(app, dry, Method::POST, "/janitors", Some(Value::Object(body))).await
             }
             "run-context" => {
                 let asked = format!("{run_path}/context");
@@ -1505,10 +1503,12 @@ async fn janitor(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
         }
     }
     .await;
-    match done {
+    let mut answer = match done {
         Ok(value) => shown(&value),
         Err(answer) => answer,
-    }
+    };
+    answer.stderr = format!("{said_first}{}", answer.stderr);
+    answer
 }
 
 /// Answers `clarp-admin`.

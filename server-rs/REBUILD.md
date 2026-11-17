@@ -995,9 +995,16 @@ a turn in the janitor's own conversation.
   whom a request names and lets everything else through as it came, where the Python Host has the same check
   in twenty-five handlers. A janitor's own turn uses the tools an agent has for what it left running, and a
   message it writes to an agent is from it.
-- Not yet: a janitor made as a new agent, the jobs that are no scheduled task (the turn's end and the goal
-  keeper, the workers that answer one request, the label keeper), and a janitor's own goals and published
-  files.
+- **A janitor that is made as a new agent** (`POST /janitors` with a `name`, a tool, where it works and the
+  id of the request; `clarp-admin janitor create --name ...`) is one request however often it is sent
+  (`janitors/creation.rs`, by the Python Host's `begin_creation` and `complete_creation`, held by 48 requests
+  and a story of 13 steps from `tools/janitor-creation-vectors.py`): what it says is checked whole before
+  anything is made, a session is kept for it (the letters of its name and twelve signs the Host draws), its
+  agent is made as a janitor on the model its tool has for janitors, it is given its job, and what was
+  answered is kept as the answer. Sent again it makes nothing; under the same id with other settings it is
+  refused.
+- Not yet: the jobs that are no scheduled task (the turn's end and the goal keeper, the workers that answer
+  one request, the label keeper), and a janitor's own goals and published files.
 
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one

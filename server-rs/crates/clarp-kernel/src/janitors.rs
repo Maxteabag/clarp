@@ -24,6 +24,7 @@ use crate::schedules;
 
 pub mod adaptive;
 pub mod book;
+pub mod creation;
 pub mod runs;
 pub mod schedule;
 
@@ -76,6 +77,7 @@ struct Catalogue {
     routing: Vec<String>,
     isolating: Vec<String>,
     backend_of: Map<String, Value>,
+    default_models: Map<String, Value>,
     roles: Vec<String>,
     own_ids: Map<String, Value>,
     portraits: Map<String, Value>,
@@ -100,11 +102,19 @@ fn catalogue() -> &'static Catalogue {
             routing: words(&whole["providers"]["routing"]),
             isolating: words(&whole["providers"]["isolating"]),
             backend_of: map(&whole["providers"]["backend_of"]),
+            default_models: map(&whole["providers"]["default_models"]),
             roles: words(&whole["roles"]),
             own_ids: map(&whole["own_ids"]),
             portraits: map(&whole["portraits"]),
         }
     })
+}
+
+/// The model a tool runs a janitor on when a request for a new one names none. Nothing: the
+/// tool's own choice.
+pub fn default_model(backend: &str) -> &'static str {
+    let named = catalogue().default_models.get(backend);
+    named.and_then(Value::as_str).unwrap_or_default()
 }
 
 /// The jobs a janitor can be given.

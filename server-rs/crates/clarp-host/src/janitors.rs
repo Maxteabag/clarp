@@ -27,6 +27,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use clarp_kernel::conversation::Message;
 use clarp_kernel::janitors::book::{Agent, Asked, Book, Config, Effect, World};
+use clarp_kernel::janitors::creation::Begun;
 use clarp_kernel::janitors::runs::{self, Delivery, Ended, Handed, Run};
 use clarp_kernel::janitors::{self as rules, Refused, schedule};
 use clarp_kernel::python;
@@ -37,7 +38,7 @@ use tower::ServiceExt as _;
 
 use crate::agent::Unavailable;
 use crate::edge::App;
-use crate::fleet::{Amend, Directory, JanitorSeed};
+use crate::fleet::{Amend, Directory, JanitorSeed, NotMade};
 use crate::ids;
 
 /// The kind of thing the janitors' book is, among what is left with the fleet.
@@ -128,6 +129,22 @@ impl World for Around<'_> {
         schedule::next_run(expression, zone, from_ms).ok().flatten()
     }
 
+    fn directory(&self, path: &str) -> String {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        let named = python::strip(path);
+        let named = match named.strip_prefix("~/") {
+            Some(rest) => format!("{home}/{rest}"),
+            None if named == "~" => home.clone(),
+            None => named.to_string(),
+        };
+        let there = !named.is_empty() && std::path::Path::new(&named).is_dir();
+        if there { named } else { home }
+    }
+
+    fn drawn(&mut self) -> String {
+        ids::hex(6)
+    }
+
     fn face(&self, file: &str) -> String {
         self.app.faces.janitor(file)
     }
@@ -213,6 +230,30 @@ impl Desk {
             take_back(app, &run.agent_id, &run.run_id).await;
         }
         Ok(book.shown(key, &Around::new(app), now_ms))
+    }
+
+    /// A request for a janitor that is made as a new agent, at its first asking or any
+    /// later one: where it stands, with a session kept for its agent.
+    async fn begin(
+        &self,
+        app: &App,
+        request_id: &Value,
+        payload: &Value,
+    ) -> Result<Result<Begun, Refused>, Unavailable> {
+        let mut held = self.held(app).await?;
+        let Some(book) = held.as_mut() else {
+            return Err(Unavailable(
+                "the janitors' book could not be read".to_string(),
+            ));
+        };
+        let before = book.clone();
+        let now_ms = app.clock.now_ms();
+        let begun = book.begin_creation(request_id, payload, &mut Around::new(app), now_ms);
+        if *book != before {
+            let kept = serde_json::to_vec(book).unwrap_or_default();
+            app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+        }
+        Ok(begun)
     }
 
     /// One change of the book by the Host itself, kept when it changed anything. Answers
@@ -611,14 +652,60 @@ async fn make(State(app): State<App>, body: Bytes) -> Response {
         Some(Value::Null | Value::Bool(false)) | None => String::new(),
         Some(other) => other.to_string(),
     };
-    if key.is_empty() {
-        // An agent that is made as a janitor, with a request that is one request however
-        // often it is sent: with the runner.
-        let why = "Making a new agent as a janitor is not built on this Host yet: make the \
-                   agent, then give it the job. Nothing was made.";
-        let told = json!({ "error": why, "code": "not_built" });
-        return (StatusCode::NOT_IMPLEMENTED, Json(told)).into_response();
-    }
+    // A janitor that is made as a new agent: one request however often it is sent. A session
+    // is kept for it, its agent is made as a janitor, it is given its job like any other, and
+    // what is answered is kept as the answer to the request.
+    let mut request = None;
+    let key = if key.is_empty() {
+        let request_id = asked.get("request_id").cloned().unwrap_or(Value::Null);
+        let said = Value::Object(asked.clone());
+        let begun = app.janitors.begin(&app, &request_id, &said);
+        let begun = match begun.await {
+            Ok(Ok(begun)) => begun,
+            Ok(Err(refused)) => return refusal(&refused),
+            Err(why) => return unavailable(&why),
+        };
+        if begun.completed {
+            let answered = begun.response.unwrap_or(Value::Null);
+            return Json(json!({ "janitor": as_sent(answered) })).into_response();
+        }
+        if begun.agent_id.is_none() {
+            let who = &begun.identity;
+            let seed = JanitorSeed {
+                agent_id: None,
+                session: begun.session.clone(),
+                persona: who.persona.clone(),
+                backend: who.backend.clone(),
+                cwd: who.cwd.clone(),
+                model: who.model.clone(),
+                effort: who.effort.clone(),
+            };
+            let made = match app.fleet.make_janitor(seed).await {
+                Ok(Ok(made)) => made,
+                Ok(Err(not_made)) => {
+                    let why = match not_made {
+                        NotMade::Refused(why) => why,
+                        NotMade::Occupied { session, .. } => {
+                            format!("The session {session} belongs to another agent")
+                        }
+                        NotMade::Told(told) => told.message,
+                    };
+                    return refusal(&Refused::new(409, "creation_conflict", why));
+                }
+                Err(why) => return unavailable(&why),
+            };
+            let linked = app.janitors.update(&app, |book, _, _| {
+                book.creation_made(&begun.request_id, &made.agent_id);
+            });
+            if let Err(why) = linked.await {
+                return unavailable(&why);
+            }
+        }
+        request = Some(begun.request_id.clone());
+        begun.session
+    } else {
+        key
+    };
     let job = fields(
         &asked,
         &[
@@ -632,14 +719,26 @@ async fn make(State(app): State<App>, body: Bytes) -> Response {
     let made = app.janitors.change(&app, &key, |book, world, now_ms| {
         book.create(&key, &job, world, now_ms)
     });
-    match made.await {
-        Ok(Ok(janitor)) => {
-            changed(&app);
-            Json(json!({ "janitor": as_sent(janitor) })).into_response()
+    let janitor = match made.await {
+        Ok(Ok(janitor)) => janitor,
+        Ok(Err(refused)) => return refusal(&refused),
+        Err(why) => return unavailable(&why),
+    };
+    let janitor = match request {
+        None => janitor,
+        Some(request_id) => {
+            let finished = app.janitors.update(&app, |book, world, now_ms| {
+                book.complete_creation(&request_id, &key, world, now_ms)
+            });
+            match finished.await {
+                Ok((Ok(janitor), _)) => janitor,
+                Ok((Err(refused), _)) => return refusal(&refused),
+                Err(why) => return unavailable(&why),
+            }
         }
-        Ok(Err(refused)) => refusal(&refused),
-        Err(why) => unavailable(&why),
-    }
+    };
+    changed(&app);
+    Json(json!({ "janitor": as_sent(janitor) })).into_response()
 }
 
 /// `POST /janitors/<session>/configure`, `/enabled`, `/reset-defaults`, `/adopt-options`.

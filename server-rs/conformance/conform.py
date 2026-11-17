@@ -883,6 +883,22 @@ def forked(http, found: dict) -> dict:
     return found
 
 
+def made_new(http, found: dict) -> dict:
+    """The session name of each janitor a capture made as a new agent, with the name it is given here:
+    the letters of the janitor's name and twelve signs its Host drew (`POST /janitors` without a
+    session). What a client relies on is that the name the request answered is the janitor's name
+    wherever it is named."""
+    for exchange in http:
+        body = exchange.get('body')
+        janitor = body.get('janitor') if isinstance(body, dict) else None
+        if exchange.get('method') != 'POST' or exchange.get('path') != '/janitors' or not isinstance(janitor, dict):
+            continue
+        session = janitor.get('session')
+        if isinstance(session, str) and re.fullmatch(r'.+-[0-9a-f]{12}', session):
+            found.setdefault(session, f'<made:{len(found) + 1}>')
+    return found
+
+
 def cut_lists(value, found: dict) -> dict:
     """The names of the lists of Updates a capture's pages were cut from, and the cursors its
     pages ended with: each Host's own, named here in the order a client learns of them. What is
@@ -915,6 +931,9 @@ def seen_by_a_client(raw: dict) -> dict:
     children = forked(raw['http'], {})
     if children:
         raw = {**raw, 'http': by_name(raw['http'], children), 'sse': by_name(raw['sse'], children)}
+    janitors_made = made_new(raw['http'], {})
+    if janitors_made:
+        raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})

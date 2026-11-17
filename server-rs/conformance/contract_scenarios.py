@@ -2164,6 +2164,12 @@ SWEEPER = 'sweeper-one'
 NEW_YEAR = [{'attachment_id': 'synthetic-new-year', 'trigger_id': 'schedule',
              'config': {'cron': '0 0 1 1 *', 'timezone': 'Europe/Oslo'}}]
 NO_RUN = '/janitor-runs/janitor-nobody'
+# A janitor that is made as a new agent: one request however often it is sent. Its Host draws the
+# end of its session name; the suite names it `<made:1>`.
+NEW_ONE = {'name': 'Night Sweeper', 'backend': 'claude', 'cwd': '{workspace}', 'request_id': 'synthetic-request-1',
+           'template_id': 'scheduled-prompt', 'options': {'instructions': 'Sweep.'},
+           'attachments': [{'attachment_id': 'synthetic-made-new-year', 'trigger_id': 'schedule',
+                            'config': {'cron': '0 0 1 1 *', 'timezone': 'Europe/Oslo'}}]}
 # The first of January, by the clocks of a city: far from every day the suite runs on but one.
 PREVIEW = '/janitor-triggers/preview?cron=0%200%201%201%20*'
 
@@ -2181,7 +2187,7 @@ SCENARIOS.append({
     'what': 'the janitors of a Host, agents with a job of maintenance: what a Host offers, one of its own, an '
             'agent made a janitor with a job, set, paused, put back as its job has it and removed, what each '
             'is refused in a word for the reason and in words, and when a schedule would run',
-    'sessions': (AGENT, KEEPER, SWEEPER),
+    'sessions': (AGENT, KEEPER, SWEEPER, '<made:1>'),
     'steps': [
         get('/janitors', 'the janitors of a Host, and what it offers'),
         get('/janitor-triggers', 'what can start a janitor'),
@@ -2311,6 +2317,23 @@ SCENARIOS.append({
         get(f'/log?session={SWEEPER}', "a janitor's conversation"),
         janitor('release', {'expected_revision': 4}, 'the scheduled task let go', session=SWEEPER),
         gone(f'/agents/{SWEEPER}', 'the agent of the scheduled task removed'),
+        # A janitor that is made as a new agent: refused whole where it cannot be, made once, answered
+        # the same when its request is sent again, refused under the same id with other settings.
+        post('/janitors', {'name': 'A New One'}, 'a new janitor without the id of its request'),
+        post('/janitors', {'name': ' ', 'request_id': 'synthetic-request-0'}, 'a new janitor without a name'),
+        post('/janitors', {'name': 'X', 'backend': 'abacus', 'request_id': 'synthetic-request-0'},
+             'a new janitor on a tool no Host has'),
+        post('/janitors', {'name': 'X', 'session': '', 'request_id': 'synthetic-request-0'},
+             'a new janitor that names a session of nothing'),
+        post('/janitors', {'name': 'X', 'template_id': 'no-such-job', 'request_id': 'synthetic-request-0'},
+             'a new janitor with a job there is not'),
+        {**post('/janitors', NEW_ONE, 'a new janitor'), 'save': {'made': 'janitor.session'}},
+        post('/janitors', NEW_ONE, 'the same request again'),
+        post('/janitors', {**NEW_ONE, 'name': 'Another'}, 'the same id with other settings'),
+        get('/janitors/{made}', 'the janitor that was made'),
+        {**SNAPSHOT, 'name': 'the snapshot with the new janitor'},
+        post('/janitors/{made}/release', {'expected_revision': 1}, 'the new janitor let go'),
+        gone('/agents/{made}', 'the agent that was made for it removed'),
     ],
 })
 
