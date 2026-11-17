@@ -189,7 +189,14 @@ fn waiting_for_account(live: &LiveStatus, backend: &str) -> Option<String> {
     let parked = live.parked.as_ref();
     let waits = parked.is_some_and(|parked| parked.wait.is_for_an_account());
     // A turn that could not begin because the account is out waits for one just the same.
-    (waits || live.held_for_an_account).then(|| failures::account_wait_message(backend, Some("")))
+    // One that waits for its model while other turns work says which (or "this model",
+    // where it runs on the tool's own choice): the Python Host's two wordings.
+    let model = match &live.waits_for_its_model {
+        None => Some(""),
+        Some(model) if model.is_empty() => None,
+        Some(model) => Some(model.as_str()),
+    };
+    (waits || live.held_for_an_account).then(|| failures::account_wait_message(backend, model))
 }
 
 /// What the user is told of a turn that failed: its kind, and the Python Host's words for it
@@ -1587,6 +1594,7 @@ mod tests {
                 stopping: false,
                 parked: None,
                 held_for_an_account: false,
+                waits_for_its_model: None,
                 failed_attempts: 0,
             }),
             last: last.map(|outcome| Settled {

@@ -307,6 +307,9 @@ pub enum Ask {
     /// From the pool: the agent's turn, which waited for an account whose plan offers its
     /// model, ends with what the provider said.
     AccountEnd,
+    /// From the pool: the agent's turn waits for an account that serves its model, while
+    /// the rest of the pool works.
+    AccountHeld,
     /// From the explainer of the use of tools: fields to put on an item of what is shown.
     Explained {
         item: String,
@@ -686,6 +689,12 @@ impl AgentHandle {
     /// Does not wait.
     pub fn account_back(&self) {
         let _ = self.tx.send(Ask::AccountBack);
+    }
+
+    /// Tells the agent's thread that its turn waits for an account that serves its model,
+    /// while the account now active serves the other turns of the tool. Does not wait.
+    pub fn account_held(&self) {
+        let _ = self.tx.send(Ask::AccountHeld);
     }
 
     /// Tells the agent's thread that its turn, which waited for an account whose plan
@@ -1717,6 +1726,17 @@ impl Worker {
                 None => (actor.login_changed(now)?, nobody()),
             },
             Ask::AccountEnd => (actor.end_waiting(now)?, nobody()),
+            Ask::AccountHeld => {
+                actor.held_for_its_model();
+                let out = Outputs {
+                    changed: Changed {
+                        status: true,
+                        ..Changed::default()
+                    },
+                    ..Outputs::default()
+                };
+                (out, nobody())
+            }
             Ask::Explained { item, fields } => {
                 // Whoever watches is told with what else is shown, after this.
                 actor.shown_patch(&item, &fields, now);
@@ -2317,6 +2337,10 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
     // the apps are told all the same, as the Python Host tells them.
     let doing = match live.map(|live| &live.activity) {
         // It waits for an account: when it is taken up the apps are told that it works again.
+        // And when what it waits for is said in other words: one that serves its model.
+        _ if live.is_some_and(|live| live.waits_for_its_model.is_some()) => {
+            "an account for its model".to_string()
+        }
         _ if live.is_some_and(waits_for_an_account) => "an account".to_string(),
         Some(Activity::Tool { name }) => name.clone(),
         Some(Activity::Responding) => wire::RESPONDING.to_string(),
@@ -2452,6 +2476,7 @@ fn refuse_for(
                 | Ask::AccountStop
                 | Ask::AccountBack
                 | Ask::AccountEnd
+                | Ask::AccountHeld
                 | Ask::Explained { .. },
             ) => {}
             // Who the agent is can be changed while it cannot be opened.

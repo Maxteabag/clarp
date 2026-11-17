@@ -144,7 +144,13 @@ impl Service {
             match effect {
                 // A turn that waits says so by itself: a parked turn by what it is, a
                 // launch that is held by whoever holds it.
-                Effect::Pause { .. } | Effect::Hold { .. } => {}
+                Effect::Pause { .. } => {}
+                // One that waits for its model while the rest of the pool works says which.
+                Effect::Hold { agent } => {
+                    if let Some(reached) = self.agent(&agent) {
+                        reached.account_held();
+                    }
+                }
                 Effect::Stop { agent } => match self.agent(&agent) {
                     Some(reached) => reached.stop_for_an_account(),
                     // An agent that is gone runs nothing.

@@ -376,6 +376,9 @@ pub struct LiveStatus {
     pub parked: Option<Parked>,
     /// The launch of its attempt is held until an account serves it.
     pub held_for_an_account: bool,
+    /// It waits for an account that serves its model, while the account now active serves
+    /// other turns: the model it runs on (empty: the tool's own choice).
+    pub waits_for_its_model: Option<String>,
     /// How many attempts of the turn have failed so far.
     pub failed_attempts: u32,
 }
@@ -528,6 +531,8 @@ pub struct Actor {
     /// The launch of the turn's attempt is held until an account serves it: those who watch
     /// are shown that the turn waits for one.
     held_for_an_account: bool,
+    /// The turn waits for an account that serves its model, while the rest of the pool works.
+    for_its_model: bool,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
     /// The agent's goals and plans, as the log has them.
@@ -974,6 +979,7 @@ impl Actor {
             pool: None,
             stopped_for_pool: false,
             held_for_an_account: false,
+            for_its_model: false,
             shown,
             shown_turn: None,
             shown_events: Vec::new(),
@@ -1259,6 +1265,7 @@ impl Actor {
                 stopping,
                 parked: None,
                 held_for_an_account: self.held_for_an_account,
+                waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempt.saturating_sub(1),
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
@@ -1276,6 +1283,7 @@ impl Actor {
                 stopping,
                 parked: None,
                 held_for_an_account: false,
+                waits_for_its_model: None,
                 failed_attempts: turn.attempt.saturating_sub(1),
             }),
             // Between two attempts no tool works: the turn is as busy as one that thinks.
@@ -1294,6 +1302,7 @@ impl Actor {
                 stopping,
                 parked: Some(turn.clone()),
                 held_for_an_account: false,
+                waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempts,
             }),
             _ => None,
@@ -2437,6 +2446,8 @@ impl Actor {
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
         let client_id = message.told_id().to_string();
+        // Whatever an attempt before it waited for, this one begins.
+        self.for_its_model = false;
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
         let backend_session = self.recorder.agent().backend_session().map(str::to_string);
@@ -2748,6 +2759,7 @@ impl Actor {
 
     /// The live turn is over, in the log: its files have done their work.
     fn forget_live(&mut self) {
+        self.for_its_model = false;
         if let Some(live) = self.live.take() {
             // What the turn's end says is kept for the agent's row.
             if let Ok(Some(end)) = self.turn_end(live.turn.0) {
@@ -2784,6 +2796,17 @@ impl Actor {
         self.pool = Some(pool);
     }
 
+    /// The turn waits for an account that serves its model, while the account now active
+    /// serves the other turns of the tool: said so until its next attempt begins.
+    pub fn held_for_its_model(&mut self) {
+        self.for_its_model = true;
+    }
+
+    fn model_waited_for(&self) -> Option<String> {
+        self.for_its_model
+            .then(|| self.profile.model.clone().unwrap_or_default())
+    }
+
     /// The turn that waits for an account, and since when it has, where one does.
     pub fn waits_for_an_account(&self) -> Option<(TurnId, i64)> {
         let live = self.recorder.agent().live()?;
@@ -2799,6 +2822,10 @@ impl Actor {
     /// longer: those who watch the turn are shown that it waits for an account.
     pub fn held_for_an_account(&mut self, held: bool, now_ms: i64) {
         self.held_for_an_account = held;
+        if !held {
+            // Whatever it waited for, it begins now.
+            self.for_its_model = false;
+        }
         self.show_turn(now_ms);
     }
 

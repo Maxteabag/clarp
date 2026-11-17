@@ -409,10 +409,15 @@ the pool ends the turn, and it ends with what the provider said and is not run a
 the third, since three answers of a selector are two minutes apart
 (`a_turn_the_pool_holds_for_its_plan_waits_and_ends_with_what_the_provider_said`, beside
 `a_turn_that_is_stopped_for_its_account_waits_and_is_taken_up`; four faults planted into the actor were
-each caught). Not there yet: the wait is not worded by model ("an account that serves ..."), and the pool
-is not told when someone else changes the login (`Pool::served`: a login file that changed says nothing of
-which models the new account serves, and a tool that refreshes its token changes the file too; whoever
-changes the login knows, which will be the desk of seats).
+each caught). A turn that waits for an account that serves its model, while the account now active serves
+the other turns, says so in the Python Host's other wording ("Waiting for a claude account that serves
+beta; the active one does not right now"), also a turn of that model that is to start meanwhile; held
+through the Host with a selector that serves one model of two
+(`a_selector_that_serves_one_model_takes_those_turns_up_and_the_others_say_what_they_wait_for`; two faults
+planted against it were caught). Not there yet: the pool is not told when someone else changes the login
+(`Pool::served`: a login file that changed says nothing of which models the new account serves, and a
+tool that refreshes its token changes the file too; whoever changes the login knows, which will be the
+desk of seats).
 
 The reference was asked the same (17 Nov 2026, scenario `the-selector`): both Hosts are given an owner's
 file that names a selector (a stand-in that says an account serves, `conformance/fake_selector.py`), and
