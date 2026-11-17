@@ -62,6 +62,51 @@ fn refuse<T>(why: &str) -> Result<T, Refused> {
     Err(Refused(why.to_string()))
 }
 
+/// The statuses the Goal keeper may give a step, and the ones it leaves alone: a step its
+/// owner closed stays closed.
+const KEEPER_STEP_STATUSES: [&str; 4] = ["pending", "in_progress", "completed", "blocked"];
+const KEPT_CLOSED: [&str; 4] = ["completed", "skipped", "deferred", "removed"];
+
+/// What the Goal keeper writes of a goal ([`GoalBook::updater`]).
+#[derive(Debug, Clone)]
+pub struct Update<'a> {
+    /// The plan's revision as the keeper read it.
+    pub seen_revision: i64,
+    /// The steps to move, each by its whole id: its status, and a note.
+    pub steps: &'a [(String, String, String)],
+    pub progress: &'a str,
+    pub next_work: &'a str,
+    pub model: &'a str,
+    /// What the update was made from: rows, jobs, an event.
+    pub source_refs: &'a [String],
+    /// Where the next update reads from.
+    pub through_ms: i64,
+    pub through_event: i64,
+    pub janitor_agent_id: &'a str,
+}
+
+/// Why the keeper's write was not made: by its kind, never by its words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotUpdated {
+    /// The goal is neither active nor paused any more.
+    Closed,
+    /// The owner changed the plan since the keeper read it.
+    OwnerAhead,
+    /// What was to be written is no update.
+    Invalid(&'static str),
+}
+
+impl NotUpdated {
+    /// The words the Python Host refuses with.
+    pub fn said(self) -> &'static str {
+        match self {
+            Self::Closed => "goal is closed",
+            Self::OwnerAhead => "plan changed; reload before editing",
+            Self::Invalid(why) => why,
+        }
+    }
+}
+
 /// A step of a plan.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
@@ -1184,6 +1229,92 @@ impl GoalBook {
             plan,
             documents: Vec::new(),
         })
+    }
+
+    /// What the Goal keeper writes beside the owner's own record: the statuses of steps, and
+    /// its own checkpoint (`updater` in the goal). Never the goal's state, what it waits for,
+    /// its criteria or their evidence, and never the owner's checkpoint. The plan's revision
+    /// stays what it was, so that the owner's next command is not refused because of the
+    /// keeper; the keeper's write is refused instead where the owner changed the plan since
+    /// the keeper read it. A step the owner closed stays closed. Answers the plan as it now
+    /// stands and the steps that changed, each with what it was. The rule is the Python
+    /// Host's (`task_plans.updater_apply`), held by the goal tool's vectors.
+    pub fn updater(
+        &self,
+        plan_id: &str,
+        update: &Update<'_>,
+        now: i64,
+    ) -> Result<(Change, Vec<Value>), NotUpdated> {
+        let progress = clip(crate::python::strip(update.progress), 2_000);
+        let next_work = clip(crate::python::strip(update.next_work), 1_000);
+        if progress.is_empty() {
+            return Err(NotUpdated::Invalid("updater checkpoint requires progress"));
+        }
+        let open = |plan: &&Plan| matches!(plan.status.as_str(), "active" | "paused");
+        let Some(plan) = self.plans.get(plan_id).filter(open) else {
+            return Err(NotUpdated::Closed);
+        };
+        if plan.revision != update.seen_revision {
+            return Err(NotUpdated::OwnerAhead);
+        }
+        let mut plan = plan.clone();
+        let Some(mut goal) = plan.goal.take() else {
+            return Err(NotUpdated::Invalid("not a durable goal"));
+        };
+        let running = plan.status == "active";
+        let mut changed = Vec::new();
+        for (item_id, status, said) in update.steps {
+            let known = KEEPER_STEP_STATUSES.contains(&status.as_str());
+            let Some(item) = plan.items.iter_mut().find(|item| item.item_id == *item_id) else {
+                continue;
+            };
+            if !known || KEPT_CLOSED.contains(&item.status.as_str()) || item.status == *status {
+                continue;
+            }
+            if item.status == "in_progress"
+                && let Some(started) = item.started_at
+            {
+                item.active_ms += (now - started).max(0);
+            }
+            changed.push(json!({
+                "item_id": item_id, "from": item.status, "status": status, "note": clip(said, 500),
+            }));
+            // A paused goal's work is not running: its clock stays stopped.
+            item.started_at = (status == "in_progress" && running).then_some(now);
+            item.completed_at = (status == "completed").then_some(now);
+            item.status.clone_from(status);
+        }
+        let sources: Vec<&String> = update.source_refs.iter().take(40).collect();
+        let ids: Vec<&Value> = changed.iter().map(|step| &step["item_id"]).collect();
+        let through = if update.through_ms == 0 {
+            now
+        } else {
+            update.through_ms
+        };
+        goal.fields.insert(
+            "updater".to_string(),
+            json!({
+                "at": now, "progress": progress, "next_work": next_work, "model": update.model,
+                "source_refs": sources, "changed_steps": ids, "through_ms": through,
+                "through_event": update.through_event, "by": "goal-keeper",
+                "janitor_agent_id": update.janitor_agent_id,
+            }),
+        );
+        let detail = json!({
+            "reason": format!("Goal keeper: {}", clip(&progress, 200)), "by": "goal-keeper",
+            "model": update.model, "steps": changed, "source_refs": sources,
+        });
+        let revision = plan.revision;
+        remember(&mut plan, &mut goal, "updater", revision, detail, now);
+        plan.goal = Some(goal);
+        plan.updated_at = now;
+        Ok((
+            Change {
+                plan,
+                documents: Vec::new(),
+            },
+            changed,
+        ))
     }
 
     /// Ends a plan: completed, blocked or cancelled.
