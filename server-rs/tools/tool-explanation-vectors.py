@@ -25,6 +25,9 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'tool-explanation-vectors.json'
+# The key a Host signs the shape of an unknown program's or tool's use with (`_identity`): each Host
+# draws its own. The stories are told under this one, so that they can be told again.
+KEY = 'synthetic-identity-key-' + '0123456789abcdef' * 2
 
 
 def sh(command, **more):
@@ -116,8 +119,11 @@ def run() -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
+    from lib import settings_store
     from lib import tool_explanation_templates as templates
     from lib import tool_explanations
+
+    settings_store.set_text(templates._IDENTITY_KEY, KEY)
 
     uses = [sh(command) for command in SHELL] + OTHERS + [case['activity'] for case in templates.REGRESSION]
     out = []
@@ -139,7 +145,7 @@ def run() -> dict:
         row['route'] = route
         row['said'] = said
         out.append(row)
-    return {'version': templates.VERSION, 'clip': templates.LABEL_CLIP, 'uses': out}
+    return {'version': templates.VERSION, 'clip': templates.LABEL_CLIP, 'identity_key': KEY, 'uses': out}
 
 
 def main() -> int:
@@ -153,7 +159,8 @@ def main() -> int:
         return 1
     said = json.loads(ran.stdout.splitlines()[-1])
     rows = said['uses']
-    out = ['{', f' "version": {json.dumps(said["version"])}, "clip": {json.dumps(said["clip"])},', ' "uses": [']
+    out = ['{', f' "version": {json.dumps(said["version"])}, "clip": {json.dumps(said["clip"])}, '
+                f'"identity_key": {json.dumps(said["identity_key"])},', ' "uses": [']
     out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(rows) - 1 else '') for n, row in enumerate(rows))
     out.append(' ]')
     out.append('}')
