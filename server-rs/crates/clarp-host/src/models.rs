@@ -41,8 +41,7 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// not steered while it runs, a conversation is not made shorter from an app, a tool is
 /// given no servers of its own, nobody signs in from an app, and what an account has used
 /// is not read. Codex, beside those: a past session of it is not forked. Antigravity: a
-/// conversation is not made shorter from an app, and the sessions it kept are not listed
-/// or taken up yet.
+/// conversation is not made shorter from an app.
 const NOT_YET: [(&str, &[&str]); 3] = [
     (
         "claude",
@@ -65,7 +64,7 @@ const NOT_YET: [(&str, &[&str]); 3] = [
             "supports_usage",
         ],
     ),
-    ("agy", &["supports_compact", "resumable", "supports_resume"]),
+    ("agy", &["supports_compact"]),
 ];
 
 /// What was found, with when, and under which logins.

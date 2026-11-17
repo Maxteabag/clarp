@@ -1001,9 +1001,17 @@ steps after it, a command in the background ended by a later message of the tool
 thought, looking around folded into one cell; held by 13 made-up transcripts of 169 lines in the shapes
 agy 1.1 wrote and agy 1.5 writes, in every value and in the order of every key), with two things mended
 that the vectors define (the names agy gives its file tools today, and the word it writes before what a
-command printed: defects R44 and R45 of the reference, counted in the owner's own store). Not there yet:
-those conversations listed and taken up, and making a conversation shorter. No agent has run on it
-through an installed Host yet.
+command printed: defects R44 and R45 of the reference, counted in the owner's own store). Those
+conversations are listed as the Python Host lists them (`past::agy_sessions`, its `list_sessions`: agy's
+own catalogue of them read where there is one, without the helpers within other conversations, the
+Host's own scratch directories, and what agy has let go of or wrote nothing of; and otherwise the last
+conversation of each directory, shown by what its user asked first; held by six made-up stores, 102
+lists and 61 sessions listed), offered for a new agent (`GET /past-sessions?backend=agy`), and taken up
+wherever they ran (`POST /agents` with `resume_session_id`), with the Python Host's refusals in its
+words. Held through the Host with a made-up store and a stand-in: offered, taken up with the command as
+a card and a cell and what the model thought, continued by its name, in use, opened, not forked, not
+there, and one that began as a continuation read back without the Host's record. Not there yet: making
+a conversation shorter. No agent has run on it through an installed Host yet.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

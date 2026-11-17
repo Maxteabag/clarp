@@ -90,15 +90,8 @@ const OWN_HOME: OwnHome = OwnHome {
 };
 /// How long Antigravity gives itself for a question it only reads for.
 const READS_WITHIN: &str = "120s";
-/// Where Antigravity keeps its conversations, under its user's home.
-const STORE: &str = ".gemini/antigravity-cli/conversations";
-
-/// Whether a store of Antigravity's conversations has the one of this name. Without a store
-/// nothing is known, and a name that is no name of a file says nothing either: kept.
-fn kept_in(store: &std::path::Path, session: &str) -> bool {
-    let plain = !session.is_empty() && !session.contains(['/', '\\']) && session != "..";
-    !plain || !store.is_dir() || store.join(format!("{session}.db")).exists()
-}
+/// Where Antigravity keeps what is its own, under its user's home.
+pub const OWN: &str = ".gemini/antigravity-cli";
 /// What of the Host's environment Antigravity is left with when it only reads: where it
 /// is, who it runs as, and how it reaches its provider. Its home is the one made for it.
 const KEPT_APART: [&str; 16] = [
@@ -221,7 +214,7 @@ impl Backend for Agy {
     /// as kept (the Python Host's `agy_transcript.conversation_exists`).
     fn keeps(&self, session: &str) -> bool {
         let home = std::env::var_os("HOME").unwrap_or_default();
-        kept_in(&std::path::Path::new(&home).join(STORE), session)
+        crate::past::agy_kept(&std::path::Path::new(&home).join(OWN), session)
     }
 
     /// Antigravity takes its message as the value of a flag and in no other way: 60 KiB, as
@@ -749,21 +742,22 @@ mod tests {
     fn a_conversation_is_kept_while_its_file_is_in_the_store() {
         let root = std::env::temp_dir().join(format!("clarp-agy-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let store = root.join(STORE);
+        let base = root.join(OWN);
+        let kept = |session: &str| crate::past::agy_kept(&base, session);
         // No store on this machine: nothing is known, and nothing counts as let go of.
-        assert!(kept_in(&store, "c-1"));
-        std::fs::create_dir_all(&store).unwrap();
+        assert!(kept("c-1"));
+        std::fs::create_dir_all(base.join("conversations")).unwrap();
         // A store without the conversation: Antigravity let go of it. What it leaves behind
         // elsewhere (its notes on the conversation) is no conversation.
-        assert!(!kept_in(&store, "c-1"));
-        std::fs::create_dir_all(root.join(".gemini/antigravity-cli/brain/c-1")).unwrap();
-        assert!(!kept_in(&store, "c-1"));
-        std::fs::write(store.join("c-1.db"), "").unwrap();
-        assert!(kept_in(&store, "c-1"));
-        assert!(!kept_in(&store, "c-2"));
+        assert!(!kept("c-1"));
+        std::fs::create_dir_all(base.join("brain/c-1")).unwrap();
+        assert!(!kept("c-1"));
+        std::fs::write(base.join("conversations/c-1.db"), "").unwrap();
+        assert!(kept("c-1"));
+        assert!(!kept("c-2"));
         // What is no name of a file is not looked for.
-        for odd in ["", "..", "../c-1", "a/b", "a\\b"] {
-            assert!(kept_in(&store, odd), "{odd:?}");
+        for odd in ["..", "../c-1", "a/b", "a\\b"] {
+            assert!(kept(odd), "{odd:?}");
         }
         std::fs::remove_dir_all(&root).unwrap();
     }

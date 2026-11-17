@@ -7,11 +7,13 @@
 //! conversation shows what was said in it: the turns of the tool's own transcript
 //! ([`clarp_backend::history`]), as rows that came from elsewhere.
 //!
-//! This Host reads the sessions of Claude Code (`<home>/.claude/projects`) and those of
-//! Codex (`<home>/.codex/sessions`, with Codex's own index of its threads beside them):
-//! [`clarp_backend::past`]. A session of Codex is taken up wherever it ran, since Codex
-//! finds a thread by its name alone; a copy of one is not made, which is said in the Python
-//! Host's own words for a tool that cannot fork.
+//! This Host reads the sessions of Claude Code (`<home>/.claude/projects`), those of
+//! Codex (`<home>/.codex/sessions`, with Codex's own index of its threads beside them) and
+//! the conversations Antigravity kept (`<home>/.gemini/antigravity-cli`, with its own
+//! catalogue of them): [`clarp_backend::past`]. A session of Codex or of Antigravity is
+//! taken up wherever it ran, since those tools find a conversation by its name alone; a
+//! copy of one is not made, which is said in the Python Host's own words for a tool that
+//! cannot fork.
 //!
 //! The rules are the Python Host's (`policies/agent_spec.py`, `agent_lifecycle.py`,
 //! `fork.py`, `routes/settings.py`): a session another agent has is not taken up a second
@@ -26,6 +28,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use clarp_actor::ImportedRow;
 use clarp_backend::{history, past};
+use clarp_kernel::told;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -35,6 +38,7 @@ use crate::{ids, wire};
 /// The tools whose sessions this Host reads.
 const CLAUDE: &str = "claude";
 const CODEX: &str = "codex";
+const AGY: &str = "agy";
 /// How many sessions of a directory are offered, and how many of every directory.
 const OF_A_DIRECTORY: usize = 20;
 const OF_EVERY_DIRECTORY: usize = 100;
@@ -52,6 +56,11 @@ fn codex_home(home: &Path) -> PathBuf {
     said.map_or_else(|| home.join(".codex"), PathBuf::from)
 }
 
+/// Where Antigravity keeps what is its own, for a user whose home is `home`.
+fn agy_own(home: &Path) -> PathBuf {
+    home.join(clarp_backend::agy::OWN)
+}
+
 /// `GET /past-sessions?cwd=&backend=&scope=`: the sessions a tool kept in a directory
 /// (`scope=all`: in every directory), the newest first, for an app that offers to take one
 /// up. A tool whose sessions this Host does not read has none to offer.
@@ -63,19 +72,21 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
         .to_string();
     let all = asked("scope").eq_ignore_ascii_case("all");
     // A tool the Host has not is its default tool, as on the Python Host.
-    let of_claude = !asked("backend").eq_ignore_ascii_case("codex");
+    let tool = asked("backend").to_ascii_lowercase();
     let limit = if all {
         OF_EVERY_DIRECTORY
     } else {
         OF_A_DIRECTORY
     };
     let (root, codex, of) = (projects(&home), codex_home(&home), cwd.clone());
-    let read = move || match of_claude {
-        true => past::claude_sessions(&root, &of, all, limit),
-        false => {
+    let agy = agy_own(&home);
+    let read = move || match tool.as_str() {
+        CODEX => {
             let index = codex.join("state_5.sqlite");
             past::codex_sessions(&codex.join("sessions"), Some(&index), &of, all, limit)
         }
+        AGY => past::agy_sessions(&agy, if all { "" } else { &of }, limit),
+        _ => past::claude_sessions(&root, &of, all, limit),
     };
     let sessions = tokio::task::spawn_blocking(read).await.unwrap_or_default();
     Json(json!({
@@ -176,14 +187,49 @@ pub(crate) fn rows_of(agent_id: &str, session: &str, turns: &[Value]) -> Vec<Imp
     rows
 }
 
-/// What an agent on Codex begins with. A session is taken up wherever it ran: Codex finds a
-/// thread by its name. What was said and done in it is read from its rollout
-/// ([`history::codex`]), the newest file under Codex's sessions that is named after it.
-async fn begins_with_codex(
+/// What a session a tool kept holds: what was said and done in it, and the model it last
+/// ran on (empty where nothing names one).
+type Held = (Vec<Value>, String);
+
+/// What was said and done in a session of Codex, and the model it last ran on: read from
+/// its rollout ([`history::codex`]), the newest file under Codex's sessions that is named
+/// after it.
+fn read_of_codex(named: &str) -> Option<Held> {
+    let sessions = codex_home(&crate::config::home()).join("sessions");
+    let rollout = std::fs::read_to_string(past::codex_rollout(&sessions, named)?).ok()?;
+    Some((history::codex(&rollout), history::model(&rollout)))
+}
+
+/// What was said and done in a conversation Antigravity kept: read from its transcript
+/// ([`history::agy`]). A conversation this Host itself carried over into a new one opens
+/// with the Host's record of the one before, which is no part of what the user said. The
+/// transcript names no model the conversation ran on.
+fn read_of_agy(named: &str) -> Option<Held> {
+    let base = agy_own(&crate::config::home());
+    let transcript = std::fs::read_to_string(past::agy_transcript(&base, named)?).ok()?;
+    let mut turns = history::agy(&transcript);
+    for turn in &mut turns {
+        if turn["role"] == "user"
+            && let Some(said) = turn["text"].as_str().map(told::without_restored)
+        {
+            turn["text"] = json!(said);
+        }
+    }
+    turns.retain(|turn| turn["role"] != "user" || turn["text"] != "");
+    Some((turns, String::new()))
+}
+
+/// What an agent begins with on a tool that finds a conversation by its name alone (Codex,
+/// Antigravity): a session is taken up wherever it ran. `label`: what the tool is called,
+/// in the Python Host's own sentences; `read`: what was said and done in a session of that
+/// name, and the model it last ran on.
+async fn begins_where_it_ran(
     app: &App,
     asked: &Map<String, Value>,
     resume: Option<String>,
     forks: bool,
+    label: &str,
+    read: fn(&str) -> Option<Held>,
 ) -> Result<Begins, Refused> {
     let owner = resume.as_deref().and_then(|session| owner_of(app, session));
     if let Some((_, owner)) = &owner
@@ -193,23 +239,19 @@ async fn begins_with_codex(
     }
     if forks {
         // The Python Host's own answer for a tool that cannot fork a session.
-        let why = "Codex does not support session forks.";
-        return Err(refused(StatusCode::BAD_REQUEST, "fork_unsupported", why));
+        let why = format!("{label} does not support session forks.");
+        return Err(refused(StatusCode::BAD_REQUEST, "fork_unsupported", &why));
     }
     let Some(session) = resume else {
         return Ok(Begins::Afresh);
     };
     if let Some((_, owner)) = owner {
-        let why = format!("Codex session '{session}' is already used by {owner}.");
+        let why = format!("{label} session '{session}' is already used by {owner}.");
         let told = json!({ "error": "session_in_use", "message": why, "owner": owner });
         return Err((StatusCode::CONFLICT, told));
     }
-    let sessions = codex_home(&crate::config::home()).join("sessions");
     let named = session.clone();
-    let read = move || -> Option<(Vec<Value>, String)> {
-        let rollout = std::fs::read_to_string(past::codex_rollout(&sessions, &named)?).ok()?;
-        Some((history::codex(&rollout), history::model(&rollout)))
-    };
+    let read = move || read(&named);
     let Some((turns, model)) = tokio::task::spawn_blocking(read).await.ok().flatten() else {
         let why = "Session is no longer available in this directory";
         return Err(refused(StatusCode::NOT_FOUND, why, why));
@@ -240,11 +282,16 @@ pub(crate) async fn begins(
     }
     let tool = said("backend").unwrap_or_else(|| CLAUDE.to_string());
     if tool.eq_ignore_ascii_case(CODEX) {
-        return begins_with_codex(app, asked, resume, fork.is_some()).await;
+        let forks = fork.is_some();
+        return begins_where_it_ran(app, asked, resume, forks, "Codex", read_of_codex).await;
+    }
+    if tool.eq_ignore_ascii_case(AGY) {
+        let forks = fork.is_some();
+        return begins_where_it_ran(app, asked, resume, forks, "Antigravity", read_of_agy).await;
     }
     if !tool.eq_ignore_ascii_case(CLAUDE) {
-        let why = "Taking up or forking a past session is built for Claude Code and Codex \
-                   on this Host, and for no other tool yet.";
+        let why = "Taking up or forking a past session is built for Claude Code, Codex and \
+                   Antigravity on this Host, and for no other tool yet.";
         return Err(refused(StatusCode::BAD_REQUEST, "resume_unsupported", why));
     }
     let root = projects(&crate::config::home());
