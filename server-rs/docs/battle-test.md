@@ -884,6 +884,22 @@ agent of its own, as told above. Rounds 102 to 107 (to 19:38 on 16 Nov) complete
 `afbf6959`. In all, 107 rounds over 26.4 hours on twenty builds: 106 completed and answered with their word,
 the one of 19:31 on the 15th as told above; none lost, none doubled. The build of `a9c9f41e` runs from 19:38.
 
+Rounds 108 to 167 (19:53 on 16 Nov to 10:45 on 17 Nov) completed, each in six to nine seconds, across the
+seventeen builds from `a9c9f41e` to `d725481b`. In all, 167 rounds over 41.5 hours on thirty-seven builds:
+166 completed and answered with their word, the one of 19:31 on the 15th as told above; none lost, none
+doubled.
+
+**Codex ran out of credits** (17 Nov, about 10:56). Round 168 (11:00) and the three turns of the
+forty-fourth restart exercise (10:57, to install `de2da7c1`) were accepted and started, and Codex ended each
+at once. Asked itself at 11:01, with one question it may only read for, Codex says: "Your workspace is out
+of credits. Ask your workspace owner to refill in order to continue." The Host is run with `--accounts
+follow`: each of the four turns is shown as waiting for an account (`limited`, "Waiting for a codex account
+with available usage"), its message is in the conversation once, and nothing ran. The exercise saw that no
+turn had reached its command and ended without touching the installed Host, which stays on `d725481b` while
+main is ahead of it. The owner was told by a card at 11:03, and the release owner of the Python Host, whose
+Codex agents share the account, by a message. What becomes of the four turns when Codex answers again is
+told here when it has happened.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart
