@@ -40,6 +40,7 @@ pub mod recovery;
 pub mod requests;
 pub mod rings;
 pub mod roster;
+pub mod router;
 pub mod said;
 pub mod schedules;
 pub mod spoken;

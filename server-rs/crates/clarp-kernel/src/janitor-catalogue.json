@@ -662,6 +662,21 @@
    "opencode": "",
    "deepseek": "",
    "muse": ""
+  },
+  "names": {
+   "claude": "claude",
+   "codex": "codex",
+   "agy": "agy",
+   "grok": "grok",
+   "opencode": "opencode",
+   "deepseek": "deepseek",
+   "muse": "muse",
+   "antigravity": "agy",
+   "open-code": "opencode",
+   "opencode-ai": "opencode",
+   "deep-seek": "deepseek",
+   "muse-code": "muse",
+   "musecode": "muse"
   }
  },
  "roles": [

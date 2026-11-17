@@ -239,7 +239,9 @@ def run() -> dict:
                       'isolating': [name for name in routing if backends.get(name).isolated_oneshot is not None],
                       'backend_of': {name: backends.for_provider(name) for name in ['openai', 'local', *routing]},
                       # The model a janitor that is made as a new agent gets where its request names none.
-                      'default_models': {name: backends.by_id(name).janitor_default_model for name in routing}},
+                      'default_models': {name: backends.by_id(name).janitor_default_model for name in routing},
+                      # Every name a tool is known by: its own, and the others it goes by.
+                      'names': {**{tool.id: tool.id for tool in backends._all()}, **dict(backends._ALIASES)}},
         'roles': list(janitor_builtins.ROLES), 'optional_roles': list(janitor_builtins.OPTIONAL_ROLES),
         # The id each of the Host's own janitors has, on every Host: made from its job's name.
         'own_ids': {row['builtin_role']: row['agent_id'] for row in first_day},

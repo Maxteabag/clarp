@@ -79,6 +79,7 @@ struct Catalogue {
     isolating: Vec<String>,
     backend_of: Map<String, Value>,
     default_models: Map<String, Value>,
+    names: Map<String, Value>,
     roles: Vec<String>,
     optional_roles: Vec<String>,
     own_ids: Map<String, Value>,
@@ -105,6 +106,7 @@ fn catalogue() -> &'static Catalogue {
             isolating: words(&whole["providers"]["isolating"]),
             backend_of: map(&whole["providers"]["backend_of"]),
             default_models: map(&whole["providers"]["default_models"]),
+            names: map(&whole["providers"]["names"]),
             roles: words(&whole["roles"]),
             optional_roles: words(&whole["optional_roles"]),
             own_ids: map(&whole["own_ids"]),
@@ -118,6 +120,11 @@ fn catalogue() -> &'static Catalogue {
 pub fn default_model(backend: &str) -> &'static str {
     let named = catalogue().default_models.get(backend);
     named.and_then(Value::as_str).unwrap_or_default()
+}
+
+/// The tool a name stands for: its own name, or another it goes by (`antigravity`).
+pub fn tool_named(name: &str) -> Option<&'static str> {
+    catalogue().names.get(name).and_then(Value::as_str)
 }
 
 /// The jobs a janitor can be given.
