@@ -11205,6 +11205,140 @@ fn a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turn
 }
 
 #[test]
+fn a_plan_that_lacks_the_model_is_asked_of_the_selector_only_when_nothing_else_runs() {
+    let place = Place::new("select-plan");
+    let at = |name: &str| place.root.join(name);
+    let (lacks, given, running, asked) = (at("lacks"), at("given"), at("running"), at("asked"));
+    std::fs::create_dir_all(&running).unwrap();
+    std::fs::create_dir_all(&given).unwrap();
+    // A stand-in for Claude Code. For a message that says `planned`, the account's plan does
+    // not offer the model, for as long as a file says so: it says so as the real tool
+    // says what its provider refused (a message of its own, marked as an error of the API),
+    // and ends badly. A message that says `slow` is worked on for a long time. A turn that
+    // is taken up answers at once.
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\n",
+        &format!("printf '%s\\n' \"$message\" > \"{}/$$\"\n", given.display()),
+        &format!("here=\"{}/$$\"\n: > \"$here\"\n", running.display()),
+        "trap 'rm -f \"$here\"; kill $waits 2>/dev/null; exit 143' TERM INT\n",
+        "case \"$message\" in\n*clarp-account-recovery*) ;;\n*)\n",
+        &format!("if [ -e \"{}\" ]; then case \"$message\" in *planned*)\n", lacks.display()),
+        init,
+        "printf '%s\\n' '{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"invalid_request\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"e1\",\"model\":\"<synthetic>\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"This model is not available on your current plan\"}]}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"This model is not available on your current plan\"}'\n",
+        "rm -f \"$here\"\nexit 1\n;; esac; fi\n",
+        "case \"$message\" in *slow*)\n",
+        init,
+        "sleep 60 &\nwaits=$!\nwait $waits\n;; esac\n",
+        ";;\nesac\n",
+        init,
+        "printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_'$$'\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+        "rm -f \"$here\"\n",
+    ]
+    .concat();
+    let claude = at("claude");
+    program(&claude, &script);
+    // The owner's selector: it writes down what it was given, puts in place "an account
+    // whose plan offers the model", and says that an account serves.
+    let selector = at("selector");
+    let script = [
+        "#!/bin/sh\n",
+        &format!(
+            "cat >> \"{}\"\necho >> \"{}\"\n",
+            asked.display(),
+            asked.display()
+        ),
+        &format!("rm -f \"{}\"\n", lacks.display()),
+        "printf '%s' '{\"available\": true}'\n",
+    ]
+    .concat();
+    program(&selector, &script);
+    let owners = at("owner.toml");
+    let named = format!(
+        "[agents]\nclaude_account_switch_command = [\"{}\"]\n",
+        selector.display()
+    );
+    std::fs::write(&owners, named).unwrap();
+    let host = place.start_in(
+        "",
+        &[
+            "--accounts",
+            "select",
+            "--speech-keys",
+            owners.to_str().unwrap(),
+        ],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let made = |name: &str| -> String {
+        let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
+        made["session"].as_str().unwrap().to_string()
+    };
+    let (first, second) = (made("First"), made("Second"));
+    let runs = || std::fs::read_dir(&running).unwrap().count();
+    let asked_times = || std::fs::read_to_string(&asked).map_or(0, |text| text.lines().count());
+    let was_given = || std::fs::read_dir(&given).unwrap().count();
+
+    // Another agent's turn runs fine. A turn whose model the account's plan does not offer
+    // ends at once, with what the provider said: nothing is stopped for it, and the
+    // selector, which would change the login under the turn that runs, is not asked.
+    std::fs::write(&lacks, "").unwrap();
+    host.send(&second, "slow work", "alpha");
+    wait_for("the slow turn to run", || runs() == 1);
+    host.send(&first, "planned work", "bravo");
+    let failed = |agent: &str| {
+        let rows = host.turns(agent);
+        rows.iter().any(|row| row["turn"]["status"] == "failed")
+    };
+    let ended = Instant::now() + Duration::from_secs(10);
+    while !failed(&first) {
+        assert!(
+            Instant::now() < ended,
+            "the turn did not end: the agent is {}, it runs {}, the selector was asked {} time(s), {:#?}",
+            host.state(&first),
+            runs(),
+            asked_times(),
+            host.turns(&first)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let rows = host.turns(&first);
+    let told = rows.last().unwrap()["text"].as_str().unwrap_or_default();
+    assert!(
+        told.contains("not available on your current plan"),
+        "{rows:#?}"
+    );
+    assert_eq!((runs(), asked_times(), was_given()), (1, 0, 2));
+    assert_eq!(host.state(&second), "thinking");
+    let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": second })));
+    assert_eq!(status, 200);
+    wait_for("the stop", || {
+        host.state(&second) == "interrupted" && runs() == 0
+    });
+
+    // Nothing else runs now. The same failure is asked of the selector: another account's
+    // plan may offer the model. It does: the turn is taken up, told so, and answers.
+    host.send(&first, "planned again", "charlie");
+    wait_for("the answer", || host.state(&first) == "done");
+    // Four processes of the tool in all: the slow turn, the turn that ended on its plan,
+    // and the two attempts of this one.
+    assert_eq!((asked_times(), was_given(), runs()), (1, 4, 0));
+    let rows = host.turns(&first);
+    let last = rows.last().unwrap();
+    assert_eq!(
+        (&last["text"], &last["turn"]["status"]),
+        (&json!("on it"), &json!("completed")),
+        "{rows:#?}"
+    );
+    let taken_up = std::fs::read_dir(&given).unwrap().filter(|file| {
+        let said = std::fs::read_to_string(file.as_ref().unwrap().path()).unwrap();
+        said.contains("<clarp-account-recovery>") && said.contains("planned again")
+    });
+    assert_eq!(taken_up.count(), 1);
+}
+
+#[test]
 fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
     // `clarp-sub-agent` is the repository's own program (skills/clarp-sub-agents). It asks
     // no Host anything itself: it calls clarp-admin and clarp-agent-bg by name. Here those

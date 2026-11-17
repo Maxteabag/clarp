@@ -399,10 +399,20 @@ meanwhile waits and says so; and a stop ends a waiting turn, also one that never
 can fail was tried with six wrong behaviours planted into the Host one at a time. `tools/install-host`
 takes `--accounts select`, never chooses it by itself, and refuses it while the Python Host of the
 machine runs with a selector: the logins are the machine's, and two Hosts must not both change them.
-Not there yet: a plan that does not offer a turn's model is not handed to the pool (the turn ends, as
-where someone else changes the login; the pool has the rule, the Host would have to end a waiting turn
-with what the provider said); the wait is not worded by model ("an account that serves ..."); the pool
-is not told when someone else changes the login (`Pool::served`).
+A plan that does not offer a turn's model is the pool's to say as well (`recovery::Next::Pool { plan }`):
+where other turns of the tool run, the turn ends at once with what the provider said, nothing is stopped
+and the selector is not asked; where nothing else runs, the selector is asked, since another account's
+plan may offer the model, and the turn is taken up when one does; after three answers without the model
+the pool ends the turn, and it ends with what the provider said and is not run again
+(`Actor::end_waiting`). Held through the Host for the first two
+(`a_plan_that_lacks_the_model_is_asked_of_the_selector_only_when_nothing_else_runs`) and at the actor for
+the third, since three answers of a selector are two minutes apart
+(`a_turn_the_pool_holds_for_its_plan_waits_and_ends_with_what_the_provider_said`, beside
+`a_turn_that_is_stopped_for_its_account_waits_and_is_taken_up`; four faults planted into the actor were
+each caught). Not there yet: the wait is not worded by model ("an account that serves ..."), and the pool
+is not told when someone else changes the login (`Pool::served`: a login file that changed says nothing of
+which models the new account serves, and a tool that refreshes its token changes the file too; whoever
+changes the login knows, which will be the desk of seats).
 
 The reference was asked the same (17 Nov 2026, scenario `the-selector`): both Hosts are given an owner's
 file that names a selector (a stand-in that says an account serves, `conformance/fake_selector.py`), and

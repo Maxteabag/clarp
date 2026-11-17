@@ -90,8 +90,10 @@ pub enum Next {
     /// The turn waits for an account, and is tried at this time at the latest.
     Account { until_ms: i64 },
     /// The turn failed on its account, on a Host that runs the selector itself: the pool of
-    /// the tool's accounts says whether it waits or ends.
-    Pool,
+    /// the tool's accounts says whether it waits or ends. `plan`: the provider said that the
+    /// account does not offer the turn's model, which is a fact about one turn and not about
+    /// the account's limits.
+    Pool { plan: bool },
     /// The turn ends on this failure.
     Fail,
 }
@@ -106,10 +108,15 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
                 after_ms: BACKOFF_BASE_MS << (tries - 1),
             }
         }
-        // A plan that does not offer the model still ends the turn here, as where someone
-        // else changes the login: the pool can wait for an account whose plan has it, and
-        // the Host does not ask it to yet.
-        failures::USAGE_LIMIT | failures::AUTH if accounts == Accounts::Select => Next::Pool,
+        // Also a plan that does not offer the model: another account's plan may, and the
+        // pool knows when asking for one would stop turns that run fine.
+        failures::USAGE_LIMIT | failures::AUTH | failures::ACCOUNT_PLAN
+            if accounts == Accounts::Select =>
+        {
+            Next::Pool {
+                plan: failed.kind == failures::ACCOUNT_PLAN,
+            }
+        }
         failures::USAGE_LIMIT | failures::AUTH if accounts == Accounts::Follow => {
             let since = failed.account_wait_since_ms.unwrap_or(failed.now_ms);
             let left = since + ACCOUNT_WAIT_MOST_MS - failed.now_ms;
@@ -261,11 +268,18 @@ mod tests {
             // However often the turn has waited: the pool keeps that count.
             for attempt in [1, 2, 9] {
                 let next = after_failed_attempt(failed(kind, attempt), Accounts::Select);
-                assert_eq!(next, Next::Pool, "{kind}, attempt {attempt}");
+                assert_eq!(
+                    next,
+                    Next::Pool { plan: false },
+                    "{kind}, attempt {attempt}"
+                );
             }
         }
+        // A plan that does not offer the model is the pool's to say as well, and it is told
+        // that this is what it is.
+        let next = after_failed_attempt(failed(failures::ACCOUNT_PLAN, 1), Accounts::Select);
+        assert_eq!(next, Next::Pool { plan: true });
         for kind in [
-            failures::ACCOUNT_PLAN,
             failures::TRANSIENT,
             failures::INTERRUPTED,
             failures::RUNNER_EXIT,

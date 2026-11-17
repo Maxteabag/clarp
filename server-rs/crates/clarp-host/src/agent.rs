@@ -304,6 +304,9 @@ pub enum Ask {
     AccountStop,
     /// From the pool: the agent's turn, which waited for an account, is taken up.
     AccountBack,
+    /// From the pool: the agent's turn, which waited for an account whose plan offers its
+    /// model, ends with what the provider said.
+    AccountEnd,
     /// From the explainer of the use of tools: fields to put on an item of what is shown.
     Explained {
         item: String,
@@ -683,6 +686,12 @@ impl AgentHandle {
     /// Does not wait.
     pub fn account_back(&self) {
         let _ = self.tx.send(Ask::AccountBack);
+    }
+
+    /// Tells the agent's thread that its turn, which waited for an account whose plan
+    /// offers its model, ends: there is none. Does not wait.
+    pub fn account_end(&self) {
+        let _ = self.tx.send(Ask::AccountEnd);
     }
 
     /// Has fields put on an item of what is shown of the agent's turn: the explanation of
@@ -1707,6 +1716,7 @@ impl Worker {
                 }
                 None => (actor.login_changed(now)?, nobody()),
             },
+            Ask::AccountEnd => (actor.end_waiting(now)?, nobody()),
             Ask::Explained { item, fields } => {
                 // Whoever watches is told with what else is shown, after this.
                 actor.shown_patch(&item, &fields, now);
@@ -2441,6 +2451,7 @@ fn refuse_for(
                 | Ask::LoginChanged
                 | Ask::AccountStop
                 | Ask::AccountBack
+                | Ask::AccountEnd
                 | Ask::Explained { .. },
             ) => {}
             // Who the agent is can be changed while it cannot be opened.
