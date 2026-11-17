@@ -2083,12 +2083,14 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
         .iter()
         .find(|turn| turn["kind"] == "tool")
         .expect("the command is in the conversation");
-    assert_eq!(tool["tools"][0]["status"], "ok", "{tool}");
+    let cell = &tool["display_cells"][0];
+    assert_eq!(cell["status"], "ok", "{tool}");
+    let printed = cell["lines"].as_array().unwrap();
     assert!(
-        tool["tools"][0]["result"]
-            .as_str()
-            .unwrap()
-            .contains("spool-survived")
+        printed
+            .iter()
+            .any(|line| line["text"].as_str().unwrap().contains("spool-survived")),
+        "{tool}"
     );
     let answers: Vec<&str> = turns
         .iter()
@@ -17983,6 +17985,140 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
     let host = place.start();
     assert_eq!(waiting(&host), stands);
     assert_eq!(queue(&host)["revision"], revision);
+}
+
+/// A stand-in for Codex that works: a turn in which it says what it will do, runs a
+/// command, reads a file, changes one and answers, printed as `codex exec --json` prints it.
+const CODEX_AT_WORK: &str = r#"#!/usr/bin/env python3
+import json, sys
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+sys.stdin.read()
+def item(step, **fields):
+    print(json.dumps({"type": "item." + step, "item": fields}), flush=True)
+ran = "/usr/bin/bash -lc 'cargo test -p kernel'"
+print(json.dumps({"type": "thread.started", "thread_id": "00000000-0000-7000-8000-00000000c0de"}), flush=True)
+print(json.dumps({"type": "turn.started"}), flush=True)
+item("completed", id="item_0", type="agent_message", text="I will run the tests.")
+item("started", id="item_1", type="command_execution", command=ran, aggregated_output="", exit_code=None,
+     status="in_progress")
+item("completed", id="item_1", type="command_execution", command=ran, exit_code=101, status="failed",
+     aggregated_output="running 7 tests\n" + "".join(f"test t{n} ... ok\n" for n in range(6)) + "test t6 ... FAILED\n")
+item("completed", id="item_2", type="command_execution", command="/usr/bin/bash -lc 'cat src/a.rs'",
+     aggregated_output="fn main() {}\n", exit_code=0, status="completed")
+item("completed", id="item_3", type="file_change", status="completed",
+     changes=[{"path": "src/a.rs", "kind": "update"}, {"path": "notes.md", "kind": "add"}])
+item("completed", id="item_4", type="agent_message", text="One test fails still.")
+usage = {"input_tokens": 120, "cached_input_tokens": 0, "output_tokens": 30, "reasoning_output_tokens": 0}
+print(json.dumps({"type": "turn.completed", "usage": usage}), flush=True)
+"#;
+
+#[test]
+fn what_a_codex_agent_did_is_shown_in_its_conversation_as_cells() {
+    let place = Place::new("codex-cells");
+    let codex = place.root.join("codex-at-work");
+    program(&codex, CODEX_AT_WORK);
+    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    host.send(&agent, "make the tests pass", "u-1");
+    wait_for("the turn to be over", || host.state(&agent) == "done");
+
+    let turns = host.turns(&agent);
+    let shown: Vec<(&str, &str)> = turns
+        .iter()
+        .map(|turn| {
+            let kind = turn["kind"]
+                .as_str()
+                .unwrap_or(turn["role"].as_str().unwrap());
+            (kind, turn["text"].as_str().unwrap())
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("user", "make the tests pass"),
+            ("assistant", "I will run the tests."),
+            ("tool", ""),
+            ("tool", ""),
+            ("tool", ""),
+            ("assistant", "One test fails still."),
+        ]
+    );
+    // Each call is a row of its own, shown as Codex's own reader shows it: as a cell, and
+    // not as a card too.
+    let calls: Vec<&Value> = turns.iter().filter(|turn| turn["kind"] == "tool").collect();
+    for call in &calls {
+        assert_eq!(call["tools"], json!([]), "{call}");
+        assert!(call["tool_name"].is_string(), "{call}");
+        let cell = &call["display_cells"][0];
+        let id = cell["id"].as_str().unwrap();
+        assert!(
+            id.starts_with("c-") && id.contains("-item_"),
+            "known by its call: {id}"
+        );
+        assert_eq!(call["display_cells"].as_array().unwrap().len(), 1);
+    }
+    let without_id = |call: &Value| {
+        let mut cell = call["display_cells"][0].clone();
+        cell.as_object_mut().unwrap().shift_remove("id");
+        cell
+    };
+    let line =
+        |text: &str, label: &str, kind: &str| json!({ "label": label, "text": text, "kind": kind });
+    // A command: what ran without the shell around it, that it failed, and the first and
+    // the last of what it printed.
+    assert_eq!(
+        without_id(calls[0]),
+        json!({
+            "kind": "command", "title": "Ran", "summary": "cargo test -p kernel", "status": "error",
+            "lines": [
+                line("running 7 tests", "", "output"),
+                line("test t0 ... ok", "", "output"),
+                line("… +4 lines (full transcript in terminal)", "", "omitted"),
+                line("test t5 ... ok", "", "output"),
+                line("test t6 ... FAILED", "", "output"),
+            ],
+        })
+    );
+    // A command that only looked at something: what it read.
+    assert_eq!(
+        without_id(calls[1]),
+        json!({
+            "kind": "exploration", "title": "Explored", "summary": "", "status": "ok",
+            "lines": [line("src/a.rs", "Read", "detail")],
+        })
+    );
+    // A change to files: each file, and how it changed.
+    assert_eq!(
+        without_id(calls[2]),
+        json!({
+            "kind": "patch", "title": "Edited", "summary": "apply_patch", "status": "ok",
+            "lines": [line("src/a.rs", "Edit", "detail"), line("notes.md", "Add", "detail")],
+        })
+    );
+
+    // An app that opens a card's details itself is told that there is a cell and how much
+    // is behind it.
+    let page = host.get(&format!("/log?session={agent}&include_tool_details=0"));
+    let rows = page["turns"].as_array().unwrap();
+    let ran = rows.iter().find(|row| row["kind"] == "tool").unwrap();
+    assert_eq!(
+        (
+            &ran["tool_details_available"],
+            &ran["activity_count"],
+            &ran["tools"]
+        ),
+        (&json!(true), &json!(1), &json!([]))
+    );
+    assert_eq!(
+        (
+            &ran["display_cells"][0]["title"],
+            &ran["display_cells"][0]["detail_count"]
+        ),
+        (&json!("Ran"), &json!(5))
+    );
 }
 
 /// A stand-in for Codex that explains the use of tools: it writes down how it was started,

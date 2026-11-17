@@ -830,10 +830,30 @@ and remembers the whole commands to complete a cut name an app asks about. This 
 under the name `shell` with the command beside it (2,000 signs at most on its item), and the apps ask with
 what the row carries (name, summary, command, path and what it was given: read in the phone's app and in
 the desktop's; the web app does not ask, it shows what the row carries). No name this Host tells is cut, so
-there is nothing to complete, and no command is held in memory for it. What is
-still short of the Python Host is another thing: a call of Codex is a row of its own in the conversation
-here, with a plain card that holds 200 signs of its command, where that Host groups such calls into cells.
-The cells are to be built.
+there is nothing to complete, and no command is held in memory for it.
+
+**What a Codex agent did, as Codex's own reader shows it** (17 Nov 2026). Found while reading the above: a
+call of Codex was a row with a plain card here (the name `shell`, 100 signs of the command, nothing of what
+it printed; an edit with no file named), where the Python Host shows cells: "Ran cargo test" with the first
+and the last lines it printed, "Edited" with the files, "Explored" for what only looked at things. Of the
+191 agents on the owner's Host that morning 58 run on Codex. The whole reader is ported, since the past
+sessions of Codex need it too: `clarp-kernel` `tools/cells.rs` (the cells: `codex_tool_cells.py`) and
+`clarp-backend` `history/rollout.rs` (`parse_turns` of `codex_transcript.py`: the messages in both forms
+Codex writes them, told once; the items `codex exec --json` prints and those of Codex's app server; the
+older records of a call and what came back, left out where a turn has the item too; the agents Codex starts
+itself; reads and searches gathered; every cell within its bounds). Held to 17 made-up rollouts read by that
+Host's own function: 375 lines, 49 turns, 232 cells, 75 cards, written twice (once for what rollouts look
+like, once for each branch of the port). It agreed at its first build.
+
+In the Host, the adapter that reads `codex exec --json` has the cell made of each item while all of the
+item is there (the Host keeps 4,000 signs of what a command printed; the cell wants its first and last
+lines and how many were between), and keeps it with the call. The row of the call carries the cell and no
+card (an app shows each: both would be the call twice). The cell is known by the call's id, also where it
+only looked at things, so that an app which shows the call live knows the row for the same. A call its
+turn was interrupted under is no longer shown as running. One thing is left out: several calls gathered
+into one cell, since a call is a row of its own here. Held by the adapter's recorded turn, the row's own
+test, and a turn of a stand-in Codex through the Host (a command that fails with eight lines, a read, an
+edit of two files).
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
