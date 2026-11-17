@@ -815,7 +815,11 @@ in say 16.5 million for all their turns together. Mended in the build after `7c8
 counted by what its thread's count grew by, and one whose thread's count before it is not known (a session
 that was taken up, a thread from before this) is not counted at all rather than wrongly. Held by the two
 recorded turns of one thread (87,566 taken in, then 131,412) and by a stand-in that counts on the same way
-through the Host.
+through the Host. Landed with `09d9225c` (17 Nov, 12:05; installed at 12:06 without an exercise, to spare the
+account) and tried with the real Codex (`verify-codex-count.py`, 6 points, two turns): an agent of the
+check's own answers two short messages in one thread. The first turn is counted with 45,445 tokens taken
+in, the second with 45,706, its own share; together 91,151, which is what Codex's own record says the
+thread has taken.
 
 ## The use of tools explained
 

@@ -8313,21 +8313,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "oscar",
-    "event_id": "<eid:agent-state#2@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "claire",
-    "trace_id": "<id:4>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#2@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -8413,6 +8398,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#6@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "oscar",
+    "event_id": "<eid:agent-state#2@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "claire",
+    "trace_id": "<id:4>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@91d46a>"
   },
   {
    "data": {

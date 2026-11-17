@@ -4423,6 +4423,16 @@
   {
    "data": {
     "agent_id": "<id:5>",
+    "event_id": "<eid:transcript-updated#1@f88043>",
+    "session": "pictured",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@f88043>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
     "detail": {
      "session": "pictured"
     },
@@ -4459,16 +4469,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@7c2acb>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "event_id": "<eid:transcript-updated#1@f88043>",
-    "session": "pictured",
-    "type": "transcript-updated"
-   },
-   "event": null,
-   "id": "<eid:transcript-updated#1@f88043>"
   },
   {
    "data": {
