@@ -1,9 +1,10 @@
 //! What is said of a tool's use without asking a model is what the Python Host says of it.
 //!
 //! `tests/fixtures/tool-explanation-vectors.json` (written by
-//! `tools/tool-explanation-vectors.py` out of that Host's own functions) holds 256 uses of
+//! `tools/tool-explanation-vectors.py` out of that Host's own functions) holds 543 uses of
 //! tools as they were read: how each is told (the template that fits with what the use names
-//! for it, or why none fits) and the sentence at each of the five levels of detail.
+//! for it, or why none fits, for each of the seventeen reasons there are) and the sentence at
+//! each of the five levels of detail.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_kernel::explain;
@@ -41,6 +42,6 @@ fn a_use_is_told_and_spoken_of_as_the_python_host_does() {
             none += 1;
         }
     }
-    // Counted by the generator: a template fits 109 uses and none fits 147; 436 sentences.
-    assert_eq!((fit, none, sentences), (109, 147, 436));
+    // Counted by the generator: a template fits 253 uses and none fits 290; 1010 sentences.
+    assert_eq!((fit, none, sentences), (253, 290, 1010));
 }
