@@ -1336,6 +1336,10 @@ def main(argv=None) -> int:
                         'compare: where what the Rust Host answered goes, when it is wanted')
     parser.add_argument('--intended', default=str(HERE / 'intended.txt'))
     parser.add_argument('--scenarios', help='a comma-separated subset of the corpus')
+    parser.add_argument('--plant', type=int, help='plants: only the planted change of this number, from 0')
+    parser.add_argument('--plants-beside', type=int, metavar='N',
+                        help='cross: the planted changes are tried beside this run, each in a run of its own '
+                             '(conformance.yml), of which there are N: refused unless the suite has N')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--keep', action='store_true', help='keep the scratch directory')
     args = parser.parse_args(argv)
@@ -1363,7 +1367,12 @@ def main(argv=None) -> int:
                 lines.append(f'written down: {len(recordings[0])} scenario(s), {len(recordings)} times, '
                              f'in {args.golden}')
         elif args.mode == 'plants':
-            lines, ok = prove(build, load_golden(args.golden, chosen), chosen, plants.CHANGES, run, args.jobs)
+            changes = plants.CHANGES
+            if args.plant is not None:
+                if not 0 <= args.plant < len(changes):
+                    raise SystemExit(f'no planted change {args.plant}: the suite has {len(changes)}')
+                changes = [changes[args.plant]]
+            lines, ok = prove(build, load_golden(args.golden, chosen), chosen, changes, run, args.jobs)
         elif args.mode == 'compare':
             recordings = [load_golden(directory, chosen) for directory in golden_dirs(args.golden)
                           if directory == args.golden or directory.is_dir()]
@@ -1391,6 +1400,17 @@ def main(argv=None) -> int:
                 proof = ['# Planted changes', '',
                          'NOT TRIED: a part of the corpus was asked for; the whole corpus is the gate']
                 proved = True
+            elif args.plants_beside is not None:
+                # Each planted change runs the whole corpus once: three quarters of what the gate
+                # runs. They are tried at the same time as this, each in a run of its own, and the
+                # gate is this run and all of those. A planted change nobody tries would be a
+                # suite nobody proved: the count has to be the suite's.
+                proved = args.plants_beside == len(plants.CHANGES)
+                proof = ['# Planted changes', '',
+                         f'TRIED BESIDE THIS RUN: {args.plants_beside} planted changes, each in a run of its own'
+                         if proved else
+                         f'{args.plants_beside} PLANTED CHANGES ARE TRIED BESIDE THIS RUN AND THE SUITE HAS '
+                         f'{len(plants.CHANGES)}: give every one a run in conformance.yml']
             else:
                 proof, proved = prove(build, recordings[0], chosen, plants.CHANGES, run, args.jobs)
             rust_lines, conforms, rust_seen = against_rust(

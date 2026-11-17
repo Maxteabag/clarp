@@ -10,6 +10,11 @@ name: Conformance (Rust Host)
 # The whole corpus is the gate a candidate lands by. A run of some scenarios only
 # (`-f scenarios=a,b`) is a question, asked before the Rust Host is written: what the Python
 # Host answers there. It gates nothing.
+# The gate is every job of a run of the whole corpus: `conformance` writes down what the Python
+# Host answers and compares the Rust Host with it, and each `proof` plants one change in the
+# Python Host and requires the corpus to show it. A planted change runs the whole corpus once,
+# so the eight of them were three quarters of a run of 28 minutes; side by side the gate takes
+# about ten, which is what lets a candidate land on a main that moves twice an hour.
 
 on:
   workflow_dispatch:
@@ -54,9 +59,12 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p conformance-report
+          # The whole corpus: the planted changes are tried in the jobs beside this one, and
+          # this one refuses when their number is not the suite's.
+          if [ -n "$SCENARIOS" ]; then part=(--scenarios "$SCENARIOS"); else part=(--plants-beside 8); fi
           bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py cross \
             --build . --rust server-rs/target/debug/clarp-host --out conformance-report \
-            ${SCENARIOS:+--scenarios "$SCENARIOS"} \
+            "${part[@]}" \
             | tee conformance-report/console.txt
       # The report prints structure, counts and codes; the corpus is synthetic.
       - uses: actions/upload-artifact@v4
@@ -64,3 +72,37 @@ jobs:
         with:
           name: conformance-report
           path: conformance-report/
+
+  # One planted change each: the Python Host's answers are written down, the change is planted
+  # in a copy of it, and the corpus has to show it. No Rust is built here. As many as the suite
+  # has planted changes (`contract_plants.py`); `conformance` refuses another number.
+  proof:
+    if: ${{ inputs.scenarios == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plant: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - name: A planted change has to show
+        run: |
+          set -o pipefail
+          mkdir -p conformance-proof
+          bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py record \
+            --build . --golden conformance-proof/golden | tee conformance-proof/console.txt
+          bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py plants \
+            --build . --golden conformance-proof/golden --plant ${{ matrix.plant }} \
+            | tee -a conformance-proof/console.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-proof-${{ matrix.plant }}
+          path: conformance-proof/console.txt
