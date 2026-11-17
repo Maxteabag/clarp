@@ -194,6 +194,9 @@ pub struct Recorder {
     last_seq: Seq,
     /// The position of the newest item of the conversation: 0 when it has none.
     conversation_seq: Seq,
+    /// Where the agent was last started again: its conversation, as it is read, is what
+    /// was written after this. 0: it never was.
+    floor: Seq,
 }
 
 fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
@@ -207,6 +210,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
+        | AgentEvent::StartedAgain { .. }
         | AgentEvent::Labelled { .. } => None,
     };
     Ok(item)
@@ -218,6 +222,7 @@ impl Recorder {
         let mut agent = Agent::new();
         let mut cursor = None;
         let mut after = 0;
+        let mut floor = 0;
         loop {
             let page = log.read_after(after, kind::MACHINERY, PAGE)?;
             let Some(last) = page.last() else { break };
@@ -231,6 +236,9 @@ impl Recorder {
                     kind::AGENT_EVENT => {
                         let event: AgentEvent =
                             serde_json::from_slice(&item.body).map_err(corrupt)?;
+                        if matches!(event, AgentEvent::StartedAgain { .. }) {
+                            floor = item.seq;
+                        }
                         agent
                             .apply(&event)
                             .map_err(|transition| JournalError::Illegal {
@@ -257,6 +265,7 @@ impl Recorder {
             cursor,
             last_seq,
             conversation_seq,
+            floor,
         })
     }
 
@@ -266,9 +275,61 @@ impl Recorder {
     }
 
     /// The position of the newest item of the conversation: the conversation changed last when
-    /// that item was written. 0 when there is none.
+    /// that item was written. 0 when there is none: nothing was ever written, or nothing
+    /// since the agent was started again.
     pub fn conversation_seq(&self) -> Seq {
-        self.conversation_seq
+        if self.conversation_seq > self.floor {
+            self.conversation_seq
+        } else {
+            0
+        }
+    }
+
+    /// Where the agent was last started again: its conversation, as it is read, is what
+    /// was written after this position. 0: it never was.
+    pub fn floor(&self) -> Seq {
+        self.floor
+    }
+
+    /// Starts the agent again: its next turn begins a conversation with its tool, and its
+    /// conversation, as it is read, begins anew. What waits its turn and was said already
+    /// is written anew, after where the old conversation ends: it is part of the new one,
+    /// and its turn answers it there. Answers how many such messages there were; `None`,
+    /// with nothing changed, while a turn of the agent runs: that turn is stopped first.
+    pub fn start_again(&mut self, now_ms: i64) -> Result<Option<usize>, JournalError> {
+        if self.agent.live().is_some() {
+            return Ok(None);
+        }
+        let waiting: Vec<(TurnId, Seq)> = self
+            .agent
+            .waiting()
+            .map(|queued| (queued.id, queued.message_seq))
+            .collect();
+        let mut said = Vec::new();
+        for (turn, message_seq) in waiting {
+            let from = message_seq.saturating_sub(1);
+            let kept = self.log.read_after(from, Kinds::only(kind::MESSAGE), 1)?;
+            // What waits outside the conversation enters it when its turn starts.
+            if let Some(stored) = kept.into_iter().find(|item| item.seq == message_seq) {
+                said.push((turn, stored));
+            }
+        }
+        // This recorder is the log's one writer: the item it writes first is the next one.
+        let first = self.last_seq + 1;
+        let moved = said.len();
+        let mut batch = self.batch();
+        batch
+            .command(Command::StartAgain, now_ms)
+            .map_err(JournalError::Refused)?;
+        for (turn, stored) in said {
+            let mut item = NewItem::new(kind::MESSAGE, stored.ts_ms, stored.body).in_turn(turn.0);
+            item.key = stored.key;
+            let message_seq = first + batch.item(item) as Seq;
+            let anew = Command::Reword { turn, message_seq };
+            batch.command(anew, now_ms).map_err(JournalError::Refused)?;
+        }
+        batch.commit()?;
+        Ok(Some(moved))
     }
 
     pub fn agent(&self) -> &Agent {
@@ -298,6 +359,7 @@ impl Recorder {
             effects: Vec::new(),
             cursor: None,
             failed: None,
+            started_again: None,
         }
     }
 
@@ -449,6 +511,8 @@ pub struct Batch<'a> {
     effects: Vec<Effect>,
     cursor: Option<SpoolCursor>,
     failed: Option<JournalError>,
+    /// Where in this batch the agent is started again, when it is.
+    started_again: Option<usize>,
 }
 
 impl Batch<'_> {
@@ -458,7 +522,12 @@ impl Batch<'_> {
         let decision = self.work.decide(command, now_ms)?;
         for event in decision.events {
             match event_item(&event, now_ms) {
-                Ok(item) => self.items.push(item),
+                Ok(item) => {
+                    if matches!(event, AgentEvent::StartedAgain { .. }) {
+                        self.started_again = Some(self.items.len());
+                    }
+                    self.items.push(item);
+                }
                 Err(error) => {
                     self.failed.get_or_insert(error);
                 }
@@ -554,6 +623,9 @@ impl Batch<'_> {
             .rposition(|item| kind::CONVERSATION.has(item.kind))
         {
             self.recorder.conversation_seq = first_seq + newest as Seq;
+        }
+        if let Some(at) = self.started_again {
+            self.recorder.floor = first_seq + at as Seq;
         }
         self.recorder.last_seq = last_seq;
         self.recorder.agent = self.work;
@@ -1051,6 +1123,103 @@ mod tests {
             vec![3, 2],
             "the order survives a restart"
         );
+    }
+
+    #[test]
+    fn an_agent_started_again_has_a_conversation_that_begins_after_it() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        assert_eq!((recorder.floor(), recorder.conversation_seq()), (0, 0));
+        // A message that is answered, one that was said and waits, one left for later.
+        recorder
+            .accept_message(message("u-1", Admission::Queue), 1)
+            .unwrap();
+        let said = recorder
+            .accept_message(message("u-2", Admission::Queue), 2)
+            .unwrap();
+        let later = recorder
+            .accept_message(message("u-3", Admission::Later), 3)
+            .unwrap();
+        let waits = |r: &Recorder| -> Vec<(u64, Seq)> {
+            let waiting = r.agent().waiting();
+            waiting
+                .map(|queued| (queued.id.0, queued.message_seq))
+                .collect()
+        };
+        assert_eq!(
+            waits(&recorder),
+            vec![(2, said.message_seq), (3, later.message_seq)]
+        );
+        // While its turn runs it is not started again, and nothing is written.
+        let before = recorder.last_seq();
+        assert_eq!(recorder.start_again(4).unwrap(), None);
+        assert_eq!((recorder.last_seq(), recorder.floor()), (before, 0));
+        // The turn is stopped, and ends; the mailbox is held meanwhile.
+        recorder
+            .handle(
+                Command::Stop {
+                    by: "relaunch".to_string(),
+                },
+                5,
+            )
+            .unwrap();
+        let ended = Command::TurnEnded {
+            turn: TurnId(1),
+            outcome: RunOutcome::Stopped {
+                by: "relaunch".to_string(),
+            },
+        };
+        recorder.handle(ended, 6).unwrap();
+        let old_conversation = recorder.conversation_seq();
+        assert!(old_conversation > 0);
+
+        // Started again: one message was said already, and is written anew after where the
+        // old conversation ends. The one left for later enters the new one when it runs.
+        assert_eq!(recorder.start_again(7).unwrap(), Some(1));
+        let floor = recorder.floor();
+        assert!(floor > old_conversation, "{floor}");
+        let moved = waits(&recorder);
+        assert_eq!(moved[1], (3, later.message_seq));
+        assert!(moved[0].0 == 2 && moved[0].1 > floor, "{moved:?}");
+        assert_eq!(
+            recorder.conversation_seq(),
+            moved[0].1,
+            "the conversation is what was written after"
+        );
+        let kept = recorder
+            .log()
+            .read_after(moved[0].1 - 1, Kinds::only(kind::MESSAGE), 1)
+            .unwrap();
+        assert_eq!(kept[0].body, b"u-2".to_vec(), "in its own words");
+        assert_eq!(recorder.agent().backend_session(), None);
+        // The same message sent again is still the message that is known.
+        let again = recorder
+            .accept_message(message("u-2", Admission::Queue), 8)
+            .unwrap();
+        assert!(again.duplicate);
+
+        // All of it is what a restart of the Host reads back.
+        let state = recorder.agent().clone();
+        drop(recorder);
+        let mut recorder = open(&engine);
+        assert_eq!(recorder.agent(), &state);
+        assert_eq!(
+            (recorder.floor(), recorder.conversation_seq()),
+            (floor, moved[0].1)
+        );
+        // Started again once more with nothing said since: an empty conversation.
+        recorder
+            .handle(
+                Command::Withdraw {
+                    turn: TurnId(2),
+                    by: "user".to_string(),
+                },
+                9,
+            )
+            .unwrap();
+        assert_eq!(recorder.start_again(10).unwrap(), Some(0));
+        assert!(recorder.floor() > floor);
+        assert_eq!(recorder.conversation_seq(), 0, "nothing is in it yet");
     }
 
     #[test]

@@ -1094,6 +1094,21 @@ impl Actor {
         (self.recorder.conversation_seq() * REVISION_STEP).max(self.shown_revision)
     }
 
+    /// Where the conversation begins, as it is read, and how far it has got.
+    fn span(&self) -> conversation::Span {
+        conversation::Span {
+            floor: self.recorder.floor(),
+            head_revision: self.head_revision(),
+        }
+    }
+
+    /// The revision the conversation, as it is read, begins after: 0 for an agent that was
+    /// never started again. A reader that holds an older revision holds a conversation
+    /// that has ended.
+    pub fn begins_after(&self) -> u64 {
+        self.recorder.floor() * REVISION_STEP
+    }
+
     pub fn status(&self) -> Status {
         let agent = self.recorder.agent();
         let stopping = agent.stopping().is_some();
@@ -1183,15 +1198,22 @@ impl Actor {
             return Ok(kept);
         };
         // From the newest end back: an older one only fills what the newer ones left open.
+        let floor = self.recorder.floor();
         for turn in (1..=last.id.0).rev().take(CONTEXT_LOOKBACK) {
+            let stored = self.recorder.log().find(&format!("t-{turn}"))?;
+            // A turn that ended before the agent was started again says when a turn last
+            // ran to its end, and nothing of the conversation there is now.
+            let earlier = stored.is_some_and(|stored| stored.seq <= floor);
             if let Some(end) = self.turn_end(turn)? {
                 let mut older = Remembered::default();
                 older.take(&end);
-                kept.context_tokens = kept.context_tokens.or(older.context_tokens);
                 kept.completed_at_ms = kept.completed_at_ms.or(older.completed_at_ms);
-                kept.answered_by = kept.answered_by.or(older.answered_by);
+                if !earlier {
+                    kept.context_tokens = kept.context_tokens.or(older.context_tokens);
+                    kept.answered_by = kept.answered_by.or(older.answered_by);
+                }
             }
-            if kept.is_whole() {
+            if kept.is_whole() || (earlier && kept.completed_at_ms.is_some()) {
                 break;
             }
         }
@@ -1299,10 +1321,22 @@ impl Actor {
         conversation::tail(
             self.recorder.log(),
             self.drafts(),
-            self.head_revision(),
+            self.span(),
             limit,
             which,
         )
+    }
+
+    /// The newest `limit` things the agent's log has of any of its conversations, also of
+    /// those that ended when it was started again. What a list of chats shows of an agent
+    /// is the last thing that was said: an agent that was started again shows it until
+    /// something is said in its new conversation.
+    pub fn tail_of_any(&self, limit: usize) -> Result<Page, ActorError> {
+        let whole = conversation::Span {
+            floor: 0,
+            head_revision: self.head_revision(),
+        };
+        conversation::tail(self.recorder.log(), self.drafts(), whole, limit, Which::All)
     }
 
     /// Up to `limit` things that are newer than `revision`, as a client catches up.
@@ -1316,7 +1350,7 @@ impl Actor {
             self.recorder.log(),
             revision,
             self.drafts(),
-            self.head_revision(),
+            self.span(),
             limit,
             which,
         )
@@ -1609,7 +1643,7 @@ impl Actor {
             self.recorder.log(),
             item.seq,
             &[],
-            self.head_revision(),
+            self.span(),
             limit,
             which,
         )
@@ -1799,6 +1833,32 @@ impl Actor {
         // Whoever stops an agent does not want to hear the rest of what it had to say.
         out.changed.speech = self.drop_lines(now_ms)? > 0;
         Ok((u32::try_from(told).unwrap_or(u32::MAX), out))
+    }
+
+    /// Starts the agent again: its next turn begins a conversation with its tool, and its
+    /// conversation, as it is read, begins anew: empty, but for what waits its turn and was
+    /// said already. Answers `false`, with nothing changed, while a turn of the agent runs:
+    /// whoever starts an agent again stops that turn first.
+    pub fn start_again(&mut self, now_ms: i64) -> Result<(bool, Outputs), ActorError> {
+        let Some(moved) = self.recorder.start_again(now_ms)? else {
+            return Ok((false, Outputs::default()));
+        };
+        // Nothing of the conversation that ended is shown any more. What the agent last
+        // said stays what a list of chats shows of it, until it says something new. How
+        // full its tool's conversation was and which model answered in it were said of the
+        // conversation that ended: the new one has no such word yet.
+        self.shown_revision = 0;
+        self.remembered.context_tokens = None;
+        self.remembered.answered_by = None;
+        let out = Outputs {
+            changed: Changed {
+                status: true,
+                queue: moved > 0,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        Ok((true, out))
     }
 
     /// The agent says what it is busy with beyond its turns, or with an empty label, that it

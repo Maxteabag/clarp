@@ -224,7 +224,7 @@ pub struct Told {
 }
 
 impl Told {
-    fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status,
             code,
@@ -446,6 +446,13 @@ enum Ask {
         request: CreateAgentRequest,
         answer: Answer<Result<AgentRecord, NotMade>>,
     },
+    /// An agent is started again in place. `dry`: only what would be is answered.
+    StartAgain {
+        replaces: String,
+        request: CreateAgentRequest,
+        dry: bool,
+        answer: Answer<Result<AgentRecord, NotMade>>,
+    },
     /// The user changes something about an agent. `of_any`: the change is the janitors'
     /// own, and may be of a janitor.
     Amend {
@@ -609,6 +616,26 @@ impl FleetHandle {
         request: CreateAgentRequest,
     ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
         self.ask(|answer| Ask::Create { request, answer }).await
+    }
+
+    /// Starts an agent again in place: the same agent under the same session name, as the
+    /// request says it is to be from now on (its name, its tool, where it works, its model
+    /// and effort, its voice; what the request leaves out stays), with a conversation of a
+    /// new name. `dry`: nothing is changed, and the answer is what would be. The inner error
+    /// says why not. The agent's own log is told by whoever asks ([`AgentHandle::start_again`]).
+    pub async fn start_again(
+        &self,
+        replaces: String,
+        request: CreateAgentRequest,
+        dry: bool,
+    ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
+        self.ask(|answer| Ask::StartAgain {
+            replaces,
+            request,
+            dry,
+            answer,
+        })
+        .await
     }
 
     /// Makes a janitor as one: a member of the fleet that is no agent of the roster. It has
@@ -1110,6 +1137,14 @@ impl Fleet {
                 Ask::Create { request, answer } => {
                     let _ = answer.send(Ok(self.create(request)));
                 }
+                Ask::StartAgain {
+                    replaces,
+                    request,
+                    dry,
+                    answer,
+                } => {
+                    let _ = answer.send(Ok(self.start_again(&replaces, request, dry)));
+                }
                 Ask::Mark {
                     key,
                     state,
@@ -1530,6 +1565,110 @@ impl Fleet {
             .iter()
             .map(|member| &member.record)
             .find(|record| record.agent_id != except && roster::same_name(&record.persona, name))
+    }
+
+    /// An agent started again in place, by the Python Host's rules for it
+    /// (`policies/agent_spec.py`, with `replace_sid`): it has to have a name, be an agent
+    /// of this Host and no janitor; what the request does not say stays as the agent has
+    /// it; its name must be no other agent's. A tool this Host has not is refused, as for a
+    /// new agent. With another tool the model it had is the old tool's and is not kept,
+    /// and neither is an effort the new tool has not.
+    fn start_again(
+        &mut self,
+        replaces: &str,
+        request: CreateAgentRequest,
+        dry: bool,
+    ) -> Result<AgentRecord, NotMade> {
+        let persona = request.name.trim().to_string();
+        if persona.is_empty() {
+            return Err(Told::new(400, "name required", "name required").into());
+        }
+        let by_session = |member: &Arc<Member>| member.record.session == replaces;
+        let Some(at) = self.members.iter().position(by_session) else {
+            let why = "no such agent to replace";
+            return Err(Told::new(404, why, why).into());
+        };
+        let before = self.members[at].record.clone();
+        if before.is_janitor {
+            let why = "Janitors are managed from their maintenance configuration";
+            return Err(Told::new(409, "janitor_managed", why).into());
+        }
+        let said = |said: &Option<String>| said.as_deref().map_or("", strip).to_string();
+        let cwd = match said(&request.cwd) {
+            asked if asked.is_empty() => before.cwd.clone(),
+            asked => {
+                let default_cwd = &self.works.config.default_cwd;
+                let cwd = crate::config::working_dir(&asked, &crate::config::home(), default_cwd);
+                cwd.display().to_string()
+            }
+        };
+        let backend = match said(&request.backend) {
+            asked if asked.is_empty() => before.backend.clone(),
+            asked => asked,
+        };
+        if clarp_backend::by_id(&backend).is_none() {
+            return Err(format!("this Host has no backend named `{backend}`").into());
+        }
+        if let Some(owner) = self.owner_of_name(&persona, &before.agent_id) {
+            return Err(NotMade::Occupied {
+                owner: owner.persona.clone(),
+                session: owner.session.clone(),
+            });
+        }
+        let another_tool = backend != before.backend;
+        let model = match &request.model {
+            Some(model) => model.trim().to_string(),
+            None if another_tool => String::new(),
+            None => before.model.clone(),
+        };
+        let efforts = clarp_backend::efforts(&backend);
+        let effort = match &request.effort {
+            Some(asked) => match roster::effort(asked, efforts) {
+                Some(effort) => effort,
+                None => {
+                    let why = "invalid effort for backend";
+                    return Err(Told::new(400, why, why).into());
+                }
+            },
+            None if efforts.contains(&before.effort.as_str()) => before.effort.clone(),
+            None => String::new(),
+        };
+        let or_kept = |asked: String, kept: &str| {
+            if asked.is_empty() {
+                kept.to_string()
+            } else {
+                asked
+            }
+        };
+        let record = AgentRecord {
+            persona,
+            backend,
+            cwd,
+            model,
+            effort,
+            voice_id: or_kept(said(&request.voice_id), &before.voice_id),
+            personality: match &request.personality {
+                Some(asked) => python::first(strip(asked), PERSONALITY_MOST).to_string(),
+                None => before.personality.clone(),
+            },
+            avatar_symbol: match &request.avatar_symbol {
+                Some(asked) => python::first(strip(asked), personas::SYMBOL_MOST).to_string(),
+                None => before.avatar_symbol.clone(),
+            },
+            // A conversation of a new name: an app that kept the old one drops it.
+            conversation_id: ids::uuid(),
+            ..before.clone()
+        };
+        if dry {
+            return Ok(record);
+        }
+        let (took, _taken) = oneshot::channel();
+        self.replace(at, record.clone(), took)
+            .map_err(|unavailable| unavailable.0)?;
+        self.works
+            .hub
+            .publish(wire::roster_started_again(&record), self.now_ms());
+        Ok(record)
     }
 
     fn create(&mut self, request: CreateAgentRequest) -> Result<AgentRecord, NotMade> {

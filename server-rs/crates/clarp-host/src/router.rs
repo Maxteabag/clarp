@@ -327,16 +327,21 @@ async fn say(app: &App, say: &Say) {
     }
 }
 
-/// Starts an agent: a new one by its name. An agent that is started again in place is not
-/// built on this Host yet, and that is said as what failed.
+/// Starts an agent: again in place, as the Host knows it, or a new one by its name.
 async fn start(app: &App, start: &Start) -> Done {
-    if start.again.is_some() {
-        let why = "Starting an agent again in place is not built on this Host yet";
-        return Done::Broke(why.to_string());
-    }
     let mut asked = Map::new();
     if let Some(name) = &start.name {
         asked.insert("name".to_string(), json!(name));
+    }
+    if let Some(session) = &start.again {
+        // Everything about it is taken from what the Host knows of it: only that it is
+        // started again is the model's to say.
+        let directory = app.fleet.directory();
+        let Some(agent) = directory.by_session(session) else {
+            return Done::Broke("no such agent to replace".to_string());
+        };
+        asked.insert("name".to_string(), json!(agent.record.persona));
+        asked.insert("replace_sid".to_string(), json!(session));
     }
     match edge::make_agent(app, &asked).await {
         Ok(made) => Done::Started {

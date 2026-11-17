@@ -108,6 +108,11 @@ pub enum Ask {
         by: String,
         answer: Answer<(bool, QueueState)>,
     },
+    /// Starts the agent again: its next turn begins a conversation with its tool, and its
+    /// conversation begins anew. Answers whether it was: not while a turn of it runs.
+    StartAgain {
+        answer: Answer<bool>,
+    },
     /// What waits, in the order it will run.
     Queue {
         answer: Answer<(Vec<Waiting>, QueueState)>,
@@ -361,6 +366,13 @@ impl AgentHandle {
 
     pub async fn resume(&self, by: String) -> Result<(bool, QueueState), Unavailable> {
         self.ask(|answer| Ask::Resume { by, answer }).await
+    }
+
+    /// Starts the agent again: a new conversation with its tool, and an empty one for those
+    /// who read it. Answers whether it was: `false` while a turn of it runs, which whoever
+    /// starts an agent again stops first.
+    pub async fn start_again(&self) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::StartAgain { answer }).await
     }
 
     pub async fn queue(&self) -> Result<(Vec<Waiting>, QueueState), Unavailable> {
@@ -1004,11 +1016,23 @@ impl Worker {
             actor.retune(model, effort);
             actor.retell(told);
         }
-        // Another tool: the agent is opened again on it. Only an agent that has no
-        // conversation with the tool it had is given another (who changes it sees to that).
-        let another = record.backend != self.setup.record.backend;
+        // Another tool, another directory or a conversation of another name: the agent is
+        // opened again as it now is. Only an agent that has no conversation with the tool it
+        // had is given another, and only one that runs no turn is moved or started again
+        // (who changes it sees to that).
+        let was = &self.setup.record;
+        let another = record.backend != was.backend;
+        let moved = record.cwd != was.cwd || record.conversation_id != was.conversation_id;
         if let Some(backend) = clarp_backend::by_id(&record.backend).filter(|_| another) {
             self.setup.backend = backend;
+            self.actor = None;
+        }
+        if moved {
+            self.setup.profile.cwd = std::path::PathBuf::from(&record.cwd);
+            self.setup
+                .profile
+                .conversation_id
+                .clone_from(&record.conversation_id);
             self.actor = None;
         }
         self.setup.record = record;
@@ -1474,6 +1498,7 @@ impl Worker {
                 let queue = actor.queue_state();
                 answered(resumed.map(|(held, out)| ((held, queue), out)), answer)?
             }
+            Ask::StartAgain { answer } => answered(actor.start_again(now), answer)?,
             Ask::Queue { answer } => {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
@@ -1763,12 +1788,13 @@ impl Worker {
     fn newest_row(&self) -> Option<Versioned> {
         let actor = self.actor.as_ref()?;
         // Nearly always it is the newest row itself. Otherwise look back, as far as the
-        // Python Host does.
-        let newest = actor.tail(1).ok()?.entries.into_iter().last()?;
+        // Python Host does. Also into a conversation that ended when the agent was started
+        // again: what it last said is shown of it until it says something new.
+        let newest = actor.tail_of_any(1).ok()?.entries.into_iter().last()?;
         if wire::previewed(&newest) {
             return Some(newest);
         }
-        let back = actor.tail(50).ok()?.entries;
+        let back = actor.tail_of_any(50).ok()?.entries;
         back.into_iter().rev().find(wire::previewed)
     }
 
@@ -2088,6 +2114,7 @@ fn refuse_for(
             Ok(Ask::Send { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
