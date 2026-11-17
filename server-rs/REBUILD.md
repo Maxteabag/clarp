@@ -847,6 +847,43 @@ since the end of the turn before in the same thread: nothing before a thread's f
 so not counted, where the thread was taken up or is older than this. Found on 17 Nov when the account the
 tests ran on was used up: the usage screen said 61 million tokens for sixteen turns.
 
+**What is left of an account, as its tool says it** (17 Nov 2026). The other half of the usage screen is how
+much of an account is left. The Python Host has it from Codex's app server as that runs, and from the
+provider's usage endpoint, asked with the account's login. This Host runs Codex one process to a turn, and
+`codex exec --json` prints nothing of limits. But Codex writes them into its conversation's record with every
+count of tokens (`rate_limits`: each window with how much of it is used, how long it is and when it begins
+anew), in the words of its endpoint. So when a turn of Codex ends, the newest such record of the turn's
+rollout is read from the file's end (`clarp-host` `quota.rs`; in 37 conversations of elitebook it lay within
+eight thousand bytes of the end), read as the Python Host reads one (`clarp-backend` `limits.rs`), and kept
+and shown by that Host's rule (`clarp-kernel` `quota.rs`): a window of five hours and one of a week, fresh for
+a quarter of an hour and until the window begins anew; a warning at four fifths of the five hours and a hard
+limit, each told once; no longer known when the window begins anew or another login comes; over when the
+account is back under the warning. Each of these is told to the apps as the event `provider-limit`, and what
+is kept is shown in `GET /backend-usage`, with what this Host counted itself beside it. The rule is held to
+the Python code's own answers over 33 made-up stories on four logins (146 steps, 83 askings, 39 limit
+events); it matched at its first run, so 34 wrong rules were planted one at a time, and each was caught.
+Through the Host it is held by a stand-in for Codex that writes a rollout: the windows are shown after a
+turn; the warning and the hard limit are told once; a Host that is killed and started shows what it kept and
+tells nothing again; another account's login shows nothing of the account before and ends what stood open of
+it; and a limit whose window began anew is told as no longer known, to the app that asks and to those that
+listen. That test too passed at its first run: 15 wrong rules planted into the Host's part were each caught.
+Nobody is asked anything, so what is shown is as old as the last turn of Codex on this Host, and says so.
+
+Whose account a record is of is the login Codex is on when the record is read. The login file is read for the
+account and the token, and what is kept of them is a keyed digest (HMAC-SHA-256 under a key this Host draws
+once), as the Python Host keeps one: neither is in what the Host keeps, and the test looks for them there. A
+record written before the login file was last written is of the login before and is not taken; one that is
+no newer than the newest kept was read before. Two things differ on purpose (`docs/differences.md`). The
+tool's row says when its record was seen. And old windows are forgotten: a window is known by when it begins
+anew, and Codex does not say that the same throughout (in 213 of 359 conversations of elitebook that held
+more than one record it was said differently along the way; 4,516 of the 6,662 steps were of a minute or
+less), so that most records are of another window; the Python Host on elitebook holds 755 rows of the week's
+window from 48 days. That table also says what the owner's accounts have today: a week's window and no
+five-hour one, and no limit was ever told there. So the warning and the hard limit are held by vectors and by
+stand-ins, and by nothing live. Left of this: what Claude Code says of its limits as it runs, an agent's row
+saying that its tool's account is used up (`backend_quota`, which is `null` here), a turn that fails for a
+usage limit told as a limit, and asking a provider, which stays off unless the owner turns it on.
+
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
 every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain

@@ -55,6 +55,7 @@ pub mod pool;
 pub mod process;
 pub mod push;
 pub mod pusher;
+pub mod quota;
 pub mod relay;
 pub mod request_tool;
 pub mod revisions;

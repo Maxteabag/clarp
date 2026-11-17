@@ -151,6 +151,11 @@ pub struct Shown {
 }
 
 impl Kept {
+    /// When the newest record that was kept was seen: none before any was.
+    pub fn seen_at_ms(&self) -> Option<i64> {
+        self.row.as_ref().map(|row| row.seen_at_ms)
+    }
+
     /// A record of the account's limits was seen on a login: what the tool's reader made of
     /// it (`clarp_backend::limits::codex`), where it was seen (`detail`), and now. `new_id`
     /// makes an id nobody has, after the prefix it is given. Answers the events to tell.
@@ -439,9 +444,10 @@ impl Kept {
         if told.kind == "recovered" {
             episode.status = "resolved".to_string();
         }
+        // In the order the Python Host writes an event of this kind in.
         Some(json!({
-            "type": "provider-limit",
             "schema_version": 1,
+            "type": "provider-limit",
             "provider_limit_event_id": event_id,
             "episode_id": episode.episode_id,
             "provider_instance_id": tool.instance,

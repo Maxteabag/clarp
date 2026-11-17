@@ -2152,6 +2152,13 @@ impl Worker {
                 let agent_id = &self.setup.record.agent_id;
                 self.setup.tally.ended(agent_id, end.turn, used);
             }
+            // And what the tool wrote of its account's limits meanwhile is read, whatever
+            // became of the turn: Codex writes it into its conversation's own record.
+            if let Some(session) = status.backend_session.as_deref()
+                && backend == crate::quota::CODEX
+            {
+                self.setup.tally.over(backend, session);
+            }
         }
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
 
