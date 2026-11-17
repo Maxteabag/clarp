@@ -441,9 +441,17 @@ temporary.write_text(
     "#!/bin/sh\n"
     "# managed-by-clarp\n"
     'if [ -n "${CLARP_HOST_ADDR:-}" ]; then\n'
-    f'  clarp_tool="${{CLARP_SHARE_DIR:-}}/tools/"{shlex.quote(destination.name)}\n'
-    '  if [ -n "${CLARP_SHARE_DIR:-}" ] && [ -f "$clarp_tool" ] && [ -x "$clarp_tool" ] && ! [ "$clarp_tool" -ef "$0" ]; then\n'
-    '    exec "$clarp_tool" "$@"\n'
+    '  if [ "${CLARP_WRAPPER_HANDOVER+x}" != x ]; then\n'
+    '    case "${CLARP_SHARE_DIR:-}" in\n'
+    '      /*)\n'
+    f'        if [ -f "$CLARP_SHARE_DIR/tools/{destination.name}" ] && [ -x "$CLARP_SHARE_DIR/tools/{destination.name}" ]; then\n'
+    f'          if {{ [ "$CLARP_SHARE_DIR/tools/{destination.name}" -ef "$0" ]; [ "$?" -eq 1 ]; }} 2>/dev/null; then\n'
+    '            export CLARP_WRAPPER_HANDOVER=1\n'
+    f'            exec "$CLARP_SHARE_DIR/tools/{destination.name}" "$@"\n'
+    '          fi\n'
+    '        fi\n'
+    '        ;;\n'
+    '    esac\n'
     '  fi\n'
     f"  printf '%s\\n' {shlex.quote(destination.name + ': this turn belongs to another Clarp Host')} >&2\n"
     '  exit 69\n'
