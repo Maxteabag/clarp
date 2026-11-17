@@ -1073,6 +1073,30 @@ four). An app that folds such rows away asks for the log without them; the Host'
 readings (the chat as it was, and the request marked as the Host's own). The check reads as an app does
 from now on. It was not run a second time for that point: four more calls of a model.
 
+## What an app is told while a real tool works
+
+17 Nov 2026, 17:30, the Host installed from main `3c33896c` (17:28:56; the relay back after 119 ms, its
+23 agents there): the build that tells every state a turn passes through, however its tool's output is
+read (`REBUILD.md`, section 7). An agent of the check's own on Codex, one turn with one harmless
+command of a made-up shape, while the check reads the stream of events an app reads. Run twice (9 and 7
+seconds); two turns of Codex in all.
+
+| What was read | What the installed Host told |
+|---|---|
+| The agent is made | `spawned`, with the activity `idle` |
+| Its message is taken | `thinking`, to the sender (the send's own event) and as the agent's state, with the activity `thinking` |
+| Codex runs the command | `tool`, with the activity `tool` and what it does (`shell`) |
+| The command is over | `thinking` again, with its activity |
+| The answer | `done`, with the activity `idle`; the answer is what the command printed and the word asked for |
+| Afterwards | the agent removed; the Host has its 23 agents |
+
+No activity was told twice in a row. In the first run three points of the check did not hold, and all
+three were the check's own: it expected `thinking` before anything else (a new agent is told as made
+first), it took the send's own event and the state for the same thing told twice, and it counted what
+the stream gives a client that has nothing: what was told lately, of an agent of the same name before
+this one too. The second run, with the check corrected in the first two, held every point; the third
+is corrected in the script and was not run again.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart
