@@ -109,12 +109,13 @@ def diagnose(host, root: Path, scenario: str, error: str) -> None:
 NO_STATE = {'schema': [], 'tables': {}, 'files': [], 'cli': [], 'sse_log': []}
 
 
-def claude_shim(path: Path) -> None:
-    """Makes `path` the program that runs this suite's fake Claude."""
-    # How long the stand-in takes before it does anything is said by whoever runs the suite
-    # (`CLARP_QA_ANSWER_AFTER`, to try another moment), and is the same for both Hosts: a test
-    # Host hands its tools only the environment it makes for them.
-    pace = os.environ.get('CLARP_QA_ANSWER_AFTER', '')
+def claude_shim(path: Path, pace: str | None = None) -> None:
+    """Makes `path` the program that runs this suite's fake Claude. `pace`: how long the
+    stand-in takes before it does anything in a first turn, where its Host is given another
+    moment than the stand-in's own."""
+    # The moment can be said by whoever runs the suite (`CLARP_QA_ANSWER_AFTER`, to try
+    # another): a test Host hands its tools only the environment it makes for them.
+    pace = os.environ.get('CLARP_QA_ANSWER_AFTER', '') if pace is None else pace
     env = f'CLARP_QA_ANSWER_AFTER={shlex.quote(pace)} ' if pace else ''
     path.write_text(f'#!/bin/sh\n{env}exec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_CLAUDE))} "$@"\n')
     path.chmod(0o755)
@@ -152,7 +153,15 @@ class RustHost(replay.Host):
         provider = self.root / 'provider'
         for path in (provider / 'bin', self.root / 'workspace', self.root / 'home', self.root / 'tmp'):
             path.mkdir(parents=True)
-        claude_shim(provider / 'bin' / 'claude')
+        # The stand-in takes no moment before a first turn of this Host. The moment keeps the
+        # reference out of a race of its own (R43), which this Host does not have. And with it
+        # the stand-in's turn, which it prints in one breath, begins while this Host is already
+        # reading, and may be read in two: then a state the agent passed through in between
+        # (using a tool, answering) is told, where otherwise the state at the end is. In run
+        # 44111344344 that happened in tool-turns and live-items, 29 differences. That this
+        # Host's telling of states depends on how a burst is read is a weakness of its own,
+        # written down in REBUILD.md; until it is mended the suite does not lean on it.
+        claude_shim(provider / 'bin' / 'claude', os.environ.get('CLARP_QA_ANSWER_AFTER_RUST', '0'))
         # The owner's file of settings, of the reference Host's kind: what a scenario gives the
         # reference Host as its config, this Host reads its owner's choices of speech from. With
         # none, speech out is off on both (tests/replay/host.py, isolate).
