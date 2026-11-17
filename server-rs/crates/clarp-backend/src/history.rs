@@ -59,19 +59,6 @@ fn made_up(record: &Value) -> bool {
         || message["model"] == "<synthetic>"
 }
 
-/// Whether a value is something as the Python Host reads it (`if value`): not nothing, not
-/// false, not zero and not empty.
-fn something(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(yes) => *yes,
-        Value::Number(number) => number.as_f64() != Some(0.0),
-        Value::String(text) => !text.is_empty(),
-        Value::Array(items) => !items.is_empty(),
-        Value::Object(fields) => !fields.is_empty(),
-    }
-}
-
 /// What came back from a tool settles the use it answers: the newest use that is still
 /// open, of that id where the answer names one.
 fn settle(turns: &mut [Value], answer: &Value) {
@@ -83,7 +70,7 @@ fn settle(turns: &mut [Value], answer: &Value) {
     let id = said(["tool_use_id", "toolUseId"]).and_then(Value::as_str);
     let id = id.filter(|id| !id.is_empty());
     let failed = [&answer["is_error"], &answer["isError"]];
-    let failed = failed.iter().any(|flag| something(flag));
+    let failed = failed.iter().any(|flag| python::truthy(flag));
     for turn in turns.iter_mut().rev() {
         let Some(cards) = turn["tools"].as_array_mut() else {
             continue;
@@ -192,7 +179,7 @@ pub fn phases(turns: &[Value]) -> Vec<Value> {
             let by_what_follows = if work_after { "commentary" } else { "final" };
             phases[index] = json!(by_itself.unwrap_or(by_what_follows));
         }
-        if something(&turn["tools"]) || something(&turn["display_cells"]) {
+        if python::truthy(&turn["tools"]) || python::truthy(&turn["display_cells"]) {
             work_after = true;
         }
     }
@@ -215,7 +202,7 @@ pub fn model(transcript: &str) -> String {
         // A line whose `payload` or `message` is something and no object names nothing.
         let part = |key: &str| match event.get(key) {
             Some(Value::Object(fields)) => Some(Some(fields)),
-            Some(other) if something(other) => None,
+            Some(other) if python::truthy(other) => None,
             _ => Some(None),
         };
         let (Some(payload), Some(message)) = (part("payload"), part("message")) else {

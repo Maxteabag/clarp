@@ -670,6 +670,19 @@ With it came a way to leave something small with the fleet under a key, in a tab
 question to the fleet for each small thing an app or an agent leaves. What comes next of that sort (a
 phone's tokens for calls and live activities) is kept the same way.
 
+**An agent asks for an event in its user's calendar** (17 Nov 2026). Counted again on the owner's Python
+Host, a week of its request log this time (`tools/count-load --days 7`): 79,413 requests that changed
+something, over 100 routes, and eleven of them to six routes this Host had not. One is this: an agent's tool
+names an event (`POST /calendar/request`: whose agent asks, a title, when it begins and ends, and what else
+there is to say), the Host gives the request an id and tells the apps (`calendar-request`), and the app in
+front asks its user and writes the event into the phone's own calendar. The Host keeps nothing of it and
+reads no time. The rule is the Python Host's (`calendar_request.py`), held by what its own function makes of
+fifty made-up requests (`tools/calendar-vectors.py`: what a request must say and the words it is refused
+with, the zone under either of its two names, a number or a list where a word is expected written as Python
+writes it, and `all_day` by what Python takes for something, so that the word "false" is a yes), by a Host
+test and by the scenario `calendar`. The other ten of the eleven: an agent's slot given back by hand
+(`POST /repair-slot`, five), and teams (three routes, three requests).
+
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
 until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the

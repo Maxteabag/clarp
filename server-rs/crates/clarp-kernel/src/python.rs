@@ -369,6 +369,19 @@ pub fn b64encode(bytes: &[u8]) -> String {
     out
 }
 
+/// Whether Python takes a value for something (`bool(value)`, `if value`): not nothing,
+/// not false, not zero and not empty.
+pub fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(yes) => *yes,
+        Value::Number(number) => number.as_f64() != Some(0.0),
+        Value::String(text) => !text.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(fields) => !fields.is_empty(),
+    }
+}
+
 /// Whether Python counts a sign as blank (`str.isspace`, and `\s` in a pattern): what
 /// Unicode calls white space, and the four separators of information below the space.
 pub fn blank(sign: char) -> bool {

@@ -9192,6 +9192,85 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
 }
 
 #[test]
+fn an_agent_asks_for_an_event_in_its_users_calendar() {
+    let place = Place::new("calendar");
+    let host = place.start();
+    let heard = host.listen();
+    let ask = |body: Value| host.ask("POST", "/calendar/request", Some(&body));
+    let told = || -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let events = heard.iter();
+        events
+            .filter(|event| event["type"] == "calendar-request")
+            .cloned()
+            .collect()
+    };
+
+    // What is asked is given an id and told to the apps as it was said, without the blanks.
+    let (status, answered) = ask(json!({
+        "session": " mike ", "title": "Standup", "start": "2027-01-15T09:00:00+01:00",
+        "end": "2027-01-15T09:15:00+01:00", "timezone": " Europe/Oslo ", "all_day": 0,
+        "notes": 7,
+    }));
+    assert_eq!((status, &answered["ok"]), (200, &json!(true)), "{answered}");
+    let id = answered["request_id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("cal-") && id.len() == 20, "{id}");
+    wait_for("the apps to be told", || told().len() == 1);
+    let event = told().remove(0);
+    assert_eq!(
+        (
+            &event["request_id"],
+            &event["session"],
+            &event["title"],
+            &event["time_zone"],
+            &event["all_day"],
+            &event["notes"],
+            &event["location"]
+        ),
+        (
+            &json!(id),
+            &json!("mike"),
+            &json!("Standup"),
+            &json!("Europe/Oslo"),
+            &json!(false),
+            &json!("7"),
+            &json!("")
+        ),
+        "{event}"
+    );
+
+    // What does not say what it must is refused with what is missing, and nobody is told.
+    let refused = [
+        (
+            json!({ "title": "T", "start": "s", "end": "e" }),
+            "session required",
+        ),
+        (
+            json!({ "session": "mike", "title": " ", "start": "s", "end": "e" }),
+            "title required",
+        ),
+        (
+            json!({ "session": "mike", "title": "T", "start": null, "end": "e" }),
+            "start required",
+        ),
+        (
+            json!({ "session": "mike", "title": "T", "start": "s" }),
+            "end required",
+        ),
+        (json!({}), "session required"),
+        (json!([1, 2]), "bad json"),
+    ];
+    for (body, why) in refused {
+        let (status, answered) = ask(body.clone());
+        assert_eq!((status, &answered["error"]), (400, &json!(why)), "{body}");
+    }
+    // A second request has an id of its own.
+    let (_, again) = ask(json!({ "session": "mike", "title": "T", "start": "s", "end": "e" }));
+    wait_for("the second to be told", || told().len() == 2);
+    assert!(again["request_id"] != id.as_str());
+}
+
+#[test]
 fn a_new_agent_begins_with_a_session_its_tool_kept() {
     let place = Place::new("past-sessions");
     // A stand-in for Claude Code that writes down what it was started with, and answers in
