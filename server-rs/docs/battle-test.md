@@ -807,6 +807,16 @@ Host with the real tools (`verify-usage.py`, 17 points): an agent of Codex and a
 | An agent's own command for its user's place | answered as the Python tool answers when nobody shares one in time: it ends with 1 and says so |
 | Afterwards | the check's two agents removed; the 23 agents that were there still are |
 
+Found later the same day, through the account that ran out. The first turn of a thread was counted
+rightly (the 45,438 above). A turn that continued a thread was not: at a turn's end `codex exec` says what
+the whole thread has taken so far, and the Host counted that as the turn's. By 10:57 its usage screen said
+61 million tokens taken in by sixteen turns, where Codex's own records of the four threads those turns ran
+in say 16.5 million for all their turns together. Mended in the build after `7c8b6697`: a turn of Codex is
+counted by what its thread's count grew by, and one whose thread's count before it is not known (a session
+that was taken up, a thread from before this) is not counted at all rather than wrongly. Held by the two
+recorded turns of one thread (87,566 taken in, then 131,412) and by a stand-in that counts on the same way
+through the Host.
+
 ## The use of tools explained
 
 Landed with `382d1c37` (17 Nov, 09:50, installed by exercise 42 a minute later) and tried on the installed

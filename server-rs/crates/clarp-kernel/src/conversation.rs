@@ -225,6 +225,17 @@ impl Notice {
 /// How a turn ended. It is not a row of the conversation: it belongs to the row that closed
 /// the turn, which is the last thing the turn put there, or the message itself when the turn
 /// put nothing.
+/// What a tool said its whole conversation had taken in and given out by the end of a turn,
+/// with the conversation it said it of. A tool that continues a conversation and says no
+/// more than this (Codex) leaves a turn's own share to be told by the difference from the
+/// turn before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Total {
+    pub session: String,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnEnd {
     pub id: String,
@@ -256,6 +267,10 @@ pub struct TurnEnd {
     /// What the tool said the turn cost, in millionths of a dollar, where it said so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_micros: Option<u64>,
+    /// The running total of the tool's conversation at the turn's end, where the tool told
+    /// that and not the turn's own share.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<Total>,
 }
 
 impl TurnEnd {
@@ -282,6 +297,7 @@ impl TurnEnd {
             tokens_out: None,
             context_tokens: None,
             cost_micros: None,
+            total: None,
         })
     }
 }
@@ -532,6 +548,7 @@ mod tests {
                 tokens_out: None,
                 context_tokens: None,
                 cost_micros: None,
+                total: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

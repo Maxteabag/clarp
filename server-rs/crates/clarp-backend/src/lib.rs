@@ -134,6 +134,14 @@ pub enum Signal {
         tokens_in: u64,
         tokens_out: u64,
     },
+    /// What the tool says its whole conversation has taken in and given out so far, where
+    /// that is all it says at a turn's end (Codex: the count goes on from turn to turn of one
+    /// thread). The turn's own share is the difference from what was said at the end of the
+    /// turn before, in the same conversation.
+    Total {
+        tokens_in: u64,
+        tokens_out: u64,
+    },
     /// How many tokens the tool's conversation holds now, where the tool says so with an
     /// answer: how full it is.
     Context {

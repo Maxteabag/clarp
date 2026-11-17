@@ -123,11 +123,20 @@ fn a_real_turn_that_runs_a_command_and_answers() {
         ]
     );
     assert!(
-        signals.contains(&Signal::Usage {
+        signals.contains(&Signal::Total {
             tokens_in: 87_566,
             tokens_out: 36
         }),
-        "what the turn took in and gave out"
+        "what the thread has taken in and given out so far: all of it is this turn's, its first"
+    );
+    // The next turn of the same thread says the thread's count again, not its own share.
+    let resumed = read("codex-0.167.1-resumed.jsonl", "m2", (Some(0), None));
+    assert!(
+        resumed.contains(&Signal::Total {
+            tokens_in: 131_412,
+            tokens_out: 57
+        }),
+        "the thread's count goes on"
     );
     assert_eq!(signals.last(), Some(&Signal::Ended(RunOutcome::Completed)));
 }

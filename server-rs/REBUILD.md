@@ -751,6 +751,14 @@ differences, one cause. The Python Host was mended the same morning (pull reques
 the report): asked again with the scenario alone (run 44058260247) the two Hosts show the same gauge, and
 the three registrations are taken out.
 
+One more number was wrong, and it was this Host's own: what a turn of Codex took in. `codex exec` says at
+a turn's end what its whole thread has taken so far, not what the turn took (the two recordings of one
+thread in the backend's fixtures: 87,566, then 131,412). The adapter now tells it as that (`Signal::Total`),
+the turn's end keeps it with the thread it was said of, and the turn's own share is what the count grew by
+since the end of the turn before in the same thread: nothing before a thread's first turn, and not known,
+so not counted, where the thread was taken up or is older than this. Found on 17 Nov when the account the
+tests ran on was used up: the usage screen said 61 million tokens for sixteen turns.
+
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
 every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain

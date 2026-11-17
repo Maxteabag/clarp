@@ -428,10 +428,13 @@ impl CodexInterpreter {
             "turn.completed" => {
                 self.completed = true;
                 let count = |field: &str| event["usage"][field].as_u64();
+                // Codex counts on from turn to turn of a thread: what it says here is what the
+                // whole thread has taken so far (a first turn said 87,566 in, the next turn of
+                // the same thread 131,412: the recordings in `tests/fixtures`).
                 if let (Some(tokens_in), Some(tokens_out)) =
                     (count("input_tokens"), count("output_tokens"))
                 {
-                    out.push(Signal::Usage {
+                    out.push(Signal::Total {
                         tokens_in,
                         tokens_out,
                     });
@@ -958,7 +961,7 @@ mod tests {
                     ..Reply::default()
                 }),
                 Signal::Moved(Activity::Thinking),
-                Signal::Usage {
+                Signal::Total {
                     tokens_in: 12,
                     tokens_out: 3
                 },
