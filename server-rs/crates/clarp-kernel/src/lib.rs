@@ -9,6 +9,7 @@ pub mod activity;
 pub mod addressed;
 pub mod agent;
 pub mod artifacts;
+pub mod calendar;
 pub mod calls;
 pub mod chip;
 pub mod connector;
