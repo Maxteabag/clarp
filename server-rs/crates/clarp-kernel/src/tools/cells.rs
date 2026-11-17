@@ -1237,7 +1237,19 @@ pub fn attach_output(turns: &mut [Value], id: &str, output: &Value) {
             Some("command") => {
                 let ran = text_of(&[held.get("summary")]);
                 let id = if own.is_empty() { id } else { &own };
-                command(&ran, id, Some(&Value::from(text.as_str())), code, false)
+                let mut made = command(&ran, id, Some(&Value::from(text.as_str())), code, false);
+                // What a reader marked the cell with stays on it. The Python Host makes the
+                // cell anew here and loses the marks of an older record, so that the cell of
+                // a call stays beside the cells of what the call ran (its defect R41).
+                for (name, mark) in held
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter(|(name, _)| name.starts_with('_'))
+                {
+                    made[name.as_str()] = mark.clone();
+                }
+                made
             }
             Some("subagents") => subagent_answered(held, output),
             Some("patch") => {

@@ -17,7 +17,7 @@ fn vectors() -> Value {
 fn a_rollout_is_read_as_the_python_host_reads_it() {
     let vectors = vectors();
     let rollouts = vectors["rollouts"].as_array().unwrap();
-    let (mut lines_read, mut turns, mut shown, mut tools) = (0, 0, 0, 0);
+    let (mut lines_read, mut turns, mut shown, mut tools, mut mended) = (0, 0, 0, 0, 0);
     for rollout in rollouts {
         let what = format!("{}: {}", rollout["name"], rollout["what"]);
         let lines: Vec<&str> = rollout["lines"]
@@ -27,7 +27,13 @@ fn a_rollout_is_read_as_the_python_host_reads_it() {
             .map(|line| line.as_str().unwrap())
             .collect();
         let read = history::codex(&(lines.join("\n") + "\n"));
-        let theirs = rollout["turns"].as_array().unwrap();
+        // The one thing read otherwise, on purpose (defect R41 of the reference): a cell made
+        // of an older record keeps that record's marks when what came back is put on it, and
+        // so is left out where the same turn has the thing as an item too. The Python Host
+        // loses the marks there; `turns_mended` is its own function's reading with that mended.
+        mended += usize::from(rollout.get("turns_mended").is_some());
+        let theirs = rollout.get("turns_mended").unwrap_or(&rollout["turns"]);
+        let theirs = theirs.as_array().unwrap();
         for (number, (ours, theirs)) in read.iter().zip(theirs).enumerate() {
             let ours_shown = ours["display_cells"].as_array().unwrap();
             let theirs_shown = theirs["display_cells"].as_array().unwrap();
@@ -50,7 +56,11 @@ fn a_rollout_is_read_as_the_python_host_reads_it() {
     }
     assert_eq!(
         (rollouts.len(), lines_read, turns, shown, tools),
-        (17, 375, 49, 232, 75)
+        (17, 375, 49, 233, 75)
+    );
+    assert_eq!(
+        mended, 1,
+        "one rollout is read otherwise than the Python Host reads it"
     );
 }
 

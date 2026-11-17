@@ -181,11 +181,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 09:39 (17 Nov) | the Host updated by the installer, `e46cbf51` to `5bf5ab93`: the build in which the Host's own turns are counted for an app's usage screen, the gauge shows what the last answer was made from, a turn is told this Host under the names a skill's own script reads, and the explainer of the use of tools is in as far as its desk (nothing of it runs in this build). The relay was on: the new Host was connected to it again 134 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 09:50 (17 Nov) | the Host updated by the installer, `5bf5ab93` to `382d1c37`: the build in which an app that asks for the use of tools to be explained is answered (off as it comes, and its janitor paused). The relay was on: the new Host was connected to it again 45 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 10:08 (17 Nov) | the Host updated by the installer, `382d1c37` to `d725481b`: the build in which a row of a tool carries its explanation while its turn is shown (off as it comes). The relay was on: the new Host was connected to it again 66 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 11:38 (17 Nov) | the Host updated by the installer, `d725481b` to `7c8b6697`, over two landings (`de2da7c1` at 10:57 could not be installed: Codex was out of credits, as told under the soak): the build in which what a Codex agent did is shown as Codex's own reader shows it, and the sessions Codex kept are listed and taken up. Three agents made new for the exercise. The relay was on: the new Host was connected to it again 940 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and forty-three turns in
-forty-three exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-fifty-one of Codex in the seventeen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and forty-six turns in
+forty-four exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+fifty-four of Codex in the eighteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -897,8 +898,48 @@ follow`: each of the four turns is shown as waiting for an account (`limited`, "
 with available usage"), its message is in the conversation once, and nothing ran. The exercise saw that no
 turn had reached its command and ended without touching the installed Host, which stays on `d725481b` while
 main is ahead of it. The owner was told by a card at 11:03, and the release owner of the Python Host, whose
-Codex agents share the account, by a message. What becomes of the four turns when Codex answers again is
-told here when it has happened.
+Codex agents share the account, by a message.
+
+How it ended: the owner answered the card within a minute ("see if you can redeem usage or move some codex
+hotseat accounts to elitebook from laptopstudio"). The machine's two saved accounts were both used up with
+no reset to redeem (the business seat until 23 Nov), so one idle seat was moved over from the other machine
+with the owner's own tool at 11:36:04; the Python Host's account selector made it the machine's login
+eleven seconds later, and Codex answered again. The four waiting turns were not left to go on: they had
+been stopped a minute before, at 11:35, with the soak, because of what the outage showed about this test
+itself. Counted from Codex's own records, the test's four threads had taken 16.5 million input tokens of
+the account that ran out (about a tenth of what the Python Host counted for the owner's agents in the same
+week): the soak wrote every round into one thread, which Codex is sent whole again with every call, and by
+round 167 a round cost 215,000 tokens where the first cost 45,000; the three agents of the restart
+exercise were kept from one exercise to the next and had grown likewise. From here the exercise makes its
+agents new each time (`tools/soak`), and the soak stays off until it starts a thread of its own for every
+round. So whether a turn that waits for an account is taken up when the account changes was not seen here:
+it is held by the Host's tests, and not yet by a real account.
+
+## Codex conversations as Codex's own reader shows them
+
+Landed with `de2da7c1` and `7c8b6697` (17 Nov, 10:57 and 11:21; installed together by exercise 44 at 11:38)
+and tried on the installed Host with the real Codex (`verify-cells.py --past`, 23 points, three turns of
+Codex). An agent of the check's own is asked to run one command of a made-up shape and to read one file;
+then it is removed and another agent takes its session up.
+
+| What | On the installed Host |
+|---|---|
+| The command, in the agent's conversation | a row of its own with a cell and no card: "Ran `printf 'zorb-…\n' \| wc -c`", `ok`, with what it printed (`16`): the shell Codex wraps a command in is not shown |
+| The reading | a row with the cell "Explored", one line: `Read` and the file's path |
+| An app that opens details itself | told there is one cell behind the row, and no card |
+| The sessions Codex kept (`GET /past-sessions?backend=codex`) | a hundred of every directory (the most a list holds), ten of the check's own directory, the check's own among them; read from Codex's own index of its threads, opened to read and nothing else |
+| The session while its agent has it | refused to a second agent: 409, `session_in_use` |
+| After that agent was removed | another agent takes it up: its conversation shows what the user asked and, on the agent's turn, three cells read from Codex's rollout |
+| Asked what the first command printed, without running anything | "16": Codex continued its own thread |
+| Afterwards | both agents of the check removed; the 23 agents that were there still are |
+
+Two of the 23 points failed, and both were the check's own waiting: it read a field of the agent's row that
+this Host does not have (`state` for `latest_state`), waited its full time twice, and went on; every point
+after each wait shows the turn had ended. The check is corrected. The three cells where two commands ran
+are the Python Host's own reading of that rollout (asked of its function with the same file: the same
+three): recent Codex writes the call that ran both commands as an older record too, and that Host keeps its
+cell beside the two it stands for once the call has its output. It is reported as a defect of the
+reference (R41) and not copied from the next build on.
 
 ## What a round does not prove
 
