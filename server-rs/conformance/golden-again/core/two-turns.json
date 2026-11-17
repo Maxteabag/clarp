@@ -132,7 +132,7 @@
       "id": "<row:2>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
