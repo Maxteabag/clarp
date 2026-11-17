@@ -63,8 +63,13 @@ f632d0f86f1d  spoken-names: last_completed_message at rest, after the fifth turn
 cce40563260b  router: the same of the second agent, after its third turn (computed)
 
 # The model that answered is shown after a turn that completed (the Python Host shows none
-# after some: reference defect R13).
+# after some: reference defect R13). It answers in two ways at the same place, by its clock:
+# its reader remembers for the rest of a minute where an agent's transcript is, and asked once
+# before the agent's first turn it remembers that there is none. Two recordings of one run can
+# both show none: then the places below are all that tells this Host's answer from a fault.
 961155cc0b66  approval: the agent's model after its answer was delivered and answered
+6a2b3966fcbf  turn-timer: the agent's model while its first turn is timed
+6389f02a8160  turn-timer: the same, after that turn
 
 # The answer to a discard says the artifact is not pinned (the Python Host says pinned true
 # beside pinned_at null: reference defect R15).
