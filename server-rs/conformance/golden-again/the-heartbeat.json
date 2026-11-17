@@ -3950,21 +3950,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "hb-alfa",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -4005,6 +3990,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "hb-alfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {

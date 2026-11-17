@@ -231,7 +231,7 @@
       "id": "<row:3>",
       "kind": null,
       "origin": "user",
-      "phase": "final",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -338,7 +338,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "Claude replay reply: synthetic ids charlie",
+      "last_completed_message": "You: synthetic ids charlie",
       "last_message": "Claude replay reply: synthetic ids charlie",
       "last_message_id": "<row:3>",
       "last_turn_end": "<time>",
@@ -2250,50 +2250,6 @@
   {
    "data": {
     "agent_id": "<id:5>",
-    "badge": true,
-    "cause_message_id": "u-phone-alfa",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:6>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:1>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "badge": true,
-    "cause_message_id": "u-phone-bravo",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#2@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:7>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: synthetic ids bravo",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "<row:2>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#2@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
     "detail": {
      "dispatch": "clarp",
      "duration_ms": "<duration>",
@@ -2335,6 +2291,50 @@
    },
    "event": null,
    "id": "<eid:agent-activity#12@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "badge": true,
+    "cause_message_id": "u-phone-alfa",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:6>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic ids alfa",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:1>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "badge": true,
+    "cause_message_id": "u-phone-bravo",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#2@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:7>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: synthetic ids bravo",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "<row:2>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#2@f5caa0>"
   },
   {
    "data": {

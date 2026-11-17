@@ -1,0 +1,775 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "schedules": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "no schedules"
+  },
+  {
+   "body": {
+    "schedules": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "none of the agent"
+  },
+  {
+   "body": {
+    "error": "session, name, cron_expression, and prompt are required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a schedule that says nothing"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a schedule that is no object"
+  },
+  {
+   "body": {
+    "error": "session, name, cron_expression, and prompt are required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a schedule without a prompt"
+  },
+  {
+   "body": {
+    "error": "Agent session 'nobody-there' not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a schedule for nobody"
+  },
+  {
+   "body": {
+    "error": "Cron expression must have 5 fields, got 1: nonsense"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "an expression that is none"
+  },
+  {
+   "body": {
+    "error": "Cron expression must have 5 fields, got 4: 0 0 1 1"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "an expression of four fields"
+  },
+  {
+   "body": {
+    "error": "Value 61 out of range (0-59)"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a minute there is none of"
+  },
+  {
+   "body": {
+    "error": "Step must be > 0 in */0"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a step of nothing"
+  },
+  {
+   "body": {
+    "error": "invalid literal for int() with base 10: 'a'"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 400,
+   "step": "a field that is no number"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "0 0 1 1 *",
+     "enabled": true,
+     "last_run_at": null,
+     "name": "Synthetic new year",
+     "next_run_at": "<time>",
+     "prompt": "synthetic prompt one",
+     "schedule_id": "<schedule:1>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 201,
+   "step": "a schedule is made"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "@monthly",
+     "enabled": false,
+     "last_run_at": null,
+     "name": "Synthetic off",
+     "next_run_at": null,
+     "prompt": "synthetic prompt two",
+     "schedule_id": "<schedule:2>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 201,
+   "step": "a schedule is made off"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "30 4 29 2 *",
+     "enabled": false,
+     "last_run_at": null,
+     "name": "Synthetic short",
+     "next_run_at": null,
+     "prompt": "synthetic prompt three",
+     "schedule_id": "<schedule:3>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules",
+   "status": 201,
+   "step": "made by the short word for its expression, off by a number"
+  },
+  {
+   "body": {
+    "schedules": [
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "0 0 1 1 *",
+      "enabled": true,
+      "last_run_at": null,
+      "name": "Synthetic new year",
+      "next_run_at": "<time>",
+      "prompt": "synthetic prompt one",
+      "schedule_id": "<schedule:1>",
+      "session": "claire",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "@monthly",
+      "enabled": false,
+      "last_run_at": null,
+      "name": "Synthetic off",
+      "next_run_at": null,
+      "prompt": "synthetic prompt two",
+      "schedule_id": "<schedule:2>",
+      "session": "claire",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "30 4 29 2 *",
+      "enabled": false,
+      "last_run_at": null,
+      "name": "Synthetic short",
+      "next_run_at": null,
+      "prompt": "synthetic prompt three",
+      "schedule_id": "<schedule:3>",
+      "session": "claire",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "the schedules"
+  },
+  {
+   "body": {
+    "schedules": [
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "0 0 1 1 *",
+      "enabled": true,
+      "last_run_at": null,
+      "name": "Synthetic new year",
+      "next_run_at": "<time>",
+      "prompt": "synthetic prompt one",
+      "schedule_id": "<schedule:1>",
+      "session": "claire",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "@monthly",
+      "enabled": false,
+      "last_run_at": null,
+      "name": "Synthetic off",
+      "next_run_at": null,
+      "prompt": "synthetic prompt two",
+      "schedule_id": "<schedule:2>",
+      "session": "claire",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "30 4 29 2 *",
+      "enabled": false,
+      "last_run_at": null,
+      "name": "Synthetic short",
+      "next_run_at": null,
+      "prompt": "synthetic prompt three",
+      "schedule_id": "<schedule:3>",
+      "session": "claire",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "the schedules of the agent"
+  },
+  {
+   "body": {
+    "schedules": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "the schedules of nobody"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "@monthly",
+     "enabled": true,
+     "last_run_at": null,
+     "name": "Synthetic off",
+     "next_run_at": "<time>",
+     "prompt": "synthetic prompt two",
+     "schedule_id": "<schedule:2>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 200,
+   "step": "turned on"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "@monthly",
+     "enabled": true,
+     "last_run_at": null,
+     "name": "Synthetic off",
+     "next_run_at": "<time>",
+     "prompt": "synthetic prompt two",
+     "schedule_id": "<schedule:2>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 200,
+   "step": "on already"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "0 0 1 1 *",
+     "enabled": false,
+     "last_run_at": null,
+     "name": "Synthetic new year",
+     "next_run_at": null,
+     "prompt": "synthetic prompt one",
+     "schedule_id": "<schedule:1>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 200,
+   "step": "turned off"
+  },
+  {
+   "body": {
+    "error": "schedule_id and enabled boolean required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 400,
+   "step": "a switch that says neither"
+  },
+  {
+   "body": {
+    "error": "schedule_id and enabled boolean required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 400,
+   "step": "a switch that is no switch"
+  },
+  {
+   "body": {
+    "error": "schedule not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 404,
+   "step": "a switch for no schedule"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/toggle",
+   "status": 400,
+   "step": "a switch that is no object"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "0 0 1 1 *",
+     "enabled": true,
+     "last_run_at": null,
+     "name": "Synthetic first day",
+     "next_run_at": "<time>",
+     "prompt": "synthetic prompt one",
+     "schedule_id": "<schedule:1>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "PATCH",
+   "path": "/schedules/<schedule:1>",
+   "status": 200,
+   "step": "given another name, and on"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "15 3 1 1 *",
+     "enabled": true,
+     "last_run_at": null,
+     "name": "Synthetic first day",
+     "next_run_at": "<time>",
+     "prompt": "synthetic prompt four",
+     "schedule_id": "<schedule:1>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "PATCH",
+   "path": "/schedules/<schedule:1>",
+   "status": 200,
+   "step": "given another expression and prompt"
+  },
+  {
+   "body": {
+    "error": "Cron expression must have 5 fields, got 1: nonsense"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "PATCH",
+   "path": "/schedules/<schedule:1>",
+   "status": 400,
+   "step": "given an expression that is none"
+  },
+  {
+   "body": {
+    "ok": true,
+    "schedule": {
+     "agent_id": "<id:1>",
+     "created_at": "<time>",
+     "cron_expression": "15 3 1 1 *",
+     "enabled": true,
+     "last_run_at": null,
+     "name": "Synthetic first day",
+     "next_run_at": "<time>",
+     "prompt": "synthetic prompt four",
+     "schedule_id": "<schedule:1>",
+     "session": "claire",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "PATCH",
+   "path": "/schedules/<schedule:1>",
+   "status": 200,
+   "step": "given nothing"
+  },
+  {
+   "body": {
+    "error": "schedule not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "PATCH",
+   "path": "/schedules/sched_nothing",
+   "status": 404,
+   "step": "a change of no schedule"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "PATCH",
+   "path": "/schedules/<schedule:1>",
+   "status": 400,
+   "step": "a change that is no object"
+  },
+  {
+   "body": {
+    "schedules": [
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "15 3 1 1 *",
+      "enabled": true,
+      "last_run_at": null,
+      "name": "Synthetic first day",
+      "next_run_at": "<time>",
+      "prompt": "synthetic prompt four",
+      "schedule_id": "<schedule:1>",
+      "session": "claire",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "@monthly",
+      "enabled": true,
+      "last_run_at": null,
+      "name": "Synthetic off",
+      "next_run_at": "<time>",
+      "prompt": "synthetic prompt two",
+      "schedule_id": "<schedule:2>",
+      "session": "claire",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "30 4 29 2 *",
+      "enabled": false,
+      "last_run_at": null,
+      "name": "Synthetic short",
+      "next_run_at": null,
+      "prompt": "synthetic prompt three",
+      "schedule_id": "<schedule:3>",
+      "session": "claire",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "the schedules as they are now"
+  },
+  {
+   "body": {
+    "error": "schedule_id required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/delete",
+   "status": 400,
+   "step": "nothing is removed"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/delete",
+   "status": 200,
+   "step": "a schedule is removed"
+  },
+  {
+   "body": {
+    "ok": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agent-schedules/delete",
+   "status": 200,
+   "step": "removed already"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/schedules/<schedule:1>",
+   "status": 200,
+   "step": "a schedule is removed by its address"
+  },
+  {
+   "body": {
+    "error": "schedule not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/schedules/<schedule:1>",
+   "status": 404,
+   "step": "removed already, by its address"
+  },
+  {
+   "body": {
+    "<bytes>": 9,
+    "<sha256>": "907ba78b4545338d3539683e63ecb51cf51c10adc9dabd86e92bd52339f298b9"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "text/plain"
+   },
+   "method": "DELETE",
+   "path": "/agent-schedules",
+   "status": 404,
+   "step": "what is no route"
+  },
+  {
+   "body": {
+    "schedules": [
+     {
+      "agent_id": "<id:1>",
+      "created_at": "<time>",
+      "cron_expression": "30 4 29 2 *",
+      "enabled": false,
+      "last_run_at": null,
+      "name": "Synthetic short",
+      "next_run_at": null,
+      "prompt": "synthetic prompt three",
+      "schedule_id": "<schedule:3>",
+      "session": "claire",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/agent-schedules",
+   "status": 200,
+   "step": "the schedule that is left"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "schedules",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "<version>"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  }
+ ]
+}
