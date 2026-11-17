@@ -511,6 +511,8 @@ def _usage_tokens(line: bytes) -> int | None:
         return None
     if not isinstance(d, dict) or d.get("type") != "assistant":
         return None
+    if is_synthetic_assistant_record(d):
+        return None
     usage = (d.get("message") or {}).get("usage") or {}
     if not usage:
         return None

@@ -3,6 +3,8 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
 from lib.claude_transcript import context_tokens_from_jsonl
 
 
@@ -109,3 +111,69 @@ def test_usage_further_back_is_still_found_within_the_tail(tmp_path):
     beyond = tmp_path / 'beyond.jsonl'
     beyond.write_text(_usage(9) + _filler(1_200_000))
     assert context_tokens_from_jsonl(beyond) is None
+
+
+def _synthetic_usage(marker, tokens=0):
+    record = {'type':'assistant','message':{
+        'role':'assistant','model':'claude-real',
+        'usage':{'input_tokens':tokens,'cache_read_input_tokens':0,'cache_creation_input_tokens':0}}}
+    if marker == 'model':
+        record['message']['model'] = '<synthetic>'
+    elif marker == 'api':
+        record['isApiErrorMessage'] = True
+    else:
+        record['message']['isApiErrorMessage'] = True
+    return json.dumps(record) + '\n'
+
+
+@pytest.mark.parametrize('marker', ['model','api','nested-api'])
+@pytest.mark.parametrize('cache_mode', ['settled','racy'])
+@pytest.mark.parametrize('shape,expected', [
+    ('one-failure',160), ('several-failures',160), ('only-failures',None),
+    ('failure-before-real',23), ('after-compact',23), ('synthetic-nonzero',160),
+    ('real-zero',0), ('tail-cuts-failure-run',None), ('widen-through-failures',160),
+])
+def test_context_usage_keeps_the_last_real_answer(tmp_path, monkeypatch, marker, cache_mode, shape, expected):
+    from lib import claude_transcript as transcript
+
+    failed = _synthetic_usage(marker)
+    real = _usage(160)
+    tail_bytes = 1_000_000
+    if shape == 'one-failure':
+        content = real + failed
+    elif shape == 'several-failures':
+        content = real + failed * 4
+    elif shape == 'only-failures':
+        content = failed * 3
+    elif shape == 'failure-before-real':
+        content = failed + _usage(23)
+    elif shape == 'after-compact':
+        compact = json.dumps({'type':'system','subtype':'compact_boundary',
+                              'compactMetadata':{'trigger':'manual','preTokens':160}}) + '\n'
+        content = real + compact + failed + _usage(23) + failed
+    elif shape == 'synthetic-nonzero':
+        content = real + _synthetic_usage(marker,777)
+    elif shape == 'real-zero':
+        content = _usage(0) + _synthetic_usage(marker,777)
+    elif shape == 'tail-cuts-failure-run':
+        content = real + failed * 6
+        tail_bytes = len(failed.encode()) * 4 + len(failed.encode()) // 2
+    else:
+        content = real + failed * 700  # beyond the first 64 KiB read
+        assert len(content.encode()) > 64 * 1024
+    path = tmp_path / 'context.jsonl'
+    path.write_text(content)
+    stamp = path.stat().st_mtime_ns
+    age = transcript._RACY_NS + 1 if cache_mode == 'settled' else 1
+    monkeypatch.setattr(transcript.time, 'time_ns', lambda: stamp + age)
+    transcript._context_tokens_cached.cache_clear()
+    opened = []
+    original = Path.open
+    def observe(self, *args, **kwargs):
+        if self == path:
+            opened.append(args)
+        return original(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'open', observe)
+    assert context_tokens_from_jsonl(path, tail_bytes=tail_bytes) == expected
+    assert context_tokens_from_jsonl(path, tail_bytes=tail_bytes) == expected
+    assert len(opened) == (1 if cache_mode == 'settled' else 2)
