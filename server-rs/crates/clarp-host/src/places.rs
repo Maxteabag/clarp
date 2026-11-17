@@ -18,6 +18,7 @@ use clarp_kernel::located::{Fix, WHOSE};
 use clarp_kernel::python;
 use serde_json::{Map, Value, json};
 
+use crate::agent::Unavailable;
 use crate::edge::{ApiError, App};
 use crate::personas::object;
 
@@ -35,16 +36,30 @@ fn session_of(said: &Map<String, Value>) -> Result<String, ApiError> {
     }
 }
 
-/// `GET /location?session=`: the last place said for a session; an empty object when none
-/// was.
-async fn told(State(app): State<App>, Query(asked): Query<HashMap<String, String>>) -> Answered {
-    let session = python::strip(asked.get("session").map_or("", String::as_str));
+/// The last place said for a session, as it is told: an empty object when none was, or
+/// when no session is named.
+pub(crate) async fn last(app: &App, session: &str) -> Result<Value, Unavailable> {
+    let session = python::strip(session);
     if session.is_empty() {
-        return Ok(Json(json!({})));
+        return Ok(json!({}));
     }
     let kept = app.fleet.kept(PLACES, session.to_string()).await?;
     let fix = kept.as_deref().and_then(Fix::read);
-    Ok(Json(fix.map_or_else(|| json!({}), |fix| fix.told())))
+    Ok(fix.map_or_else(|| json!({}), |fix| fix.told()))
+}
+
+/// An agent asks where its user is: the apps that listen are told, and the one in front
+/// asks its user to share it.
+pub(crate) fn ask(app: &App, session: &str) {
+    let event = json!({ "type": "location-request", "session": session });
+    app.hub.publish(event, app.clock.now_ms());
+}
+
+/// `GET /location?session=`: the last place said for a session; an empty object when none
+/// was.
+async fn told(State(app): State<App>, Query(asked): Query<HashMap<String, String>>) -> Answered {
+    let session = asked.get("session").map_or("", String::as_str);
+    Ok(Json(last(&app, session).await?))
 }
 
 /// `POST /location` with `{session, lat, lng, accuracy?}`: the app says where its phone is.
@@ -66,8 +81,7 @@ async fn said(State(app): State<App>, body: Bytes) -> Answered {
 /// that listen are told; the one in front asks its user to share it.
 async fn asked(State(app): State<App>, body: Bytes) -> Answered {
     let session = session_of(&object(&body)?)?;
-    let event = json!({ "type": "location-request", "session": session });
-    app.hub.publish(event, app.clock.now_ms());
+    ask(&app, &session);
     Ok(Json(json!({ "ok": true })))
 }
 
