@@ -111,6 +111,37 @@ run that records (`conform.py selftest`: a recording that ran to its end is not 
 first answer that is whole takes the other's place and nothing beside it is touched, a second
 is taken when the first is cut short again, and a scenario that is never whole stays cut short).
 
+Four defects of the reference are told by their shape, not by the ids of their places. They
+come and go with its clock, at places nobody can list, and two recordings can both have one
+where no run had it before: then they agree with each other, the Rust Host differs from both,
+and a register of ids lacks that place. On 17 Nov 2026 three runs failed so (44089630630 and
+44093481589 on a place of R17 each, 44096945408 on thirteen of R6 and R12). A rule says where
+such a difference lies, in which direction, and what the
+two rows it lies in have to say of themselves (`SHAPES` in `conform.py`):
+
+- **R6**, `turns[n].phase`, nothing where this Host says `final`: both rows are the reply that
+  closes a completed turn, with the same words.
+- **R12**, `agents[n].last_completed_message`: both rows are at rest (`done`), and what this Host
+  gives is what the reference's own row names as the agent's last message.
+- **R13**, `agents[n].model`, an empty text where this Host names a model: the reference shows
+  that model for that agent somewhere else in what was recorded.
+- **R17**, `agents[n].live_activity`, nothing where this Host has the line: both rows say `done`.
+
+A rule holds only where the reference's row gives the defect away or this Host's row shows that
+what it says is what the contract asks for; anything else at such a place is a difference like
+any other, and so is the same difference the other way round. The report counts them apart
+(`defect R6` beside `intended` and `UNEXPLAINED`). The rules are tried before every run
+(`selftest`: 41 cases, of which 6 are the defects and 35 are what they must not take for them),
+and were tried on the runs that were written down: in run 44096945408 they tell 8 places of R6
+and 5 of R12 and leave 8 differences that are none of the four; in run 44101297003, whose 138
+differences were this suite's own doing, they tell none. With nothing registered they tell the
+places the register lists for these defects (run 44081827558: 7 of R6 and 9 of R12).
+
+A run that was written down can be judged again without starting a Host, as the rules and the
+register are now: `conform.py judge --golden <report>/golden --out <report>` reads the
+recordings of the reference (`golden`, `golden-again`, `golden-more`) and what the Rust Host
+answered (`rust/`).
+
 ## What is compared as what a client may rely on
 
 Some things are each Host's own choice, and comparing their values would only compare the

@@ -1290,7 +1290,98 @@ def selftest() -> list:
     assert asked == [(attempt, ['s', 't']) for attempt in range(1, UNFINISHED_TRIES + 1)], asked
     assert len(lines) == 2 and all('never did' in line for line in lines), lines
     return ['the rule for a scenario whose every recording carries the mark of defect R19: tried on 5 cases, holds',
-            'the rule for a scenario the reference did not run to its end: tried on 4 cases, holds']
+            'the rule for a scenario the reference did not run to its end: tried on 4 cases, holds',
+            f'the rules for defects of the reference told by their shape: tried on {shapes_tried()} cases, hold']
+
+
+def shapes_tried() -> int:
+    """The rules for defects told by their shape, tried on rows made for them: each tells its
+    defect where the rows give it away, and nothing anywhere else. Raises when one does
+    otherwise; answers how many cases were tried."""
+    tried = 0
+
+    def answered(*bodies):
+        return {'http': [{'body': body} for body in bodies]}
+
+    def at(locator, kind='changed', channel='http'):
+        return {'channel': channel, 'kind': kind, 'locator': locator}
+
+    def told(expected, locator, base, head, bases=(), **more):
+        nonlocal tried
+        tried += 1
+        found = told_by_shape(at(locator, **more), base, head, bases)
+        assert found == expected, (tried, locator, expected, found)
+
+    # R6: the reply that closes a completed turn, unmarked by the reference and final here.
+    def closing(phase, status='completed', text='The answer'):
+        return {'role': 'assistant', 'phase': phase, 'text': text, 'turn': {'status': status}}
+    phase = '[0].body.turns[1].phase'
+    theirs = answered({'turns': [{'role': 'user', 'text': 'A question'}, closing(None)]})
+    ours = answered({'turns': [{'role': 'user', 'text': 'A question'}, closing('final')]})
+    told('R6', phase, theirs, ours)
+    told('', phase, ours, theirs)                                   # the other way round
+    told('', phase, theirs, ours, kind='field-removed')             # another kind of difference
+    told('', phase, theirs, ours, channel='sse')                    # another channel
+    told('', '[0].body.turns[0].phase', theirs, ours)               # a row that closes nothing
+    told('', '[0].body.turns[7].phase', theirs, ours)               # no such row
+    told('', '[3].body.turns[1].phase', theirs, ours)               # no such exchange
+    told('', '[0].body.turns[1].phase.more', theirs, ours)          # another place
+    for theirs_row, ours_row in (
+            (closing(None, 'failed'), closing('final', 'failed')),  # a turn that did not complete
+            (closing(None), closing('final', 'failed')),
+            (closing(None, text='One reply'), closing('final', text='Another')),   # not the same reply
+            (closing(None, text=''), closing('final', text='')),
+            (closing(None), closing('commentary')),                 # not what the contract asks for
+            (closing('commentary'), closing('final')),              # the reference says something else
+            ({'role': 'assistant', 'phase': None, 'text': 'The answer'}, closing('final')),
+            ({**closing(None), 'role': 'user'}, {**closing('final'), 'role': 'user'})):
+        told('', phase, answered({'turns': [{}, theirs_row]}), answered({'turns': [{}, ours_row]}))
+
+    # R12: at rest, the last completed message; the reference's own row names the newer one.
+    def row(completed, last='The answer', state='done', session='claire', **more):
+        return {'session': session, 'latest_state': state, 'last_message': last,
+                'last_completed_message': completed, **more}
+    place = '[0].body.agents[0].last_completed_message'
+    theirs, ours = answered({'agents': [row('You: the question')]}), answered({'agents': [row('The answer')]})
+    told('R12', place, theirs, ours)
+    told('R12', place, answered({'agents': [row('An older answer')]}), ours)
+    told('', place, ours, theirs)
+    told('', place, answered({'agents': [row('You: the question', last='Something else')]}), ours)
+    told('', place, theirs, answered({'agents': [row('The answer', last='Not the answer')]}))
+    told('', place, answered({'agents': [row('You: the question', state='thinking')]}), ours)
+    told('', place, theirs, answered({'agents': [row('The answer', state='thinking')]}))
+    told('', place, answered({'agents': [row('You: the question', session='mike')]}), ours)
+    told('', place, theirs, answered({'agents': [row('', last='')]}))
+    told('', '[0].body.agents[1].last_completed_message', theirs, ours)
+
+    # R13: no model shown, though the reference shows that model for that agent elsewhere.
+    def of(model, session='claire'):
+        return {'agents': [{'session': session, 'model': model}]}
+    place = '[0].body.agents[0].model'
+    ours = answered(of('model-one'), of('model-one'))
+    told('R13', place, answered(of(''), of('model-one')), ours)
+    never = answered(of(''), of(''))
+    told('', place, never, ours)                                    # the reference never shows it
+    told('R13', place, never, ours, bases=(never, answered(of('model-one'))))   # another recording does
+    told('', place, answered(of(''), of('model-two')), ours)        # it shows another model
+    told('', place, answered(of(''), of('model-one', 'mike')), ours)   # for another agent
+    told('', place, answered(of('model-two'), of('model-one')), ours)  # it shows one, another
+    told('', place, ours, answered(of(''), of('model-one')))        # the other way round
+    told('', place, answered(of(None), of('model-one')), ours)      # nothing at all is no empty text
+
+    # R17: at rest after a turn, the line of what the agent is doing.
+    def resting(line, state='done', session='claire'):
+        return {'agents': [{'session': session, 'latest_state': state, 'live_activity': line}]}
+    place = '[0].body.agents[0].live_activity'
+    theirs, ours = answered(resting(None)), answered(resting({'state': 'idle'}))
+    told('R17', place, theirs, ours)
+    told('', place, ours, theirs)
+    told('', place, answered(resting(None, state='thinking')), ours)
+    told('', place, theirs, answered(resting({'state': 'idle'}, state='thinking')))
+    told('', place, theirs, answered(resting('a text')))
+    told('', place, answered(resting(None, session='mike')), ours)
+    told('', place, answered(resting({'state': 'working'})), ours)
+    return tried
 
 
 
@@ -1404,14 +1495,132 @@ def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tu
     return lines, ok
 
 
-def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run, jobs: int) -> tuple:
-    """The Rust Host against what the Python Host answered. Where the reference was recorded
-    answering in more than one way, the answer the Rust Host is nearest to is the one it is
-    held to; the report says which recording that was."""
-    seen = corpus(rust_host(binary), chosen, run.label('rust'), jobs)
-    errors = run_errors(seen, 'rust')
-    report, held_to = diff.Report(), []
+# ---- defects of the reference that are told by their shape ---------------------------------
+#
+# Some defects of the reference come and go with its clock, at places nobody can list: a reply
+# that closes a turn left without its mark, an agent's row that is behind its own conversation.
+# Two recordings can both have such a defect at a place where no run had it before, and then
+# they agree with each other and the Rust Host differs from both. A difference there was
+# registered by its id, one run and one place at a time, and every new place failed a run
+# (three runs on 17 Nov 2026). Such a defect is told here by its shape instead: where the
+# difference is, in which direction, and what the two rows it lies in say of themselves. A rule
+# holds only where the reference's own row gives the defect away, or the Rust Host's row shows
+# that what it says is the thing the contract asks for; anything else at such a place is a
+# difference like any other. The defects are in server-rs/docs/reference-defects.md.
+
+def _row(core: dict, exchange: int, list_name: str, at: int) -> dict:
+    """The row of a list in the body of an exchange, or nothing that is a row."""
+    exchanges = core.get('http') or []
+    body = exchanges[exchange].get('body') if exchange < len(exchanges) else None
+    rows = body.get(list_name) if isinstance(body, dict) else None
+    row = rows[at] if isinstance(rows, list) and at < len(rows) else None
+    return row if isinstance(row, dict) else {}
+
+
+def _closes_a_completed_turn(row: dict) -> bool:
+    turn = row.get('turn')
+    return row.get('role') == 'assistant' and isinstance(turn, dict) and turn.get('status') == 'completed'
+
+
+def _unmarked_reply(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
+    """R6: the reply that closes a completed turn is `final`; the reference leaves it unmarked."""
+    theirs, ours = _row(base, exchange, 'turns', at), _row(head, exchange, 'turns', at)
+    return (_closes_a_completed_turn(theirs) and _closes_a_completed_turn(ours)
+            and theirs.get('phase') is None and ours.get('phase') == 'final'
+            and bool(ours.get('text')) and theirs.get('text') == ours.get('text'))
+
+
+def _stale_last_completed(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
+    """R12: at rest after a turn, the last completed message is the agent's last message; the
+    reference's row still names an older one, beside the newer one it names as its last."""
+    theirs, ours = _row(base, exchange, 'agents', at), _row(head, exchange, 'agents', at)
+    said = ours.get('last_completed_message')
+    return (bool(said) and said == ours.get('last_message') == theirs.get('last_message')
+            and theirs.get('last_completed_message') != said
+            and theirs.get('latest_state') == ours.get('latest_state') == 'done'
+            and theirs.get('session') == ours.get('session'))
+
+
+def _model_not_shown(base: dict, head: dict, exchange: int, at: int, bases) -> bool:
+    """R13: the model that answered is shown after a turn; the reference shows none for the rest
+    of a minute, though it shows that very model for that agent elsewhere in what was recorded."""
+    theirs, ours = _row(base, exchange, 'agents', at), _row(head, exchange, 'agents', at)
+    model, session = ours.get('model'), ours.get('session')
+    if theirs.get('model') != '' or not model or not session or theirs.get('session') != session:
+        return False
+    for recording in bases:
+        for answered in recording.get('http') or []:
+            body = answered.get('body')
+            rows = body.get('agents') if isinstance(body, dict) else None
+            for row in rows if isinstance(rows, list) else ():
+                if isinstance(row, dict) and row.get('session') == session and row.get('model') == model:
+                    return True
+    return False
+
+
+def _no_line_at_rest(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
+    """R17: after a turn that completed, the row says what the agent is doing (at rest); the
+    reference leaves the line empty after an agent's first turn, in a row that says `done`."""
+    theirs, ours = _row(base, exchange, 'agents', at), _row(head, exchange, 'agents', at)
+    return (theirs.get('live_activity') is None and isinstance(ours.get('live_activity'), dict)
+            and theirs.get('latest_state') == ours.get('latest_state') == 'done'
+            and theirs.get('session') == ours.get('session'))
+
+
+# The defect, where a difference of its shape lies (the exchange and the row), and what the
+# rows have to say for it to be that defect.
+SHAPES = (
+    ('R6', re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.phase$'), _unmarked_reply),
+    ('R12', re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.last_completed_message$'), _stale_last_completed),
+    ('R13', re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.model$'), _model_not_shown),
+    ('R17', re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.live_activity$'), _no_line_at_rest),
+)
+
+
+def told_by_shape(difference: dict, base: dict, head: dict, bases=()) -> str:
+    """The defect of the reference a difference is an instance of, by its shape; '' for none.
+    `base` and `head`: what the reference and the Rust Host answered in the scenario (the view
+    that is compared); `bases`: every recording of the reference there is of it."""
+    if difference.get('channel') != 'http' or difference.get('kind') != 'changed':
+        return ''
+    for defect, where, holds in SHAPES:
+        found = where.match(difference.get('locator') or '')
+        if found and holds(base, head, int(found.group(1)), int(found.group(2)), bases or (base,)):
+            return defect
+    return ''
+
+
+def rendered(report, intended: set, shaped: dict, title: str, errors=()) -> str:
+    """A report of differences in three kinds: registered by its id, a defect of the reference
+    told by its shape, and unexplained."""
+    explained = lambda d: d['id'] in intended or d['id'] in shaped  # noqa: E731
+    unexplained = [d for d in report.items if not explained(d)]
+    by_shape = sum(1 for d in report.items if d['id'] not in intended and d['id'] in shaped)
+    lines = [f'# Replay difference report: {title}', '',
+             f'differences: {len(report.items)}  registered intended: '
+             f'{len(report.items) - len(unexplained) - by_shape}  a defect of the reference by its shape: '
+             f'{by_shape}  unexplained: {len(unexplained)}']
+    counts: dict = {}
+    for d in report.items:
+        counts[d['scenario']] = counts.get(d['scenario'], 0) + 1
+    lines += [f'  {scenario}: {count}' for scenario, count in sorted(counts.items())]
+    lines += [f'RUN ERROR {line}' for line in errors]
+    if report.items:
+        lines += ['', 'id            class        scenario / channel / locator / kind: base -> head']
+    for d in report.items:
+        kind = 'intended' if d['id'] in intended else f'defect {shaped[d["id"]]}' if d['id'] in shaped else 'UNEXPLAINED'
+        lines.append(f"{d['id']}  {kind:<11}  {d['scenario']} / {d['channel']} / {d['locator']} / "
+                     f"{d['kind']}: {d['base']} -> {d['head']}")
+    return '\n'.join(lines) + '\n'
+
+
+def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple:
+    """What the Rust Host answered (`seen`), held to the recordings of the reference: the lines
+    of the report, and whether it conforms. Nothing is started here: a run that was written
+    down can be judged again."""
+    report, held_to, shaped = diff.Report(), [], {}
     for scenario in steady(chosen):
+        name = scenario['id']
         against = [differences(recording, seen, [scenario], view='core').items for recording in recordings]
         # A place counts when the Rust Host differs there from every recording. Where it gives
         # what one recording gave and another did not, the reference itself answers in more
@@ -1419,18 +1628,28 @@ def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run
         places = [{place(d) for d in items} for items in against]
         everywhere = set.intersection(*places)
         counted = [[d for d in items if place(d) in everywhere] for items in against]
-        nearest = min(range(len(recordings)),
-                      key=lambda n: sum(1 for d in counted[n] if d['id'] not in intended))
+        bases = [recording[name]['core'] for recording in recordings]
+        head = seen[name]['core']
+        told = [{d['id']: told_by_shape(d, bases[n], head, bases) for d in counted[n] if d['id'] not in intended}
+                for n in range(len(recordings))]
+        nearest = min(range(len(recordings)), key=lambda n: sum(1 for defect in told[n].values() if not defect))
         report.items.extend(counted[nearest])
+        shaped.update({ident: defect for ident, defect in told[nearest].items() if defect})
         if nearest:
-            held_to.append(f"{scenario['id']}: recording {nearest + 1}")
+            held_to.append(f"{name}: recording {nearest + 1}")
         elsewhere = sorted(set().union(*places) - everywhere)
         if elsewhere:
-            held_to.append(f"{scenario['id']}: at {len(elsewhere)} place(s) the recordings differ and the Rust "
+            held_to.append(f"{name}: at {len(elsewhere)} place(s) the recordings differ and the Rust "
                            f"Host gives one of their answers ({'; '.join(' / '.join(p) for p in elsewhere[:6])}"
                            f"{' ...' if len(elsewhere) > 6 else ''})")
-    unexplained = [d for d in report.items if d['id'] not in intended]
-    lines = [diff.render(report, intended, 'the Python Host (base) against the Rust Host (head)', errors)]
+    unexplained = [d for d in report.items if d['id'] not in intended and d['id'] not in shaped]
+    lines = [rendered(report, intended, shaped, 'the Python Host (base) against the Rust Host (head)', errors)]
+    if shaped:
+        by_defect: dict = {}
+        for defect in shaped.values():
+            by_defect[defect] = by_defect.get(defect, 0) + 1
+        lines += ['defects of the reference told by their shape: '
+                  + ', '.join(f'{defect} at {count} place(s)' for defect, count in sorted(by_defect.items())), '']
     if held_to:
         lines += ['', 'held to more than the first recording:', *(f'  {line}' for line in held_to)]
     lines += ['', '# The same differences by shape', *diff.shapes(report, top=200)]
@@ -1438,6 +1657,15 @@ def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run
     lines.append('')
     lines.append('THE RUST HOST CONFORMS' if ok else
                  f'THE RUST HOST DIFFERS: {len(unexplained)} unexplained difference(s), {len(errors)} run error(s)')
+    return lines, ok
+
+
+def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run, jobs: int) -> tuple:
+    """The Rust Host against what the Python Host answered. Where the reference was recorded
+    answering in more than one way, the answer the Rust Host is nearest to is the one it is
+    held to; the report says which recording that was."""
+    seen = corpus(rust_host(binary), chosen, run.label('rust'), jobs)
+    lines, ok = judged(recordings, seen, chosen, intended, run_errors(seen, 'rust'))
     return lines, ok, seen
 
 
@@ -1452,7 +1680,10 @@ def choose(names):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('mode', choices=('record', 'plants', 'compare', 'cross', 'rust', 'selftest'))
+    parser.add_argument('mode', choices=('record', 'plants', 'compare', 'cross', 'rust', 'judge', 'selftest'),
+                        help='judge: a run that was written down is judged again as the rules and the register '
+                             'are now, without starting a Host: the recordings of the reference under --golden '
+                             '(and beside it -again, -more), what the Rust Host answered under --out/rust')
     parser.add_argument('--build', type=Path, help='a checkout of the repository: the Python Host under ./server')
     parser.add_argument('--rust', type=Path, help='the clarp-host binary (clarp-shim beside it)')
     parser.add_argument('--golden', type=Path, default=HERE / 'golden')
@@ -1477,7 +1708,7 @@ def main(argv=None) -> int:
         global UNFINISHED
         UNFINISHED = args.out.resolve() / 'unfinished'
     for needed, modes in (('build', ('record', 'plants', 'cross')), ('rust', ('compare', 'cross', 'rust')),
-                          ('out', ('cross', 'rust'))):
+                          ('out', ('cross', 'rust', 'judge'))):
         if args.mode in modes and getattr(args, needed) is None:
             parser.error(f'{args.mode} needs --{needed}')
     build = args.build.resolve() if args.build else None
@@ -1485,6 +1716,15 @@ def main(argv=None) -> int:
     if args.mode == 'selftest':
         print('\n'.join(selftest()))
         return 0
+    if args.mode == 'judge':
+        selftest()
+        recordings = [load_golden(directory, chosen) for directory in golden_dirs(args.golden)
+                      if directory == args.golden or directory.is_dir()]
+        seen = load_golden(args.out / 'rust', chosen)
+        errors = [error for n, recording in enumerate(recordings) for error in run_errors(recording, f'recording {n + 1}')]
+        lines, ok = judged(recordings, seen, chosen, load_intended(args.intended), errors + run_errors(seen, 'rust'))
+        print('\n'.join(lines))
+        return 0 if ok else 1
     run = Run()
     ok, lines = True, []
     try:
