@@ -610,13 +610,18 @@ impl ClaudeInterpreter {
                 // work behind it answers that first, with a result of its own. The turn is over
                 // when the process is, and the last result is the one that counts.
                 self.settle(out);
-                let tokens = |name: &str| event["usage"][name].as_u64();
-                if let (Some(tokens_in), Some(tokens_out)) =
-                    (tokens("input_tokens"), tokens("output_tokens"))
-                {
+                // What the turn took in is what was sent, what was written to the cache and
+                // what was read from it, as the Python Host counts it
+                // (`turn_stop._result_detail`): a turn that goes on in a long conversation
+                // reads nearly all of it from the cache.
+                let said = event["usage"].as_object();
+                if let Some(usage) = said.filter(|usage| !usage.is_empty()) {
+                    let count = |name: &str| usage.get(name).and_then(Value::as_u64).unwrap_or(0);
                     out.push(Signal::Usage {
-                        tokens_in,
-                        tokens_out,
+                        tokens_in: count("input_tokens")
+                            + count("cache_creation_input_tokens")
+                            + count("cache_read_input_tokens"),
+                        tokens_out: count("output_tokens"),
                     });
                 }
                 self.result = Some(ResultFacts {
@@ -1024,6 +1029,35 @@ mod tests {
             tokens_in: 5,
             tokens_out: 7
         }));
+    }
+
+    #[test]
+    fn what_a_turn_took_in_counts_what_it_read_from_the_cache_and_wrote_to_it() {
+        let used = |usage: &str| {
+            let result = format!(
+                r#"{{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{usage}}}"#
+            );
+            let signals = read(&[INIT, &result], (Some(0), None));
+            let mut said = signals.into_iter().filter_map(|signal| match signal {
+                Signal::Usage {
+                    tokens_in,
+                    tokens_out,
+                } => Some((tokens_in, tokens_out)),
+                _ => None,
+            });
+            said.next()
+        };
+        assert_eq!(
+            used(
+                r#"{"input_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":7}"#
+            ),
+            Some((1105, 7))
+        );
+        // What it does not say counts as none; a turn that says nothing of its use says none.
+        assert_eq!(used(r#"{"output_tokens":3}"#), Some((0, 3)));
+        assert_eq!(used(r#"{"cache_read_input_tokens":40}"#), Some((40, 0)));
+        assert_eq!(used("{}"), None);
+        assert_eq!(used("null"), None);
     }
 
     const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"sess-1","model":"m"}"#;
