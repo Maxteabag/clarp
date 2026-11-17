@@ -21524,3 +21524,165 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         told_again(&heard) == 1
     });
 }
+
+#[test]
+fn a_turn_that_fails_for_a_usage_limit_is_told_as_a_limit_until_a_turn_completes() {
+    let place = Place::new("codex-refused");
+    let own = place.root.join("codex-own");
+    std::fs::create_dir_all(&own).unwrap();
+    let tokens = json!({ "account_id": "an-account", "access_token": "a-token" });
+    let login = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+    std::fs::write(own.join("auth.json"), login.to_string()).unwrap();
+    // A stand-in for Codex that says nothing of its account's windows. While the test has
+    // it refuse, it fails as Codex does when its account is used up; else it answers. (Not
+    // by what it is asked: a turn after turns that failed is given what they were asked.)
+    let codex = place.root.join("codex-refuses");
+    let script = r#"#!/usr/bin/env python3
+import json, os, pathlib, sys
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+sys.stdin.read()
+args = sys.argv[1:]
+thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-000000001157"
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+if (pathlib.Path(os.environ["CODEX_HOME"]) / "refuses").exists():
+    say(type="turn.failed", error={"message": "You've hit your usage limit. Try again later."})
+    sys.exit(1)
+say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": "done"})
+say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
+"#;
+    program(&codex, script);
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CODEX_HOME", own.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    let limits_told = |heard: &Arc<Mutex<Vec<Value>>>| -> Vec<Value> {
+        let all = heard.lock().unwrap();
+        let limits = all.iter().filter(|event| event["type"] == "provider-limit");
+        limits.cloned().collect()
+    };
+    let of_codex = |host: &Host| host.get("/backend-usage")["providers"]["codex"].clone();
+    let quota_of = |host: &Host, session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let row = agents.iter().find(|agent| agent["session"] == session);
+        row.unwrap()["backend_quota"].clone()
+    };
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+    assert_eq!(quota_of(&host, &cody), Value::Null);
+
+    // A turn fails for a usage limit, and Codex said nothing of its windows: a hard limit of
+    // which nothing more is known is told, shown as a window of no known kind, and the
+    // agent's row says that the account is used up, until nobody knows when.
+    std::fs::write(own.join("refuses"), "").unwrap();
+    host.send(&cody, "one", "u-1");
+    wait_for("the limit to be told", || limits_told(&heard).len() == 1);
+    let limit = limits_told(&heard).remove(0);
+    assert_eq!(
+        (
+            &limit["kind"],
+            &limit["source"]["kind"],
+            &limit["used_percentage"],
+            &limit["resets_at"]
+        ),
+        (
+            &json!("hard_limit"),
+            &json!("classified_terminal"),
+            &Value::Null,
+            &Value::Null
+        ),
+        "{limit}"
+    );
+    let shown = of_codex(&host);
+    let windows = shown["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 1, "{shown}");
+    let from = json!({ "kind": "classified_terminal", "detail": "classified quota terminal" });
+    assert_eq!(
+        (
+            &windows[0]["kind"],
+            &windows[0]["freshness"],
+            &windows[0]["source"]
+        ),
+        (&json!("unknown"), &json!("fresh"), &from),
+        "{shown}"
+    );
+    let stands = json!({
+        "state": "hard_limit",
+        "episode_id": limit["episode_id"],
+        "provider_limit_event_id": limit["provider_limit_event_id"],
+    });
+    assert_eq!(windows[0]["limit"], stands);
+    wait_for("the row to say that the account is used up", || {
+        !quota_of(&host, &cody).is_null()
+    });
+    let said = quota_of(&host, &cody);
+    assert_eq!(
+        (
+            &said["state"],
+            &said["window"],
+            &said["resets_at"],
+            &said["reason"]
+        ),
+        (
+            &json!("exhausted"),
+            &json!("unknown"),
+            &Value::Null,
+            &json!("usage_limit")
+        ),
+        "{said}"
+    );
+
+    // A second turn fails the same way, a second later (a moment is told to the second):
+    // the limit stands, is seen again, and is not told again.
+    let then = now_ms() / 1000;
+    wait_for("a second to pass", || now_ms() / 1000 > then);
+    host.send(&cody, "two", "u-2");
+    wait_for("the second turn to have failed", || {
+        let turns = host.turns(&cody);
+        turns.iter().any(|row| row["id"] == "u-2") && host.state(&cody) != "thinking"
+    });
+    let seen_again = |host: &Host| of_codex(host)["windows"][0]["observed_at"].clone();
+    wait_for("the limit to be seen again", || {
+        seen_again(&host) != windows[0]["observed_at"]
+    });
+    assert_eq!(limits_told(&heard).len(), 1);
+
+    // The limit is of the account the Host is on: while another account is logged in,
+    // nothing of it is shown as that account's, and with the first again it is.
+    let other = json!({ "account_id": "another-account", "access_token": "another-token" });
+    let other = json!({ "auth_mode": "chatgpt", "tokens": other });
+    std::fs::write(own.join("auth.json"), other.to_string()).unwrap();
+    assert_eq!(of_codex(&host)["windows"], json!([]));
+    assert_eq!(quota_of(&host, &cody), Value::Null);
+    std::fs::write(own.join("auth.json"), login.to_string()).unwrap();
+    assert_eq!(of_codex(&host)["windows"][0]["kind"], "unknown");
+    assert_eq!(quota_of(&host, &cody)["window"], "unknown");
+
+    // A turn completes: the account served it. The limit is over, told as that, its window
+    // is no more, and the row says nothing.
+    std::fs::remove_file(own.join("refuses")).unwrap();
+    host.send(&cody, "three", "u-3");
+    wait_for("the limit to be told as over", || {
+        limits_told(&heard).len() == 2
+    });
+    let over = limits_told(&heard).remove(1);
+    assert_eq!(
+        (&over["kind"], &over["episode_id"], &over["source"]["kind"]),
+        (
+            &json!("recovered"),
+            &limit["episode_id"],
+            &json!("provider_reported")
+        ),
+        "{over}"
+    );
+    assert_eq!(of_codex(&host)["windows"], json!([]));
+    wait_for("the row to say nothing again", || {
+        quota_of(&host, &cody).is_null()
+    });
+}

@@ -33,6 +33,14 @@ depends on the turns that completed since a window was last heard of, so a story
 a turn of an agent ended (`ended`: of which tool, and how; a row of the Host's own log of states,
 written here as that Host writes one).
 
+A story may also say that a turn of Codex failed for a usage limit (`failed_for_a_limit`): the Python Host
+then records a limit of which nothing more is known (`record_classified_usage_limit`), on the
+login the story says the Host is on. Such a limit ends there when the provider is asked and says
+that all is well (`_resolve_unknown_terminals`). The Rust Host asks no provider: it ends such a
+limit when a turn of Codex completes, and so that function is called here where a story says that
+a turn of Codex completed, on the login the Host is on then. What it answers is written with the
+step.
+
 It runs in processes of its own, one for each story, whose every home, data, config and cache
 directory is a new empty directory (the replay harness's own isolation,
 `tests/replay/host.py`), with no way out to any network.
@@ -92,9 +100,14 @@ def advance(seconds):
     return {'advance': seconds}
 
 
-def ended(tool, how='done'):
-    """A turn of an agent of this tool ended now, this way."""
-    return {'ended': {'tool': tool, 'kind': how}}
+def ended(tool, how='done', on=None):
+    """A turn of an agent of this tool ended now, this way (while the Host is on this login)."""
+    return {'ended': {'tool': tool, 'kind': how}, **({} if on is None else {'active': None if on == NO_LOGIN else on})}
+
+
+def refused(on=None):
+    """A turn of Codex failed for a usage limit (while the Host is on this login)."""
+    return {'failed_for_a_limit': True, **({} if on is None else {'active': None if on == NO_LOGIN else on})}
 
 
 ASKED = {'asked': True}
@@ -225,6 +238,29 @@ STORIES = [
     ('used-up-twice-and-a-turn-completed-after-each', 'Used up, a turn completed, used up again, and a turn completed again',
      [record(100.0, 50.0), advance(30), ended('codex'), advance(30), record(100.0, 50.0), ASKED, advance(30),
       ended('codex'), ASKED]),
+    ('refused', 'A turn fails for a usage limit, and nothing more is known',
+     [refused(), ASKED, advance(15 * 60), ASKED, advance(1), ASKED]),
+    ('refused-twice', 'A second turn fails the same way',
+     [refused(), ASKED, advance(60), refused(), ASKED]),
+    ('refused-and-a-turn-completed', 'A turn fails for a usage limit, a turn completes, and one fails again',
+     [refused(), ASKED, advance(60), ended('codex'), ASKED, advance(60), refused(), ASKED]),
+    ('refused-with-windows-known', 'A turn fails for a usage limit though the windows say there is room',
+     [record(50.0, 20.0), advance(60), refused(), ASKED, advance(60), ended('codex'), ASKED]),
+    ('refused-while-the-five-hours-are-used-up', 'A turn fails for a usage limit while the five hours are said to be used up',
+     [record(100.0, 20.0), advance(60), refused(), ASKED, advance(60), ended('codex'), ASKED]),
+    ('refused-and-a-record-under-the-warning', 'After a turn failed for a usage limit, a record says there is room',
+     [refused(), advance(60), record(10.0, 10.0), ASKED]),
+    ('refused-on-no-login', 'A turn fails for a usage limit while the Host is on no login it can read',
+     [refused(on=NO_LOGIN), asked(NO_LOGIN), asked(IDENTITY), advance(60), ended('codex', on=IDENTITY),
+      asked(NO_LOGIN), asked(IDENTITY)]),
+    ('refused-and-another-login', 'A turn fails for a usage limit, and another account is logged in',
+     [refused(), advance(60), record(20.0, 30.0, on=OTHER), asked(OTHER), asked(IDENTITY)]),
+    ('refused-after-another-login', 'A warning stands, another account is logged in, and a turn of it fails for a usage limit',
+     [record(90.0, 10.0), advance(60), refused(on=OTHER), asked(OTHER), asked(IDENTITY)]),
+    ('refused-and-a-turn-of-another-login-completed', 'A turn fails for a usage limit, and a turn completes on another account',
+     [refused(), advance(60), ended('codex', on=OTHER), asked(IDENTITY), asked(OTHER)]),
+    ('refused-and-the-login-renewed', 'A turn fails for a usage limit, the login is renewed, and a turn completes',
+     [refused(), advance(60), asked(RENEWED), ended('codex', on=RENEWED), asked(RENEWED)]),
     ('used-up-with-one-reset-unknown', 'Both used up, and one does not say when it begins anew',
      [{'record': {'primary': {'used_percent': 100.0, 'window_minutes': 300},
                   'secondary': window(100.0, 10_080, WEEK_ON)}}, ASKED]),
@@ -255,6 +291,15 @@ def told(story):
     # The login the Host is on, as the story says it: no login is read.
     active = [tuple(IDENTITY)]
     usage._active_codex_identity = lambda *, create=False: active[0]
+
+    # And so is the login a failed turn is recorded on: read by the Host's own reader, which
+    # is given the story's word.
+    def read_login(codex_home=None):
+        if active[0] is None:
+            raise RuntimeError('codex auth tokens missing')
+        return 'a-token', 'an-account'
+    codex._read_codex_auth = read_login
+    codex._codex_identity = lambda token, account: active[0]
     # Every module of the Host that took the clock's reading by name is given this clock.
     for module in list(sys.modules.values()):
         if getattr(module, '__name__', '').startswith('lib.') and hasattr(module, '_now_ms'):
@@ -266,11 +311,29 @@ def told(story):
         if 'advance' in step:
             clock[0] += step['advance'] * 1000
             continue
+        if 'ended' in step or 'failed_for_a_limit' in step:
+            if 'active' in step:
+                active[0] = None if step['active'] is None else tuple(step['active'])
+            at['active'] = None if active[0] is None else list(active[0])
         if 'ended' in step:
             how = step['ended']
             store_of_all.execute('INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail) VALUES (?,?,?,?,?)',
                                  (f"agent-{how['tool']}", None, clock[0], how['kind'], '{}'))
-            done.append({**at, 'ended': how})
+            over = []
+            if how['tool'] == 'codex' and how['kind'] == 'done':
+                generation, account = active[0] or ('auth-unknown', None)
+                over = store._resolve_unknown_terminals(
+                    provider_instance_id=store._provider_instance_id('codex'), auth_generation_id=generation,
+                    account_scope_ref=account, observed_at=clock[0])
+            done.append({**at, 'ended': how, 'limit_events': over})
+            continue
+        if 'failed_for_a_limit' in step:
+            limit = codex.record_classified_usage_limit('codex')
+            its_own = None if limit is None else {key: value for key, value in limit.items() if not key.startswith('_')}
+            new = bool(limit and limit.get('_new'))
+            # As they are told: what ended under the login before first, then the limit where it is new.
+            told_of = list((limit or {}).get('_additional_events') or []) + ([its_own] if new else [])
+            done.append({**at, 'failed_for_a_limit': True, 'limit': its_own, 'new': new, 'limit_events': told_of})
             continue
         if 'record' in step:
             seen = step['record']

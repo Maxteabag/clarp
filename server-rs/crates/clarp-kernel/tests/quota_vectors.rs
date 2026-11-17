@@ -102,7 +102,7 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
     let began = vectors["began_ms"].as_i64().unwrap();
     let seen_in = vectors["seen_in"].as_str().unwrap();
     let (mut steps, mut askings, mut events, mut logins) = (0, 0, 0, BTreeMap::new());
-    let (mut ended, mut used_up) = (0, 0);
+    let (mut ended, mut refused, mut used_up) = (0, 0, 0);
     let stories = vectors["stories"].as_array().unwrap();
     for story in stories {
         let name = story["name"].as_str().unwrap();
@@ -131,11 +131,33 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
             let told = step["limit_events"].as_array().cloned().unwrap_or_default();
             if let Some(how) = step.get("ended") {
                 // A turn of an agent ended. The keeper is told of those of its own tool that
-                // completed, and of no other: that is all a Host tells it.
-                if how["tool"] == "codex" && how["kind"] == "done" {
-                    kept.completed(now);
-                }
+                // completed, and of no other: that is all a Host tells it. What ends with a
+                // completed turn is what the Python Host's own ending of such a limit ends.
+                let did = if how["tool"] == "codex" && how["kind"] == "done" {
+                    kept.completed(tool, login(&step["active"]), now, &mut new_id)
+                } else {
+                    Vec::new()
+                };
+                keys.check(&did, None, &what);
+                keys.check(&told, None, &what);
+                let over = ours.of(&json!(did));
+                assert_eq!(over, theirs.of(&json!(told)), "{what}: over with a turn");
                 ended += 1;
+            } else if step.get("failed_for_a_limit").is_some() {
+                // A turn failed for a usage limit, on the login the Host is on, or on none.
+                let on = login(&step["active"]);
+                let under = on.map_or(quota::NO_LOGIN, |on| on.generation);
+                let did = kept.refused(tool, on, now, &mut new_id);
+                keys.check(&did, Some(under), &what);
+                keys.check(&told, Some(under), &what);
+                let limit = ours.of(&json!(did));
+                assert_eq!(limit, theirs.of(&json!(told)), "{what}: a refused turn");
+                // Told as a limit where none stood, and not again while it stands.
+                let new = did
+                    .last()
+                    .is_some_and(|event| event["source"]["kind"] == quota::REFUSED);
+                assert_eq!(json!(new), step["new"], "{what}: whether it is new");
+                refused += 1;
             } else if step.get("record").is_some() {
                 let on = login(&step["identity"]).unwrap();
                 *logins.entry(step["identity"].to_string()).or_insert(0) += 1;
@@ -196,8 +218,8 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
         }
     }
     // Counted by the script that wrote the vectors.
-    assert_eq!((stories.len(), steps, askings, events), (48, 202, 108, 55));
-    assert_eq!((ended, used_up), (11, 29));
+    assert_eq!((stories.len(), steps, askings, events), (59, 251, 133, 76));
+    assert_eq!((ended, refused, used_up), (17, 13, 41));
     // And told on more than one login: four of them, one with no account known.
     assert_eq!(logins.len(), 4);
 }
