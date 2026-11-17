@@ -4484,6 +4484,21 @@
   {
    "data": {
     "agent_id": "<id:5>",
+    "client_msg_id": "whopictured",
+    "event_id": "<eid:agent-state#1@67804f>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "pictured",
+    "trace_id": "<id:6>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@67804f>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
     "detail": {
      "session": "pictured"
     },
@@ -4520,21 +4535,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@7c2acb>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:5>",
-    "client_msg_id": "whopictured",
-    "event_id": "<eid:agent-state#1@67804f>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "pictured",
-    "trace_id": "<id:6>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@67804f>"
   },
   {
    "data": {

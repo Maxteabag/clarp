@@ -310,7 +310,7 @@
     "file": "<id:4>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 10,
+    "latest_revision": 9,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -357,7 +357,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 7,
+      "revision": 6,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -391,7 +391,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 8,
+      "revision": 7,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -426,7 +426,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 10,
+      "revision": 9,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -503,7 +503,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 10,
+      "head_revision": 9,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -2223,21 +2223,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "client_msg_id": "shown-1",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "conv": "<id:4>",
     "epoch": "<id:2>",
     "lseq": "<lseq>",
@@ -2282,6 +2267,21 @@
    },
    "event": null,
    "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "shown-1",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
@@ -3165,47 +3165,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "conv": "<id:4>",
-    "epoch": "<id:2>",
-    "lseq": "<lseq>",
-    "ops": [
-     {
-      "conv": "<id:4>",
-      "op": "turn",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 2,
-       "turn_id": "<id:3>",
-       "worked_ms": "<duration>"
-      }
-     },
-     {
-      "activity": {
-       "headline": null,
-       "item_id": null,
-       "running_tools": 0,
-       "since_ms": "<time>",
-       "state": "idle",
-       "tool": null,
-       "turn_id": "<id:3>",
-       "turn_started_ms": null
-      },
-      "conv": "<id:4>",
-      "op": "status"
-     }
-    ],
-    "server_now_ms": "<time>",
-    "session": "claire",
-    "type": "live"
-   },
-   "event": null,
-   "id": null
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "backend_session_id": "<id:4>",
      "dispatch": "claude",
@@ -3246,6 +3205,47 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "conv": "<id:4>",
+    "epoch": "<id:2>",
+    "lseq": "<lseq>",
+    "ops": [
+     {
+      "conv": "<id:4>",
+      "op": "turn",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 2,
+       "turn_id": "<id:3>",
+       "worked_ms": "<duration>"
+      }
+     },
+     {
+      "activity": {
+       "headline": null,
+       "item_id": null,
+       "running_tools": 0,
+       "since_ms": "<time>",
+       "state": "idle",
+       "tool": null,
+       "turn_id": "<id:3>",
+       "turn_started_ms": null
+      },
+      "conv": "<id:4>",
+      "op": "status"
+     }
+    ],
+    "server_now_ms": "<time>",
+    "session": "claire",
+    "type": "live"
+   },
+   "event": null,
+   "id": null
   },
   {
    "data": {
