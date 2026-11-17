@@ -260,7 +260,7 @@
       "ordinal": 5,
       "phase": "final",
       "rev": 3,
-      "row_id": "<row:3>",
+      "row_id": "<a row the conversation does not have>",
       "started_at_ms": "<time>",
       "status": "completed",
       "text": "Claude replay reply: [qa-stream] synthetic work, shown as it is done",
@@ -411,15 +411,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:3>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 2,
-       "turn_id": "<id:3>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:3>"
      }
     ]
    },
@@ -3028,7 +3020,7 @@
        "kind": "message",
        "ordinal": 5,
        "phase": "final",
-       "row_id": "<row:3>",
+       "row_id": "<a row the conversation does not have>",
        "started_at_ms": "<time>",
        "status": "running",
        "text": "",
@@ -3354,7 +3346,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "<row:3>",
+    "source_message_id": "<a row the conversation does not have>",
     "type": "user-notification",
     "unread": true
    },

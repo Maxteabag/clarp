@@ -1,0 +1,569 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": true,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": true,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "no_label": "No",
+      "options": [
+       {
+        "description": "Sure",
+        "id": "slow",
+        "label": "The slow way"
+       },
+       {
+        "id": "fast",
+        "label": "The fast way"
+       }
+      ],
+      "priority": 200,
+      "priority_reason": "Nothing else can go on",
+      "question": "Which synthetic way?",
+      "recommended_option_id": "slow",
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "quick",
+      "response_type": "single_choice",
+      "revision": 1,
+      "status": "pending",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {},
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "Which synthetic way?",
+     "title": "Synthetic choice",
+     "type": "question",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 201,
+   "step": "ask"
+  },
+  {
+   "body": {
+    "error": "questions require 2 or 3 options"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 409,
+   "step": "ask with one choice"
+  },
+  {
+   "body": {
+    "error": "blocking or time-sensitive requests require priority_reason"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 409,
+   "step": "ask urgently without a reason"
+  },
+  {
+   "body": {
+    "count": 0,
+    "decision_format": 2,
+    "items": [],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "the inbox, as an app that knows only approvals asks"
+  },
+  {
+   "body": {
+    "count": 1,
+    "decision_format": 2,
+    "items": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "allow_custom_text": true,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": true,
+      "context": "",
+      "created_at": "<time>",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "kind": "question",
+      "no_label": "No",
+      "options": [
+       {
+        "description": "Sure",
+        "id": "slow",
+        "label": "The slow way"
+       },
+       {
+        "id": "fast",
+        "label": "The fast way"
+       }
+      ],
+      "priority": 200,
+      "priority_reason": "Nothing else can go on",
+      "question": "Which synthetic way?",
+      "recommended_option_id": "slow",
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "quick",
+      "response_type": "single_choice",
+      "revision": 1,
+      "session": "claire",
+      "status": "pending",
+      "summary": "Which synthetic way?",
+      "title": "Synthetic choice",
+      "updated_at": "<time>",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     }
+    ],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "get /attention?decision_format=2"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": "<time>",
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": true,
+      "answer": {
+       "label": "The fast way",
+       "option_id": "fast"
+      },
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": true,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": true,
+      "expires_at": null,
+      "no_label": "No",
+      "options": [
+       {
+        "description": "Sure",
+        "id": "slow",
+        "label": "The slow way"
+       },
+       {
+        "id": "fast",
+        "label": "The fast way"
+       }
+      ],
+      "priority": 200,
+      "priority_reason": "Nothing else can go on",
+      "question": "Which synthetic way?",
+      "recommended_option_id": "slow",
+      "resolved_at": "<time>",
+      "resolved_by": "user",
+      "resolved_choice": "answered",
+      "response_effort": "quick",
+      "response_type": "single_choice",
+      "revision": 2,
+      "status": "answered",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {},
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "completed",
+     "summary": "Which synthetic way?",
+     "title": "Synthetic choice",
+     "type": "question",
+     "updated_at": "<time>"
+    },
+    "changed": true,
+    "delivery_pending": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:3>/resolve",
+   "status": 200,
+   "step": "choose"
+  },
+  {
+   "body": {
+    "count": 0,
+    "decision_format": 2,
+    "items": [],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "the inbox, empty"
+  },
+  {
+   "body": {
+    "conversation_id": "<id:4>",
+    "cwd": "<ROOT>/workspace",
+    "delivery_scope": {
+     "agent_id": "<id:2>",
+     "runtime_instance": "<instance>",
+     "runtime_release": "in-process",
+     "server_id": "<id:7>"
+    },
+    "delivery_stop_generation": 0,
+    "file": "<id:4>.jsonl",
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 5,
+    "latest_ts": "<time>",
+    "missing": false,
+    "replace_required": false,
+    "turns": [
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "u-decision-decision-<id:3>",
+      "kind": null,
+      "origin": "automation",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "user",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "[Clarp decision resolved]\nDecision ID: decision-<id:3>\nArtifact ID: artifact-<id:1>\nResolved by: user\nQuestion: Which synthetic way?\nContext: \nReference: \nPayload: {}\nThe user answered this clarification: {\"option_id\": \"fast\", \"label\": \"The fast way\"}. Continue using this answer. This does not grant approval for unrelated protected actions.",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "live-<id:6>",
+      "kind": null,
+      "origin": "automation",
+      "phase": "final",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 5,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay reply: [Clarp decision resolved]\nDecision ID: decision-<id:3>\nArtifact ID: artifact-<id:1>\nResolved by: user\nQuestion: Which synthetic way?\nContext: \nReference: \nPayload: {}\nThe user answered this clarification: {\"option_id\": \"fast\", \"label\": \"The fast way\"}. Continue using this answer. This does not grant approval for unrelated protected actions.",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [],
+      "trace_id": "<id:5>",
+      "turn": {
+       "ended_at_ms": "<time>",
+       "started_at_ms": "<time>",
+       "status": "completed",
+       "tool_count": 0,
+       "turn_id": "<id:5>",
+       "worked_ms": "<duration>"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "question",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#1@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#1@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#1@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#1@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#2@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#2@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#2@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#2@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "event_id": "<eid:transcript-updated#1@45bbad>",
+    "session": "claire",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@45bbad>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "client_msg_id": "decision-decision-<id:3>",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 0,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": true,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "client_msg_id": "decision-decision-<id:3>",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "claire",
+    "trace_id": "<id:5>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "detail": {
+     "backend_session_id": "<id:4>",
+     "dispatch": "claude",
+     "origin": "automation",
+     "source": "pwa",
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:2>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "detail": {
+     "dispatch": "clarp",
+     "duration_ms": "<duration>",
+     "origin": "automation",
+     "tokens_in": 5,
+     "tokens_out": 7,
+     "trace_id": "<id:5>"
+    },
+    "event_id": "<eid:agent-state#3@0952e1>",
+    "kind": "done",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@0952e1>"
+  },
+  {
+   "data": {
+    "action": "done",
+    "agent_id": "<id:2>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@0952e1>",
+    "file_path": "",
+    "kind": "done",
+    "persona": "Claire",
+    "phase": "done",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Done",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "badge": true,
+    "cause_message_id": "u-decision-decision-<id:3>",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "automation",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [Clarp decision resolved] Decision ID: decision-<id:3> Artifact ID: artifact-<id:1> Resolved by: user Question: Which synt\u2026",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "live-<id:6>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
+  }
+ ]
+}

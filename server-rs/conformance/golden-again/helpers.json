@@ -9350,6 +9350,16 @@
   },
   {
    "data": {
+    "event_id": "<eid:agent-roster#1@fb02d3>",
+    "kind": "helper-state",
+    "session": "helper-one",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#1@fb02d3>"
+  },
+  {
+   "data": {
     "agent_id": "<id:2>",
     "detail": {
      "backend_session_id": "<id:5>",
@@ -9368,16 +9378,6 @@
    },
    "event": null,
    "id": "<eid:agent-state#1@0952e1>"
-  },
-  {
-   "data": {
-    "event_id": "<eid:agent-roster#1@fb02d3>",
-    "kind": "helper-state",
-    "session": "helper-one",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#1@fb02d3>"
   },
   {
    "data": {

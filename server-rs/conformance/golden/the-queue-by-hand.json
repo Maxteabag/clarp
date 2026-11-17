@@ -4513,6 +4513,50 @@
   {
    "data": {
     "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:7>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:9>"
+    },
+    "event_id": "<eid:agent-state#13@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#13@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#14@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#14@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
     "client_msg_id": "q-lima",
     "event_id": "<eid:queue-updated#7@dfa4af>",
     "queue_depth": 1,
@@ -4558,50 +4602,6 @@
    },
    "event": null,
    "id": "<eid:queue-updated#4@4e1693>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:6>",
-    "detail": {
-     "backend_session_id": "<id:7>",
-     "dispatch": "claude",
-     "origin": "user",
-     "source": "pwa",
-     "trace_id": "<id:9>"
-    },
-    "event_id": "<eid:agent-state#13@0952e1>",
-    "kind": "thinking",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#13@0952e1>"
-  },
-  {
-   "data": {
-    "action": "thinking",
-    "agent_id": "<id:6>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#14@0952e1>",
-    "file_path": "",
-    "kind": "thinking",
-    "persona": "Claire",
-    "phase": "thinking",
-    "session": "claire",
-    "started_at_ms": null,
-    "state": "thinking",
-    "status": "running",
-    "summary": "Thinking",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": "<time>",
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#14@0952e1>"
   },
   {
    "data": {
