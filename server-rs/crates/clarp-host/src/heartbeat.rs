@@ -259,6 +259,9 @@ fn caught_up<'a>(book: &'a mut Book, agent_id: &str, seen: &Seen) -> &'a mut rul
         counted,
     } = book;
     let state = agents.entry(agent_id.to_string()).or_default();
+    // A run of interruptions begins with its first, and is not begun anew by a heartbeat
+    // whose own turn is interrupted.
+    state.saw(&seen.latest);
     if let Some((turn, what)) = &seen.turn
         && counted.get(agent_id) != Some(turn)
     {

@@ -152,7 +152,7 @@ fn state(row: &Value) -> State {
         recent_starts: starts.unwrap_or_default(),
         noop_streak: row["noop_streak"].as_i64().unwrap_or_default(),
         dormant: row["dormant"].as_bool().unwrap_or_default(),
-        last_wake_signal_ms: 0,
+        ..State::default()
     }
 }
 
