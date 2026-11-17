@@ -31,6 +31,10 @@ no part of it. Markers in the prompt:
   says the limit rejected the request, its own sentence as the answer (an assistant message of
   the model ``<synthetic>``, marked as an API error in the transcript), a result that is an
   error, and exit code 1;
+- ``[qa-limit:N]``: the account is out, as above, in the first N processes that are given
+  this request, and the next one answers: a limit that is over once another account is in
+  place. The request is known by the mark and what follows it on its line, also where a Host
+  gives it again inside its own words (a turn that is taken up after its account was out);
 - ``[qa-crash]``: the tool dies: a line on stderr, no result, exit code 1;
 - ``[qa-says-first]``: the agent says one thing before whatever else the prompt asks for: a
   turn that had begun to answer when it failed;
@@ -380,6 +384,9 @@ def main() -> int:
     if '[qa-stream]' in text:
         asked = stream_work(path, session, text, asked)
     if '[qa-usage-limit]' in text:
+        return out_of_usage(path, session, asked)
+    limit = re.search(r'\[qa-limit:(\d+)\][^\n<]*', text)
+    if limit and given_before(limit.group(0)) < int(limit.group(1)):
         return out_of_usage(path, session, asked)
     if '[qa-crash]' in text:
         sys.stderr.write('Error: the synthetic tool broke before it could answer\n')

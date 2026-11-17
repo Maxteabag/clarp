@@ -209,6 +209,9 @@ class RustHost(replay.Host):
              '--cwd', str(self.root / 'home'), '--listen', '127.0.0.1:0',
              '--whisper-python', sys.executable, '--whisper-worker', str(HERE.parent / 'tools' / 'whisper-worker.py'),
              '--speech-keys', str(self.root / OWNERS_FILE),
+             # Where a scenario's owner has a selector of accounts, this Host runs it, as the
+             # reference Host does; without one the mode changes nothing.
+             '--accounts', 'select',
              # The pictures agents are shown with: the repository's own, as the reference Host has them.
              '--static', str(REPO / 'static')],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,

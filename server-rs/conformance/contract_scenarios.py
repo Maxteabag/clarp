@@ -8,6 +8,10 @@ whose tool is the replay harness's deterministic `fake_claude.py`.
 """
 from __future__ import annotations
 
+import json
+import sys
+from pathlib import Path
+
 AGENT = 'claire'
 
 
@@ -652,6 +656,33 @@ SCENARIOS.append({
         # And the agent works on.
         send('synthetic greeting sierra', 'sierra'),
         {'op': 'wait_reply', 'after': 'u-sierra'},
+        {'op': 'quiesce'},
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
+# The owner's selector of accounts in a scenario: a stand-in that says an account serves
+# (`fake_selector.py`), run by the interpreter the suite runs with.
+SELECTOR = [sys.executable, str(Path(__file__).resolve().parent / 'fake_selector.py')]
+
+SCENARIOS.append({
+    'id': 'the-selector',
+    'what': "an account that is out under a turn, on a Host that runs its owner's selector of accounts: "
+            'the turn waits, the selector puts another account in place, the turn is taken up and '
+            'answers; what a client is shown meanwhile and afterwards',
+    'config': ('[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
+               '[agents]\nclaude_account_switch_command = ' + json.dumps(SELECTOR) + '\n'),
+    'steps': [
+        # The account is out for the first process that is given the request.
+        send('[qa-limit:1] synthetic work tango', 'tango'),
+        {'op': 'wait_reply', 'after': 'u-tango'},
+        {'op': 'quiesce'},
+        {**LOG, 'name': 'log after a turn that waited for an account'},
+        {**SNAPSHOT, 'name': 'snapshot after a turn that waited for an account'},
+        # And the agent works on.
+        send('synthetic greeting uniform', 'uniform'),
+        {'op': 'wait_reply', 'after': 'u-uniform'},
         {'op': 'quiesce'},
         LOG,
         SNAPSHOT,
