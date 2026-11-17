@@ -28,7 +28,8 @@ from . import db, db_schema
 _HOST_INDEX_NAME = "idx_background_jobs_agent_terminal"
 _HOST_INDEX_SQL = ("CREATE INDEX IF NOT EXISTS idx_background_jobs_agent_terminal "
                    "ON background_jobs(agent_id, terminal_at)")
-_HOST_INDEX_BUDGET_SEC = 0.1
+_HOST_INDEX_WAIT_SEC = 0.1
+_HOST_INDEX_BUILD_SEC = 2.0
 
 
 def _index_notice(outcome: str, reason: str) -> None:
@@ -62,12 +63,11 @@ def ensure_host_indexes(connection, path) -> bool:
         if connection.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
                               (_HOST_INDEX_NAME,)).fetchone():
             return True
-        deadline = time.monotonic() + _HOST_INDEX_BUDGET_SEC
-        worker = sqlite3.connect(str(path), timeout=_HOST_INDEX_BUDGET_SEC, isolation_level=None)
-        worker.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+        worker = sqlite3.connect(str(path), timeout=_HOST_INDEX_WAIT_SEC, isolation_level=None)
         worker.execute("BEGIN IMMEDIATE")
-        if time.monotonic() >= deadline:
-            raise TimeoutError("optional index budget")
+        # Waiting for another writer must not spend the build allowance.
+        deadline = time.monotonic() + _HOST_INDEX_BUILD_SEC
+        worker.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
         # Two service processes may have observed absence. Only the creator
         # emits ready, and neither changes the version or existing indexes.
         if not worker.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
