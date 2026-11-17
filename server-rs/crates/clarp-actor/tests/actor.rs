@@ -613,6 +613,53 @@ fn a_conversation_is_read_in_pages() {
     );
 }
 
+/// Whoever keeps a time and no revision (the Goal keeper: where a goal's next update reads
+/// from is a time) is told the revision the conversation had then, and reads on from it.
+#[test]
+fn what_was_written_after_a_time_is_read_from_the_revision_the_conversation_had_then() {
+    let mut world = World::new("revision-at");
+    let mut actor = world.open();
+    let mut after_turn = Vec::new();
+    for n in 1..=6u64 {
+        world.send(
+            &mut actor,
+            &format!("u-{n}"),
+            &format!("message {n}"),
+            Admission::Queue,
+        );
+        world.says(n, &format!("answer {n}"));
+        world.exits(n, Some(0), None);
+        world.hint(&mut actor);
+        after_turn.push(world.tick());
+    }
+    let since = |actor: &Actor, ts_ms: i64| {
+        let revision = actor.revision_at(ts_ms).unwrap();
+        let page = actor.after(revision, 100).unwrap();
+        let ids = page.entries.iter();
+        ids.map(|version| version.entry.id().to_string())
+            .collect::<Vec<_>>()
+    };
+    // After the third turn: the three that followed, and nothing of the three before.
+    assert_eq!(
+        since(&actor, after_turn[2]),
+        vec!["u-4", "r-4-1", "u-5", "r-5-1", "u-6", "r-6-1"]
+    );
+    assert_eq!(since(&actor, after_turn[4]), vec!["u-6", "r-6-1"]);
+    // Before anything was written: all of it. After everything: nothing.
+    assert_eq!(actor.revision_at(0).unwrap(), 0);
+    assert_eq!(since(&actor, 0).len(), 12);
+    assert_eq!(since(&actor, after_turn[5]), Vec::<String>::new());
+    assert_eq!(actor.revision_at(i64::MAX).unwrap(), actor.head_revision());
+    // A time in the middle of a turn: the turn's message was written by then, its answer
+    // was not, and the answer is what is read.
+    let asked_at = {
+        let page = actor.tail(100).unwrap();
+        let fifth = page.entries.iter().find(|row| row.entry.id() == "u-5");
+        fifth.unwrap().ts_ms
+    };
+    assert_eq!(since(&actor, asked_at), vec!["r-5-1", "u-6", "r-6-1"]);
+}
+
 // ---- restarts -------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug)]

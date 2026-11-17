@@ -35,6 +35,7 @@ pub mod hub;
 pub mod ids;
 pub mod janitors;
 pub mod joblog;
+pub mod keeper;
 pub mod launcher;
 pub mod library;
 pub mod logins;

@@ -119,6 +119,16 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("log_turn_summary", 47),
     // Plans with goals: `/task-plan`, `/task-plans`, `/task-plan/action`.
     ("durable_task_goals", 21),
+    // Goals kept current by the Goal keeper: `plan.goal.updater` beside the owner's own
+    // checkpoint, `plan.updater`, a criterion set aside, a paused goal's step that keeps
+    // its place.
+    ("goal_updater", 96),
+    // A receipt for everything the keeper did with a goal: `plan.updater.last_receipt`,
+    // `receipts` on the keeper's runs, `clarp-goal receipts`.
+    ("goal_keeper_receipts", 97),
+    // A goal older than the keeper's first look back is read from its start once, and a
+    // goal that has stalled says so, by a rule.
+    ("goal_keeper_stalled", 98),
     ("background_job_cancel_generation", 23),
     // A send that says it came from the desk is not pushed to the phone.
     ("desktop_send_quiet_push", 27),
@@ -185,6 +195,8 @@ pub struct App {
     pub router: Arc<crate::router::Desk>,
     /// The explainer of the use of tools: what it learned, and what waits for its model.
     pub explain: Arc<crate::explain::Desk>,
+    /// The Goal keeper: its own state of the goals it keeps, and its receipts.
+    pub keeper: Arc<crate::keeper::Desk>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to

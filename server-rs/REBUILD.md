@@ -224,9 +224,9 @@ is woken when the job ends, a wake no checkpoint follows is tried again later ea
 agent's goals. The message is the Python Host's word for word (55 recorded cases). The apps have their side of
 it (`plans.rs`): the plan a session works, its plans, a goal's documents, and what the user does to a goal,
 which is what its owner may do and one thing more, setting a criterion aside (101 recorded steps in all, 13
-of them the user's). Not there of goals: the ledger, subgoals and the Goal keeper's verbs (`ledger`,
-`subgoal`, `receipts`, `bookkeeping` answer that they are not here yet), and what an account's usage limit
-does to a wake (accounts come later).
+of them the user's). Not there of goals: the ledger and subgoals (`ledger`, `subgoal` and `bookkeeping`
+answer that they are not here yet), and what an account's usage limit does to a wake (accounts come later).
+The Goal keeper and its receipts are there: below.
 
 **What agents make and ask is there, for the plain kinds** (15 Nov 2026). The rules of `server/lib/artifacts.py`
 are in the kernel (`artifacts.rs`, `artifacts/decisions.rs`, held to the Python module by 264 recorded calls,
@@ -880,6 +880,50 @@ server of Codex to ask, and says so in the Python Host's own words for a tool th
 turn of a stand-in Codex through the Host: the session offered, taken up, shown, continued, and refused a
 second time.
 
+**The Goal keeper** (17 Nov 2026). The janitor that ran most on the owner's Host after the explainer (1,647
+runs in the counted week), and the one a long piece of work leans on: agents rarely keep their own goal's
+books while they work, so after something happened a small model restates the goal beside its owner: which
+steps are pending, in progress, done or blocked, and a short checkpoint. The owner is never prompted, told
+or interrupted; a step is called done only where the model quotes what shows it; and the keeper cannot
+complete, pause or cancel a goal. Three layers, as the Python Host has them in `goal_keeper.py`,
+`task_plans.updater_apply` and `janitor_autonomy.goal_keeper_once`:
+
+- *The rules* (`clarp-kernel` `goals/keeper.rs`), with no clock and no store: what a keeper watches, where a
+  goal's next update reads from, what happened since and which of it is a trigger, whether a goal has
+  stalled (a rule, with no model: nothing for three days, or the owner's last turn stopped on a usage limit
+  or a provider's error and nothing followed for an hour), the text of what was said, the sheet of facts,
+  the prompt, what is taken from a model's answer, which goals are due (triggers folded for five minutes,
+  thirty seconds after a pause or a resume; a failure tried once more and then left to the hourly sweep; a
+  goal older than the first look back read from its start once) and how a run is settled. Held to the Python
+  module's own functions by `tools/goal-keeper-vectors.py`.
+- *The write* (`GoalBook::updater`): the statuses of steps and the keeper's own checkpoint beside the
+  owner's, never the goal's state, its criteria or their evidence. The plan's revision stays what it was, so
+  the owner's next command is never refused because of the keeper; the keeper's write is refused instead
+  where the owner changed the plan since it was read. Held by seventeen writes and refusals in the goal
+  tool's vectors.
+- *The loop* (`clarp-host` `keeper.rs`). Every fifteen seconds, for each keeper that is on: the open goals
+  of the agents in its scope are looked at, and those that are due, six at most, are updated in one run of
+  the janitor, side by side. A goal's world is read off what the Host already has. What the owner and its
+  helpers said since is asked of their conversations as an app asks for what changed: the revision each had
+  at the time the update reads from is found once (the actor's `revision_at`, a search of the log, not a
+  reading), and from then on only what is newer is asked for, so a look at a goal where nothing happened
+  asks nobody anything. The model is the janitor's tool, started to read and nothing else
+  (`once::read`), and held to the answer's shape where the tool can hold a model to one. The write goes
+  through the thread of the agent that owns the goal, as its own tool's does: one writer for a plan.
+
+A plan says how the keeper stands to it (`plan.updater`: its switch, its last run, this goal's last failed
+update and when it is tried again, the newest receipt), on the routes and in what `clarp-goal` prints. A
+receipt is kept of everything the keeper did with a goal in a run, also where it wrote nothing, the newest
+two hundred of a goal: on the goal, on the keeper's runs (`receipts`), and from `clarp-goal receipts`. The
+features `goal_updater`, `goal_keeper_receipts` and `goal_keeper_stalled` are listed. It is installed
+paused, as on the Python Host, and on Codex until this Host has Antigravity, which is the tool its job
+recommends; every update is one call of that tool, so whoever turns it on spends that account. Held
+through the Host by a goal, three turns and a stand-in model: paused it asks nobody; on, it writes what was
+shown and holds what was only said; it reads only what is new the second time; a model that fails leaves
+the goal untouched and says when it is tried again; and what it kept is there after the Host was killed.
+Not held by a test of the Host: a stalled goal and a goal read from its start, which need days to pass
+(the rules for both are held by the vectors).
+
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
 until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the
@@ -1213,8 +1257,9 @@ a turn in the janitor's own conversation.
   agent is made as a janitor on the model its tool has for janitors, it is given its job, and what was
   answered is kept as the answer. Sent again it makes nothing; under the same id with other settings it is
   refused.
-- Not yet: the jobs that are no scheduled task and no routing (the turn's end and the goal keeper, the
-  explainer of a tool's use, the label keeper), and a janitor's own goals and published files.
+- Not yet: the jobs that are no scheduled task, no routing, no explaining and no keeping of goals (the
+  label keeper, the audio bookkeeper, the janitors of accounts), and a janitor's own goals and published
+  files.
 
 **The router of spoken messages** (17 Nov 2026). The owner's own words for what this is for: hands-free,
 without names. A message that is dictated hands-free and is not said to be for the agent it names can be

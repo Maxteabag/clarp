@@ -18867,3 +18867,401 @@ fn a_tools_row_carries_its_explanation_while_its_turn_is_shown() {
     assert_eq!(on_the_row(&live()), Value::Null);
     assert_eq!(questions().len(), 1);
 }
+
+/// A stand-in for Codex that keeps a goal's books: it writes down how it was started and
+/// what it was given to read, and answers in the shape it was given: the step `probe` done
+/// with what shows it, `build` done with nothing shown, every other step pending, and a
+/// checkpoint. While a file `keeper-fails` lies beside it, it ends badly instead. Answers
+/// where it is, and where what it was asked is written.
+fn keeping_model(place: &Place) -> (PathBuf, PathBuf) {
+    let (codex, asked) = (place.root.join("codex-keeps"), place.root.join("kept"));
+    let quoted = |path: PathBuf| serde_json::to_string(path.to_str().unwrap()).unwrap();
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+read = sys.stdin.read()
+here = os.getcwd()
+schema = json.load(open(os.path.join(here, "schema.json")))
+shown = {{"args": sys.argv[1:], "files": sorted(os.listdir(here)), "schema": schema,
+         "instructions": open(os.path.join(here, "instructions.txt")).read(), "read": read}}
+with open({asked}, "a") as out:
+    out.write(json.dumps(shown) + "\n")
+if os.path.exists({fails}):
+    sys.stderr.write("the model is not logged in\n")
+    sys.exit(3)
+steps = {{name: {{"status": "pending", "evidence": "", "note": ""}} for name in schema["properties"]["steps"]["required"]}}
+if "probe" in steps:
+    steps["probe"] = {{"status": "completed", "evidence": "the owner said: it behaves", "note": ""}}
+if "build" in steps:
+    steps["build"] = {{"status": "completed", "evidence": "", "note": "said so"}}
+checkpoint = {{"progress": "Probe done; the build is said to be done.", "next_work": "Show the build."}}
+said = {{"steps": steps, "checkpoint": checkpoint, "changed": True}}
+answer = {{"type": "agent_message", "text": json.dumps(said)}}
+print(json.dumps({{"type": "item.completed", "item": answer}}))
+"#,
+        asked = quoted(asked.clone()),
+        fails = quoted(place.root.join("keeper-fails")),
+    );
+    program(&codex, &script);
+    (codex, asked)
+}
+
+#[test]
+fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
+    let place = Place::new("goal-keeper");
+    let (codex, asked) = keeping_model(&place);
+    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let host = place.start_in("", &["--goals-kept-every-ms", "100"], &world);
+    let session = host.new_agent("Planner");
+    let dir = place.root.clone();
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    // What the model was asked so far: one line for each time.
+    let questions = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&asked).unwrap_or_default();
+        let lines = written.lines();
+        lines
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let over = |who: &str, id: &str| {
+        let turns = host.turns(who);
+        let asked = turns.iter().position(|row| row["id"] == id);
+        asked.is_some_and(|at| turns[at..].iter().any(|row| row["turn"].is_object()))
+    };
+
+    let items = json!([
+        { "id": "probe", "title": "Probe the behaviour" },
+        { "id": "build", "title": "Build it" },
+        { "id": "ship", "title": "Ship it" },
+    ])
+    .to_string();
+    let commitment = json!({
+        "outcome": "The thing is shipped", "criteria": ["It runs"], "limits": "No publication",
+    })
+    .to_string();
+    let made = goal(
+        &host,
+        &dir,
+        &[
+            "create",
+            &session,
+            "ship",
+            "Ship the thing",
+            &items,
+            &commitment,
+        ],
+    );
+    let plan_id = made["plan_id"].as_str().unwrap().to_string();
+    let get = || goal(&host, &dir, &["get", &plan_id]);
+    let status_of = |plan: &Value, step: &str| {
+        let items = plan["items"].as_array().unwrap().iter();
+        let mut named = items.filter(|item| item["item_id"] == format!("{plan_id}:{step}"));
+        named.next().unwrap()["status"].clone()
+    };
+
+    // The keeper comes paused, and a goal says so: it is the Host's own, and did nothing yet.
+    let keeper = host.get("/janitors/clarp-goal-keeper")["janitor"].clone();
+    assert_eq!(
+        made["updater"],
+        json!({
+            "enabled": false, "janitor_agent_id": keeper["agent_id"], "last_run_at": null,
+            "last_error": null, "goal_error": null, "retry_at": null, "last_receipt": null,
+        })
+    );
+    // Another agent has a goal too, and works on it. The keeper will be told to leave that
+    // agent alone.
+    let other = host.new_agent("Other");
+    let tidy = [
+        "create",
+        &other,
+        "tidy",
+        "Tidy the shed",
+        &items,
+        &commitment,
+    ];
+    let left_out = goal(&host, &dir, &tidy)["plan_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    host.send(&other, "The shed is tidy.", "u-7");
+    wait_for("the other agent's turn to be over", || over(&other, "u-7"));
+    // The owner works, and its turn ends. A paused keeper asks nobody.
+    host.send(&session, "The probe is done: it behaves.", "u-1");
+    wait_for("the owner's turn to be over", || over(&session, "u-1"));
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(questions().len(), 0);
+    assert_eq!(get()["goal"]["updater"], Value::Null);
+
+    // It folds what happens for five minutes as it comes. Set to fold nothing and to keep
+    // for every agent but one, and turned on. (On the Python Host a keeper with a scope
+    // never runs again: its defect R42.)
+    let attachments: Vec<Value> = keeper["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|kept| {
+            let mut config = kept["config"].clone();
+            if kept["trigger_id"] == "agent-work-completed" {
+                config["coalesce_seconds"] = json!(0);
+            }
+            json!({
+                "attachment_id": kept["attachment_id"], "trigger_id": kept["trigger_id"],
+                "config": config,
+            })
+        })
+        .collect();
+    let (status, set) = post(
+        "/janitors/clarp-goal-keeper/configure",
+        json!({
+            "expected_revision": keeper["revision"], "attachments": attachments,
+            "scope": { "exclude_agent_ids": [row_id(&host, &other)] },
+        }),
+    );
+    assert_eq!(status, 200, "{set}");
+    let (status, on) = post(
+        "/janitors/clarp-goal-keeper/enabled",
+        json!({ "expected_revision": set["janitor"]["revision"], "enabled": true }),
+    );
+    assert_eq!(
+        (status, &on["janitor"]["enabled"]),
+        (200, &json!(true)),
+        "{on}"
+    );
+
+    // The turn that ended is seen, the model is asked once, and what it says of the steps
+    // is written beside the owner's record: what was shown done is done, what was only
+    // called done is in progress and says why, what was left alone is as it was.
+    wait_for("the keeper's checkpoint", || {
+        get()["goal"]["updater"].is_object()
+    });
+    let plan = get();
+    let kept = &plan["goal"]["updater"];
+    assert_eq!(
+        (
+            &kept["progress"],
+            &kept["next_work"],
+            &kept["by"],
+            &kept["janitor_agent_id"],
+            &kept["changed_steps"],
+        ),
+        (
+            &json!("Probe done; the build is said to be done."),
+            &json!("Show the build."),
+            &json!("goal-keeper"),
+            &keeper["agent_id"],
+            &json!([format!("{plan_id}:probe"), format!("{plan_id}:build")]),
+        ),
+        "{kept}"
+    );
+    assert_eq!(
+        (
+            status_of(&plan, "probe"),
+            status_of(&plan, "build"),
+            status_of(&plan, "ship")
+        ),
+        (json!("completed"), json!("in_progress"), json!("pending"))
+    );
+    // The plan's revision is what it was: the owner's next command is not refused.
+    assert_eq!(plan["revision"], made["revision"]);
+    let sources = kept["source_refs"].as_array().unwrap();
+    assert!(sources.contains(&json!("message:u-1")), "{sources:?}");
+
+    // What the model was given: the rules for it apart from what it reads, the goal as it
+    // is recorded and what was said since, the shape to answer in, and nothing to act with.
+    let first = questions().remove(0);
+    assert!(
+        first["instructions"]
+            .as_str()
+            .unwrap()
+            .starts_with("You keep a goal's books"),
+        "{first}"
+    );
+    let read = first["read"].as_str().unwrap();
+    assert!(read.starts_with("GOAL AS RECORDED:"), "{read}");
+    assert!(read.contains("NEW ACTIVITY SINCE LAST UPDATE (untrusted):"));
+    assert!(read.contains("[owner Planner user] (from user) The probe is done: it behaves."));
+    assert!(read.contains("[owner Planner assistant] The probe is done: it behaves."));
+    assert_eq!(
+        first["schema"]["properties"]["steps"]["required"],
+        json!(["probe", "build", "ship"])
+    );
+    assert_eq!(first["files"], json!(["instructions.txt", "schema.json"]));
+    let args: Vec<&str> = first["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    assert!(args.contains(&"read-only"), "{args:?}");
+
+    // A receipt says what was done with the goal: on the goal, on the keeper's run, and to
+    // whoever asks the tool.
+    let told = &plan["updater"];
+    assert_eq!(
+        (
+            &told["enabled"],
+            &told["janitor_agent_id"],
+            &told["goal_error"]
+        ),
+        (&json!(true), &keeper["agent_id"], &Value::Null),
+        "{told}"
+    );
+    let receipt = &told["last_receipt"];
+    assert_eq!(
+        (&receipt["outcome"], &receipt["error"], &receipt["steps"]),
+        (
+            &json!("updated"),
+            &json!(""),
+            &json!([
+                { "item_id": format!("{plan_id}:probe"), "from": "pending", "to": "completed",
+                  "note": "Evidence: the owner said: it behaves" },
+                { "item_id": format!("{plan_id}:build"), "from": "pending", "to": "in_progress",
+                  "note": "Probably done; no concrete evidence yet. said so" },
+            ])
+        ),
+        "{receipt}"
+    );
+    wait_for("the keeper's run to be over", || {
+        let runs = host.get("/janitors/clarp-goal-keeper/runs");
+        runs["runs"][0]["status"] == "completed"
+    });
+    let runs = host.get("/janitors/clarp-goal-keeper/runs");
+    let run = &runs["runs"][0];
+    assert_eq!(
+        (
+            &run["activity"],
+            &run["activity_summary"],
+            &run["demand_result"]
+        ),
+        (
+            &json!("worked"),
+            &json!("Updated 1 of 1 goals; 2 step changes"),
+            &json!({ "summary": "Updated 1 of 1 goals; 2 step changes", "item_count": 1, "target_count": 1 }),
+        ),
+        "{run}"
+    );
+    let of_the_run = &run["receipts"][0];
+    assert_eq!(
+        (
+            &of_the_run["plan_id"],
+            &of_the_run["title"],
+            &of_the_run["run_id"],
+            &of_the_run["progress"],
+        ),
+        (
+            &json!(plan_id),
+            &json!("Ship the thing"),
+            &run["run_id"],
+            &json!("Probe done; the build is said to be done."),
+        ),
+        "{of_the_run}"
+    );
+    assert_eq!(receipt["run_id"], run["run_id"]);
+    let asked_for = goal(&host, &dir, &["receipts", &plan_id]);
+    assert_eq!(asked_for, json!([of_the_run]));
+    // The apps read the same of the goal.
+    let shown = host.get(&format!("/task-plan?session={session}"));
+    assert_eq!(shown["plan"]["updater"]["last_receipt"], *receipt);
+    let listed = host.get(&format!("/task-plans?session={session}"));
+    assert_eq!(listed["plans"][0]["updater"]["last_receipt"], *receipt);
+
+    // Nothing happens, and nobody is asked: what the keeper wrote itself is no news to it.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(questions().len(), 1);
+
+    // The owner works on. The model is shown what was said since, and no more. It says
+    // what it said before: no step moves, and the receipt says that the build was called
+    // done once more with nothing shown.
+    host.send(&session, "Still building.", "u-2");
+    wait_for("the model to be asked again", || questions().len() == 2);
+    let second = questions().remove(1);
+    let read = second["read"].as_str().unwrap();
+    assert!(read.contains("(from user) Still building."), "{read}");
+    assert!(!read.contains("it behaves"), "{read}");
+    assert!(read.contains("\"progress\": \"Probe done; the build is said to be done.\""));
+    wait_for("the second receipt", || {
+        goal(&host, &dir, &["receipts", &plan_id])
+            .as_array()
+            .unwrap()
+            .len()
+            == 2
+    });
+    let receipts = goal(&host, &dir, &["receipts", &plan_id, "1"]);
+    assert_eq!(receipts.as_array().unwrap().len(), 1);
+    assert_eq!(
+        (&receipts[0]["outcome"], &receipts[0]["steps"]),
+        (
+            &json!("held_by_evidence_rule"),
+            &json!([{
+                "item_id": format!("{plan_id}:build"), "from": null, "to": "held",
+                "note": "Completed claimed without evidence; left in progress",
+            }])
+        ),
+        "{receipts}"
+    );
+    assert_eq!(status_of(&get(), "build"), json!("in_progress"));
+
+    // The model fails. The goal says so by a short word, and when it is tried again; the
+    // run failed, and nothing of the goal was touched.
+    std::fs::write(place.root.join("keeper-fails"), "").unwrap();
+    let before = get()["goal"]["updater"].clone();
+    host.send(&session, "Built.", "u-3");
+    wait_for("the model to be asked a third time", || {
+        questions().len() == 3
+    });
+    wait_for("the goal to say that its update failed", || {
+        get()["updater"]["goal_error"] == "tool_failed"
+    });
+    let plan = get();
+    assert_eq!(plan["goal"]["updater"], before);
+    let told = &plan["updater"];
+    assert!(told["retry_at"].is_i64(), "{told}");
+    assert_eq!(
+        (
+            &told["last_receipt"]["outcome"],
+            &told["last_receipt"]["error"]
+        ),
+        (&json!("failed"), &json!("tool_failed")),
+        "{told}"
+    );
+    wait_for("the failed run to be over", || {
+        let runs = host.get("/janitors/clarp-goal-keeper/runs");
+        runs["runs"][0]["status"] == "failed"
+    });
+    let runs = host.get("/janitors/clarp-goal-keeper/runs");
+    assert_eq!(
+        (&runs["runs"][0]["activity"], &runs["runs"][0]["error"]),
+        (
+            &json!("failed"),
+            &json!("Updated 0 of 1 goals; 0 step changes; 1 failed")
+        ),
+        "{runs}"
+    );
+    assert_eq!(runs["runs"].as_array().unwrap().len(), 3);
+
+    // The agent the keeper was told to leave alone was left alone: nothing was asked about
+    // its goal, and nothing was written of it.
+    let about_the_shed = |asked: &Value| asked["read"].as_str().unwrap().contains("Tidy the shed");
+    assert!(!questions().iter().any(about_the_shed));
+    assert_eq!(
+        goal(&host, &dir, &["get", &left_out])["goal"]["updater"],
+        Value::Null
+    );
+    assert_eq!(goal(&host, &dir, &["receipts", &left_out]), json!([]));
+
+    // The Host is killed. What the keeper kept is there when it is back: the receipts, and
+    // that the goal waits to be tried again.
+    host.kill();
+    let host = place.start_in("", &["--goals-kept-every-ms", "100"], &world);
+    let after = goal(&host, &dir, &["get", &plan_id]);
+    assert_eq!(after["updater"]["goal_error"], "tool_failed");
+    assert_eq!(after["updater"]["retry_at"], told["retry_at"]);
+    assert_eq!(after["updater"]["last_receipt"], told["last_receipt"]);
+    assert_eq!(
+        goal(&host, &dir, &["receipts", &plan_id])
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}

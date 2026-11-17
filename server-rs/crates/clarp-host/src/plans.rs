@@ -50,20 +50,22 @@ fn owner(app: &App, plan_id: &str) -> Option<Arc<Member>> {
 /// The plan a session is working, or nothing.
 async fn active(State(app): State<App>, Query(query): Params) -> Result<Json<Value>, ApiError> {
     let session = session_of(&query)?;
-    let plan = app
+    let mut plan = app
         .member(session)
         .map(|member| member.agent.view().books.goals.show(app.clock.now_ms()))
         .filter(|plan| plan.as_object().is_some_and(|fields| !fields.is_empty()));
+    crate::keeper::tell(&app, plan.iter_mut()).await;
     Ok(Json(json!({ "plan": plan })))
 }
 
 /// A session's plans, the last changed first.
 async fn plans(State(app): State<App>, Query(query): Params) -> Result<Json<Value>, ApiError> {
     let session = session_of(&query)?;
-    let plans = app.member(session).map_or_else(
+    let mut plans = app.member(session).map_or_else(
         || json!([]),
         |member| member.agent.view().books.goals.list(app.clock.now_ms()),
     );
+    crate::keeper::tell(&app, plans.as_array_mut().into_iter().flatten()).await;
     Ok(Json(json!({ "plans": plans })))
 }
 
@@ -140,7 +142,8 @@ async fn action(
     if answered.exit != 0 {
         return Err(conflict(goaltool::refusal(&answered)));
     }
-    let plan: Value = serde_json::from_str(answered.stdout.trim()).unwrap_or(Value::Null);
+    let mut plan: Value = serde_json::from_str(answered.stdout.trim()).unwrap_or(Value::Null);
+    crate::keeper::tell(&app, std::iter::once(&mut plan)).await;
     Ok(Json(json!({ "plan": plan })))
 }
 

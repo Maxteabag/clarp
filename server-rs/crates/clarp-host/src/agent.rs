@@ -233,6 +233,11 @@ pub enum Ask {
         id: String,
         answer: Answer<Option<Versioned>>,
     },
+    /// The revision the conversation had at a time.
+    RevisionAt {
+        ts_ms: i64,
+        answer: Answer<u64>,
+    },
     /// The one that speaks takes the agent's next line. `None`: nothing of this agent's is
     /// to be said now.
     ClaimLine {
@@ -519,6 +524,12 @@ impl AgentHandle {
     /// One thing of the agent's conversation, by its id. `None`: there is no such thing.
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
         self.ask(|answer| Ask::Row { id, answer }).await
+    }
+
+    /// The revision the agent's conversation had at a time: what is newer than it
+    /// ([`Self::after`]) is what was written after that time.
+    pub async fn revision_at(&self, ts_ms: i64) -> Result<u64, Unavailable> {
+        self.ask(|answer| Ask::RevisionAt { ts_ms, answer }).await
     }
 
     /// Takes the agent's next line to be said. `None`: nothing of its is to be said now.
@@ -1598,6 +1609,7 @@ impl Worker {
                 return read(actor.job_timeline(&id, limit), answer);
             }
             Ask::Row { id, answer } => return read(actor.row(&id), answer),
+            Ask::RevisionAt { ts_ms, answer } => return read(actor.revision_at(ts_ms), answer),
             // Answered above, where what they change is published first.
             Ask::Artifact { .. }
             | Ask::Goal { .. }
@@ -2201,6 +2213,7 @@ fn refuse_for(
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::RevisionAt { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),

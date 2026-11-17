@@ -7,6 +7,63 @@
 use clarp_kernel::goals::keeper::{self, Activity, Ended, Event, Helper, Job, Open, Row, World};
 use serde_json::{Value, json};
 
+/// The shape a model is held to names every step the prompt shows, by the id the prompt
+/// shows it under, and an answer of that shape is read whole.
+#[test]
+fn the_shape_of_an_answer_names_the_steps_the_prompt_shows() {
+    let plan = json!({
+        "plan_id": "a:ship:01", "title": "Ship", "status": "active",
+        "goal": { "outcome": "Shipped", "criteria": [] },
+        "items": [
+            { "item_id": "a:ship:01:probe", "title": "Probe", "status": "completed", "subtasks": [
+                { "item_id": "a:ship:01:probe-2", "title": "Again", "status": "pending" },
+            ] },
+            { "item_id": "a:ship:01:build", "title": "Build", "status": "in_progress" },
+        ],
+    });
+    let shape = keeper::schema(&plan);
+    assert_eq!(
+        shape["properties"]["steps"]["required"],
+        json!(["probe", "probe-2", "build"])
+    );
+    assert_eq!(shape["required"], json!(["steps", "checkpoint", "changed"]));
+    let step = &shape["properties"]["steps"]["properties"]["build"];
+    assert_eq!(step["required"], json!(["status", "evidence", "note"]));
+    assert_eq!(step["additionalProperties"], json!(false));
+    // Every step of the shape is one the prompt shows.
+    let asked = keeper::prompt(&plan, &json!({}), "");
+    for name in ["\"probe\"", "\"probe-2\"", "\"build\""] {
+        assert!(asked.contains(name), "{name}");
+    }
+    // An answer of that shape, as a model gives it: a step shown done is done, one called
+    // done with nothing shown stays in progress.
+    let answer = json!({
+        "steps": {
+            "probe": { "status": "completed", "evidence": "", "note": "" },
+            "probe-2": { "status": "completed", "evidence": "PR 12 merged", "note": "" },
+            "build": { "status": "blocked", "evidence": "", "note": "Waits for a review" },
+        },
+        "checkpoint": { "progress": "Probed twice.", "next_work": "The review." },
+        "changed": true,
+    });
+    let (steps, progress, next_work) = keeper::decide(&plan, &answer);
+    let of = |id: &str| {
+        let found = steps.iter().find(|(item_id, _, _)| item_id == id).unwrap();
+        (found.1.as_str(), found.2.as_str())
+    };
+    assert_eq!(of("a:ship:01:probe").0, "in_progress");
+    assert!(of("a:ship:01:probe").1.starts_with(keeper::HELD_NOTE));
+    assert_eq!(
+        of("a:ship:01:probe-2"),
+        ("completed", "Evidence: PR 12 merged")
+    );
+    assert_eq!(of("a:ship:01:build"), ("blocked", "Waits for a review"));
+    assert_eq!(
+        (progress.as_str(), next_work.as_str()),
+        ("Probed twice.", "The review.")
+    );
+}
+
 fn vectors() -> Value {
     serde_json::from_str(include_str!("fixtures/goal-keeper-vectors.json")).unwrap()
 }

@@ -96,7 +96,7 @@ pub fn request_run_id(role: &str, request_id: &Value) -> Result<String, Refused>
 }
 
 /// Whether a janitor with this scope answers for an agent.
-fn in_scope(scope: &Map<String, Value>, target: &Agent) -> bool {
+pub fn in_scope(scope: &Map<String, Value>, target: &Agent) -> bool {
     let named = |side: &str| scope.get(side).and_then(Value::as_array);
     let id = json!(target.agent_id);
     let only = named("agent_ids").is_none_or(|only| only.is_empty() || only.contains(&id));
@@ -117,7 +117,7 @@ fn answers_a_request(run: &Run) -> bool {
 impl Book {
     /// The janitors that may answer requests of a job: each on, with the job's own trigger
     /// on once, and a way to run it that holds.
-    fn eligible(&self, role: &str, world: &dyn World) -> Vec<String> {
+    pub fn eligible(&self, role: &str, world: &dyn World) -> Vec<String> {
         let first = template(role).ok();
         let first = first.and_then(|job| job["default_trigger_id"].as_str());
         let mut found = Vec::new();
@@ -212,9 +212,28 @@ impl Book {
         world: &dyn World,
         now_ms: i64,
     ) -> Result<Option<Value>, Refused> {
+        let janitor = self.resolve(role, target, world)?;
+        self.begin_run_of(janitor, role, request_id, context, target, world, now_ms)
+    }
+
+    /// Begins the run of a request whose janitor is already found (`None`: nobody answers),
+    /// or answers the run the request has. For whoever knows whose run it is: the Goal
+    /// keeper's run is the run of the keeper whose goals are due, whatever its scope, where
+    /// a request that names no agent finds only a janitor that watches everyone (the Python
+    /// Host's defect R42: a keeper with a scope never runs there).
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_run_of(
+        &mut self,
+        janitor: Option<String>,
+        role: &str,
+        request_id: &Value,
+        context: Option<&Value>,
+        target: Option<&str>,
+        world: &dyn World,
+        now_ms: i64,
+    ) -> Result<Option<Value>, Refused> {
         let run_id = request_run_id(role, request_id)?;
         let context = said(context)?;
-        let janitor = self.resolve(role, target, world)?;
         if let Some(known) = self.runs.get(&run_id) {
             let kept = |key: &str| known.configuration.get(key).unwrap_or(&Value::Null);
             if *kept("context") != Value::Object(context)
