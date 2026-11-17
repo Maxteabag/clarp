@@ -19,6 +19,7 @@ from typing import Any
 from .claude_reply_evidence import is_synthetic_assistant_record
 from .activity import summarize_tool_activity
 from .log import log_exception
+from .revisioned_cache import RevisionedCache
 from .text_util import truncate
 
 
@@ -435,7 +436,7 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
     """Context-window occupancy after the latest turn — i.e. how full the
     conversation is right now.
 
-    The right number is the LAST assistant message's own usage
+    The right number is the LAST real assistant message's own usage
     (input_tokens + cache_read + cache_creation), which is the size of the
     context the model carried on its final step. We deliberately do NOT use the
     `result` event's aggregated usage: that sums every tool-step's cache read,
@@ -444,7 +445,8 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
     post-summary size.
 
     Reads only the tail of the file (transcripts reach tens of MB), so it's
-    cheap to call on every snapshot. Returns None if no usage is found.
+    cheap to call on every snapshot. A same-file sample survives error-only
+    tails until a newer real usage is read; without one, returns None.
     """
     try:
         stat = path.stat()
@@ -464,6 +466,36 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
 _RACY_NS = 2_000_000_000
 
 
+_CONTEXT_LAST_REAL = RevisionedCache("claude-context-last-real", max_entries=8192)
+_CONTEXT_USAGE_LOCK = threading.Lock()
+
+
+def _known_context_usage(identity: tuple, size: int, observed_size: int,
+                         tokens: int | None = None) -> int | None:
+    """Last measured usage, its sample size, and the largest observed size.
+
+    The latter detects a storm subsequently truncated above the original
+    sample size. A delayed older read cannot replace a newer real sample.
+    Only metadata is locked; file reads never hold this process-wide lock.
+    """
+    with _CONTEXT_USAGE_LOCK:
+        _hit, previous = _CONTEXT_LAST_REAL.get(identity, 0)
+        if previous is not None and observed_size < previous[2]:
+            _CONTEXT_LAST_REAL.pop(identity)
+            previous = None
+        if tokens is not None:
+            if size > observed_size:
+                return tokens  # truncated during this read; do not retain its old image
+            if previous is None or size >= previous[1]:
+                _CONTEXT_LAST_REAL.put(identity, 0, (tokens, size, observed_size))
+                return tokens
+        if previous is not None:
+            value, sampled_size, seen_size = previous
+            _CONTEXT_LAST_REAL.put(identity, 0, (value, sampled_size, max(seen_size, observed_size)))
+            return value
+        return None
+
+
 # Every snapshot asks once per bound Claude agent. The fleet passed 256 such
 # agents, and a cache smaller than the fleet evicts each entry just before
 # its next use: every snapshot re-read a 1 MB tail per agent. Entries are
@@ -477,10 +509,12 @@ def _context_tokens_cached(path_string: str, device: int, inode: int,
     # The latest usage is almost always in the last few KB, so read backwards
     # from a small window and widen it only when that window has none. A
     # cold Host start read a full 1 MB tail per agent: 38 s of a 44 s first
-    # snapshot on the live fleet. The answer is the same as scanning the
-    # whole tail_bytes window: the last complete line with usage.
+    # snapshot on the live fleet. On an error-only tail, a remembered real
+    # sample avoids widening; a cold reader still searches tail_bytes.
     path = pathlib.Path(path_string)
+    identity = (path_string, device, inode)
     window = min(64 * 1024, tail_bytes)
+    first_window = True
     try:
         with path.open("rb") as f:
             while True:
@@ -493,7 +527,17 @@ def _context_tokens_cached(path_string: str, device: int, inode: int,
                 for line in reversed(lines):
                     tokens = _usage_tokens(line)
                     if tokens is not None:
+                        observed = os.fstat(f.fileno())
+                        if (observed.st_dev, observed.st_ino) == (device, inode):
+                            return _known_context_usage(identity, size, observed.st_size, tokens)
                         return tokens
+                if first_window:
+                    first_window = False
+                    observed = os.fstat(f.fileno())
+                    if (observed.st_dev, observed.st_ino) == (device, inode):
+                        known = _known_context_usage(identity, size, observed.st_size)
+                        if known is not None:
+                            return known
                 if start == 0 or window >= tail_bytes:
                     return None
                 window = min(window * 4, tail_bytes)
