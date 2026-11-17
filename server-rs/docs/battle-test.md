@@ -948,12 +948,41 @@ then it is removed and another agent takes its session up.
 | Afterwards | both agents of the check removed; the 23 agents that were there still are |
 
 Two of the 23 points failed, and both were the check's own waiting: it read a field of the agent's row that
-this Host does not have (`state` for `latest_state`), waited its full time twice, and went on; every point
-after each wait shows the turn had ended. The check is corrected. The three cells where two commands ran
+this Host does not have (`state` for `latest_state`), and it looked for its message under the id it had sent
+it with, where the Host files it with the mark of a message before it (found with the keeper's check below);
+so it waited its full time twice, and went on; every point after each wait shows the turn had ended. The
+check is corrected. The three cells where two commands ran
 are the Python Host's own reading of that rollout (asked of its function with the same file: the same
 three): recent Codex writes the call that ran both commands as an older record too, and that Host keeps its
 cell beside the two it stands for once the call has its output. It is reported as a defect of the
 reference (R41) and not copied from the next build on.
+
+## The Goal keeper
+
+Landed with `4581f4bd` (17 Nov, 12:59; installed plainly at 13:02 after the soak's round of 13:00, the
+relay back after 55 ms, 23 agents) and tried once on the installed Host with the real Codex
+(`verify-keeper.py`: one turn of an agent of the check's own, and one question of the keeper).
+
+| What | On the installed Host |
+|---|---|
+| The features | `goal_updater`, `goal_keeper_receipts` and `goal_keeper_stalled` are listed |
+| The keeper as it comes | paused, on Codex with the tool's own model. A goal that is made says so: `plan.updater` with `enabled: false`, the keeper's id, no receipt |
+| The owner's turn | an agent of Codex with a goal of three steps (run a counting command and say what it printed; publish the count; archive the page a week later) runs the command and answers "15" |
+| The keeper, set to keep for that agent alone with nothing folded, and turned on | 15 s later its checkpoint stands beside the owner's record: "The owner reported the count as 15. Publication is not shown.", and as what comes next "Publish the count on the team page, then archive the page a week later." |
+| The steps | the counting done, with what shows it; publishing and archiving pending. The plan's revision is what it was |
+| The model | Codex, started to read and nothing else, answered in the shape it was held to (a property for each step, by the step's id) after 11.8 s |
+| The receipt and the run | `updated`; the run `completed` and `worked`, "Updated 1 of 1 goals; 1 step changes", with the receipt on it; `clarp-goal receipts` lists it |
+| Left alone for twenty seconds | nobody is asked again |
+| Afterwards | the keeper paused again, its scope and its triggers as they were read; the check's agent removed; the 23 agents that were there still are |
+
+Three of the check's 25 points failed, and all three were the check's own. It looked for the features at
+the top of `/server-info`, where they are under `capabilities` (asked for directly afterwards: all three are
+listed). And twice it looked for its own message under the id it had sent it with, where this Host files a
+message as the Python Host does, with the mark of a message before an id that has none (`u-`): so it waited
+its full time for a turn that was over, and did not find its message among what the keeper had read from.
+The check is corrected and was not run again: a run is a turn of Codex. Not shown by this run: that what a
+Codex call did reaches the keeper's model (held by a test of the Host's reading), a goal that has stalled,
+and a goal read from its start, which need days to pass (the rules for both are held by the vectors).
 
 ## What a round does not prove
 
