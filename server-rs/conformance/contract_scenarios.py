@@ -1634,6 +1634,34 @@ SCENARIOS.append({
     ],
 })
 
+CALENDAR = '/calendar/request'
+EVENT = {'session': AGENT, 'title': 'Synthetic standup', 'start': '2027-01-15T09:00:00+01:00',
+         'end': '2027-01-15T09:15:00+01:00'}
+
+SCENARIOS.append({
+    'id': 'calendar',
+    'what': "an agent asks its user's phone to put an event into a calendar: the id the request is given, "
+            'what the apps are told of it, and what is refused in words',
+    'steps': [
+        post(CALENDAR, {**EVENT, 'time_zone': 'Europe/Oslo', 'location': 'Room 4', 'notes': 'synthetic notes',
+                        'url': 'https://example.org/synthetic', 'all_day': False, 'calendar': 'Work'},
+             'an agent asks for an event'),
+        post(CALENDAR, EVENT, 'the least that can be said'),
+        post(CALENDAR, {**EVENT, 'session': f'  {AGENT}  ', 'timezone': ' UTC ', 'all_day': 'false', 'title': 5,
+                        'notes': ['a', 1, None]},
+             'padded, the zone under its other name, a word for all day, a number and a list for words'),
+        post(CALENDAR, {**EVENT, 'session': 'nobody-there'}, 'for an agent the Host has not'),
+        post(CALENDAR, {key: said for key, said in EVENT.items() if key != 'session'}, 'for nobody'),
+        post(CALENDAR, {**EVENT, 'title': '  '}, 'no title'),
+        post(CALENDAR, {**EVENT, 'start': None}, 'no start'),
+        post(CALENDAR, {**EVENT, 'end': ''}, 'no end'),
+        post(CALENDAR, {}, 'nothing said'),
+        post(CALENDAR, [1, 2], 'a list for a request'),
+        {'op': 'post', 'path': CALENDAR, 'name': 'what is no JSON',
+         'raw': {'bytes': '{"session": ', 'content_type': 'application/json'}},
+    ],
+})
+
 PLACE = '/location'
 
 SCENARIOS.append({
