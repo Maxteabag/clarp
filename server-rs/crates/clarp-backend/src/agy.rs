@@ -670,15 +670,18 @@ impl AgyInterpreter {
                 ..Reply::default()
             }));
         }
-        // What the whole turn took: the result's own count (the sum of its steps), and the
-        // steps' sum where it gives none.
+        // What the turn took: the sum of what its steps say they took. The result's own count
+        // is no turn's where a conversation is continued: it is what the whole conversation
+        // has taken so far (four calls in one conversation on 17 Nov 2026 said 8,805, 13,774,
+        // 18,950 and 24,431 tokens in, for steps of 8,805, 4,969, 5,176 and 5,481). It is
+        // taken only where no step said anything.
         let count = |field: &str| result["usage"][field].as_u64();
-        let took = match (count("input_tokens"), count("output_tokens")) {
-            (Some(tokens_in), Some(tokens_out)) => (
+        let took = match (self.took, count("input_tokens"), count("output_tokens")) {
+            ((0, 0), Some(tokens_in), Some(tokens_out)) => (
                 tokens_in,
                 tokens_out + count("thinking_tokens").unwrap_or(0),
             ),
-            _ => self.took,
+            (own, ..) => own,
         };
         if took != (0, 0) {
             out.push(Signal::Usage {

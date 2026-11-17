@@ -1028,7 +1028,9 @@ it), left out of the chat an app reads, telling nobody. While it runs the agent'
 (the adapter read that already, for the times the tool does it by itself in the middle of a turn);
 afterwards the row's `context_tokens` is what the tool said the conversation holds. The answers are the
 Python Host's, in its words: started, already at it, no such agent, no live session, busy, unsupported
-for the tool (Codex and Antigravity, which take no message for it that is known). Held through the Host
+for the tool (Codex, whose `exec` has no command for it, and Antigravity, whose print mode takes twelve
+commands as messages and none for this: measured with agy 1.5.10, where `/compress` went to the model).
+Held through the Host
 with a stand-in that does what the recording shows. Not tried on the installed Host with the real tool
 yet.
 
