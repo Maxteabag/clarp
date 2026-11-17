@@ -6985,7 +6985,7 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
             &first["runtime_available"],
             &first["providers"],
         ),
-        (10, 11, &json!(false), &json!([]))
+        (10, 11, &json!(true), &json!([]))
     );
     for own in first["janitors"].as_array().unwrap() {
         let role = own["builtin_role"].as_str().unwrap();
@@ -7241,8 +7241,8 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
             &json!(86400),
         )
     );
-    // Turning one on is refused in words: nothing starts a janitor on this Host yet. Turning
-    // off what is off changes nothing.
+    // Turning one on whose job does not run on this Host yet is refused in words (a
+    // scheduled task runs: the next test). Turning off what is off changes nothing.
     let enabled = |body: Value| post("/janitors/worker/enabled", body);
     let (status, refused) = enabled(json!({ "expected_revision": 2, "enabled": true }));
     assert_eq!(
@@ -7473,6 +7473,487 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
         host.get("/janitors/clarp-tool-explainer")["janitor"]["options"]["detail_level"],
         3
     );
+}
+
+/// Waits for something that happens when the next minute begins.
+fn wait_a_minute(what: &str, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(75);
+    while !ready() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// A stand-in for Claude Code as a janitor's tool: it finds the run it was started for in
+/// what it was told, does `closing` (shell lines, with the run's id in `$run` and the Host's
+/// own program in `$host`), and answers.
+fn janitors_tool(place: &Place, closing: &str) -> PathBuf {
+    let claude = place.root.join("claude");
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        r#"run=$(printf '%s' "$message" | sed -n 's/.*Registered run: \(janitor-[0-9a-f]*\)\..*/\1/p')"#,
+        &format!("\nhost=\"{}\"\n", env!("CARGO_BIN_EXE_clarp-host")),
+        closing,
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&claude, &script);
+    claude
+}
+
+/// A task of every minute for an agent, as a request makes it.
+fn every_minute(session: &str, longest_s: i64) -> Value {
+    json!({
+        "session": session, "template_id": "scheduled-prompt",
+        "attachments": [{
+            "attachment_id": "minutely", "trigger_id": "schedule",
+            "config": { "cron": "* * * * *", "timezone": "UTC" },
+        }],
+        "options": { "instructions": "Count the doors.", "max_interval_seconds": longest_s },
+    })
+}
+
+#[test]
+fn a_janitors_scheduled_task_runs_when_its_schedule_says_and_closes_itself_with_its_tool() {
+    let place = Place::new("janitor-runs");
+    // The janitor's turn reads what its run is given and says how the run went, with the
+    // agents' own tool, as a real janitor is told to.
+    let seen = place.root.join("seen");
+    let closing = format!(
+        "{{\n\"$host\" tool clarp-admin janitor run-context \"$run\"; echo \"context_exit=$?\"\n\
+         \"$host\" tool clarp-admin janitor outcome \"$run\" --status idle --summary '  nothing   to count '; \
+         echo \"outcome_exit=$?\"\n}} > \"{}\" 2>&1\n",
+        seen.display()
+    );
+    let claude = janitors_tool(&place, &closing);
+    let fast = ["--janitors-checked-every-ms", "200"];
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &fast, &world);
+    let made = host.post("/agents", json!({ "name": "Keeper", "backend": "claude" }));
+    let keeper = made["session"].as_str().unwrap().to_string();
+    let heard = host.listen();
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+
+    // An agent is given a task of every minute and turned on, which this Host does for a
+    // scheduled task. A job that does not run here is still refused in words.
+    let (status, made) = post("/janitors", every_minute(&keeper, 120));
+    assert_eq!(
+        (status, &made["janitor"]["enabled"]),
+        (200, &json!(false)),
+        "{made}"
+    );
+    let enabled = |seen: i64, on: bool| {
+        let path = format!("/janitors/{keeper}/enabled");
+        post(&path, json!({ "expected_revision": seen, "enabled": on }))
+    };
+    let (status, on) = enabled(1, true);
+    assert_eq!(
+        (
+            status,
+            &on["janitor"]["enabled"],
+            &on["janitor"]["health"],
+            &on["janitor"]["revision"]
+        ),
+        (200, &json!(true), &json!("ready"), &json!(2)),
+        "{on}"
+    );
+    let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    let (status, refused) = post(
+        "/janitors/clarp-tool-explainer/enabled",
+        json!({ "expected_revision": explainer["revision"], "enabled": true }),
+    );
+    assert_eq!(
+        (status, &refused["code"]),
+        (503, &json!("janitor_runtime_unavailable")),
+        "{refused}"
+    );
+
+    // Within a look the runner says when the task runs next: when the next minute begins.
+    let janitor = || host.get(&format!("/janitors/{keeper}"))["janitor"].clone();
+    wait_for("the next run to be set", || {
+        janitor()["attachments"][0]["next_run_at"].is_i64()
+    });
+    let first_due = janitor()["attachments"][0]["next_run_at"].as_i64().unwrap();
+    assert!(
+        first_due % 60_000 == 0 && first_due - now_ms() <= 60_000,
+        "{first_due}"
+    );
+    assert_eq!(janitor()["cadence"][0]["next_run_at"], json!(first_due));
+    let runs = || {
+        let runs = host.get(&format!("/janitors/{keeper}/runs"));
+        runs["runs"].as_array().unwrap().clone()
+    };
+    assert!(runs().is_empty());
+
+    // When the minute comes a run is made, its turn runs in the janitor's own conversation,
+    // and the run is over when its turn is.
+    wait_a_minute("the run of the minute to be over", || {
+        runs()
+            .first()
+            .is_some_and(|run| run["status"] == "completed")
+    });
+    let run = runs()[0].clone();
+    let run_id = run["run_id"].as_str().unwrap().to_string();
+    assert!(
+        run_id.starts_with("janitor-") && run_id.len() == 40,
+        "{run_id}"
+    );
+    assert_eq!(
+        (
+            &run["outcome"],
+            &run["session"],
+            &run["attachment_id"],
+            &run["trace_id"],
+            &run["error"]
+        ),
+        (
+            &json!("completed"),
+            &json!(keeper),
+            &json!("minutely"),
+            &json!(run_id),
+            &json!("")
+        ),
+        "{run}"
+    );
+    let (made_at, started, ended) = (
+        run["created_at"].as_i64().unwrap(),
+        run["started_at"].as_i64().unwrap(),
+        run["finished_at"].as_i64().unwrap(),
+    );
+    assert!(
+        first_due <= made_at && made_at <= started && started <= ended,
+        "{run}"
+    );
+    assert_eq!(
+        run["configuration"]["options"]["instructions"],
+        json!("Count the doors.")
+    );
+    // What the run said of itself while it was out, on one line, and what its turn read.
+    assert_eq!(
+        (&run["activity"], &run["activity_summary"]),
+        (&json!("idle"), &json!("nothing to count")),
+        "{run}"
+    );
+    let seen = std::fs::read_to_string(&seen).unwrap();
+    assert!(
+        seen.contains("context_exit=0") && seen.contains("outcome_exit=0"),
+        "{seen}"
+    );
+    assert!(
+        seen.contains(&format!("\"run_id\": \"{run_id}\"")),
+        "{seen}"
+    );
+    assert!(
+        seen.contains("\"generation\": 2") && seen.contains("\"candidates\": []"),
+        "{seen}"
+    );
+    assert!(seen.contains("\"summary\": \"nothing to count\""), "{seen}");
+    // What the janitor was told is the owner's instructions with how the run is closed; its
+    // conversation is read like any agent's, and nobody was told of the turn.
+    let spoken = host.conversation(&keeper);
+    assert_eq!(spoken.len(), 2, "{spoken:?}");
+    let told = &spoken[0].1;
+    assert!(told.starts_with(&format!(
+        "Scheduled Janitor task. Registered run: {run_id}."
+    )));
+    assert!(told.contains("\n\nCount the doors.\n\n"), "{told}");
+    assert!(told.contains(&format!(
+        "clarp-admin janitor outcome {run_id} --status STATUS"
+    )));
+    assert_eq!(spoken[1], said("assistant", "on it"));
+    let events = heard.lock().unwrap().clone();
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["type"] == "user-notification"),
+        "{events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == "janitor-changed")
+    );
+    // The task found nothing to do: it waits twice as long, which is its longest, and the
+    // minute after next is its next run.
+    let after = janitor();
+    assert_eq!(
+        (
+            &after["health"],
+            &after["current_run_id"],
+            &after["last_error"]
+        ),
+        (&json!("ready"), &Value::Null, &json!("")),
+        "{after}"
+    );
+    assert_eq!(after["last_run_at"], json!(ended));
+    assert_eq!(
+        after["cadence"][0],
+        json!({
+            "lane": "schedule:minutely", "base_interval_seconds": 60,
+            "current_interval_seconds": 120, "max_interval_seconds": 120, "adaptive": true,
+            "idle_streak": 1, "last_activity": "idle", "last_summary": "nothing to count",
+            "next_run_at": first_due + 120_000,
+        })
+    );
+
+    // A run that is over says nothing any more, by the route and by the agents' own tool.
+    let late = post(
+        &format!("/janitor-runs/{run_id}/activity"),
+        json!({ "activity": "idle", "summary": "late" }),
+    );
+    let over = "This maintenance run is no longer active";
+    assert_eq!(
+        late,
+        (409, json!({ "error": over, "code": "run_terminal" }))
+    );
+    assert_eq!(
+        host.ask("GET", &format!("/janitor-runs/{run_id}/context"), None),
+        (409, json!({ "error": over, "code": "run_terminal" }))
+    );
+    assert_eq!(
+        post(
+            "/janitor-runs/janitor-nobody/activity",
+            json!({ "activity": "napped" })
+        ),
+        (
+            400,
+            json!({ "error": "Activity must be worked, idle or failed", "code": "invalid_activity" })
+        )
+    );
+    assert_eq!(
+        host.ask("GET", "/janitor-runs/janitor-nobody/context", None),
+        (
+            404,
+            json!({ "error": "Maintenance run not found", "code": "run_not_found" })
+        )
+    );
+    assert_eq!(
+        post(&format!("/janitor-runs/{run_id}/review"), json!({})),
+        (404, json!({ "error": "Janitor route not found" }))
+    );
+    let admin = |args: &[&str]| -> (i32, String, String) {
+        let mut line = vec!["clarp-admin", "janitor"];
+        line.extend_from_slice(args);
+        tool(&host, &place.root, None, &line)
+    };
+    let (code, out, err) = admin(&["outcome", &run_id, "--status", "idle", "--summary", "late"]);
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    assert_eq!(
+        err.trim_end(),
+        format!(
+            "Janitor request failed (409): {over} Inspect the current configuration and repeat \
+             your intent; nothing was retried."
+        )
+    );
+    let (code, _, err) = admin(&["outcome", &run_id, "--status", "napped", "--summary", "x"]);
+    assert!(
+        code == 2 && err.contains("argument --status: invalid choice: 'napped'"),
+        "{err}"
+    );
+    let (code, _, err) = admin(&["outcome", &run_id]);
+    assert!(
+        code == 2 && err.contains("the following arguments are required: --status, --summary"),
+        "{err}"
+    );
+    let dry = admin(&[
+        "outcome",
+        &run_id,
+        "--status",
+        "worked",
+        "--summary",
+        "swept",
+        "--dry-run",
+    ]);
+    let shown: Value = serde_json::from_str(&dry.1).unwrap();
+    assert_eq!(
+        shown,
+        json!({
+            "dry_run": true, "method": "POST", "path": format!("/janitor-runs/{run_id}/activity"),
+            "body": { "activity": "worked", "summary": "swept" },
+        })
+    );
+    // The tool reads the janitors as the routes do, and sets one.
+    let (code, out, err) = admin(&["inspect", &keeper]);
+    assert_eq!(code, 0, "{err}");
+    let inspected: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        inspected["janitor"]["template_id"],
+        json!("scheduled-prompt")
+    );
+    let (code, out, _) = admin(&["runs", &keeper, "--limit", "1"]);
+    let listed: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((code, &listed["runs"][0]["run_id"]), (0, &json!(run_id)));
+    let (code, out, _) = admin(&["templates"]);
+    let offered: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (code, offered["templates"].as_array().unwrap().len()),
+        (0, 10)
+    );
+    let (code, _, err) = admin(&["inspect", "nobody"]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        err.trim_end(),
+        "Janitor request failed (404): Janitor or route unavailable; this Host may not \
+         support Janitors. Agent not found"
+    );
+    let (code, out, _) = tool(
+        &host,
+        &place.root,
+        None,
+        &["clarp-admin", "trigger", "list"],
+    );
+    let offered: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (code, offered["triggers"].as_array().unwrap().len()),
+        (0, 11)
+    );
+    // A change of its options by the tool, read from a file: saved, which pauses it.
+    let more = r#"{"options": {"instructions": "Count the windows."}}"#;
+    std::fs::write(place.root.join("more.json"), more).unwrap();
+    let (code, out, err) = admin(&["configure", &keeper, "--config", "@more.json"]);
+    assert_eq!(code, 0, "{err}");
+    let set: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (
+            &set["janitor"]["enabled"],
+            &set["janitor"]["revision"],
+            &set["janitor"]["options"]["instructions"],
+            &set["janitor"]["attachments"][0]["next_run_at"]
+        ),
+        (
+            &json!(false),
+            &json!(3),
+            &json!("Count the windows."),
+            &Value::Null
+        ),
+        "{set}"
+    );
+    let (code, _, err) = admin(&["configure", &keeper, "--config", r#"{"colour": "red"}"#]);
+    assert_eq!(
+        (code, err.trim_end()),
+        (
+            1,
+            "Janitor request failed: unsupported configuration fields: colour"
+        )
+    );
+
+    // Turned on again by the tool it starts anew, in another generation, with its run of
+    // before still told.
+    let (code, out, _) = admin(&["enable", &keeper, "--expected-revision", "3"]);
+    let turned: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((code, &turned["janitor"]["generation"]), (0, &json!(4)));
+    wait_for("the task to be due again", || {
+        janitor()["attachments"][0]["next_run_at"].is_i64()
+    });
+    assert_eq!(runs().len(), 1);
+
+    // The Host is killed and comes back: the task is as it was kept, and its run of before.
+    host.kill();
+    let host = place.start_in("", &fast, &world);
+    let back = host.get(&format!("/janitors/{keeper}"))["janitor"].clone();
+    assert_eq!(
+        (&back["enabled"], &back["generation"], &back["last_run_at"]),
+        (&json!(true), &json!(4), &json!(ended)),
+        "{back}"
+    );
+    let kept = host.get(&format!("/janitors/{keeper}/runs"));
+    assert_eq!(kept["runs"][0]["run_id"], json!(run_id));
+}
+
+#[test]
+fn a_pause_cuts_a_janitors_run_off_and_its_turn_is_taken_back() {
+    let place = Place::new("janitor-cut-off");
+    // A janitor whose turn says it worked and then goes on working for a minute.
+    let closing = "\"$host\" tool clarp-admin janitor outcome \"$run\" --status worked --summary 'half done' \
+                   > /dev/null 2>&1\nsleep 60\n";
+    let claude = janitors_tool(&place, closing);
+    let fast = ["--janitors-checked-every-ms", "200"];
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &fast, &world);
+    let made = host.post("/agents", json!({ "name": "Sweeper", "backend": "claude" }));
+    let sweeper = made["session"].as_str().unwrap().to_string();
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    let (status, made) = post("/janitors", every_minute(&sweeper, 0));
+    assert_eq!(status, 200, "{made}");
+    let path = format!("/janitors/{sweeper}/enabled");
+    let (status, _) = post(&path, json!({ "expected_revision": 1, "enabled": true }));
+    assert_eq!(status, 200);
+
+    // Its run of the minute is out: its turn runs, and it has said how it goes.
+    let janitor = || host.get(&format!("/janitors/{sweeper}"))["janitor"].clone();
+    let runs = || {
+        let runs = host.get(&format!("/janitors/{sweeper}/runs"));
+        runs["runs"].as_array().unwrap().clone()
+    };
+    wait_a_minute("the run to be running and to have said so", || {
+        let run = runs().first().cloned().unwrap_or(Value::Null);
+        run["status"] == "running" && run["activity"] == "worked"
+    });
+    let run_id = runs()[0]["run_id"].as_str().unwrap().to_string();
+    let out = janitor();
+    assert_eq!(
+        (&out["health"], &out["current_run_id"]),
+        (&json!("running"), &json!(run_id)),
+        "{out}"
+    );
+    // The turn is watched like any agent's while it runs.
+    let live = host.get(&format!("/live?session={sweeper}"));
+    assert!(live.is_object(), "{live}");
+
+    // Paused: the run is cut off, its turn is ended, and the janitor's mailbox is not held.
+    let (status, paused) = post(&path, json!({ "expected_revision": 2, "enabled": false }));
+    assert_eq!(
+        (status, &paused["janitor"]["health"]),
+        (200, &json!("paused")),
+        "{paused}"
+    );
+    let run = runs()[0].clone();
+    assert_eq!(
+        (
+            &run["status"],
+            &run["outcome"],
+            &run["activity"],
+            &run["activity_summary"]
+        ),
+        (
+            &json!("cancelled"),
+            &json!("cancelled"),
+            &json!("worked"),
+            &json!("half done")
+        ),
+        "{run}"
+    );
+    assert!(run["finished_at"].is_i64(), "{run}");
+    wait_for("the turn to be gone", || {
+        janitor()["cancellation_pending"] == false && host.state(&sweeper) != "running"
+    });
+    let queue = host.get(&format!("/turn-queue?session={sweeper}"));
+    assert_eq!(
+        (&queue["items"], &queue["paused"]),
+        (&json!([]), &json!(false)),
+        "{queue}"
+    );
+    let over =
+        json!({ "error": "This maintenance run is no longer active", "code": "run_terminal" });
+    assert_eq!(
+        post(
+            &format!("/janitor-runs/{run_id}/activity"),
+            json!({ "activity": "worked", "summary": "done after all" })
+        ),
+        (409, over)
+    );
+    let after = janitor();
+    assert_eq!(
+        (
+            &after["current_run_id"],
+            &after["attachments"][0]["next_run_at"]
+        ),
+        (&Value::Null, &Value::Null),
+        "{after}"
+    );
+    // Nothing of it runs any more: no second run is made while it is paused.
+    std::thread::sleep(Duration::from_millis(1_000));
+    assert_eq!(runs().len(), 1);
 }
 
 /// The id of the agent a session names, as its row in the snapshot has it.
@@ -10076,9 +10557,10 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
         host.get("/automation-settings"),
         json!({ "special_treatment": false })
     );
-    // The janitors are the Host's own, installed paused: nothing starts one here yet.
+    // The janitors are the Host's own, installed paused. A Host of this kind runs a janitor's
+    // scheduled task.
     let janitors = host.get("/janitors");
-    assert_eq!(janitors["runtime_available"], false);
+    assert_eq!(janitors["runtime_available"], true);
     assert_eq!(janitors["janitors"].as_array().unwrap().len(), 7);
     let transcribes = host.get("/transcription-capabilities");
     assert_eq!(

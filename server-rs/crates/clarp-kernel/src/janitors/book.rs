@@ -15,15 +15,13 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use super::adaptive::{self, State};
+use super::runs::{Progress, Run};
 use super::{
     Attachment, Kept, Named, Refused, attachment_values, execution, option_patch, option_values,
     portrait, scope, supported_triggers, template,
 };
 
-/// The longest a janitor waits between two runs, whatever it is set to, and what it is set
-/// to when nothing says: a week, and a day.
-const LONGEST_INTERVAL_S: i64 = 7 * 86_400;
-const DEFAULT_LONGEST_S: i64 = 86_400;
 /// How long a name or an id of an agent may be.
 const KEY_MOST: usize = 160;
 /// The efforts a provider that is no tool of the Host takes.
@@ -61,6 +59,8 @@ pub trait World {
     fn efforts(&self, backend: &str) -> Vec<String>;
     /// The time between the next two runs of a schedule, in seconds.
     fn base_interval(&self, expression: &str, zone: &str, now_ms: i64) -> i64;
+    /// The first time after `from_ms` that a schedule names, if it names one within a year.
+    fn next_run(&self, expression: &str, zone: &str, from_ms: i64) -> Option<i64>;
     /// Where the picture of this name is fetched.
     fn face(&self, file: &str) -> String;
 }
@@ -129,13 +129,18 @@ pub struct Book {
     pub triggers: BTreeMap<String, Trigger>,
     /// The Host's own janitors: the job each was installed for, by the agent's id.
     pub builtins: BTreeMap<String, String>,
+    /// The runs of the janitors, by their ids: every one that is out, and of those that are
+    /// over the newest hundred of each janitor.
+    pub runs: BTreeMap<String, Run>,
+    /// What the runner keeps of each trigger between two looks, by the trigger's id.
+    pub progress: BTreeMap<String, Progress>,
 }
 
 /// A change a request asks for: the fields it names. One it does not name, or names as
 /// nothing, stays as it is; only options that are named as nothing are refused.
 pub type Asked = Map<String, Value>;
 
-fn refused(status: u16, code: &'static str, message: &str) -> Refused {
+pub(super) fn refused(status: u16, code: &'static str, message: &str) -> Refused {
     Refused::new(status, code, message)
 }
 
@@ -150,7 +155,7 @@ fn said<'a>(asked: &'a Asked, key: &str) -> Option<&'a Value> {
 }
 
 /// The agent a key names, or why there is none.
-fn agent_of(key: &str, world: &dyn World) -> Result<Agent, Refused> {
+pub(super) fn agent_of(key: &str, world: &dyn World) -> Result<Agent, Refused> {
     if key.is_empty() || key.chars().count() > KEY_MOST {
         return Err(Refused::new(
             400,
@@ -287,6 +292,16 @@ impl Book {
             }
         }
         for one in taken {
+            // A trigger that is another than it was starts anew: what the runner kept of it
+            // is dropped.
+            let as_it_was = self.triggers.get(&one.attachment_id).is_some_and(|kept| {
+                kept.trigger_id == one.trigger_id
+                    && kept.trigger_version == one.trigger_version
+                    && kept.config == one.config
+            });
+            if !as_it_was {
+                self.progress.remove(&one.attachment_id);
+            }
             let kept = self
                 .triggers
                 .entry(one.attachment_id)
@@ -303,12 +318,17 @@ impl Book {
         }
     }
 
-    /// Nothing that was started for the configuration as it was may act any more: no run
-    /// of it is due.
-    fn fence(&mut self, agent_id: &str) {
+    /// Nothing that was started for the configuration as it was may act any more: a run
+    /// that is out is cut off, and no run is due.
+    fn fence(&mut self, agent_id: &str, now_ms: i64) {
         for kept in self.triggers.values_mut() {
             if kept.agent_id == agent_id {
                 kept.next_run_at = None;
+            }
+        }
+        for run in self.runs.values_mut() {
+            if run.agent_id == agent_id {
+                run.cut_off(now_ms);
             }
         }
     }
@@ -469,7 +489,16 @@ impl Book {
             }
             None => None,
         };
-        self.fence(&id);
+        self.fence(&id, now_ms);
+        // Watching other agents, or doing another job: what the runner kept is void.
+        if scope != config.scope || !same_job {
+            let triggers = &self.triggers;
+            self.progress.retain(|attachment_id, _| {
+                triggers
+                    .get(attachment_id)
+                    .is_none_or(|kept| kept.agent_id != id)
+            });
+        }
         if let Some(kept) = self.moved(&id, now_ms) {
             kept.enabled = false;
             kept.template_id = template_id;
@@ -562,7 +591,7 @@ impl Book {
                 return Err(Refused::new(400, "invalid_janitor", why));
             }
         }
-        self.fence(id);
+        self.fence(id, now_ms);
         if let Some(kept) = self.moved(id, now_ms) {
             kept.enabled = enabled;
             kept.last_error = String::new();
@@ -588,7 +617,7 @@ impl Book {
             let why = "Pause a built-in Janitor instead of removing it";
             return Err(refused(409, "builtin_janitor", why));
         }
-        self.fence(&id);
+        self.fence(&id, now_ms);
         if let Some(kept) = self.moved(&id, now_ms) {
             kept.enabled = false;
         }
@@ -643,7 +672,7 @@ impl Book {
             let why = "Handing a janitor's work to a successor is not built on this Host yet";
             return Err(refused(501, "not_built", why));
         }
-        self.fence(&id);
+        self.fence(&id, now_ms);
         self.moved(&id, now_ms);
         Ok(vec![Effect::Release { agent_id: id }])
     }
@@ -737,7 +766,7 @@ impl Book {
             &Value::Object(given.clone()),
             Some(&config.options),
         )?;
-        self.fence(id);
+        self.fence(id, now_ms);
         if let Some(kept) = self.moved(id, now_ms) {
             kept.options = options;
         }
@@ -776,10 +805,12 @@ impl Book {
         } else {
             String::new()
         };
-        let health = match (config.enabled, config.last_error.is_empty()) {
-            (false, _) => "paused",
-            (true, false) => "needs_attention",
-            (true, true) => "ready",
+        let current = self.out_of(id).map(|run| run.run_id.clone());
+        let health = match (config.enabled, &current, config.last_error.is_empty()) {
+            (false, _, _) => "paused",
+            (true, Some(_), _) => "running",
+            (true, None, false) => "needs_attention",
+            (true, None, true) => "ready",
         };
         let attachments: Vec<Value> = self
             .triggers_of(id)
@@ -805,7 +836,7 @@ impl Book {
             "model": agent.model, "effort": agent.effort, "backend": agent.backend,
             "scope": config.scope, "health": health, "last_error": config.last_error,
             "last_run_at": config.last_run_at, "last_change_at": config.last_change_at,
-            "current_run_id": null, "attachments": attachments,
+            "current_run_id": current, "attachments": attachments,
             "cadence": self.cadence(id, config, &options, world, now_ms),
         }))
     }
@@ -821,63 +852,50 @@ impl Book {
         now_ms: i64,
     ) -> Vec<Value> {
         let longest = options.get("max_interval_seconds").and_then(Value::as_i64);
-        let lane = |name: String, base: i64, next_run_at: Option<i64>| {
-            let base = base.max(1);
-            let cap = longest.unwrap_or(DEFAULT_LONGEST_S).min(LONGEST_INTERVAL_S);
-            let cap = cap.max(base);
-            json!({
-                "lane": name, "base_interval_seconds": base, "current_interval_seconds": base,
-                "max_interval_seconds": cap, "adaptive": cap > base, "idle_streak": 0,
-                "last_activity": null, "last_summary": "", "next_run_at": next_run_at,
-            })
-        };
-        let interval = |key: &str| options.get(key).and_then(Value::as_i64).unwrap_or(0);
+        let fresh = State::default();
         // The janitors the Host runs by itself wait as their options say.
+        let own = |lane: &str, option: &str| {
+            let base = options.get(option).and_then(Value::as_i64).unwrap_or(0);
+            adaptive::cadence(&fresh, (base, longest), None, lane)
+        };
         match config.template_id.as_str() {
-            "label-auditor" => {
-                return vec![lane(
-                    "label-auditor".to_string(),
-                    interval("interval_seconds"),
-                    None,
-                )];
-            }
-            "quota-monitor" => {
-                return vec![lane(
-                    "quota-keeper".to_string(),
-                    interval("interval_seconds"),
-                    None,
-                )];
-            }
+            "label-auditor" => return vec![own("label-auditor", "interval_seconds")],
+            "quota-monitor" => return vec![own("quota-keeper", "interval_seconds")],
             "account-hotseat" => {
-                let claude = lane(
-                    "hotseat-switcher.claude".to_string(),
-                    interval("interval_seconds"),
-                    None,
-                );
-                let codex = interval("codex_interval_seconds");
                 return vec![
-                    claude,
-                    lane("hotseat-switcher.codex".to_string(), codex, None),
+                    own("hotseat-switcher.claude", "interval_seconds"),
+                    own("hotseat-switcher.codex", "codex_interval_seconds"),
                 ];
             }
             _ => {}
         }
         let mut lanes = Vec::new();
         for (id, kept) in self.triggers_of(agent_id) {
+            // What the runner kept of the trigger, where it was kept for the job as it is.
+            let state = self.progress.get(id);
+            let state = state.filter(|state| state.generation == config.generation);
             let base = match kept.trigger_id.as_str() {
                 "active-interval" => kept.config.get("interval_seconds").and_then(Value::as_i64),
                 "schedule" => {
+                    let measured = state.and_then(|state| state.cron_base_seconds);
                     let said = |key: &str| kept.config.get(key).and_then(Value::as_str);
-                    let (expression, zone) = (said("cron"), said("timezone"));
-                    expression
-                        .zip(zone)
-                        .map(|(expression, zone)| world.base_interval(expression, zone, now_ms))
+                    measured.filter(|base| *base != 0).or_else(|| {
+                        let (expression, zone) = (said("cron")?, said("timezone")?);
+                        Some(world.base_interval(expression, zone, now_ms))
+                    })
                 }
                 _ => continue,
             };
+            let waited = state.and_then(|state| state.adaptive.as_ref());
             let next = kept.next_run_at.filter(|_| config.enabled);
-            let name = format!("{}:{id}", kept.trigger_id);
-            lanes.push(lane(name, base.unwrap_or(900), next));
+            let lane = format!("{}:{id}", kept.trigger_id);
+            let set = (base.unwrap_or(900), longest);
+            lanes.push(adaptive::cadence(
+                waited.unwrap_or(&fresh),
+                set,
+                next,
+                &lane,
+            ));
         }
         lanes
     }

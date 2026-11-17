@@ -8,25 +8,32 @@
 //! itself, and the routes, which answer as the Python Host's do
 //! (`server/lib/janitor_http.py`): the same statuses, bodies and words.
 //!
-//! **Nothing runs yet.** A janitor is made, set, paused and removed, and shown; no trigger
-//! starts one, so none can be turned on: that is refused in words, with the Python Host's
-//! word for a Host that cannot run janitors (`janitor_runtime_unavailable`), and
-//! `GET /janitors` says `runtime_available: false`. The janitors of the Host's own are
-//! installed paused for the same reason, where the Python Host starts three of them.
+//! **What runs: a scheduled task.** A janitor whose job is a scheduled task is turned on, and
+//! then runs when its schedule says: the runner here looks every two seconds at what the
+//! book says is due ([`clarp_kernel::janitors::runs`]), hands a run to the janitor's own
+//! mailbox as a message the Host sends by itself, and tells the book how the turn stands.
+//! No other job runs yet: turning such a janitor on is refused in words, with the Python
+//! Host's word for a Host that cannot run it (`janitor_runtime_unavailable`), and the
+//! janitors of the Host's own are installed paused, where the Python Host starts three.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{Method, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use clarp_kernel::conversation::Message;
 use clarp_kernel::janitors::book::{Agent, Asked, Book, Config, Effect, World};
+use clarp_kernel::janitors::runs::{self, Delivery, Ended, Handed, Run};
 use clarp_kernel::janitors::{self as rules, Refused, schedule};
 use clarp_kernel::python;
+use clarp_kernel::turn::{Admission, Origin, Outcome};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use tower::ServiceExt as _;
 
 use crate::agent::Unavailable;
 use crate::edge::App;
@@ -42,9 +49,13 @@ const A_DAY_S: i64 = 86_400;
 /// has not.
 const OWN_TOOL: &str = "codex";
 
-/// What an app is told when it turns a janitor on.
-const CANNOT_RUN: &str = "This Host cannot run janitors yet: a janitor is made, set and \
-                          paused here, and nothing starts one. Nothing was turned on.";
+/// Who a run's turn is from, as the apps file it: the Host itself, for a janitor.
+const FROM_A_JANITOR: &str = "janitor";
+
+/// What an app is told when it turns on a janitor whose job does not run here.
+const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task and no other job yet: \
+                          this janitor is made, set and paused here, and nothing starts it. \
+                          Nothing was turned on.";
 
 /// The janitors of this Host. `None` until the book was read where it is kept.
 #[derive(Default)]
@@ -111,6 +122,10 @@ impl World for Around<'_> {
 
     fn base_interval(&self, expression: &str, zone: &str, now_ms: i64) -> i64 {
         schedule::base_interval(expression, zone, now_ms).unwrap_or(A_DAY_S)
+    }
+
+    fn next_run(&self, expression: &str, zone: &str, from_ms: i64) -> Option<i64> {
+        schedule::next_run(expression, zone, from_ms).ok().flatten()
     }
 
     fn face(&self, file: &str) -> String {
@@ -191,8 +206,208 @@ impl Desk {
             };
             let _ = app.fleet.amend_any(agent_id, amend).await?;
         }
+        // A run the change cut off may not go on: its turn is taken back.
+        let was_out = before.runs.values().filter(|run| run.out());
+        let cut_off = was_out.filter(|run| book.runs.get(&run.run_id).is_none_or(|run| !run.out()));
+        for run in cut_off {
+            take_back(app, &run.agent_id, &run.run_id).await;
+        }
         Ok(book.shown(key, &Around::new(app), now_ms))
     }
+
+    /// One change of the book by the Host itself, kept when it changed anything. Answers
+    /// what the change answered, and whether anything changed.
+    async fn update<T>(
+        &self,
+        app: &App,
+        change: impl FnOnce(&mut Book, &Around<'_>, i64) -> T,
+    ) -> Result<(T, bool), Unavailable> {
+        let mut held = self.held(app).await?;
+        let Some(book) = held.as_mut() else {
+            return Err(Unavailable(
+                "the janitors' book could not be read".to_string(),
+            ));
+        };
+        let before = book.clone();
+        let done = change(book, &Around::new(app), app.clock.now_ms());
+        let changed = *book != before;
+        if changed {
+            let kept = serde_json::to_vec(book).unwrap_or_default();
+            app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+        }
+        Ok((done, changed))
+    }
+}
+
+// ---- the runner ----------------------------------------------------------------------------
+
+/// How the turn of a run stands in its janitor's conversation: when it started, if it has,
+/// and how it ended, if it has.
+fn turn_of(app: &App, run: &Run) -> (Option<i64>, Option<Ended>) {
+    let directory = app.fleet.directory();
+    let Some(member) = directory.janitor(&run.agent_id) else {
+        return (None, None);
+    };
+    let view = member.agent.view();
+    let trace = Some(run.trace_id.as_str());
+    if let Some(live) = &view.status.live
+        && live.trace_id.as_deref() == trace
+    {
+        return (Some(live.started_at_ms), None);
+    }
+    let end = view.ended.as_ref();
+    let Some(end) = end.filter(|end| end.trace_id.as_deref() == trace) else {
+        return (None, None);
+    };
+    let last = view.status.last.as_ref();
+    let failed = |why: String| Ended { failed: true, why };
+    let ended = match last
+        .filter(|last| last.id.0 == end.turn)
+        .map(|last| &last.outcome)
+    {
+        Some(Outcome::Completed) => Ended::default(),
+        Some(Outcome::Failed { reason, .. } | Outcome::Interrupted { reason }) => {
+            failed(reason.clone())
+        }
+        Some(Outcome::Stopped { by }) => failed(format!("Stopped by {by}")),
+        Some(Outcome::Withdrawn { .. }) => {
+            failed("Its turn was taken back before it started".to_string())
+        }
+        // Its end is known and no more of it: what the end says of itself holds.
+        None => Ended {
+            failed: end.status != "completed",
+            why: String::new(),
+        },
+    };
+    (end.started_at_ms, Some(ended))
+}
+
+/// Hands the turn of a run to its janitor's own mailbox: a message the Host sends by
+/// itself, under the run's id, that waits its turn behind a turn that runs. Nobody is
+/// told of it and nothing is said aloud.
+async fn deliver(app: &App, hand: &Handed) -> Delivery {
+    let directory = app.fleet.directory();
+    let Some(member) = directory.janitor(&hand.session) else {
+        return Delivery::NotTaken;
+    };
+    let (id, marked) = Message::filed(&hand.run_id);
+    let message = Message {
+        id,
+        marked,
+        unminted: true,
+        text: hand.prompt.clone(),
+        origin: Origin::Trigger {
+            name: FROM_A_JANITOR.to_string(),
+        },
+        trace_id: Some(hand.run_id.clone()),
+        ..Message::default()
+    };
+    match member.agent.send(message, Admission::Background).await {
+        Ok(_) => Delivery::Taken,
+        Err(_) => Delivery::Broke("Unavailable".to_string()),
+    }
+}
+
+/// Takes back the turn of a run that was cut off: a message that waits is withdrawn, a
+/// turn that runs is stopped. The janitor's mailbox is not left held: its next run is not
+/// this one's.
+async fn take_back(app: &App, agent: &str, run_id: &str) {
+    let directory = app.fleet.directory();
+    let Some(member) = directory.janitor(agent).or_else(|| directory.anyone(agent)) else {
+        return;
+    };
+    if let Ok((waiting, _)) = member.agent.queue().await {
+        for one in waiting.iter().filter(|one| one.client_id == run_id) {
+            let _ = member
+                .agent
+                .withdraw(one.turn, FROM_A_JANITOR.to_string())
+                .await;
+        }
+    }
+    let view = member.agent.view();
+    let live = view.status.live.as_ref();
+    if live.is_some_and(|live| live.trace_id.as_deref() == Some(run_id)) {
+        let _ = member.agent.stop(FROM_A_JANITOR.to_string()).await;
+        let _ = member.agent.resume(FROM_A_JANITOR.to_string()).await;
+    }
+}
+
+/// One look of the runner at every trigger of a scheduled task that may act. The apps are
+/// told nothing by it, as on the Python Host: what a run's turn does is told like any turn.
+async fn look(app: &App) -> Result<(), Unavailable> {
+    let desk = &app.janitors;
+    let ids = desk
+        .read(app, |book, world, _| book.scheduled(world))
+        .await?;
+    for id in ids {
+        let out = desk
+            .read(app, |book, _, _| book.out_for(&id).cloned())
+            .await?;
+        let (started, ended) = out.as_ref().map_or((None, None), |run| turn_of(app, run));
+        let (hand, _) = desk
+            .update(app, |book, world, now_ms| {
+                // Its turn has started: said once, with the time it did.
+                let unstarted = out.as_ref().filter(|run| {
+                    let kept = book.runs.get(&run.run_id);
+                    kept.is_some_and(|kept| kept.started_at.is_none())
+                });
+                if let (Some(run), Some(started_at)) = (unstarted, started) {
+                    let _ = book.started(&run.run_id, world, started_at);
+                }
+                book.look(&id, ended.as_ref(), world, now_ms)
+            })
+            .await?;
+        let Some(hand) = hand else {
+            continue;
+        };
+        let how = deliver(app, &hand).await;
+        let handed = desk.update(app, |book, world, now_ms| {
+            book.handed(&id, &how, world, now_ms)
+        });
+        let (taken, _) = handed.await?;
+        if how == Delivery::Taken && !taken {
+            // The run was cut off between the look and the hand-over.
+            take_back(app, &hand.session, &hand.run_id).await;
+        }
+    }
+    Ok(())
+}
+
+/// Starts the runner: it looks for what is due every so often.
+pub fn run(app: &App) {
+    let app = app.clone();
+    let every = Duration::from_millis(app.config.janitors_checked_every_ms.max(50));
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(every).await;
+            if let Err(why) = look(&app).await {
+                eprintln!("clarp-host: the janitors were not looked at: {}", why.0);
+            }
+        }
+    });
+}
+
+/// One request of the janitors' own routes, asked inside the Host: for the agents' tool,
+/// which does what the Python tool does by asking what it asks. Answers the status and the
+/// body.
+pub(crate) async fn asked(
+    app: &App,
+    method: Method,
+    path: &str,
+    body: Option<&Value>,
+) -> (u16, Value) {
+    let said = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
+    let Ok(request) = Request::builder().method(method).uri(path).body(said) else {
+        return (400, json!({ "error": "Janitor route not found" }));
+    };
+    let response = match routes().with_state(app.clone()).oneshot(request).await {
+        Ok(response) => response,
+        Err(never) => match never {},
+    };
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await;
+    let body = serde_json::from_slice(&bytes.unwrap_or_default()).unwrap_or(Value::Null);
+    (status, body)
 }
 
 /// A janitor as it goes out: with both sides of its scope named, also where what is kept
@@ -280,8 +495,8 @@ async fn list(State(app): State<App>) -> Response {
             "janitors": janitors,
             "templates": rules::templates(),
             "triggers": rules::triggers(),
-            // No trigger starts a janitor on this Host yet.
-            "runtime_available": false,
+            // A scheduled task runs here; turning any other job on is refused in words.
+            "runtime_available": true,
             "providers": [],
         }))
         .into_response(),
@@ -317,7 +532,7 @@ fn count(said: Option<&str>, otherwise: i128) -> Result<i128, String> {
     }
 }
 
-/// `GET /janitors/<session>/runs`: what a janitor did. No janitor has run here.
+/// `GET /janitors/<session>/runs?limit=N`: what a janitor did, the newest run first.
 async fn more(
     State(app): State<App>,
     Path((key, what)): Path<(String, String)>,
@@ -334,9 +549,17 @@ async fn more(
     if what != "runs" {
         return no_route("route");
     }
-    match count(query.limit.as_deref(), 30) {
-        Ok(_) => Json(json!({ "runs": [] })).into_response(),
-        Err(why) => bad(&why),
+    let limit = match count(query.limit.as_deref(), i128::from(runs::RUNS_SHOWN)) {
+        Ok(limit) => i64::try_from(limit.clamp(1, 100)).unwrap_or(runs::RUNS_SHOWN),
+        Err(why) => return bad(&why),
+    };
+    let read = app
+        .janitors
+        .read(&app, |book, world, _| book.runs_of(&key, limit, world));
+    match read.await {
+        Ok(Ok(runs)) => Json(json!({ "runs": runs })).into_response(),
+        Ok(Err(refused)) => refusal(&refused),
+        Err(why) => unavailable(&why),
     }
 }
 
@@ -478,15 +701,16 @@ async fn change(
             let Some(Value::Bool(on)) = asked.get("enabled") else {
                 return bad("enabled must be true or false");
             };
-            if *on {
+            let on = *on;
+            if on && agent["template_id"] != runs::SCHEDULED_TASK {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);
                 return refusal(&told);
             }
-            let paused = app.janitors.change(&app, &key, |book, world, now_ms| {
-                book.set_enabled(&key, &seen, false, world, now_ms)?;
+            let turned = app.janitors.change(&app, &key, |book, world, now_ms| {
+                book.set_enabled(&key, &seen, on, world, now_ms)?;
                 Ok(Vec::new())
             });
-            paused.await
+            turned.await
         }
         "release" => {
             let successor = (
@@ -527,7 +751,7 @@ async fn change(
     match done {
         Ok(Ok(janitor)) => {
             changed(&app);
-            // Nothing of a janitor runs here, so nothing is still being stopped.
+            // A turn that was cut off may still be ending.
             let pending = janitor["cancellation_pending"] == true;
             let told = json!({ "janitor": as_sent(janitor), "cancellation_pending": pending });
             Json(told).into_response()
@@ -554,39 +778,69 @@ async fn remove(
         Ok(seen) => seen,
         Err(why) => return bad(why),
     };
-    let mut held = match app.janitors.held(&app).await {
-        Ok(held) => held,
-        Err(why) => return unavailable(&why),
-    };
-    let Some(book) = held.as_mut() else {
-        return unavailable(&Unavailable(
-            "the janitors' book could not be read".to_string(),
-        ));
-    };
-    let now_ms = app.clock.now_ms();
-    let effects = match book.remove(&key, &seen, &Around::new(&app), now_ms) {
-        Ok(effects) => effects,
-        Err(refused) => return refusal(&refused),
-    };
-    let kept = serde_json::to_vec(book).unwrap_or_default();
-    if let Err(why) = app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await {
-        return unavailable(&why);
-    }
-    for effect in effects {
-        if let Effect::PutAway { agent_id } = effect
-            && let Err(why) = app.fleet.amend_any(agent_id, Amend::Archive(true)).await
-        {
-            return unavailable(&why);
+    let removed = app.janitors.change(&app, &key, |book, world, now_ms| {
+        book.remove(&key, &seen, world, now_ms)
+    });
+    match removed.await {
+        Ok(Ok(janitor)) => {
+            changed(&app);
+            let pending = janitor["cancellation_pending"] == true;
+            Json(json!({ "ok": true, "cancellation_pending": pending })).into_response()
         }
+        Ok(Err(refused)) => refusal(&refused),
+        Err(why) => unavailable(&why),
     }
-    drop(held);
-    changed(&app);
-    Json(json!({ "ok": true, "cancellation_pending": false })).into_response()
 }
 
-/// What is asked of a janitor's run: no janitor has run here.
-async fn no_run() -> Response {
-    no_route("route")
+/// `GET /janitor-runs/<run>/context`: what a run is given to read when its turn begins.
+async fn run_read(State(app): State<App>, Path(rest): Path<String>) -> Response {
+    let Some((run_id, "context")) = rest.split_once('/') else {
+        return no_route("route");
+    };
+    let read = app
+        .janitors
+        .read(&app, |book, world, _| book.context(run_id, world));
+    match read.await {
+        Ok(Ok(context)) => Json(context).into_response(),
+        Ok(Err(refused)) => refusal(&refused),
+        Err(why) => unavailable(&why),
+    }
+}
+
+/// What a request says under a key, as the Python Host makes a text of it (`str(x or "")`):
+/// nothing, no, zero and what is empty are no text.
+fn text_of(asked: &Asked, key: &str) -> String {
+    match asked.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        None | Some(Value::Null | Value::Bool(false)) => String::new(),
+        Some(Value::Number(number)) if number.as_f64() == Some(0.0) => String::new(),
+        Some(Value::Array(items)) if items.is_empty() => String::new(),
+        Some(Value::Object(fields)) if fields.is_empty() => String::new(),
+        Some(other) => python::repr(other),
+    }
+}
+
+/// `POST /janitor-runs/<run>/activity`: what a run says of itself before it ends:
+/// `worked`, `idle` or `failed`, and one line.
+async fn run_said(State(app): State<App>, Path(rest): Path<String>, body: Bytes) -> Response {
+    let Some(asked) = object(&body) else {
+        return bad("Expected a JSON object");
+    };
+    let Some((run_id, "activity")) = rest.split_once('/') else {
+        return no_route("route");
+    };
+    let (activity, summary) = (text_of(&asked, "activity"), text_of(&asked, "summary"));
+    let said = app.janitors.update(&app, |book, world, _| {
+        book.report(run_id, &activity, &summary, world)
+    });
+    match said.await {
+        Ok((Ok(activity), _)) => {
+            changed(&app);
+            Json(json!({ "activity": activity })).into_response()
+        }
+        Ok((Err(refused), _)) => refusal(&refused),
+        Err(why) => unavailable(&why),
+    }
 }
 
 /// The janitors a Host installs for itself, each once: an agent of its own for each job,
@@ -743,7 +997,7 @@ pub fn routes() -> Router<App> {
         .route("/janitors/{session}/{action}", get(more).post(change))
         .route("/janitor-triggers", get(triggers))
         .route("/janitor-triggers/preview", get(preview))
-        .route("/janitor-runs/{*rest}", get(no_run).post(no_run))
+        .route("/janitor-runs/{*rest}", get(run_read).post(run_said))
 }
 
 #[cfg(test)]

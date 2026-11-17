@@ -65,6 +65,11 @@ impl World for Host {
             .unwrap_or_else(|| panic!("no base is known for {key:?}"))
     }
 
+    fn next_run(&self, _expression: &str, _zone: &str, _from_ms: i64) -> Option<i64> {
+        // Nothing runs in these stories.
+        None
+    }
+
     fn face(&self, file: &str) -> String {
         self.faces.get(file).cloned().unwrap_or_default()
     }
