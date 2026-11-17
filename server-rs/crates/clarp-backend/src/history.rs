@@ -21,8 +21,10 @@ use clarp_kernel::python;
 use clarp_kernel::tools;
 use serde_json::{Value, json};
 
+mod agy;
 mod rollout;
 
+pub use agy::agy;
 pub use rollout::{codex, codex_cell};
 
 /// What the tool writes into a conversation by itself, as a message of the user's: it

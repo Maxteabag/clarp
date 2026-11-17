@@ -10,6 +10,7 @@ clarp-kernel.workspace = true
 clarp-speech.workspace = true
 clarp-spool.workspace = true
 jiff.workspace = true
+regex.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 
