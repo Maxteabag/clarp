@@ -1,0 +1,1411 @@
+{
+ "records": [
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": null,
+     "spend_control_reached": null
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": null,
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-22T08:53:20Z",
+    "used_percentage": 82.0,
+    "windows": {
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": null,
+     "rate_limit_reached_type": null,
+     "secondary": null,
+     "spend_control_reached": null
+    }
+   },
+   "refused": "codex usage response had no usable windows"
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {},
+     "rate_limit_reached_type": null,
+     "secondary": {},
+     "spend_control_reached": null
+    }
+   },
+   "refused": "codex usage response had no usable windows"
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "spend_control_reached": null
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-22T08:53:20Z",
+    "used_percentage": 82.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "primary_window": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "secondary_window": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "primary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "primary_window": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "primary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "primary_window": null
+    }
+   },
+   "refused": "codex usage response had no usable windows"
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    },
+    "spend_control": {
+     "individual_limit": {
+      "resets_at": 1900800000,
+      "used_percent": 9
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "individual_limit": {
+      "resets_at": "2030-03-27T00:00:00Z",
+      "used_percentage": 9.0
+     },
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": null,
+     "rate_limit_reached_type": null,
+     "secondary": null,
+     "spend_control_reached": null
+    },
+    "spend_control": {
+     "individual_limit": {
+      "resets_at": 1900800000,
+      "used_percent": 9
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-27T00:00:00Z",
+    "used_percentage": 9.0,
+    "windows": {
+     "individual_limit": {
+      "resets_at": "2030-03-27T00:00:00Z",
+      "used_percentage": 9.0
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    },
+    "spend_control": "none"
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    },
+    "spend_control": {
+     "individual_limit": null
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": {
+     "limitId": "codex",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": {
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": [
+     {
+      "limitId": "other",
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     {
+      "limitId": "codex",
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    ]
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": [
+     {
+      "limitId": "other",
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     {
+      "limitId": "more",
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     }
+    ]
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimits": [
+     {
+      "limitId": "other",
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     {
+      "limitId": "more",
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    ]
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": [
+     {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     },
+     {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    ]
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimits": [],
+    "rateLimitsByLimitId": {}
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "codex": {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      },
+      "secondary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     "spark": {
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "Codex": {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "a": {
+      "limitId": "CODEX",
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     "b": {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-22T08:53:20Z",
+    "used_percentage": 82.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "a": {
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     "b": {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "a": {
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     },
+     "b": {
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     }
+    }
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "a": {
+      "primary": {
+       "resets_at": 1900400000,
+       "used_percent": 82.0,
+       "window_minutes": 10080
+      }
+     }
+    }
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimitsByLimitId": {
+     "a": "no limit"
+    }
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimits": {
+     "primary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     }
+    },
+    "rateLimitsByLimitId": {
+     "codex": {
+      "primary": {
+       "resets_at": 1900000000,
+       "used_percent": 37.5,
+       "window_minutes": 300
+      }
+     }
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": {
+     "primary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     }
+    },
+    "rate_limit": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    }
+   },
+   "snapshot": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T17:46:40Z",
+      "used_percentage": 37.5,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {
+    "rateLimits": {
+     "primary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     }
+    },
+    "rate_limit": "none"
+   },
+   "snapshot": {
+    "resets_at": "2030-03-22T08:53:20Z",
+    "used_percentage": 82.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-22T08:53:20Z",
+      "used_percentage": 82.0,
+      "window_minutes": 10080
+     }
+    }
+   }
+  },
+  {
+   "given": {},
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rate_limit": null
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rate_limits": {
+     "credits": {
+      "balance": null,
+      "has_credits": false,
+      "unlimited": false
+     },
+     "individual_limit": null,
+     "limit_id": "codex",
+     "limit_name": null,
+     "plan_type": "pro",
+     "primary": {
+      "resets_at": 1900000000,
+      "used_percent": 37.5,
+      "window_minutes": 300
+     },
+     "rate_limit_reached_type": null,
+     "secondary": {
+      "resets_at": 1900400000,
+      "used_percent": 82.0,
+      "window_minutes": 10080
+     },
+     "spend_control_reached": null
+    }
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": {
+    "rateLimits": "none"
+   },
+   "refused": "codex usage response missing rate_limit"
+  },
+  {
+   "given": [],
+   "refused": "codex usage response was not an object"
+  },
+  {
+   "given": "a text",
+   "refused": "codex usage response was not an object"
+  },
+  {
+   "given": null,
+   "refused": "codex usage response was not an object"
+  },
+  {
+   "given": 7,
+   "refused": "codex usage response was not an object"
+  }
+ ],
+ "windows": [
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percent": 37.5,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 37.5,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900400000,
+    "used_percent": 82.0,
+    "window_minutes": 10080
+   },
+   "window": {
+    "resets_at": "2030-03-22T08:53:20Z",
+    "used_percentage": 82.0,
+    "window_minutes": 10080
+   }
+  },
+  {
+   "given": null,
+   "window": null
+  },
+  {
+   "given": {},
+   "window": null
+  },
+  {
+   "given": "a text",
+   "window": null
+  },
+  {
+   "given": 7,
+   "window": null
+  },
+  {
+   "given": [],
+   "window": null
+  },
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percent": 0,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 0.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percent": 100.0,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 100.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percent": "41",
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 41.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percent": "much",
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": null,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percent": null,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": null,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": null,
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": 0,
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "2030-03-17T18:46:40+01:00",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "2030-03-17T18:46:40+01:00",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "soon",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "soon",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "1900000000",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": " 1900000000 ",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "1900000000.9",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "0",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "-5",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "0"
+   },
+   "window": null
+  },
+  {
+   "given": {
+    "resets_at": true,
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "1970-01-01T00:00:01Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": false,
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "breaks": "ValueError",
+   "given": {
+    "resets_at": 1900000000000,
+    "used_percent": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900000000.75,
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": 1900000000
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": null
+   }
+  },
+  {
+   "given": {
+    "window_minutes": 300
+   },
+   "window": null
+  },
+  {
+   "given": {
+    "resets_at": 1900000000,
+    "used_percentage": 55,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 55.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "usedPercent": 77,
+    "used_percent": 66,
+    "used_percentage": 55
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 55.0
+   }
+  },
+  {
+   "given": {
+    "usedPercent": 77,
+    "used_percent": 66
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 66.0
+   }
+  },
+  {
+   "given": {
+    "resetsAt": 1900000000,
+    "usedPercent": 77,
+    "windowDurationMins": 300
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 77.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "usedPercent": 77,
+    "windowDurationMins": 300,
+    "window_minutes": 60
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 77.0,
+    "window_minutes": 60
+   }
+  },
+  {
+   "given": {
+    "reset_at": 1900000000,
+    "resetsAt": 1900400000,
+    "used_percent": 5
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 5.0
+   }
+  },
+  {
+   "given": {
+    "reset_at": 1900400000,
+    "resets_at": 1900000000,
+    "used_percent": 5
+   },
+   "window": {
+    "resets_at": "2030-03-17T17:46:40Z",
+    "used_percentage": 5.0
+   }
+  },
+  {
+   "given": {
+    "limit_window_seconds": 18000,
+    "used_percent": 5
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 5.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "limit_window_seconds": "604800",
+    "used_percent": 5
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 5.0,
+    "window_minutes": 10080
+   }
+  },
+  {
+   "given": {
+    "limit_window_seconds": "a week",
+    "used_percent": 5
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 5.0
+   }
+  },
+  {
+   "given": {
+    "limit_window_seconds": 90,
+    "used_percent": 5
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 5.0,
+    "window_minutes": 1
+   }
+  },
+  {
+   "given": {
+    "limit_window_seconds": 18000,
+    "used_percent": 5,
+    "window_minutes": null
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 5.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "used_percent": true
+   },
+   "window": null
+  },
+  {
+   "given": {
+    "used_percent": -3.5,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": -3.5,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "used_percent": 250,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 250.0,
+    "window_minutes": 300
+   }
+  },
+  {
+   "given": {
+    "used_percent": 1e+30,
+    "window_minutes": 300
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 1e+30,
+    "window_minutes": 300
+   }
+  }
+ ]
+}
