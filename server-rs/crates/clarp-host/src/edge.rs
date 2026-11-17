@@ -320,6 +320,12 @@ impl App {
     pub(crate) fn member(&self, session: &str) -> Option<Arc<Member>> {
         self.fleet.directory().by_session(session).cloned()
     }
+
+    /// The agent or the janitor with this session name: for what is read of either. A
+    /// janitor is looked at and not spoken to.
+    pub(crate) fn anyone(&self, session: &str) -> Option<Arc<Member>> {
+        self.fleet.directory().anyone(session).cloned()
+    }
 }
 
 pub fn router(app: App) -> Router {
@@ -1296,7 +1302,7 @@ async fn log(
     State(app): State<App>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let Some(member) = app.member(&query.session) else {
+    let Some(member) = app.anyone(&query.session) else {
         // An agent the Host does not have has no conversation: the answer is the one for an
         // agent that has not said anything yet, and not an error.
         let home = std::env::var("HOME").unwrap_or_default();
@@ -1360,7 +1366,7 @@ async fn tool_details(
         ));
     }
     let none = || ApiError::new(StatusCode::NOT_FOUND, "message not found");
-    let member = app.member(session).ok_or_else(none)?;
+    let member = app.anyone(session).ok_or_else(none)?;
     let version = member.agent.row(message_id.to_string()).await?;
     let row = wire::row(&version.ok_or_else(none)?);
     Ok(Json(json!({
@@ -1968,7 +1974,7 @@ async fn queue(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let member = app
-        .member(&query.session)
+        .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
     let (waiting, state) = member.agent.queue().await?;
     let items: Vec<Value> = waiting
@@ -1999,7 +2005,7 @@ async fn shown(
 ) -> Result<Json<Value>, ApiError> {
     let session = query.session.unwrap_or_default();
     let member = app
-        .member(session.trim())
+        .anyone(session.trim())
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
     let mut whole = member.agent.shown().await?;
     whole["tool_explanations"] = apps::explanations_told(&app);

@@ -938,10 +938,59 @@ Host did not have. The first part is what is kept and how it is set, with nothin
   `/janitors/<s>/configure`, `/enabled`, `/reset-defaults`, `/adopt-options`, `/release`; `DELETE /janitors/<s>`), which
   answer in the Python Host's statuses, bodies and words, and tell the apps to read again (`agent-roster`,
   `janitor-changed`).
-- **Nothing runs yet, and the Host says so**: `runtime_available: false`, the seven installed paused, and
-  turning one on refused in words (503, `janitor_runtime_unavailable`). That is the next part: the runner
-  with a schedule and the scheduled task, then the turn's end and the goal keeper, then the workers that
-  answer one request (the tool explainer first).
+- In that first part nothing ran, and the Host said so (`runtime_available: false`, turning one on refused,
+  503 `janitor_runtime_unavailable`). The second part, below, runs a scheduled task. The seven of the Host's
+  own are still installed paused, and a job that does not run here yet is still refused in words.
+
+**The janitors: the runs of a scheduled task** (17 Nov 2026). A janitor whose job is a scheduled task
+(`scheduled-prompt` on `schedule@1`) runs when its schedule says: one run for each time that comes due, each
+a turn in the janitor's own conversation.
+
+- The rules are the Python Host's runner (`lib/janitor_runner.py`, `_scheduled_tick`) and its runs
+  (`lib/janitors.py`), and are held to that runner itself: `tools/janitor-run-vectors.py` drives
+  `JanitorRunner` look by look on a database made for it, with a clock, an ending of the turn and an answer
+  of the queue that each step sets, and writes what the Python Host kept after every step. Six stories, 155
+  steps, 102 looks: a task of every half hour that is idle, at work, failing and given up; two schedules of
+  one janitor that is paused, set anew and removed while a run is out; and four tasks whose times are not
+  evenly apart. The kernel's `janitors/runs.rs` replays them (`tests/janitor_run_vectors.rs`): where the
+  Python Host passes over nothing, what the runner keeps of every trigger, every run and the janitor as it
+  is read are equal after every step.
+- **A look has two halves**, because the Host's queue is asked outside the book: `Book::look` says what is to
+  be handed over (a run is made for a time that is due; a run that is out is offered until the queue takes
+  it; a run whose turn has ended is over, `completed` or `error` with why, without what is plainly a
+  secret), and `Book::handed` is told what the queue answered. A run that the queue did not take is offered
+  again after half a minute, the same run and never another; one whose turn never ends is given up after two
+  hours.
+- **How long a task waits** is the rule of `lib/janitor_adaptive.py` (`janitors/adaptive.rs`, 71 runs of
+  vectors): a run says of itself that it worked, was idle or failed (`clarp-admin janitor outcome`, `POST
+  /janitor-runs/<id>/activity`); idle doubles the wait up to the task's longest, worked puts it back, failed
+  leaves it, and a run that says nothing counts as worked.
+- **Where this Host does otherwise** (defect R31 of the reference): the Python Host takes as the wait of a
+  task that keeps its pace the gap between the two runs after its first, and asks for the first time at
+  least that gap after the time that ran. A task of working days first run on a Thursday measures three
+  days and runs on Mondays and Thursdays only; a daily one first run two days before the clocks are put
+  back runs every other day; every daily one loses the day the clocks are put forward. Here a task that
+  keeps its pace runs at the next time its schedule names, and only a wait that idle runs have stretched is
+  counted from the time that ran. The test names the three stories in which the reference loses runs and
+  holds this Host to every time of the schedule in them.
+- **A change cuts a run off.** A pause, a save and a removal move the janitor's generation: the run that was
+  out is `cancelled`, may say nothing any more, and the Host takes its turn back (a message that waits is
+  withdrawn, a turn that runs is stopped, and the janitor's mailbox is not left held). A run that was cut off
+  between a look and its hand-over is taken back by the runner itself.
+- The Host's part (`janitors.rs`): the runner, every two seconds (`--janitors-checked-every-ms`), reads from
+  the janitor's own actor how the turn with the run's id stands (started, ended and how) and hands a run
+  over as a message the Host sends by itself (`origin: janitor`, the run's id as its trace, waiting behind a
+  turn that runs, said to nobody). The routes for a janitor's runs (`GET /janitors/<s>/runs`, `GET
+  /janitor-runs/<id>/context`, `POST /janitor-runs/<id>/activity`), and a janitor's conversation read like an
+  agent's (`/log`, `/live`, the queue's contents), which is all a person does with one.
+- **The agents' tool** `clarp-admin janitor ...` (and `clarp-admin trigger list`) asks the Host's own routes,
+  inside the Host, what the Python tool asks them (`lib/janitor_cli.py`), and prints what it prints: `list`,
+  `templates`, `inspect`, `runs`, `create`, `configure`, `attach`, `enable`, `pause`, `remove`, `release`,
+  `reset-defaults`, `run-context`, `outcome`, with `--dry-run` and the revision read where none is named.
+  What the routes do not have here yet (a label's review, the state for a move) the tool is told by them.
+- Not yet: a janitor made as a new agent, the jobs that are no scheduled task (the turn's end and the goal
+  keeper, the workers that answer one request, the label keeper), and the tools that keep something for an
+  agent when a janitor's own turn calls them.
 
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one

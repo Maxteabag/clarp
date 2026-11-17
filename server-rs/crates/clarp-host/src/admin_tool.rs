@@ -29,7 +29,8 @@ use crate::edge::{self, App};
 use crate::ids;
 use crate::peers::{self, Failed};
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
-use crate::{request_tool, roster};
+use crate::{janitors, request_tool, roster};
+use axum::http::{Method, StatusCode};
 use clarp_kernel::calls::Refused;
 
 /// What argparse says of a command line it cannot read, and exits 2 with.
@@ -999,6 +1000,517 @@ async fn schedule(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+// ---- clarp-admin janitor --------------------------------------------------------------------
+
+/// A name as it stands in an address: what is no letter, no digit and none of `_.-~` as its
+/// bytes in hex (Python's `quote(name, safe="")`).
+fn quoted(name: &str) -> String {
+    let mut out = String::new();
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() || b"_.-~".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// A JSON object an option carries: written out, or `@` and the file it is in.
+fn object_of(call: &ToolCall, given: &str) -> Result<serde_json::Map<String, Value>, String> {
+    let raw = match given.strip_prefix('@') {
+        Some(path) => {
+            std::fs::read_to_string(written_from(call, path)).map_err(|error| error.to_string())?
+        }
+        None => given.to_string(),
+    };
+    if raw.len() > 1_048_576 {
+        return Err("JSON exceeds 1 MiB".to_string());
+    }
+    match serde_json::from_str(&raw) {
+        Ok(Value::Object(fields)) => Ok(fields),
+        Ok(_) => Err("expected a JSON object".to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// A UUID as Python's `str(uuid.UUID(text))` writes it; `None` for what is none.
+fn as_uuid(text: &str) -> Option<String> {
+    let text = text.trim_start_matches("urn:").trim_start_matches("uuid:");
+    let hex: String = text.chars().filter(|sign| !"{}-".contains(*sign)).collect();
+    if hex.len() != 32 || !hex.chars().all(|sign| sign.is_ascii_hexdigit()) {
+        return None;
+    }
+    let hex = hex.to_ascii_lowercase();
+    let parts = [
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..],
+    ];
+    Some(parts.join("-"))
+}
+
+/// One request of the janitors' routes, taken as the Python tool takes an answer: what the
+/// Host refuses ends the tool, with the Host's words and the tool's own around them.
+async fn janitor_asked(
+    app: &App,
+    method: Method,
+    path: &str,
+    body: Option<&Value>,
+) -> Result<Value, ToolAnswer> {
+    let (status, answer) = janitors::asked(app, method, path, body).await;
+    if status < 400 {
+        return Ok(answer);
+    }
+    let mut detail = match answer.get("error") {
+        Some(Value::String(why)) => why.clone(),
+        Some(other) => other.to_string(),
+        None => {
+            let reason = StatusCode::from_u16(status).ok();
+            let reason = reason.and_then(|status| status.canonical_reason());
+            format!("HTTP Error {status}: {}", reason.unwrap_or_default())
+        }
+    };
+    if status == 404 {
+        detail =
+            format!("Janitor or route unavailable; this Host may not support Janitors. {detail}");
+    } else if status == 409 {
+        detail.push_str(
+            " Inspect the current configuration and repeat your intent; nothing was retried.",
+        );
+    }
+    Err(ToolAnswer::said(
+        1,
+        format!("Janitor request failed ({status}): {detail}"),
+    ))
+}
+
+/// A request that changes something: sent, or with `--dry-run` only shown.
+async fn janitor_sent(
+    app: &App,
+    dry: bool,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> Result<Value, ToolAnswer> {
+    if dry {
+        let shown =
+            json!({ "dry_run": true, "method": method.as_str(), "path": path, "body": body });
+        return Ok(shown);
+    }
+    janitor_asked(app, method, path, body.as_ref()).await
+}
+
+/// `clarp-admin trigger list`: the triggers a janitor can be given.
+async fn trigger(app: &App, args: &[String]) -> ToolAnswer {
+    if args.first().map(String::as_str) != Some("list") || args.len() != 1 {
+        let why = "the following arguments are required: trigger_command";
+        return ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin trigger [-h] {{list}} ...\nclarp-admin trigger: error: {why}"
+            ),
+        );
+    }
+    match janitor_asked(app, Method::GET, "/janitor-triggers", None).await {
+        Ok(triggers) => shown(&triggers),
+        Err(answer) => answer,
+    }
+}
+
+/// `clarp-admin janitor ...`: the janitors of this Host, read and set by an agent's own
+/// tool, and what a run says of itself (`outcome`). Each command asks the Host's own routes
+/// what the Python tool asks them (`server/lib/janitor_cli.py`), and prints what it prints.
+async fn janitor(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let usage = |command: &str, why: &str| {
+        let named = match command {
+            "" => "clarp-admin janitor".to_string(),
+            command => format!("clarp-admin janitor {command}"),
+        };
+        ToolAnswer::said(2, format!("usage: {named} [-h] ...\n{named}: error: {why}"))
+    };
+    let failed = |why: &str| ToolAnswer::said(1, format!("Janitor request failed: {why}"));
+    let Some((command, rest)) = args.split_first() else {
+        return usage("", "the following arguments are required: janitor_command");
+    };
+    let command = command.as_str();
+    let set = ["--expected-revision"];
+    let (valued, flags, names): (&[&str], &[&str], &[&str]) = match command {
+        "list" | "templates" => (&[], &[], &[]),
+        "inspect" | "export" => (&[], &[], &["session"]),
+        "runs" => (&["--limit"], &[], &["session"]),
+        "enable" | "pause" | "remove" | "reset-defaults" => (&set, &["--dry-run"], &["session"]),
+        "release" => (
+            &["--expected-revision", "--successor", "--successor-revision"],
+            &["--dry-run"],
+            &["session"],
+        ),
+        "configure" => (
+            &[
+                "--expected-revision",
+                "--config",
+                "--scope",
+                "--template",
+                "--model",
+                "--effort",
+            ],
+            &["--dry-run"],
+            &["session"],
+        ),
+        "attach" => (
+            &["--expected-revision", "--config", "--scope", "--trigger"],
+            &["--dry-run"],
+            &["session"],
+        ),
+        "create" => (
+            &[
+                "--agent",
+                "--name",
+                "--backend",
+                "--cwd",
+                "--template",
+                "--model",
+                "--effort",
+                "--config",
+                "--scope",
+                "--request-id",
+            ],
+            &["--paused", "--dry-run"],
+            &[],
+        ),
+        "run-context" => (&[], &[], &["run_id"]),
+        "review" => (
+            &[
+                "--session",
+                "--state-id",
+                "--outcome",
+                "--label",
+                "--reason",
+            ],
+            &["--dry-run"],
+            &["run_id"],
+        ),
+        "outcome" => (&["--status", "--summary"], &["--dry-run"], &["run_id"]),
+        "migrate-pilot" => return not_here("janitor migrate-pilot"),
+        other => {
+            let why = format!("argument janitor_command: invalid choice: '{other}'");
+            return usage("", &why);
+        }
+    };
+    let parsed = match parse(rest, valued, flags, names) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(command, &why),
+    };
+    let dry = parsed.flags.contains("--dry-run");
+    let first = parsed.positional.first().map_or("", String::as_str);
+    // What an option has to be before anything is asked: a whole number above nothing, an
+    // object, one of a few words; and the options a command cannot do without.
+    let positive = |name: &str| match parsed.whole(name) {
+        Ok(Some(number)) if number < 1 => {
+            Err(format!("argument {name}: must be a positive integer"))
+        }
+        other => other,
+    };
+    let carried = |name: &str| match parsed.option(name) {
+        None => Ok(None),
+        Some(given) => match object_of(call, given) {
+            Ok(fields) => Ok(Some(fields)),
+            Err(why) => Err(format!("argument {name}: {why}")),
+        },
+    };
+    let needed: &[&str] = match command {
+        "outcome" => &["--status", "--summary"],
+        "review" => &["--session", "--state-id", "--outcome", "--reason"],
+        "attach" => &["--trigger"],
+        _ => &[],
+    };
+    let missing: Vec<&str> = needed
+        .iter()
+        .copied()
+        .filter(|name| parsed.option(name).is_none())
+        .collect();
+    if !missing.is_empty() {
+        let why = format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        );
+        return usage(command, &why);
+    }
+    let numbers = (
+        positive("--expected-revision"),
+        positive("--limit"),
+        positive("--successor-revision"),
+        positive("--state-id"),
+    );
+    let (expected, limit, successor_revision, state_id) = match numbers {
+        (Ok(expected), Ok(limit), Ok(successor), Ok(state)) => (expected, limit, successor, state),
+        (Err(why), ..) | (_, Err(why), ..) | (_, _, Err(why), _) | (_, _, _, Err(why)) => {
+            return usage(command, &why);
+        }
+    };
+    let (config, scope) = match (carried("--config"), carried("--scope")) {
+        (Ok(config), Ok(scope)) => (config, scope),
+        (Err(why), _) | (_, Err(why)) => return usage(command, &why),
+    };
+    let words = (
+        parsed.choice("--status", &["worked", "idle", "failed"], "worked"),
+        parsed.choice(
+            "--outcome",
+            &["changed", "same_task", "insufficient_context", "error"],
+            "error",
+        ),
+    );
+    let (status, outcome) = match words {
+        (Ok(status), Ok(outcome)) => (status, outcome),
+        (Err(why), _) | (_, Err(why)) => return usage(command, &why),
+    };
+    let option = |name: &str| parsed.option(name).map(str::to_string);
+    // What a `configure` or a `create` sends: the object `--config` carries, with what the
+    // other options name over it.
+    let configuration = |create: bool| -> Result<serde_json::Map<String, Value>, String> {
+        let mut body = config.clone().unwrap_or_default();
+        let mut allowed = vec![
+            "template_id",
+            "scope",
+            "attachments",
+            "model",
+            "effort",
+            "execution",
+            "backend",
+            "options",
+        ];
+        if create {
+            allowed.extend(["name", "cwd", "session", "request_id"]);
+        }
+        let mut unknown: Vec<&str> = body.keys().map(String::as_str).collect();
+        unknown.retain(|key| !allowed.contains(key));
+        unknown.sort_unstable();
+        if !unknown.is_empty() {
+            return Err(format!(
+                "unsupported configuration fields: {}",
+                unknown.join(", ")
+            ));
+        }
+        for (name, key) in [
+            ("--template", "template_id"),
+            ("--model", "model"),
+            ("--effort", "effort"),
+        ] {
+            if let Some(value) = option(name) {
+                body.insert(key.to_string(), json!(value));
+            }
+        }
+        if let Some(scope) = &scope {
+            body.insert("scope".to_string(), Value::Object(scope.clone()));
+        }
+        Ok(body)
+    };
+    let done: Result<Value, ToolAnswer> = async {
+        let path = format!("/janitors/{}", quoted(first));
+        let run_path = format!("/janitor-runs/{}", quoted(first));
+        // The revision a change says it saw: the one it names, or the one the janitor has.
+        let revision = async || -> Result<i64, ToolAnswer> {
+            if let Some(expected) = expected {
+                return Ok(expected);
+            }
+            let current = janitor_asked(app, Method::GET, &path, None).await?;
+            Ok(current["janitor"]["revision"].as_i64().unwrap_or(0))
+        };
+        match command {
+            "list" => janitor_asked(app, Method::GET, "/janitors", None).await,
+            "templates" => {
+                let all = janitor_asked(app, Method::GET, "/janitors", None).await?;
+                Ok(json!({ "templates": all["templates"] }))
+            }
+            "inspect" => janitor_asked(app, Method::GET, &path, None).await,
+            "runs" => {
+                let asked = format!("{path}/runs?limit={}", limit.unwrap_or(30));
+                janitor_asked(app, Method::GET, &asked, None).await
+            }
+            "export" => {
+                let asked = format!("{path}/migration-state");
+                janitor_asked(app, Method::GET, &asked, None).await
+            }
+            "reset-defaults" => {
+                let body = json!({ "expected_revision": revision().await? });
+                let asked = format!("{path}/reset-defaults");
+                janitor_sent(app, dry, Method::POST, &asked, Some(body)).await
+            }
+            "configure" => {
+                let mut body = configuration(false).map_err(|why| failed(&why))?;
+                body.insert("expected_revision".to_string(), json!(revision().await?));
+                let asked = format!("{path}/configure");
+                janitor_sent(app, dry, Method::POST, &asked, Some(Value::Object(body))).await
+            }
+            "attach" => {
+                let named = option("--trigger").unwrap_or_default();
+                let read = named.rsplit_once('@').and_then(|(trigger, version)| {
+                    let digits = !version.is_empty() && version.chars().all(|sign| sign.is_ascii_digit());
+                    let version = version.parse::<i64>().ok().filter(|version| digits && *version >= 1);
+                    version.filter(|_| !trigger.is_empty()).map(|version| (trigger, version))
+                });
+                let Some((trigger, version)) = read else {
+                    let why = "--trigger must be a versioned identifier such as agent-work-completed@1";
+                    return Err(failed(why));
+                };
+                let current = janitor_asked(app, Method::GET, &path, None).await?;
+                let current = &current["janitor"];
+                let seen = expected.or_else(|| current["revision"].as_i64()).unwrap_or(0);
+                let keys = ["attachment_id", "trigger_id", "trigger_version", "enabled", "config"];
+                let has = current["attachments"].as_array().map_or(&[][..], Vec::as_slice);
+                let mut attachments: Vec<Value> = has
+                    .iter()
+                    .map(|row| {
+                        let kept = keys.iter().filter_map(|key| Some(((*key).to_string(), row.get(*key)?.clone())));
+                        Value::Object(kept.collect())
+                    })
+                    .collect();
+                attachments.push(json!({
+                    "trigger_id": trigger, "trigger_version": version, "enabled": true,
+                    "config": config.clone().unwrap_or_default(),
+                }));
+                let mut body = json!({ "expected_revision": seen, "attachments": attachments });
+                if let Some(scope) = &scope {
+                    body["scope"] = Value::Object(scope.clone());
+                }
+                let asked = format!("{path}/configure");
+                janitor_sent(app, dry, Method::POST, &asked, Some(body)).await
+            }
+            "enable" | "pause" => {
+                let on = command == "enable";
+                let body = json!({ "expected_revision": revision().await?, "enabled": on });
+                let asked = format!("{path}/enabled");
+                janitor_sent(app, dry, Method::POST, &asked, Some(body)).await
+            }
+            "remove" => {
+                let asked = format!("{path}?expected_revision={}", revision().await?);
+                janitor_sent(app, dry, Method::DELETE, &asked, None).await
+            }
+            "release" => {
+                let mut body = json!({ "expected_revision": revision().await? });
+                match (option("--successor"), successor_revision) {
+                    (Some(successor), given) => {
+                        let seen = match given {
+                            Some(given) => given,
+                            None => {
+                                let other = format!("/janitors/{}", quoted(&successor));
+                                let other = janitor_asked(app, Method::GET, &other, None).await?;
+                                other["janitor"]["revision"].as_i64().unwrap_or(0)
+                            }
+                        };
+                        body["successor_session"] = json!(successor);
+                        body["successor_revision"] = json!(seen);
+                    }
+                    (None, Some(_)) => {
+                        return Err(failed("--successor-revision requires --successor"));
+                    }
+                    (None, None) => {}
+                }
+                let asked = format!("{path}/release");
+                janitor_sent(app, dry, Method::POST, &asked, Some(body)).await
+            }
+            "create" => {
+                let mut body = configuration(true).map_err(|why| failed(&why))?;
+                let truthy = |body: &serde_json::Map<String, Value>, key: &str| {
+                    body.get(key).is_some_and(|value| match value {
+                        Value::Null | Value::Bool(false) => false,
+                        Value::String(text) => !text.is_empty(),
+                        _ => true,
+                    })
+                };
+                let identity = ["name", "backend", "cwd"];
+                if let Some(agent) = option("--agent").filter(|agent| !agent.is_empty()) {
+                    if identity.iter().any(|key| truthy(&body, key)) {
+                        let why = "conversion takes --agent without new-agent identity fields";
+                        return Err(failed(why));
+                    }
+                    body.insert("session".to_string(), json!(agent));
+                } else {
+                    for key in identity {
+                        if let Some(value) = option(&format!("--{key}")) {
+                            body.insert(key.to_string(), json!(value));
+                        }
+                    }
+                    let whole = identity.iter().all(|key| truthy(&body, key));
+                    if !truthy(&body, "session") && !whole {
+                        return Err(failed("provide --agent or all of --name, --backend and --cwd"));
+                    }
+                }
+                if !body.contains_key("template_id") {
+                    body.insert("template_id".to_string(), json!("task-labels"));
+                }
+                let supplied = option("--request-id").or_else(|| {
+                    let carried = body.get("request_id").filter(|id| !id.is_null());
+                    carried.map(|id| id.as_str().map_or_else(|| id.to_string(), str::to_string))
+                });
+                let mut told = String::new();
+                if truthy(&body, "session") {
+                    if supplied.is_some() {
+                        let why = "--request-id is only for creating a new identity; conversion uses its existing session";
+                        return Err(failed(why));
+                    }
+                } else {
+                    // A new agent made as a janitor is one request however often it is sent:
+                    // its key is said before the request, so that it can be sent again.
+                    let request_id = match &supplied {
+                        Some(supplied) => as_uuid(supplied),
+                        None => as_uuid(&ids::hex(16)),
+                    };
+                    let Some(request_id) = request_id else {
+                        return Err(failed("request_id must be a UUID"));
+                    };
+                    told = format!("{}\n", python::dumps(&json!({ "request_id": request_id })));
+                    body.insert("request_id".to_string(), json!(request_id));
+                }
+                let sent = janitor_sent(app, dry, Method::POST, "/janitors", Some(Value::Object(body)));
+                sent.await.map_err(|mut refused| {
+                    refused.stderr = format!("{told}{}", refused.stderr);
+                    refused
+                })
+            }
+            "run-context" => {
+                let asked = format!("{run_path}/context");
+                janitor_asked(app, Method::GET, &asked, None).await
+            }
+            "outcome" => {
+                let body = json!({ "activity": status, "summary": option("--summary") });
+                let asked = format!("{run_path}/activity");
+                janitor_sent(app, dry, Method::POST, &asked, Some(body)).await
+            }
+            "review" => {
+                let label = option("--label");
+                if outcome == "changed" && label.as_deref().is_none_or(str::is_empty) {
+                    return Err(failed("changed requires --label"));
+                }
+                if let Some(label) = &label {
+                    let words = label.split(python::blank).filter(|word| !word.is_empty()).count();
+                    if label.chars().count() > 20 || !(2..=3).contains(&words) {
+                        let why = "a label must have 2\u{2013}3 words and at most 20 characters";
+                        return Err(failed(why));
+                    }
+                }
+                let mut body = json!({
+                    "target_session": option("--session"), "observed_state_id": state_id,
+                    "outcome": outcome, "reason": option("--reason"),
+                });
+                if let Some(label) = label {
+                    body["label"] = json!(label);
+                }
+                let asked = format!("{run_path}/review");
+                janitor_sent(app, dry, Method::POST, &asked, Some(body)).await
+            }
+            _ => Err(not_here("janitor")),
+        }
+    }
+    .await;
+    match done {
+        Ok(value) => shown(&value),
+        Err(answer) => answer,
+    }
+}
+
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
@@ -1010,6 +1522,8 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
         Some((command, rest)) if command == "call" => self::call(app, call, rest).await,
         Some((command, rest)) if command == "schedule" => schedule(app, rest).await,
+        Some((command, rest)) if command == "janitor" => janitor(app, call, rest).await,
+        Some((command, rest)) if command == "trigger" => trigger(app, rest).await,
         Some((command, _)) => not_here(command),
         None => ToolAnswer::said(2, "usage: clarp-admin COMMAND ..."),
     }

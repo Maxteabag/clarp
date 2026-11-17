@@ -2159,6 +2159,11 @@ NIGHTLY = [{'attachment_id': 'synthetic-nightly', 'trigger_id': 'schedule',
 NOWHERE = [{'attachment_id': 'synthetic-nowhere', 'trigger_id': 'schedule',
             'config': {'cron': '15 3 * * *', 'timezone': 'Europe/Nowhere'}}]
 OWN = 'clarp-message-delegator'
+# An agent with a scheduled task, at a time far from every day the suite runs on but one.
+SWEEPER = 'sweeper-one'
+NEW_YEAR = [{'attachment_id': 'synthetic-new-year', 'trigger_id': 'schedule',
+             'config': {'cron': '0 0 1 1 *', 'timezone': 'Europe/Oslo'}}]
+NO_RUN = '/janitor-runs/janitor-nobody'
 # The first of January, by the clocks of a city: far from every day the suite runs on but one.
 PREVIEW = '/janitor-triggers/preview?cron=0%200%201%201%20*'
 
@@ -2176,7 +2181,7 @@ SCENARIOS.append({
     'what': 'the janitors of a Host, agents with a job of maintenance: what a Host offers, one of its own, an '
             'agent made a janitor with a job, set, paused, put back as its job has it and removed, what each '
             'is refused in a word for the reason and in words, and when a schedule would run',
-    'sessions': (AGENT, KEEPER),
+    'sessions': (AGENT, KEEPER, SWEEPER),
     'steps': [
         get('/janitors', 'the janitors of a Host, and what it offers'),
         get('/janitor-triggers', 'what can start a janitor'),
@@ -2272,6 +2277,30 @@ SCENARIOS.append({
         {**SNAPSHOT, 'name': 'the snapshot when it is an agent again'},
         gone(f'/agents/{KEEPER}', 'removed as the agent it is'),
         get(f'/janitors/{KEEPER}', 'the janitor of an agent that was removed'),
+        # A scheduled task: turned on, which starts nothing before its time; when the runner has looked
+        # at it, it says when it runs next; and what a run is asked and told, of a run nobody has.
+        post('/agents', {**MAKE_HELPER, 'name': 'Sweeper One', 'session': SWEEPER}, 'an agent for a scheduled task'),
+        post('/janitors', {'session': SWEEPER, 'template_id': 'scheduled-prompt', 'attachments': NEW_YEAR},
+             'a scheduled task without its instructions'),
+        janitor('enabled', {'expected_revision': 1, 'enabled': True}, 'turned on without its instructions',
+                session=SWEEPER),
+        janitor('configure', {'expected_revision': 1, 'options': {'instructions': 'Count the doors.'}},
+                'given its instructions', session=SWEEPER),
+        janitor('enabled', {'expected_revision': 2, 'enabled': True}, 'turned on', session=SWEEPER),
+        janitor('enabled', {'expected_revision': 3, 'enabled': True}, 'turned on, which it is', session=SWEEPER),
+        {'op': 'quiesce'},
+        get(f'/janitors/{SWEEPER}', 'the task when the runner has looked at it'),
+        get(f'/janitors/{SWEEPER}/runs', 'its runs, of which there are none'),
+        get(f'{NO_RUN}/context', 'what a run nobody has is given to read'),
+        post(f'{NO_RUN}/activity', {'activity': 'napped'}, 'a run says something that is no ending'),
+        post(f'{NO_RUN}/activity', {'activity': 'idle', 'summary': 'x' * 301}, 'a run says too much'),
+        post(f'{NO_RUN}/activity', {'activity': 'idle', 'summary': 'nothing'}, 'a run nobody has says how it went'),
+        {'op': 'post', 'path': f'{NO_RUN}/activity', 'name': 'said as a list',
+         'raw': {'bytes': '["idle"]', 'content_type': 'application/json'}},
+        get(f'{NO_RUN}/no-such-thing', 'something of a run that there is not'),
+        janitor('enabled', {'expected_revision': 3, 'enabled': False}, 'paused', session=SWEEPER),
+        janitor('release', {'expected_revision': 4}, 'the scheduled task let go', session=SWEEPER),
+        gone(f'/agents/{SWEEPER}', 'the agent of the scheduled task removed'),
     ],
 })
 

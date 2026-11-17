@@ -24,6 +24,7 @@ use crate::schedules;
 
 pub mod adaptive;
 pub mod book;
+pub mod runs;
 pub mod schedule;
 
 const CATALOGUE: &str = include_str!("janitor-catalogue.json");

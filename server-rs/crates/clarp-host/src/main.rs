@@ -212,6 +212,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::schedules::run(&app);
     // And an idle agent that asked for it is given a heartbeat when one is due.
     clarp_host::heartbeat::run(&app);
+    // And a janitor's scheduled task is run when its schedule says.
+    clarp_host::janitors::run(&app);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",
