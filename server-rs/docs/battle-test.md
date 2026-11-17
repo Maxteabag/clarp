@@ -519,6 +519,33 @@ shell, `bash -lc`, and a `bash -lc` inside another all find this Host's tools fi
 Python Host's, as said. The turn carries `BASH_ENV`, `CLARP_HOST_ADDR` and this Host's `CLARP_SHARE_DIR` in
 all of them, which is what the hand-over reads.
 
+## The fence holds
+
+The release owner installed the wrappers that hand over (issue 388, PR 390) on both machines on 17 Nov at
+01:54, and said so at 13:42. Shown from this side on elitebook at 13:46, on the installed Host
+(`4581f4bd`), with `verify-wrappers.py`: first what is installed, then the wrapper without a model, then one
+real turn of Codex by an agent of the check's own.
+
+| What | What it showed |
+|---|---|
+| Installed | 14 of the Python Host's 14 managed wrappers in `~/.local/bin` carry the guard (release `76ee2f6b`); this Host has a tool under each of the same 14 names |
+| The wrapper called with what a turn of this Host carries, and this Host's real tools (no model) | the call is handed over: `clarp-goal list` shows a goal only this Host has |
+| The same, refused | exit 69 and "this turn belongs to another Clarp Host", nothing printed, with no share directory, with one that is no whole path, with one that has no such tool, with the mark of a hand-over there, and with the mark there and empty |
+| A call that writes, through the wrapper (no model) | the agent's own label is on this Host's row, and is taken back the same way |
+| In the real turn, under `sh -lc` | the turn carries `CLARP_HOST_ADDR`, this Host's `CLARP_SHARE_DIR` and a tool token; `command -v clarp-goal` and `command -v clarp-agent-bg` name the Python Host's wrappers |
+| `clarp-goal list` there, by its name and by the wrapper's own path | exit 0, and the goal only this Host has is listed |
+| `clarp-agent-bg ... on` there, through the wrapper | exit 0 |
+| The wrapper there with the share directory taken out of the environment | exit 69, "clarp-goal: this turn belongs to another Clarp Host" |
+| A tool this Host has not built (`clarp-podcast-history`), there | handed over, and it is this Host's own tool that says it is not here (exit 69) |
+| The Python Host's journal for those minutes | names nothing of the check: not its session, its goal or its label |
+| Afterwards | the check's agent removed; the 23 agents that were there still are |
+
+One of the check's 25 points failed, and it was the check's own: it looked for a label of four words on
+the agent's row, where a label an agent gives itself is cut to three words and twenty signs, as the Python
+tool cuts it. The call had ended well; the same write was then shown without a model, with a label that
+fits. Not shown: zsh (the wrapper is a `/bin/sh` script whatever starts it), and laptopstudio, which has no
+Rust Host. The release owner was told what it showed, to close the issue on it.
+
 ## Through the connection relay
 
 On 16 Nov 2026 at 21:54 the installed Host (`6390a692`) was told to use the relay (`tools/install-host
