@@ -374,6 +374,8 @@ pub struct LiveStatus {
     pub stopping: bool,
     /// It waits between two attempts: for what, since when, and on which failure.
     pub parked: Option<Parked>,
+    /// The launch of its attempt is held until an account serves it.
+    pub held_for_an_account: bool,
     /// How many attempts of the turn have failed so far.
     pub failed_attempts: u32,
 }
@@ -469,6 +471,10 @@ struct LiveTurn {
     over: bool,
     /// Which attempt of the turn this is, from 1: whose spool is read.
     attempt: u32,
+    /// The attempt was stopped because the account its tool runs on was out
+    /// ([`Actor::stop_for_an_account`]): however it ends short of completing, the turn
+    /// waits for an account.
+    for_account: bool,
 }
 
 impl LiveTurn {
@@ -486,11 +492,41 @@ impl LiveTurn {
     }
 }
 
+/// The accounts of the agent's tool, on a Host that runs the owner's selector itself
+/// (`recovery::Accounts::Select`). Every agent of the tool shares them: what one turn's
+/// failure means for the others is the pool's to say (`clarp_kernel::accounts`), and what
+/// the pool wants done with this agent's turn comes back to the agent from outside
+/// ([`Actor::stop_for_an_account`], [`Actor::login_changed`]).
+pub trait Pooled: Send + Sync {
+    /// An attempt of the agent's turn failed on its account. Whether the turn waits for
+    /// another account: where it does not, it ends on that failure.
+    fn failed(&self, turn: TurnId, now_ms: i64) -> bool;
+    /// Nothing of the agent's turn runs any more, as the pool had asked.
+    fn stopped(&self, now_ms: i64);
+}
+
+/// How much longer than the pool lets a turn wait the turn's own wait lasts: the pool takes
+/// a turn up or lets it go, and the wait's own end is only what is left when it does not.
+const POOL_MARGIN_MS: i64 = 300_000;
+
+/// What is written down as the failure of an attempt that was stopped because the account
+/// its tool runs on was out for another turn.
+const STOPPED_FOR_AN_ACCOUNT: &str =
+    "usage limit reached: the account was out, and the turn was stopped to wait for another";
+
 pub struct Actor {
     profile: Profile,
     backend: Arc<dyn Backend>,
     recorder: Recorder,
     live: Option<LiveTurn>,
+    /// The pool of the tool's accounts, where this Host has one.
+    pool: Option<Arc<dyn Pooled>>,
+    /// The pool is to be told that nothing of the agent's turn runs any more, once what
+    /// says so is in the log.
+    stopped_for_pool: bool,
+    /// The launch of the turn's attempt is held until an account serves it: those who watch
+    /// are shown that the turn waits for one.
+    held_for_an_account: bool,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
     /// The agent's goals and plans, as the log has them.
@@ -934,6 +970,9 @@ impl Actor {
         speech.forget_before(now_ms - KEPT_FOR_MS);
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
         let mut actor = Self {
+            pool: None,
+            stopped_for_pool: false,
+            held_for_an_account: false,
             shown,
             shown_turn: None,
             shown_events: Vec::new(),
@@ -996,6 +1035,7 @@ impl Actor {
                 calls: Vec::new(),
                 over: true,
                 attempt,
+                for_account: false,
             });
         }
         Ok((actor, out))
@@ -1134,10 +1174,11 @@ impl Actor {
             }
         }
         if self.shown_turn.is_some() {
-            let waits = matches!(
-                self.recorder.agent().live(),
-                Some(Turn::Parked(parked)) if matches!(parked.wait, Wait::Account { .. })
-            );
+            let waits = self.held_for_an_account
+                || matches!(
+                    self.recorder.agent().live(),
+                    Some(Turn::Parked(parked)) if matches!(parked.wait, Wait::Account { .. })
+                );
             let events = self
                 .shown
                 .account_recovery(waits.then_some(ACCOUNT_WAIT), now_ms);
@@ -1216,6 +1257,7 @@ impl Actor {
                 tools,
                 stopping,
                 parked: None,
+                held_for_an_account: self.held_for_an_account,
                 failed_attempts: turn.attempt.saturating_sub(1),
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
@@ -1232,6 +1274,7 @@ impl Actor {
                 tools,
                 stopping,
                 parked: None,
+                held_for_an_account: false,
                 failed_attempts: turn.attempt.saturating_sub(1),
             }),
             // Between two attempts no tool works: the turn is as busy as one that thinks.
@@ -1249,6 +1292,7 @@ impl Actor {
                 tools: Vec::new(),
                 stopping,
                 parked: Some(turn.clone()),
+                held_for_an_account: false,
                 failed_attempts: turn.attempts,
             }),
             _ => None,
@@ -2225,6 +2269,40 @@ impl Actor {
         if !self.recorder.agent().live().is_some_and(Turn::has_process) {
             return Ok(out);
         }
+        // An attempt that was stopped for its account, and went without a word in its
+        // spool: the turn waits for an account all the same, and the pool is told.
+        if self.live.as_ref().is_some_and(|live| live.for_account)
+            && self.recorder.agent().stopping().is_none()
+        {
+            let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
+            let parked = Command::TurnParked {
+                turn,
+                wait: Wait::Account {
+                    until_ms: now_ms + most,
+                },
+                kind: failures::USAGE_LIMIT.to_string(),
+                reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
+            };
+            let mut batch = self.recorder.batch();
+            if batch.command(parked, now_ms).is_ok() {
+                let effects = batch.commit()?.effects;
+                if let Some(live) = self.live.as_mut() {
+                    live.for_account = false;
+                    live.drafts.clear();
+                    live.tools.clear();
+                    live.calls.clear();
+                }
+                let events = self.shown.settle("interrupted", now_ms);
+                self.shown_events.extend(events);
+                out.changed.status = true;
+                out.changed.conversation = true;
+                self.carry_out(effects, &mut out)?;
+                if let Some(pool) = &self.pool {
+                    pool.stopped(now_ms);
+                }
+                return Ok(out);
+            }
+        }
         // What the agent had written and nobody stored is kept: the user saw it.
         let unfinished = self.drafts().to_vec();
         let facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
@@ -2476,6 +2554,7 @@ impl Actor {
             calls: Vec::new(),
             over: false,
             attempt,
+            for_account: false,
         });
         out.actions.push(Action::Launch(ShimOrder {
             turn,
@@ -2645,6 +2724,7 @@ impl Actor {
             calls,
             over: false,
             attempt,
+            for_account: false,
         });
         out.changed.conversation = true;
         out.actions.push(Action::Follow {
@@ -2696,6 +2776,60 @@ impl Actor {
             return Ok(Outputs::default());
         }
         self.retry(now_ms)
+    }
+
+    /// Gives the actor the pool of its tool's accounts.
+    pub fn pooled(&mut self, pool: Arc<dyn Pooled>) {
+        self.pool = Some(pool);
+    }
+
+    /// The turn that waits for an account, and since when it has, where one does.
+    pub fn waits_for_an_account(&self) -> Option<(TurnId, i64)> {
+        let live = self.recorder.agent().live()?;
+        match live {
+            Turn::Parked(parked) if parked.wait.is_for_an_account() => {
+                Some((parked.id, live.account_waits().since_ms?))
+            }
+            _ => None,
+        }
+    }
+
+    /// The launch of the turn's attempt is held until an account serves it, or is no
+    /// longer: those who watch the turn are shown that it waits for an account.
+    pub fn held_for_an_account(&mut self, held: bool, now_ms: i64) {
+        self.held_for_an_account = held;
+        self.show_turn(now_ms);
+    }
+
+    /// The account the agent's tool runs on is out, and the owner's selector is about to
+    /// put another in place: nothing of the tool may run while it does. A turn that runs is
+    /// stopped, and waits for an account like a turn that failed on its own; the pool is
+    /// told when nothing of it runs any more. A turn that waits already, or no turn at all,
+    /// has nothing to stop: the pool is told so at once.
+    pub fn stop_for_an_account(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        let mut out = Outputs::default();
+        let runs = match self.recorder.agent().live() {
+            Some(Turn::Starting(turn)) => Some(turn.id),
+            Some(Turn::Running(turn)) => Some(turn.id),
+            _ => None,
+        };
+        let live = self.live.as_mut().filter(|live| !live.over);
+        match (runs, live) {
+            (Some(turn), Some(live)) if live.turn == turn => {
+                live.for_account = true;
+                out.actions.push(Action::Stop {
+                    turn,
+                    socket: self.profile.socket_path_of(turn, live.attempt),
+                    grace_ms: self.profile.stop_grace_ms,
+                });
+            }
+            _ => {
+                if let Some(pool) = &self.pool {
+                    pool.stopped(now_ms);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
@@ -2820,6 +2954,31 @@ impl Actor {
                             continue;
                         }
                         Signal::Ended(outcome) => {
+                            // An attempt that was stopped for its account did not fail: the
+                            // turn waits for an account, and the pool is told that nothing
+                            // of it runs. One that completed all the same is the turn's end.
+                            if live.for_account
+                                && outcome != RunOutcome::Completed
+                                && batch.agent().stopping().is_none()
+                            {
+                                let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
+                                let parked = Command::TurnParked {
+                                    turn,
+                                    wait: Wait::Account { until_ms: t + most },
+                                    kind: failures::USAGE_LIMIT.to_string(),
+                                    reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
+                                };
+                                if batch.command(parked, t).is_ok() {
+                                    live.for_account = false;
+                                    live.drafts.clear();
+                                    live.tools.clear();
+                                    live.calls.clear();
+                                    let events = self.shown.settle("interrupted", t);
+                                    self.shown_events.extend(events);
+                                    self.stopped_for_pool = true;
+                                    continue;
+                                }
+                            }
                             // An attempt that failed on something that passes is not the
                             // turn's end: the turn waits, and is tried again.
                             if let RunOutcome::Failed { reason } = &outcome
@@ -2843,6 +3002,12 @@ impl Actor {
                                     }),
                                     recovery::Next::Account { until_ms } => {
                                         Some(Wait::Account { until_ms })
+                                    }
+                                    recovery::Next::Pool => {
+                                        let pool = self.pool.as_ref();
+                                        let waits = pool.is_some_and(|pool| pool.failed(turn, t));
+                                        let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
+                                        waits.then_some(Wait::Account { until_ms: t + most })
                                     }
                                     recovery::Next::Fail => None,
                                 };
@@ -3067,6 +3232,12 @@ impl Actor {
                 self.forget_live();
             }
             self.carry_out(committed.effects, out)?;
+            // That nothing of the turn runs any more is in the log: the pool is told.
+            if std::mem::take(&mut self.stopped_for_pool)
+                && let Some(pool) = &self.pool
+            {
+                pool.stopped(now_ms);
+            }
             if let Some(until) = stopped_at {
                 // What could not be read after that point is found again by the next reading.
                 let again = read.damaged.iter().filter(|line| line.offset >= until);

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
     Action, Actor, ActorError, ByHand, Changed, ImportedRow, Kept, Outputs, Profile, QueueState,
-    Sent, Status, Waiting,
+    Sent, ShimOrder, Status, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -299,6 +299,11 @@ pub enum Ask {
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
     /// on the one that is there now.
     LoginChanged,
+    /// From the pool of the tool's accounts: nothing of the agent's turn may run while
+    /// another login is put in place.
+    AccountStop,
+    /// From the pool: the agent's turn, which waited for an account, is taken up.
+    AccountBack,
     /// From the explainer of the use of tools: fields to put on an item of what is shown.
     Explained {
         item: String,
@@ -350,6 +355,9 @@ pub struct Setup {
     pub telling: crate::telling::Telling,
     /// The way to the tally of what turns used.
     pub tally: crate::usage::Tally,
+    /// The pool of the accounts of the agent's tool, on a Host that runs the owner's
+    /// selector itself and has one for this tool.
+    pub pool: Option<Arc<crate::pool::Service>>,
 }
 
 /// The way to an agent's thread.
@@ -665,6 +673,18 @@ impl AgentHandle {
         let _ = self.tx.send(Ask::LoginChanged);
     }
 
+    /// Tells the agent's thread that nothing of its tool may run for a while: the account
+    /// is out, and another is about to be put in place. Does not wait.
+    pub fn stop_for_an_account(&self) {
+        let _ = self.tx.send(Ask::AccountStop);
+    }
+
+    /// Tells the agent's thread that its turn, which waited for an account, is taken up.
+    /// Does not wait.
+    pub fn account_back(&self) {
+        let _ = self.tx.send(Ask::AccountBack);
+    }
+
     /// Has fields put on an item of what is shown of the agent's turn: the explanation of
     /// a tool's use on its row. Does not wait.
     pub fn explained(&self, item: String, fields: Value) {
@@ -718,6 +738,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         view: view_tx,
         told: None,
         passed: Vec::new(),
+        held: None,
+        pooled: None,
         let_go_by_hand: false,
         reworded: false,
         newest: None,
@@ -753,6 +775,11 @@ struct Worker {
     /// How the agent stood at each point where its live turn moved on to something else
     /// since the clients were last told, in order: told before the state it is in now.
     passed: Vec<Status>,
+    /// The launch of an attempt that waits for an account: carried out when the pool of the
+    /// tool's accounts takes the turn up.
+    held: Option<ShimOrder>,
+    /// The turn the pool was last told of.
+    pooled: Option<TurnId>,
     /// Its user let the mailbox go a moment ago: the clients are told so in a word of its
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
@@ -1027,6 +1054,11 @@ impl Worker {
                 },
             };
             if matches!(ask, Ask::Close) {
+                // The agent is gone: the pool of its tool's accounts does not wait for its
+                // turn, and does not take it up.
+                if let (Some(pool), Some(_)) = (&self.setup.pool, self.pooled) {
+                    pool.disowned(&self.setup.record.agent_id);
+                }
                 return;
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
@@ -1108,6 +1140,18 @@ impl Worker {
         )
         .map_err(|error| error.to_string())?;
         self.actor = Some(actor);
+        if let (Some(pool), Some(actor)) = (&self.setup.pool, self.actor.as_mut()) {
+            actor.pooled(pool.of(&self.setup.record.agent_id));
+            // A turn that waited for an account when the Host last stopped waits on, in
+            // the recovery it waited in: the pool asks the selector for it and takes it up.
+            if let Some((turn, since)) = actor.waits_for_an_account() {
+                let agent = self.setup.record.agent_id.clone();
+                let model = actor.profile().model.clone().unwrap_or_default();
+                pool.carried(since, std::slice::from_ref(&agent));
+                pool.starting(&agent, turn, &model);
+                self.pooled = Some(turn);
+            }
+        }
         // What the agent is doing when it is opened is not news: a client that connects is
         // told to look at everything anyway. What follows from opening it is.
         self.told = self.actor.as_ref().map(Actor::status);
@@ -1518,6 +1562,11 @@ impl Worker {
                 answer,
             } => answered(actor.send(&message, admission, now), answer)?,
             Ask::Stop { by, answer } => {
+                // The turn is no longer the agent's to finish: the pool of its tool's
+                // accounts does not wait for it, and does not take it up.
+                if let (Some(pool), Some(_)) = (&self.setup.pool, self.pooled) {
+                    pool.disowned(&self.setup.record.agent_id);
+                }
                 // A Stop holds the agent's goals too: each one that is being worked is paused
                 // until someone resumes it, so that none wakes the agent the user just stopped.
                 let stopped = actor.stop(&by, now).and_then(|(told, mut out)| {
@@ -1632,6 +1681,32 @@ impl Worker {
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
+            Ask::AccountStop => {
+                if self.held.is_some() {
+                    // Its launch is held: nothing of it runs.
+                    if let Some(pool) = &self.setup.pool {
+                        pool.stopped(&self.setup.record.agent_id);
+                    }
+                    return Ok(());
+                }
+                (actor.stop_for_an_account(now)?, nobody())
+            }
+            Ask::AccountBack => match self.held.take() {
+                // The launch that was held is carried out now, if the pool lets it.
+                Some(order) => {
+                    actor.held_for_an_account(false, now);
+                    let out = Outputs {
+                        actions: vec![Action::Launch(order)],
+                        changed: Changed {
+                            status: true,
+                            ..Changed::default()
+                        },
+                        ..Outputs::default()
+                    };
+                    (out, nobody())
+                }
+                None => (actor.login_changed(now)?, nobody()),
+            },
             Ask::Explained { item, fields } => {
                 // Whoever watches is told with what else is shown, after this.
                 actor.shown_patch(&item, &fields, now);
@@ -1697,6 +1772,15 @@ impl Worker {
         for action in out.actions {
             self.carry_out(action);
         }
+        // The pool of the tool's accounts is told when the turn it knows is over.
+        if let (Some(pool), Some(turn)) = (&self.setup.pool, self.pooled) {
+            let live = self.actor.as_ref().and_then(|actor| actor.status().live);
+            if live.map(|live| live.turn) != Some(turn) {
+                pool.over(&self.setup.record.agent_id, turn);
+                self.pooled = None;
+                self.held = None;
+            }
+        }
         // The books are published before anything is told of them, and before whoever
         // asked for the change is answered.
         if out.changed.goals || out.changed.artifacts || out.changed.media {
@@ -1718,7 +1802,67 @@ impl Worker {
 
     /// Each turn has a thread of its own for as long as its shim lives. It does the waiting, so
     /// the agent's thread never does.
-    fn carry_out(&self, action: Action) {
+    fn carry_out(&mut self, action: Action) {
+        let action = match action {
+            // An attempt of a turn is about to be launched: the pool of the tool's accounts
+            // says whether it has to wait for an account instead. One that does is launched
+            // when the pool takes the turn up.
+            Action::Launch(order) if self.setup.pool.is_some() => {
+                let now = self.now_ms();
+                let model = self
+                    .actor
+                    .as_ref()
+                    .and_then(|actor| actor.profile().model.clone());
+                let waits = self.setup.pool.as_ref().is_some_and(|pool| {
+                    let model = model.as_deref().unwrap_or("");
+                    pool.starting(&self.setup.record.agent_id, order.turn, model)
+                });
+                self.pooled = Some(order.turn);
+                if waits {
+                    if let Some(actor) = self.actor.as_mut() {
+                        actor.held_for_an_account(true, now);
+                    }
+                    self.held = Some(order);
+                    return;
+                }
+                Action::Launch(order)
+            }
+            // A turn that ran on while the Host was down is the pool's as well. Where the
+            // pool says it has to wait (a recovery was under way), it is stopped for its
+            // account like any turn that runs when one begins.
+            Action::Follow {
+                turn,
+                attempt,
+                socket,
+            } if self.setup.pool.is_some() => {
+                let model = self
+                    .actor
+                    .as_ref()
+                    .and_then(|actor| actor.profile().model.clone());
+                let waits = self.setup.pool.as_ref().is_some_and(|pool| {
+                    let model = model.as_deref().unwrap_or("");
+                    pool.starting(&self.setup.record.agent_id, turn, model)
+                });
+                self.pooled = Some(turn);
+                if waits {
+                    let _ = self.tx.send(Ask::AccountStop);
+                }
+                Action::Follow {
+                    turn,
+                    attempt,
+                    socket,
+                }
+            }
+            // A turn whose launch is held has no shim to stop: it is gone at once.
+            Action::Stop { turn, .. }
+                if self.held.as_ref().is_some_and(|order| order.turn == turn) =>
+            {
+                let attempt = self.held.take().map_or(1, |order| order.attempt);
+                tell(&self.tx, turn, attempt, Told::Gone);
+                return;
+            }
+            other => other,
+        };
         let tx = self.tx.clone();
         let spawned = match action {
             Action::Launch(order) => {
@@ -2153,6 +2297,8 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
     // An agent that goes from thinking to answering is thinking still by its state, and
     // the apps are told all the same, as the Python Host tells them.
     let doing = match live.map(|live| &live.activity) {
+        // It could not begin: the account its tool runs on is out.
+        _ if live.is_some_and(|live| live.held_for_an_account) => "an account".to_string(),
         Some(Activity::Tool { name }) => name.clone(),
         Some(Activity::Responding) => wire::RESPONDING.to_string(),
         _ => String::new(),
@@ -2278,6 +2424,8 @@ fn refuse_for(
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
+                | Ask::AccountStop
+                | Ask::AccountBack
                 | Ask::Explained { .. },
             ) => {}
             // Who the agent is can be changed while it cannot be opened.

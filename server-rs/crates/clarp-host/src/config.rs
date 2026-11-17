@@ -117,7 +117,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
@@ -290,7 +290,7 @@ impl Config {
                 "--accounts" => {
                     let named = value("none or follow")?;
                     accounts = clarp_kernel::recovery::Accounts::by_name(&named)
-                        .ok_or(format!("--accounts {named}: none or follow"))?;
+                        .ok_or(format!("--accounts {named}: none, follow or select"))?;
                 }
                 "--push-relay" => {
                     push_relay = value("an address")?.trim_end_matches('/').to_string();

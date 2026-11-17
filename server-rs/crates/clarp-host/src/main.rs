@@ -104,6 +104,18 @@ async fn serve(config: Config) -> Result<(), String> {
     let (speaks, to_speak) = clarp_host::voice::mouth();
     // What turns used is taken from the first moment on, and kept once the fleet is there.
     let (tally, used) = clarp_host::usage::tally();
+    // Where this Host runs the owner's selectors of accounts itself: a pool for each tool
+    // the owner has a selector for.
+    let pools: Vec<Arc<clarp_host::pool::Service>> =
+        if config.accounts == clarp_kernel::recovery::Accounts::Select {
+            let owners = OwnerFile::new(config.speech_keys.clone()).read();
+            let selectors = owners.as_ref().map(clarp_host::owner::selectors);
+            let made = selectors.unwrap_or_default().into_iter();
+            made.map(|(tool, command)| clarp_host::pool::Service::new(tool, command, clock.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
     let works = Works {
         config: config.clone(),
         engine,
@@ -119,10 +131,14 @@ async fn serve(config: Config) -> Result<(), String> {
         // Who speaks for an agent is in the owner's file, where the keys of speech are.
         telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
         tally,
+        pools: pools.clone(),
     };
     // The pictures this Host ships: for the list of agents, and for the face a push shows.
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
     let fleet = fleet::start(works, store)?;
+    for pool in &pools {
+        pool.attach(fleet.clone());
+    }
     tokio::spawn(clarp_host::usage::keep(fleet.clone(), used, clock.clone()));
     let desks = Arc::new(Mutex::new(Presence::new()));
     // The relay tells what paces the chip when it is asked too much, by an alert as well.
@@ -237,6 +253,12 @@ async fn serve(config: Config) -> Result<(), String> {
         config.blobs,
         config.launcher
     );
+    for pool in &pools {
+        eprintln!(
+            "clarp-host: the {} accounts: the owner's selector is run by this Host",
+            pool.tool()
+        );
+    }
     // The edge is told who connected: the administrator's token opens the Host only from here.
     let router = edge::router(app.clone());
     // And where the Host is reached through a relay, what a phone asks there is asked of

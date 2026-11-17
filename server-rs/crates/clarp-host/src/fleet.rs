@@ -440,6 +440,9 @@ pub struct Works {
     pub telling: crate::telling::Telling,
     /// The way to the tally of what turns used.
     pub tally: crate::usage::Tally,
+    /// The pools of the tools' accounts, where this Host runs the owner's selectors itself:
+    /// one for each tool that has a selector.
+    pub pools: Vec<Arc<crate::pool::Service>>,
 }
 
 enum Ask {
@@ -1014,6 +1017,11 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         speaks: works.speaks.clone(),
         telling: works.telling.clone(),
         tally: works.tally.clone(),
+        pool: works
+            .pools
+            .iter()
+            .find(|pool| pool.tool() == record.backend)
+            .cloned(),
     })
 }
 
