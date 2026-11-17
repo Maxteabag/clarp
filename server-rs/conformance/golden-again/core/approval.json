@@ -549,7 +549,7 @@
        "turn_started_ms": null
       },
       "mcp_servers": [],
-      "model": "",
+      "model": "replay-fake",
       "model_avatar_url": "",
       "muted": false,
       "parent_agent_id": null,
