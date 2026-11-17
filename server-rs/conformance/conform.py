@@ -15,6 +15,9 @@
   conform.py rust    --rust BINARY --out DIR
       Runs the corpus against the Rust Host and writes down what it answered, compared
       with nothing: for a scenario that is new and has no reference yet.
+  conform.py selftest
+      Tries the tool's own rule for a reference that answers in more than one way on
+      captures made for it. Starts no Host. record and cross do it first, by themselves.
 
 record, plants and cross start Python test Hosts: they run only where the
 replay harness may run (tests/replay/README.md), which is the contained
@@ -675,6 +678,34 @@ NO_SUCH_ROW = '<a row the conversation does not have>'
 NAMES_A_ROW = ('row_id', 'source_message_id')
 
 
+def names_no_row(core: dict) -> bool:
+    """Whether a recording carries the mark of the reference's defect R19: a notification of a reply
+    names a row the conversation does not have, though the conversation as this capture read it has
+    the answer to that message. The row the reply was written into while its turn ran was replaced
+    by the transcript's row, and the turn's summary went with it
+    (server-rs/docs/reference-defects.md). The reference does it in some runs and not in others,
+    in the first turn of a conversation. It is a fact about one recording alone: no other Host is
+    looked at to tell it."""
+    answered: dict = {}
+    for exchange in core.get('http', ()):
+        body = exchange.get('body')
+        turns = body.get('turns') if isinstance(body, dict) else None
+        asked = None
+        for turn in turns if isinstance(turns, list) else ():
+            if not isinstance(turn, dict):
+                continue
+            if turn.get('role') == 'user':
+                asked = turn.get('id')
+            elif turn.get('role') == 'assistant' and asked:
+                answered.setdefault(asked, set()).add(turn.get('id'))
+    for frame in core.get('sse', ()):
+        data = frame.get('data')
+        if (isinstance(data, dict) and data.get('type') == 'user-notification'
+                and data.get('source_message_id') == NO_SUCH_ROW and answered.get(data.get('cause_message_id'))):
+            return True
+    return False
+
+
 def renamed(value, names: dict):
     if isinstance(value, list):
         return [renamed(item, names) for item in value]
@@ -999,9 +1030,9 @@ def write_golden(directory: Path, seen: dict):
 
 
 def golden_dirs(first: Path) -> list:
-    """Where the two recordings of the reference are written down: the first, and beside it
-    the second."""
-    return [first, first.with_name(first.name + '-again')]
+    """Where the recordings of the reference are written down: the first, beside it the second,
+    and a third where a run made one (`record`)."""
+    return [first, first.with_name(first.name + '-again'), first.with_name(first.name + '-more')]
 
 
 def load_intended(path) -> set:
@@ -1011,13 +1042,110 @@ def load_intended(path) -> set:
             if line.strip() and not line.lstrip().startswith('#')}
 
 
+# How often a scenario is recorded again when both of its recordings carry the mark of the
+# reference's defect R19 (`names_no_row`).
+MORE_TRIES = 3
+
+
+def recorded_again(recordings: list, chosen, again) -> tuple:
+    """The recordings, with a third where one could be made, and what the report says of it.
+
+    A scenario whose every recording carries the mark of the reference's defect R19 is recorded
+    again (`again(scenarios, attempt)` answers scenario id -> its two views), up to `MORE_TRIES`
+    times; the first answer that ran to its end without the mark is kept. The third recording
+    is the second with those answers in their places, so that it has the whole corpus."""
+    marked = [scenario for scenario in steady(chosen)
+              if all(names_no_row(recording[scenario['id']]['core']) for recording in recordings)]
+    if not marked:
+        return recordings, []
+    without: dict = {}
+    tries = dict.fromkeys((scenario['id'] for scenario in marked), 0)
+    for attempt in range(1, MORE_TRIES + 1):
+        left = [scenario for scenario in marked if scenario['id'] not in without]
+        if not left:
+            break
+        more = again(left, attempt)
+        for scenario in left:
+            views = more[scenario['id']]
+            tries[scenario['id']] = attempt
+            if not views['full']['error'] and not names_no_row(views['core']):
+                without[scenario['id']] = views
+    lines = ['', "# The reference's defect R19 in every recording of a scenario (a notification names a row the "
+             'conversation does not have)']
+    for scenario in marked:
+        name = scenario['id']
+        lines.append(f'{name}: recorded again, and its answer without it (try {tries[name]}) is kept as one more '
+                     'recording' if name in without else
+                     f'{name}: recorded {tries[name]} more time(s) with it every time: compared as it is')
+    if without:
+        recordings = [*recordings, {**recordings[-1], **without}]
+    return recordings, lines
+
+
+def selftest() -> list:
+    """The rule above, tried on captures made for it: what it must do and what it must not.
+    Raises when it does otherwise; the lines say what was tried. A tool that judges is tried
+    before it judges."""
+    def capture(names, answered=True, error=None):
+        turns = [{'id': 'u-one', 'role': 'user'}]
+        if answered:
+            turns.append({'id': '<row:1>', 'role': 'assistant'})
+        core = {'http': [{'path': '/log', 'body': {'turns': turns}}],
+                'sse': [{'data': {'type': 'user-notification', 'cause_message_id': 'u-one',
+                                  'source_message_id': names}}]}
+        return {'full': {'error': error}, 'core': core}
+    sound, marked = capture('<row:1>'), capture(NO_SUCH_ROW)
+    scenario = [{'id': 's'}]
+    assert not names_no_row(sound['core']), 'a recording whose notification names its row was marked'
+    assert names_no_row(marked['core']), 'a recording whose notification names no row was not marked'
+    assert not names_no_row(capture(NO_SUCH_ROW, answered=False)['core']), \
+        'a recording that never read the answer was marked: what it names cannot be known'
+    asked = []
+
+    def again(answers):
+        def give(left, attempt):
+            asked.append(attempt)
+            return {'s': answers[min(attempt, len(answers)) - 1]}
+        return give
+    # Both recordings marked, the second try sound: it is kept, and nothing is asked after it.
+    kept, lines = recorded_again([{'s': marked}, {'s': marked}], scenario, again([marked, sound, marked]))
+    assert len(kept) == 3 and kept[2]['s'] is sound and asked == [1, 2] and 'try 2' in lines[-1], (len(kept), asked)
+    # Marked every time: nothing is added, and it was tried as often as it may be.
+    asked.clear()
+    kept, lines = recorded_again([{'s': marked}, {'s': marked}], scenario, again([marked]))
+    assert len(kept) == 2 and asked == list(range(1, MORE_TRIES + 1)) and 'compared as it is' in lines[-1], asked
+    # A try that did not run to its end is no answer.
+    asked.clear()
+    broken = capture('<row:1>', error='the scenario did not run to its end')
+    kept, _ = recorded_again([{'s': marked}, {'s': marked}], scenario, again([broken]))
+    assert len(kept) == 2, 'a recording that did not run to its end was kept'
+    # One sound recording of two: the reference answers in two ways already, and nothing is asked.
+    asked.clear()
+    kept, lines = recorded_again([{'s': marked}, {'s': sound}], scenario, again([sound]))
+    assert len(kept) == 2 and not asked and not lines, 'a scenario with a sound recording was recorded again'
+    # A scenario the reference is known to waver in is not counted, and not recorded again.
+    kept, lines = recorded_again([{'s': marked}, {'s': marked}], [{'id': 's', 'unsteady': True}], again([sound]))
+    assert len(kept) == 2 and not asked, 'a scenario that is not counted was recorded again'
+    return ['the rule for a scenario whose every recording carries the mark of defect R19: tried on 5 cases, holds']
+
+
+
+
 def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
-    """The Python Host's answers, twice. Returns (both recordings, lines of the report, ok).
+    """The Python Host's answers, twice. Returns (the recordings, lines of the report, ok).
 
     Where the two recordings differ, the reference itself answers in more than one way. That
     is a defect of the reference (they are listed in docs/reference-defects.md), and it does
     not stop the run: both answers are kept, and the Rust Host conforms in such a scenario
-    when it gives one of them."""
+    when it gives one of them.
+
+    One of those defects (R19) the reference shows in some recordings and not in others, and
+    two recordings can both have it: then they agree, and neither is the answer the reference
+    gives when it does not. A recording says of itself that it has it (`names_no_row`). A
+    scenario whose two recordings both do is recorded again, up to `MORE_TRIES` times, and an
+    answer without the mark is kept as a third recording: one more of the ways the reference
+    answers. When the mark is there every time, that is how the reference answers, and
+    nothing is added."""
     harness_run.pin_static_mtimes(build)
     first = corpus(python_host(build), chosen, run.label('py-a'), jobs)
     second = corpus(python_host(build), chosen, run.label('py-b'), jobs)
@@ -1033,7 +1161,13 @@ def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
                  'THE REFERENCE RAN WITH ERRORS: nothing below can be trusted' if errors else
                  f'THE REFERENCE ANSWERS IN MORE THAN ONE WAY in {", ".join(spread)}: '
                  'both answers are kept, and the Rust Host is compared with each')
-    return [first, second], lines, not errors
+    recordings = [first, second]
+    if not errors:
+        recordings, more = recorded_again(
+            recordings, chosen,
+            lambda left, attempt: corpus(python_host(build), left, run.label(f'py-more-{attempt}'), jobs))
+        lines += more
+    return recordings, lines, not errors
 
 
 def planted_copy(build: Path, change: dict, where: Path) -> Path:
@@ -1135,7 +1269,7 @@ def choose(names):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('mode', choices=('record', 'plants', 'compare', 'cross', 'rust'))
+    parser.add_argument('mode', choices=('record', 'plants', 'compare', 'cross', 'rust', 'selftest'))
     parser.add_argument('--build', type=Path, help='a checkout of the repository: the Python Host under ./server')
     parser.add_argument('--rust', type=Path, help='the clarp-host binary (clarp-shim beside it)')
     parser.add_argument('--golden', type=Path, default=HERE / 'golden')
@@ -1153,15 +1287,22 @@ def main(argv=None) -> int:
             parser.error(f'{args.mode} needs --{needed}')
     build = args.build.resolve() if args.build else None
     rust = args.rust.resolve() if args.rust else None
+    if args.mode == 'selftest':
+        print('\n'.join(selftest()))
+        return 0
     run = Run()
     ok, lines = True, []
     try:
+        if args.mode in ('record', 'cross'):
+            # The tool's own rule is tried before the tool judges with it.
+            selftest()
         if args.mode == 'record':
             recordings, lines, ok = record(build, chosen, run, args.jobs)
             if ok:
                 for directory, seen in zip(golden_dirs(args.golden), recordings):
                     write_golden(directory, seen)
-                lines.append(f'written down: {len(recordings[0])} scenario(s), twice, in {args.golden}')
+                lines.append(f'written down: {len(recordings[0])} scenario(s), {len(recordings)} times, '
+                             f'in {args.golden}')
         elif args.mode == 'plants':
             lines, ok = prove(build, load_golden(args.golden, chosen), chosen, plants.CHANGES, run, args.jobs)
         elif args.mode == 'compare':
