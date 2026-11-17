@@ -172,7 +172,7 @@ def stall(con, plan_row, now: int) -> tuple[int, str, str] | None:
                    f"AND status IN ('queued','running') LIMIT 1", ids).fetchone():
         return None
     last = con.execute(f"SELECT MAX(updated_at) FROM messages WHERE agent_id IN ({marks})", ids).fetchone()[0]
-    jobs = con.execute(f"SELECT MAX(terminal_at) FROM background_jobs WHERE agent_id IN ({marks})",
+    jobs = con.execute(f"SELECT MAX(terminal_at) FROM background_jobs WHERE agent_id IN ({marks}) AND terminal_at IS NOT NULL",
                        ids).fetchone()[0]
     last = max(int(last or 0), int(jobs or 0), int(plan_row["created_at"] or 0))
     if now - last >= STALL_IDLE_MS:

@@ -58,7 +58,7 @@ CREATE INDEX idx_background_jobs_active ON background_jobs(status, updated_at DE
 CREATE INDEX idx_background_jobs_agent_active ON background_jobs(agent_id) WHERE terminal_at IS NULL;
 
 -- index idx_background_jobs_agent_terminal on background_jobs
-CREATE INDEX idx_background_jobs_agent_terminal ON background_jobs(agent_id, terminal_at);
+CREATE INDEX idx_background_jobs_agent_terminal ON background_jobs(agent_id, terminal_at) WHERE terminal_at IS NOT NULL;
 
 -- index idx_background_jobs_computer on background_jobs
 CREATE INDEX idx_background_jobs_computer ON background_jobs(owner_kind, computer_id, updated_at DESC);

@@ -218,7 +218,7 @@ def test_upgraded_database_matches_fresh_schema(tmp_path, monkeypatch):
     db._migrate(upgraded)
 
     if db._SCHEMA_VERSION == 127:
-        # The sole approved additive exception keeps old rollback Hosts at
+        # The sole approved additive partial terminal index keeps rollback Hosts at
         # schema 127 runnable. The next REAL version migration must create
         # this index too; at any later version the normal strict check below
         # applies BEFORE service setup and catches a forgotten chain step.
