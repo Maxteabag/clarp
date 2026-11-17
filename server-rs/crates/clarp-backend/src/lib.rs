@@ -48,6 +48,15 @@ pub struct TurnSpec {
     pub told: Option<clarp_kernel::told::Turn>,
 }
 
+/// One question to a tool's model, outside every conversation: answered once, and nothing
+/// of it kept by the tool. What a janitor that answers one request asks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Question {
+    pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
 /// How to start the tool for one turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
@@ -134,6 +143,18 @@ pub trait Backend: Send + Sync {
     /// tool that has no login.
     fn login_file(&self, _home: &Path) -> Option<PathBuf> {
         None
+    }
+
+    /// How to start the tool for one question: it answers once and keeps no conversation
+    /// of it. The question is read on standard input, never from the command line, which
+    /// everybody on the machine can read. `None` for a tool that cannot be asked so.
+    fn once(&self, _question: &Question) -> Option<Launch> {
+        None
+    }
+
+    /// The answer in what the tool printed for one question. `Err`: why there is none.
+    fn answered(&self, printed: &str) -> Result<String, String> {
+        Ok(printed.to_string())
     }
 }
 

@@ -37,6 +37,7 @@ pub mod launcher;
 pub mod library;
 pub mod logins;
 pub mod media;
+pub mod once;
 pub mod owner;
 pub mod pairing;
 pub mod peers;

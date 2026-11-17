@@ -136,6 +136,34 @@ impl Backend for Claude {
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(ClaudeInterpreter::new(turn, name))
     }
+
+    /// One `claude -p` whose conversation is not kept, as the Python Host asks Claude Code
+    /// one question (`backend/claude.py`, `routing_cmd`), and with none of the user's own
+    /// MCP servers, which a question has no use for and would wait for. What it prints is
+    /// its answer.
+    fn once(&self, question: &crate::Question) -> Option<Launch> {
+        let mut args: Vec<String> = [
+            "-p",
+            "--dangerously-skip-permissions",
+            "--no-session-persistence",
+            "--strict-mcp-config",
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+        for (flag, value) in [("--model", &question.model), ("--effort", &question.effort)] {
+            if let Some(value) = value.as_ref().filter(|value| !value.trim().is_empty()) {
+                args.push(flag.to_string());
+                args.push(value.clone());
+            }
+        }
+        Some(Launch {
+            program: self.program.clone(),
+            args,
+            env: Vec::new(),
+            stdin: question.prompt.clone().into_bytes(),
+        })
+    }
 }
 
 /// A message of the agent's while it is being written.
@@ -1504,6 +1532,39 @@ mod tests {
                 .args
                 .windows(2)
                 .any(|pair| pair == ["--resume", "sess-1"])
+        );
+    }
+
+    #[test]
+    fn one_question_is_asked_of_claude_code_outside_every_conversation() {
+        let claude = Claude::with_program("/opt/claude");
+        let question = crate::Question {
+            prompt: "Whom is this for?".to_string(),
+            model: Some("sonnet".to_string()),
+            effort: Some("low".to_string()),
+        };
+        let launch = claude.once(&question).unwrap();
+        assert_eq!(launch.program, "/opt/claude");
+        assert_eq!(
+            launch.args,
+            [
+                "-p",
+                "--dangerously-skip-permissions",
+                "--no-session-persistence",
+                "--strict-mcp-config",
+                "--model",
+                "sonnet",
+                "--effort",
+                "low"
+            ]
+        );
+        assert_eq!(launch.stdin, b"Whom is this for?");
+        let plain = crate::Question::default();
+        assert_eq!(claude.once(&plain).unwrap().args.len(), 4);
+        // What it prints is its answer, as it is.
+        assert_eq!(
+            claude.answered(" {\"a\": 1}\n"),
+            Ok(" {\"a\": 1}\n".to_string())
         );
     }
 }
