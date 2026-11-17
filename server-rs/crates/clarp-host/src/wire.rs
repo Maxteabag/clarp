@@ -1678,6 +1678,7 @@ mod tests {
             model: None,
             tokens_in: None,
             tokens_out: None,
+            context_tokens: None,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -1914,6 +1915,7 @@ mod tests {
             model: Some("fable".to_string()),
             tokens_in: Some(5),
             tokens_out: Some(7),
+            context_tokens: None,
         }
     }
 

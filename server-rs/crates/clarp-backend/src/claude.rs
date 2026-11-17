@@ -751,6 +751,19 @@ impl ClaudeInterpreter {
             }
             return;
         }
+        // How full the conversation is: what this answer was made from, sent anew, read from
+        // the cache and written to it. The sum a turn's result says counts every step of the
+        // turn anew, and says nothing of that (the Python Host reads the same off the
+        // transcript's last answer, `claude_transcript.context_tokens_from_jsonl`).
+        let said = message["usage"].as_object();
+        if let Some(usage) = said.filter(|usage| !usage.is_empty()) {
+            let count = |name: &str| usage.get(name).and_then(Value::as_u64).unwrap_or(0);
+            out.push(Signal::Context {
+                tokens: count("input_tokens")
+                    + count("cache_read_input_tokens")
+                    + count("cache_creation_input_tokens"),
+            });
+        }
         for block in content {
             match text_of(&block["type"]) {
                 "tool_use" | "server_tool_use" => {
@@ -958,7 +971,11 @@ mod tests {
             .filter(|signal| {
                 !matches!(
                     signal,
-                    Signal::Live(_) | Signal::Glimpse(_) | Signal::Model(_) | Signal::Usage { .. }
+                    Signal::Live(_)
+                        | Signal::Glimpse(_)
+                        | Signal::Model(_)
+                        | Signal::Usage { .. }
+                        | Signal::Context { .. }
                 )
             })
             .cloned()
@@ -1053,6 +1070,36 @@ mod tests {
             ),
             Some((1105, 7))
         );
+        // How full the conversation is, is what the last answer was made from: not that sum.
+        let answer = |usage: &str| {
+            format!(
+                r#"{{"type":"assistant","message":{{"id":"msg_1","role":"assistant","content":[{{"type":"text","text":"x"}}],"usage":{usage}}}}}"#
+            )
+        };
+        let (first, last) = (
+            answer(r#"{"input_tokens":3,"cache_read_input_tokens":900,"output_tokens":9}"#),
+            answer(
+                r#"{"input_tokens":4,"cache_creation_input_tokens":50,"cache_read_input_tokens":1000}"#,
+            ),
+        );
+        let result = r#"{"type":"result","subtype":"success","is_error":false,"result":"x","usage":{"input_tokens":7,"cache_creation_input_tokens":50,"cache_read_input_tokens":1900,"output_tokens":20}}"#;
+        let signals = read(&[INIT, &first, &last, result], (Some(0), None));
+        let held: Vec<u64> = signals
+            .iter()
+            .filter_map(|signal| match signal {
+                Signal::Context { tokens } => Some(*tokens),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            held,
+            [903, 1054],
+            "each answer says how full it found the conversation"
+        );
+        assert!(signals.contains(&Signal::Usage {
+            tokens_in: 1957,
+            tokens_out: 20
+        }));
         // What it does not say counts as none; a turn that says nothing of its use says none.
         assert_eq!(used(r#"{"output_tokens":3}"#), Some((0, 3)));
         assert_eq!(used(r#"{"cache_read_input_tokens":40}"#), Some((40, 0)));

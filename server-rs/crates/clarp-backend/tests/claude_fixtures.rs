@@ -47,7 +47,11 @@ fn stored(signals: &[Signal]) -> Vec<&Signal> {
         .filter(|signal| {
             !matches!(
                 signal,
-                Signal::Live(_) | Signal::Glimpse(_) | Signal::Model(_) | Signal::Usage { .. }
+                Signal::Live(_)
+                    | Signal::Glimpse(_)
+                    | Signal::Model(_)
+                    | Signal::Usage { .. }
+                    | Signal::Context { .. }
             )
         })
         .collect()
