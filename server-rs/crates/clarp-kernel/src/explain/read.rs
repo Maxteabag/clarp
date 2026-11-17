@@ -127,6 +127,48 @@ pub fn normalize(activity: &Map<String, Value>) -> Map<String, Value> {
     read
 }
 
+/// The endings a script that an agent runs is known by.
+const SCRIPTS: [&str; 8] = [".js", ".mjs", ".cjs", ".py", ".sh", ".bash", ".ts", ".rb"];
+/// How much of a script is shown to whoever explains the call that runs it.
+const SCRIPT: usize = 6000;
+
+/// The scripts a use names: every word of its command that ends as a script does. What a
+/// script holds is part of what the call does, so whoever explains the call is shown the
+/// beginning of it; which of these are read, and how, is the Host's (only what lies in the
+/// agent's own directory, plainly).
+pub fn script_names(activity: &Map<String, Value>) -> Vec<String> {
+    let said = |source: &Map<String, Value>, key: &str| match source.get(key) {
+        None => String::new(),
+        Some(Value::String(said)) => said.clone(),
+        Some(other) => python::repr(other),
+    };
+    let mut lines: Vec<String> = ["command", "summary", "name"]
+        .iter()
+        .map(|key| said(activity, key))
+        .collect();
+    match activity.get("input") {
+        Some(Value::String(given)) => lines.push(given.clone()),
+        Some(Value::Object(given)) => {
+            lines.extend(["cmd", "command"].iter().map(|key| said(given, key)));
+        }
+        _ => lines.push(String::new()),
+    }
+    let words = crate::tools::shell_split(&lines.join("\n")).unwrap_or_default();
+    let a_script = |word: &String| {
+        let name = word.rsplit('/').next().unwrap_or_default();
+        let ending = name.rfind('.').filter(|at| *at > 0).map(|at| &name[at..]);
+        ending.is_some_and(|ending| SCRIPTS.contains(&ending))
+    };
+    words.into_iter().filter(a_script).collect()
+}
+
+/// What whoever explains a call is shown of a script it runs: its name and its beginning.
+pub fn script_excerpt(name: &str, beginning: &str) -> Value {
+    serde_json::json!({
+        "file": name, "source_excerpt": snippet(&text(beginning), SCRIPT), "excerpt_only": true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

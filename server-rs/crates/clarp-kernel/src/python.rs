@@ -25,6 +25,29 @@ pub fn dumps(value: &Value) -> String {
     }
 }
 
+/// A value as Python's `json.dumps` writes it by default: a space after every comma and
+/// colon, and nothing but ASCII (every other sign as its number).
+pub fn dumps_ascii(value: &Value) -> String {
+    match value {
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(dumps_ascii).collect();
+            format!("[{}]", items.join(", "))
+        }
+        Value::Object(fields) => {
+            let fields: Vec<String> = fields
+                .iter()
+                .map(|(key, value)| {
+                    let mut written = String::new();
+                    ascii_text(key, &mut written);
+                    format!("{written}: {}", dumps_ascii(value))
+                })
+                .collect();
+            format!("{{{}}}", fields.join(", "))
+        }
+        plain => compact_ascii(plain),
+    }
+}
+
 /// A value in the one form two writers agree on: its fields in the order of their names,
 /// nothing between them. What a digest of a value is taken of.
 pub fn canonical(value: &Value) -> String {

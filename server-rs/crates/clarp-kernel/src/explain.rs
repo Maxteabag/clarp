@@ -18,8 +18,9 @@
 //! `tests/fixtures/tool-explanation-vectors.json`.
 //!
 //! Beside it: [`read`] is how a use is read as it comes from a turn or an app (the bounded
-//! fields, with secrets and what a heredoc only feeds withheld), and [`shapes`] is what
-//! parts a call has and under what shape each is remembered.
+//! fields, with secrets and what a heredoc only feeds withheld), [`shapes`] is what parts a
+//! call has and under what shape each is remembered, [`learned`] is what a model said of a
+//! shape before, and [`desk`] is where an app asks and is answered.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -29,6 +30,8 @@ use serde_json::{Map, Value, json};
 
 use crate::{portraits, python, tools};
 
+pub mod desk;
+pub mod learned;
 pub mod read;
 pub mod shapes;
 
@@ -608,16 +611,10 @@ fn after<'a>(words: &'a [String], names: &[&str]) -> Option<&'a str> {
     Some(words[at + 1].as_str())
 }
 
-/// A value as Python's `json.dumps` writes it by default: a space after every comma, and
-/// only ASCII.
+/// A value as Python's `json.dumps` writes it by default: what a digest of a shape is
+/// taken of.
 fn written(value: &Value) -> String {
-    match value {
-        Value::Array(items) => {
-            let items: Vec<String> = items.iter().map(written).collect();
-            format!("[{}]", items.join(", "))
-        }
-        plain => python::compact_ascii(plain),
-    }
+    python::dumps_ascii(value)
 }
 
 /// What stands for the exact shape of a use, under a key that is the Host's own: two uses
