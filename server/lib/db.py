@@ -662,6 +662,7 @@ def conn() -> sqlite3.Connection:
         # connection with its lowered timeout; open a fresh one.
         _LOCAL.discard_conn = None
         close_local()
+    check_service_indexes = False
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
@@ -677,8 +678,24 @@ def conn() -> sqlite3.Connection:
                 c.close()
                 raise
             _MIGRATED = True
+            check_service_indexes = _SERVICE == "host"
     _LOCAL.conn = c
+    # Register the connection and release _CONN_LOCK before any optional
+    # setup/logging: failure must not prevent startup or recursively open DB.
+    if check_service_indexes:
+        ensure_service_indexes(c)
     return c
+
+
+def ensure_service_indexes(connection=None) -> bool:
+    """Optional additive setup is owned only by the Host service.
+
+    Runtime/CLI opens never attempt it, including maintenance in an embedded
+    caller. Fresh database creation still uses the complete fresh schema.
+    """
+    if _SERVICE != "host":
+        return False
+    return db_migrations.ensure_host_indexes(connection or conn(), DB_PATH)
 
 
 def is_locked_error(exc: BaseException) -> bool:
