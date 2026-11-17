@@ -1004,6 +1004,13 @@ impl Worker {
             actor.retune(model, effort);
             actor.retell(told);
         }
+        // Another tool: the agent is opened again on it. Only an agent that has no
+        // conversation with the tool it had is given another (who changes it sees to that).
+        let another = record.backend != self.setup.record.backend;
+        if let Some(backend) = clarp_backend::by_id(&record.backend).filter(|_| another) {
+            self.setup.backend = backend;
+            self.actor = None;
+        }
         self.setup.record = record;
     }
 

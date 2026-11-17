@@ -7232,8 +7232,10 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
             "Invalid option: max_interval_seconds"
         )
     );
+    // A tool the Host has not. (A tool it has is taken while the janitor has no
+    // conversation with the one it has: the router's test changes one.)
     assert_eq!(
-        configure(json!({ "expected_revision": 1, "backend": "codex" })),
+        configure(json!({ "expected_revision": 1, "backend": "abacus" })),
         told(400, "invalid_janitor", "Unsupported Janitor backend")
     );
     let nightly = json!([{ "attachment_id": "nightly", "trigger_id": "schedule",
@@ -8531,13 +8533,15 @@ fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
     assert_eq!(agents(), before + 5);
 }
 
-/// A stand-in for Codex asked one question (`codex exec --json`, the question on standard
-/// input): it writes down what it was started with and what it was shown, and answers as
-/// `rules` say: the answer of the first rule whose words are in the message, and that the
-/// message is noise where none are. The answer `fail` is a tool that ends badly; `<held>`
-/// in an answer is the id of the newest message that is held.
-fn routing_model(place: &Place, rules: &Value) -> (PathBuf, PathBuf) {
+/// A stand-in for a tool asked one question, as Codex (`codex exec --json`) and as Claude
+/// Code (`claude -p`), the question on standard input: it writes down what it was started
+/// with and what it was shown, and answers as `rules` say: the answer of the first rule
+/// whose words are in the message, and that the message is noise where none are. The answer
+/// `fail` is a tool that ends badly; `<held>` in an answer is the id of the newest message
+/// that is held. Answers where the two programs are, and where what was asked is written.
+fn routing_model(place: &Place, rules: &Value) -> (PathBuf, PathBuf, PathBuf) {
     let (codex, asked) = (place.root.join("codex"), place.root.join("asked"));
+    let claude = place.root.join("claude-asked-once");
     let script = format!(
         r#"#!/usr/bin/env python3
 import json, sys
@@ -8558,14 +8562,18 @@ if answer == "fail":
     sys.exit(3)
 if answer.get("pending_id") == "<held>":
     answer["pending_id"] = packet["pending"][0]["pending_id"] if packet["pending"] else ""
-said = {{"type": "agent_message", "text": json.dumps(answer)}}
-print(json.dumps({{"type": "item.completed", "item": said}}))
+if sys.argv[1:2] == ["exec"]:
+    said = {{"type": "agent_message", "text": json.dumps(answer)}}
+    print(json.dumps({{"type": "item.completed", "item": said}}))
+else:
+    print(json.dumps(answer))
 "#,
         rules = serde_json::to_string(&rules.to_string()).unwrap(),
         asked = serde_json::to_string(asked.to_str().unwrap()).unwrap(),
     );
     program(&codex, &script);
-    (codex, asked)
+    program(&claude, &script);
+    (codex, claude, asked)
 }
 
 #[test]
@@ -8591,8 +8599,11 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         }],
         ["broken", "fail"],
     ]);
-    let (codex, asked) = routing_model(&place, &rules);
-    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let (codex, claude, asked) = routing_model(&place, &rules);
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
     let host = place.start_in("", &[], &world);
     let (mike, anna) = (host.new_agent("Mike"), host.new_agent("Anna"));
     assert_eq!((mike.as_str(), anna.as_str()), ("mike", "anna"));
@@ -8916,7 +8927,51 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
         ),
         (&json!(true), &json!(false))
     );
-    // Turned off, a dictated message is a message like any other: no model is asked.
+    // Set to another tool of the Host: its janitor is that tool's from then on, with that
+    // tool's own choice of model, and stays on; and that tool is asked.
+    let moved = json!({ "provider": "claude" });
+    let (status, set) = host.ask("POST", "/orchestrator/settings", Some(&moved));
+    let settings = &set["settings"];
+    assert_eq!(
+        (
+            status,
+            &settings["provider"],
+            &settings["model"],
+            &settings["enabled"]
+        ),
+        (200, &json!("claude"), &json!(""), &json!(true)),
+        "{set}"
+    );
+    let janitor = host.get("/janitors/clarp-message-delegator")["janitor"].clone();
+    assert_eq!(
+        (
+            &janitor["backend"],
+            &janitor["execution"]["provider"],
+            &janitor["enabled"]
+        ),
+        (&json!("claude"), &json!("claude"), &json!(true)),
+        "{janitor}"
+    );
+    let by_claude = json!({
+        "session": "mike", "text": "the notes, once more", "hands_free": true,
+        "client_msg_id": "r-8",
+    });
+    let (status, sent) = host.ask("POST", "/send", Some(&by_claude));
+    assert_eq!(
+        (status, &sent["session"], &sent["orchestrator"]["action"]),
+        (200, &json!("anna"), &json!("route")),
+        "{sent}"
+    );
+    let last = questions().last().unwrap().clone();
+    assert_eq!(last["args"][0], "-p", "{last}");
+    let newest = host.get("/orchestrator/decisions?limit=1")["decisions"][0].clone();
+    assert_eq!(
+        (&newest["provider"], &newest["model"]),
+        (&json!("claude"), &json!(""))
+    );
+
+    // Turned off, a dictated message is a message like any other: no model is asked, and
+    // without a name it stays with the agent that is open (Anna, who was last given one).
     let off = json!({ "enabled": false });
     let (status, set) = host.ask("POST", "/orchestrator/settings", Some(&off));
     assert_eq!(
@@ -8926,10 +8981,10 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
     );
     let before = questions().len();
     let plain = json!({
-        "session": "mike", "text": "the notes again", "hands_free": true, "client_msg_id": "r-7",
+        "session": "mike", "text": "the notes again", "hands_free": true, "client_msg_id": "r-9",
     });
     let (status, sent) = host.ask("POST", "/send", Some(&plain));
-    assert_eq!((status, &sent["session"]), (200, &json!("mike")), "{sent}");
+    assert_eq!((status, &sent["session"]), (200, &json!("anna")), "{sent}");
     assert!(sent.get("orchestrator").is_none(), "{sent}");
     assert_eq!(questions().len(), before);
 }

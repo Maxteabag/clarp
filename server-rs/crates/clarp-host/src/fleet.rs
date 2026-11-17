@@ -173,6 +173,9 @@ pub enum Amend {
         model: Option<String>,
         effort: Option<String>,
     },
+    /// The tool it runs on: for a member that has no conversation with the tool it had.
+    /// Whoever asks has seen to that.
+    Tool(String),
     /// The voices it was given, as they are stored: one for each engine it has one for.
     Voice(String),
     /// How much it says while it works, from 0 to 3.
@@ -1784,6 +1787,7 @@ impl Fleet {
                     record.effort = effort;
                 }
             }
+            Amend::Tool(backend) => record.backend = backend,
             Amend::Voice(voices) => record.voice_id = voices,
             Amend::Narration(level) => record.narration = level,
             // A janitor is that and nothing else: no helper of anybody, and not woken by

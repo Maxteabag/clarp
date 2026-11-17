@@ -218,10 +218,17 @@ impl Desk {
                 Effect::Release { agent_id } => (agent_id, Amend::Janitor(false)),
                 Effect::Tune {
                     agent_id,
+                    backend,
                     model,
                     effort,
-                    ..
-                } => (agent_id, Amend::Tune { model, effort }),
+                } => {
+                    // Its tool first, then the model and the effort that go with it.
+                    if let Some(backend) = backend {
+                        let tool = Amend::Tool(backend);
+                        let _ = app.fleet.amend_any(agent_id.clone(), tool).await?;
+                    }
+                    (agent_id, Amend::Tune { model, effort })
+                }
             };
             let _ = app.fleet.amend_any(agent_id, amend).await?;
         }
@@ -755,6 +762,18 @@ async fn make(State(app): State<App>, body: Bytes) -> Response {
     Json(json!({ "janitor": as_sent(janitor) })).into_response()
 }
 
+/// Whether a janitor can be given another tool now: it has no conversation with the tool it
+/// has, and no turn of it runs or waits. A janitor that answers one request at a time never
+/// has either.
+pub(crate) fn tool_can_change(app: &App, key: &str) -> bool {
+    let directory = app.fleet.directory();
+    let Some(member) = directory.janitor(key) else {
+        return false;
+    };
+    let status = &member.agent.view().status;
+    status.backend_session.is_none() && status.live.is_none() && status.waiting.is_empty()
+}
+
 /// `POST /janitors/<session>/configure`, `/enabled`, `/reset-defaults`, `/adopt-options`.
 async fn change(
     State(app): State<App>,
@@ -790,9 +809,12 @@ async fn change(
                 "options",
             ];
             let job = fields(&asked, &keys);
-            // A janitor keeps the tool it has: an agent's tool is not changed on this Host.
+            // A janitor is given another tool while it has no conversation with the one it
+            // has: one that has is started again to change its tool, which this Host does
+            // not do yet.
             let another = job.get("backend").filter(|named| !named.is_null());
-            if another.is_some_and(|named| *named != agent["backend"]) {
+            let another = another.is_some_and(|named| *named != agent["backend"]);
+            if another && !tool_can_change(&app, &key) {
                 return refusal(&Refused::new(
                     400,
                     "invalid_janitor",
