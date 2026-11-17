@@ -108,7 +108,7 @@ fn expiry_of(token: &str) -> i64 {
 }
 
 /// Whether a program can be started: a path that is a file, or a name found on the path.
-fn installed(program: &str) -> bool {
+pub(crate) fn installed(program: &str) -> bool {
     if program.contains('/') {
         return Path::new(program).is_file();
     }

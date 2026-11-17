@@ -2305,33 +2305,22 @@ fn a_message_dictated_hands_free_goes_to_the_agent_it_names_at_its_beginning() {
     assert_eq!((status, &sent["session"]), (200, &json!(rachel)));
     assert!(sent.get("orchestrator").is_none(), "{sent}");
 
-    // The router's screen: off, nothing to run it on, nothing decided; and it is not
-    // turned on from an app.
+    // The router's screen: off, as it comes, and nothing decided. What it can be set to are
+    // the tools of this Host. (What it does when it is on is another test's.)
     let settings = host.get("/orchestrator/settings");
     assert_eq!(settings["settings"]["enabled"], false);
-    assert_eq!(
-        (&settings["providers"], &settings["recent_decisions"]),
-        (&json!([]), &json!([]))
-    );
+    let tools: Vec<&str> = settings["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(tools, ["claude", "codex"]);
+    assert_eq!(settings["recent_decisions"], json!([]));
     assert_eq!(
         host.get("/orchestrator/decisions"),
         json!({ "decisions": [] })
     );
-    for path in ["/orchestrator/settings", "/orchestrator/addressing"] {
-        let (status, why) = host.ask(
-            "POST",
-            path,
-            Some(&json!({ "enabled": true, "mode": "ai" })),
-        );
-        assert_eq!(status, 501, "{path}: {why}");
-        assert!(
-            why["error"]
-                .as_str()
-                .unwrap()
-                .ends_with("not built on this Host yet"),
-            "{why}"
-        );
-    }
 }
 
 #[test]
@@ -8540,6 +8529,409 @@ fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
         2
     );
     assert_eq!(agents(), before + 5);
+}
+
+/// A stand-in for Codex asked one question (`codex exec --json`, the question on standard
+/// input): it writes down what it was started with and what it was shown, and answers as
+/// `rules` say: the answer of the first rule whose words are in the message, and that the
+/// message is noise where none are. The answer `fail` is a tool that ends badly; `<held>`
+/// in an answer is the id of the newest message that is held.
+fn routing_model(place: &Place, rules: &Value) -> (PathBuf, PathBuf) {
+    let (codex, asked) = (place.root.join("codex"), place.root.join("asked"));
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, sys
+question = sys.stdin.read()
+packet = json.loads(question.split("INPUT:\n", 1)[1])
+rules = json.loads({rules})
+shown = {{"args": sys.argv[1:], "scope": packet["context_scope"], "utterance": packet["utterance"],
+         "agents": [agent["session"] for agent in packet["agents"]],
+         "told": {{agent["session"]: [said["text"] for said in agent["recent_user_messages"]]
+                  for agent in packet["agents"]}},
+         "held": [held["utterance"] for held in packet["pending"]]}}
+with open({asked}, "a") as out:
+    out.write(json.dumps(shown) + "\n")
+noise = {{"kind": "ignored", "confidence": 0.99}}
+answer = next((answer for words, answer in rules if words in packet["utterance"]), noise)
+if answer == "fail":
+    sys.stderr.write("the model is not logged in\n")
+    sys.exit(3)
+if answer.get("pending_id") == "<held>":
+    answer["pending_id"] = packet["pending"][0]["pending_id"] if packet["pending"] else ""
+said = {{"type": "agent_message", "text": json.dumps(answer)}}
+print(json.dumps({{"type": "item.completed", "item": said}}))
+"#,
+        rules = serde_json::to_string(&rules.to_string()).unwrap(),
+        asked = serde_json::to_string(asked.to_str().unwrap()).unwrap(),
+    );
+    program(&codex, &script);
+    (codex, asked)
+}
+
+#[test]
+fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
+    let place = Place::new("router");
+    let rules = json!([
+        ["notes", {
+            "kind": "agent_message", "target_session": "anna", "confidence": 0.95,
+            "addressing": true, "reason": "the notes are with Anna",
+        }],
+        ["maybe", {
+            "kind": "agent_message", "target_session": "anna", "confidence": 0.6,
+            "reason": "not sure",
+        }],
+        ["yes", {
+            "kind": "agent_message", "target_session": "anna", "confidence": 0.95,
+            "pending_id": "<held>",
+        }],
+        ["how is", { "kind": "status_query", "target_session": "anna", "confidence": 0.9 }],
+        ["switch", {
+            "kind": "agent_control", "control_action": "switch", "target_session": "mike",
+            "confidence": 0.9,
+        }],
+        ["broken", "fail"],
+    ]);
+    let (codex, asked) = routing_model(&place, &rules);
+    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let (mike, anna) = (host.new_agent("Mike"), host.new_agent("Anna"));
+    assert_eq!((mike.as_str(), anna.as_str()), ("mike", "anna"));
+    let heard = host.listen();
+    // What the model was asked so far: one line for each asking.
+    let questions = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&asked).unwrap_or_default();
+        written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    // A message dictated hands-free, said to Mike.
+    let dictate = |text: &str, id: &str| {
+        let message = json!({
+            "session": mike, "text": text, "hands_free": true, "client_msg_id": id,
+        });
+        host.ask("POST", "/send", Some(&message))
+    };
+    let set = |settings: Value| host.ask("POST", "/orchestrator/settings", Some(&settings));
+    let focus = || host.get("/agents/snapshot")["focus"].clone();
+    let id_of = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let agent = agents.iter().find(|agent| agent["session"] == session);
+        agent.unwrap()["agent_id"].clone()
+    };
+    let told_by_people = |session: &str| {
+        let told = host.conversation(session).into_iter();
+        told.filter(|(role, _)| role == "user").count()
+    };
+
+    // As it comes the router is off, set to the tool its job recommends, and can be set to
+    // the tools of this Host.
+    let screen = host.get("/orchestrator/settings");
+    let settings = &screen["settings"];
+    assert_eq!(
+        (
+            &settings["enabled"],
+            &settings["provider"],
+            &settings["model"],
+            &settings["fallback_only"]
+        ),
+        (
+            &json!(false),
+            &json!("codex"),
+            &json!("gpt-6-sol"),
+            &json!(true)
+        ),
+        "{screen}"
+    );
+    let tools = screen["providers"].as_array().unwrap();
+    let tool = tools.iter().find(|tool| tool["id"] == "codex").unwrap();
+    assert_eq!(
+        (&tool["installed"], &tool["kind"], &tool["catalog_backend"]),
+        (&json!(true), &json!("backend"), &json!("codex")),
+        "{tool}"
+    );
+    assert_eq!(screen["recent_decisions"], json!([]));
+
+    // Turned on, and for every message that is dictated: as it comes it takes only what an
+    // app could place by no name. It is its janitor that is set.
+    let (status, on) = set(json!({ "enabled": true, "fallback_only": false }));
+    assert_eq!(
+        (
+            status,
+            &on["ok"],
+            &on["settings"]["enabled"],
+            &on["settings"]["fallback_only"]
+        ),
+        (200, &json!(true), &json!(true), &json!(false)),
+        "{on}"
+    );
+    let janitor = host.get("/janitors/clarp-message-delegator")["janitor"].clone();
+    assert_eq!(
+        (&janitor["enabled"], &janitor["options"]["fallback_only"]),
+        (&json!(true), &json!(false)),
+        "{janitor}"
+    );
+
+    // A message said to Mike that is for Anna: Anna is given it, and is the open one.
+    let (status, sent) = dictate("are the notes done?", "r-1");
+    assert_eq!(status, 200, "{sent}");
+    assert_eq!(
+        (&sent["ok"], &sent["session"], &sent["dispatch"]),
+        (&json!(true), &json!("anna"), &json!("scripted")),
+        "{sent}"
+    );
+    let decided = &sent["orchestrator"];
+    assert_eq!(
+        (
+            &decided["action"],
+            &decided["decision_id"],
+            &decided["decision"]["kind"]
+        ),
+        (&json!("route"), &json!(1), &json!("agent_message")),
+        "{sent}"
+    );
+    wait_for("Anna's answer", || {
+        host.conversation(&anna)
+            .contains(&said("assistant", "are the notes done?"))
+    });
+    assert_eq!(told_by_people(&mike), 0);
+    assert_eq!(focus(), id_of(&anna));
+    // The model was asked twice: with the agent that is open in full, and, because it
+    // named another, once more with everyone in view. Each time the question was on
+    // standard input and nowhere on the command line, and no janitor was among the agents.
+    let first = questions();
+    let scopes: Vec<&str> = first
+        .iter()
+        .map(|asked| asked["scope"].as_str().unwrap())
+        .collect();
+    assert_eq!(scopes, ["focused", "all"]);
+    for question in &first {
+        let args: Vec<&str> = question["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            (args.first(), args.last()),
+            (Some(&"exec"), Some(&"-")),
+            "{args:?}"
+        );
+        assert!(args.iter().all(|arg| !arg.contains("notes")), "{args:?}");
+        assert!(
+            args.windows(2).any(|pair| pair == ["--model", "gpt-6-sol"]),
+            "{args:?}"
+        );
+        assert_eq!(question["agents"], json!(["mike", "anna"]));
+    }
+    wait_for("the apps to be told what was decided", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "orchestrator-decision"
+                && event["action"] == "route"
+                && event["target_session"] == "anna"
+                && event["decision_id"] == 1
+        })
+    });
+
+    // The same message again is answered by what it came to: Anna is not given it twice,
+    // and no model is asked.
+    let (status, again) = dictate("are the notes done?", "r-1");
+    let decided = &again["orchestrator"];
+    assert_eq!(
+        (
+            status,
+            &again["session"],
+            &decided["action"],
+            &decided["decision_id"]
+        ),
+        (200, &json!("anna"), &json!("route"), &Value::Null),
+        "{again}"
+    );
+    assert_eq!((questions().len(), told_by_people(&anna)), (2, 1));
+    // The same id for other words is other work, and refused.
+    let (status, other) = dictate("something else entirely", "r-1");
+    assert_eq!(
+        (status, &other["ok"], &other["error"]),
+        (
+            409,
+            &json!(false),
+            &json!("Request identity already refers to different work")
+        ),
+        "{other}"
+    );
+
+    // The model is not sure enough: the message is held, its user is asked, nobody is
+    // given it. The next question shows what Anna was told, and what is held.
+    let (status, unsure) = dictate("maybe ship it", "r-2");
+    let decided = &unsure["orchestrator"];
+    assert_eq!(
+        (
+            status,
+            &unsure["session"],
+            &decided["action"],
+            &decided["decision"]["kind"]
+        ),
+        (200, &json!("anna"), &json!("clarify"), &json!("clarify")),
+        "{unsure}"
+    );
+    assert_eq!(told_by_people(&anna), 1);
+    let (status, yes) = dictate("yes", "r-3");
+    assert_eq!(
+        (status, &yes["session"], &yes["orchestrator"]["action"]),
+        (200, &json!("anna"), &json!("route")),
+        "{yes}"
+    );
+    // The held message goes, in its own words: the answer to the question is given nobody.
+    wait_for("the held message to be answered", || {
+        host.conversation(&anna)
+            .contains(&said("assistant", "maybe ship it"))
+    });
+    assert!(
+        !host
+            .conversation(&anna)
+            .iter()
+            .any(|(_, text)| text == "yes")
+    );
+    let last = questions().last().unwrap().clone();
+    assert_eq!(last["held"], json!(["maybe ship it"]));
+    let anna_was_told = last["told"]["anna"].as_array().unwrap();
+    assert!(
+        anna_was_told.contains(&json!("are the notes done?")),
+        "{last}"
+    );
+
+    // A question about an agent is answered, and no agent is given it. A command is done:
+    // Mike is opened.
+    let (status, how) = dictate("how is Anna doing", "r-4");
+    assert_eq!(
+        (status, &how["orchestrator"]["action"]),
+        (200, &json!("status")),
+        "{how}"
+    );
+    let (status, switched) = dictate("switch to Mike", "r-5");
+    assert_eq!(
+        (
+            status,
+            &switched["session"],
+            &switched["orchestrator"]["action"]
+        ),
+        (200, &json!("mike"), &json!("control")),
+        "{switched}"
+    );
+    assert_eq!(focus(), id_of(&mike));
+    assert_eq!((told_by_people(&mike), told_by_people(&anna)), (0, 2));
+
+    // The model fails: the router has nothing to say, and the message goes where it was
+    // said to, as any other.
+    let (status, direct) = dictate("the broken one", "r-6");
+    assert_eq!(
+        (status, &direct["session"]),
+        (200, &json!("mike")),
+        "{direct}"
+    );
+    assert!(direct.get("orchestrator").is_none(), "{direct}");
+    wait_for("Mike's answer", || {
+        host.conversation(&mike)
+            .contains(&said("assistant", "the broken one"))
+    });
+
+    // What was decided is kept, the newest first.
+    let decisions = host.get("/orchestrator/decisions?limit=3");
+    let actions: Vec<&str> = decisions["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|decision| decision["final_action"].as_str().unwrap())
+        .collect();
+    assert_eq!(actions, ["fallback", "control", "status"]);
+    let newest = &decisions["decisions"][0];
+    assert_eq!(
+        (
+            &newest["decision_kind"],
+            &newest["error"],
+            &newest["provider"]
+        ),
+        (
+            &json!("error"),
+            &json!("the model is not logged in"),
+            &json!("codex")
+        ),
+        "{newest}"
+    );
+    let screen = host.get("/orchestrator/settings");
+    assert_eq!(screen["recent_decisions"].as_array().unwrap().len(), 5);
+
+    // What the router cannot be set to is refused in words.
+    let (status, why) = set(json!({ "provider": "openai" }));
+    let words = why["error"].as_str().unwrap();
+    assert!(
+        status == 400 && words.starts_with("unsupported orchestrator provider: openai"),
+        "{why}"
+    );
+    let (status, why) = set(json!({ "volume": 11 }));
+    assert_eq!(
+        (status, &why["error"]),
+        (400, &json!("Unsupported orchestrator settings"))
+    );
+    let (status, why) = set(json!({ "enabled": "yes" }));
+    assert_eq!(
+        (status, &why["error"]),
+        (400, &json!("Enabled must be a boolean"))
+    );
+    // How a message that names nobody finds its agent on the apps' side is kept for them.
+    let addressing = |mode: &str| {
+        host.ask(
+            "POST",
+            "/orchestrator/addressing",
+            Some(&json!({ "mode": mode })),
+        )
+    };
+    let (status, kept) = addressing("first_name");
+    assert_eq!(
+        (status, &kept["ok"], &kept["mode"]),
+        (200, &json!(true), &json!("first_name"))
+    );
+    let (status, why) = addressing("loudest");
+    assert_eq!(
+        (status, &why["error"]),
+        (400, &json!("unknown addressing mode")),
+        "{why}"
+    );
+    assert_eq!(
+        why["modes"],
+        json!(["off", "first_name", "most_names", "ai"])
+    );
+
+    // A Host that is started again has what was decided, and its router as it was set.
+    drop(host);
+    let host = place.start_in("", &[], &world);
+    let kept = host.get("/orchestrator/decisions");
+    assert_eq!(kept["decisions"].as_array().unwrap().len(), 6);
+    let screen = host.get("/orchestrator/settings");
+    assert_eq!(
+        (
+            &screen["settings"]["enabled"],
+            &screen["settings"]["fallback_only"]
+        ),
+        (&json!(true), &json!(false))
+    );
+    // Turned off, a dictated message is a message like any other: no model is asked.
+    let off = json!({ "enabled": false });
+    let (status, set) = host.ask("POST", "/orchestrator/settings", Some(&off));
+    assert_eq!(
+        (status, &set["settings"]["enabled"]),
+        (200, &json!(false)),
+        "{set}"
+    );
+    let before = questions().len();
+    let plain = json!({
+        "session": "mike", "text": "the notes again", "hands_free": true, "client_msg_id": "r-7",
+    });
+    let (status, sent) = host.ask("POST", "/send", Some(&plain));
+    assert_eq!((status, &sent["session"]), (200, &json!("mike")), "{sent}");
+    assert!(sent.get("orchestrator").is_none(), "{sent}");
+    assert_eq!(questions().len(), before);
 }
 
 /// Writes a program a test runs in place of a real one.
