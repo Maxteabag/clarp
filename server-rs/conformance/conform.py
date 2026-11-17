@@ -725,6 +725,11 @@ def core(raw: dict) -> dict:
     """A raw capture as it is compared across Hosts: without what belongs to features the Rust
     Host does not have yet, with revisions as their order, with the ids of the agent's rows as
     the order they are first read in, and with each Host's own version as just "a version"."""
+    # The session a Host drew for a janitor it made as a new agent is named first: the answer that
+    # says it is compared as its outline below, and the name is needed wherever the janitor is named.
+    janitors_made = made_new(raw['http'], {})
+    if janitors_made:
+        raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
     http = [{**exchange, 'body': own_particulars(without_features(exchange['body']))} for exchange in raw['http']]
     http = [{**exchange, 'body': outline(exchange['body'])} if exchange.get('path') in NOT_KEPT and exchange.get('status') == 200
             else exchange for exchange in http]
