@@ -418,7 +418,147 @@ def what_is_made_of_an_answer(w: World) -> None:
                         'decided': {'steps': steps, 'progress': progress, 'next_work': next_work}})
 
 
-SCENARIOS = [a_goal_with_its_helpers_and_jobs, a_goal_that_stalls, what_is_made_of_an_answer]
+KEEPER = {
+    'agent_id': 'keeper-agent', 'generation': 3, 'scope': {'agent_ids': [], 'exclude_agent_ids': []},
+    'options': {'max_goals_per_run': 5},
+    'attachments': [
+        {'attachment_id': 'k1', 'enabled': True, 'trigger_version': 1, 'trigger_id': 'agent-work-completed',
+         'config': {'coalesce_seconds': 300}},
+        {'attachment_id': 'k2', 'enabled': True, 'trigger_version': 1, 'trigger_id': 'goal-activity-observed', 'config': {}},
+        {'attachment_id': 'k3', 'enabled': True, 'trigger_version': 1, 'trigger_id': 'schedule',
+         'config': {'cron': '0 * * * *', 'timezone': 'UTC'}}],
+}
+
+
+def when_a_goal_is_due(w: World) -> None:
+    """When the keeper updates a goal: its triggers folded, a retry after a failure, the sweep."""
+    from lib import goal_keeper
+    progress: dict = {'generation': KEEPER['generation']}
+    looked: dict = {}
+    seen_of, flag_of = goal_keeper._seen, goal_keeper._needs_stall_flag
+
+    def seen(con, row, now, watch, *, full=False):
+        found = seen_of(con, row, now, watch, full=full)
+        looked.setdefault(row['plan_id'], {}).update(
+            full=full, triggers=[list(t) for t in found.triggers], status_change=found.status_change,
+            any_messages=found.any_messages)
+        return found
+
+    def flag(con, row, now):
+        found = flag_of(con, row, now)
+        looked.setdefault(row['plan_id'], {})['stall_flag'] = found
+        return found
+
+    goal_keeper._seen, goal_keeper._needs_stall_flag = seen, flag
+
+    def due(what: str, config: dict = KEEPER) -> list:
+        looked.clear()
+        before = json.loads(json.dumps(progress))
+        goals = [{'plan_id': row['plan_id'], 'catch_up': goal_keeper._needs_catch_up(row, w.now)}
+                 for row in goal_keeper.open_goals(config)]
+        ready = goal_keeper.due(config, progress, w.now)
+        w.steps.append({'what': 'due', 'note': what, 'now': w.now, 'config': config, 'before': before, 'open': goals,
+                        'looked': json.loads(json.dumps(looked)), 'ready': ready,
+                        'after': json.loads(json.dumps(progress))})
+        return ready
+
+    def settle(plan: str, outcome: str, error: str = '') -> None:
+        before = json.loads(json.dumps(progress))
+        goal_keeper.settle(progress, plan, outcome, w.now, error)
+        w.steps.append({'what': 'settle', 'now': w.now, 'plan': plan, 'outcome': outcome, 'error': error, 'before': before,
+                        'after': json.loads(json.dumps(progress))})
+
+    w.tool('create', '{session}', 'ship', 'Ship the thing', j(ITEMS), j(GOAL))
+    first, made = w.plan, w.now
+    due('a goal nobody worked on: nothing to do, and the sweep is given its time')
+    w.said(w.owner, 'assistant', 'Probe done.', at=w.now + 1000, phase='final')
+    w.now += 2000
+    due('the owner\'s turn ended two seconds ago: folded, not yet')
+    w.now += 4 * MINUTE
+    w.said(w.owner, 'assistant', 'More done.', at=w.now, phase='final')
+    due('a second turn end within the fold: the fold counts from the first')
+    w.now += MINUTE
+    assert due('five minutes after the first: due') == [first]
+    settle(first, 'failed', 'TimeoutError ' + 'x' * 400)
+    due('it failed: left alone for a minute')
+    w.now += 61_000
+    assert due('a minute later: tried again') == [first]
+    settle(first, 'failed', 'parse_error')
+    due('it failed twice: nothing until after the next sweep')
+    w.now += 50 * MINUTE
+    due('the sweep comes: the goal is free again and has what it had')
+    w.now += 10 * MINUTE
+    due('its fold is over again')
+    settle(first, 'conflict', 'owner_changed_plan')
+    w.now += 14_000
+    due('the owner wrote meanwhile: read again after fifteen seconds, not before')
+    w.now += 2000
+    due('after fifteen seconds')
+    for _ in range(3):
+        settle(first, 'conflict', 'owner_changed_plan')
+    due('after the fourth conflict in a row it waits for the sweep')
+    settle(first, 'updated')
+    due('updated: its state is gone')
+    w.user('pause', {'reason': 'Holiday'})
+    w.now += 1000
+    due('the user paused it: a change of state is folded for half a minute only')
+    w.now += 30_000
+    assert due('half a minute later: due') == [first]
+    settle(first, 'skipped')
+    # A second goal of another agent, a goal of an agent the keeper does not watch, and one that is closed.
+    other = w.agent('other', 'Somebody else')
+    session = f'other{w.number}'
+    held = w.plan, w.revision
+    w.tool('create', session, 'docs', 'Write the docs', j(ITEMS[:1]), j(GOAL))
+    second = w.plan
+    w.said(other, 'assistant', 'Docs begun.', at=w.now, phase='final')
+    w.tool('create', session, 'old', 'An old plan', j(ITEMS[:1]), j(GOAL))
+    w.tool('act', '{plan}', '{rev}', 'cancel', j({'reason': 'Not needed'}))
+    # A goal of an agent that never says anything.
+    w.agent('quiet', 'Quiet one')
+    w.tool('create', f'quiet{w.number}', 'wait', 'Wait for the weather', j(ITEMS[:1]), j(GOAL))
+    quiet = w.plan
+    w.plan, w.revision = held
+    w.now += 6 * MINUTE
+    due('two goals: the one that has something is due, in the order the goals are held')
+    only_first = {**KEEPER, 'scope': {'agent_ids': [w.owner], 'exclude_agent_ids': []}}
+    due('a keeper that watches the first owner only: the other goal is none of its own, and its state goes', only_first)
+    not_first = {**KEEPER, 'scope': {'agent_ids': [], 'exclude_agent_ids': [w.owner]}}
+    due('a keeper that watches all but the first owner', not_first)
+    turns_only = {**KEEPER, 'attachments': KEEPER['attachments'][:1]}
+    w.user('resume', {'reason': 'Back'})
+    w.now += 31_000
+    due('a keeper that watches turn ends only: a change of the goal\'s state is nothing to it', turns_only)
+    no_sweep = {**KEEPER, 'attachments': KEEPER['attachments'][:2]}
+    due('a keeper with no sweep', no_sweep)
+    settle(second, 'updated')
+    # The sweep finds what no trigger covered: a row that is no turn's end, and a goal that has stalled.
+    progress.clear()
+    progress['generation'] = KEEPER['generation']
+    due('a new book: the sweep is given its time')
+    w.said(other, 'assistant', 'Thinking aloud.', at=w.now, phase='commentary')
+    w.now += HOUR
+    due('the sweep finds a row no trigger covered: due at once')
+    settle(second, 'updated')
+    w.now += 4 * DAY
+    due('four days later: goals that were never updated are read whole, once; the quiet one has nothing')
+    w.now += HOUR
+    due('at the next sweep the quiet goal is found stalled, and says so nowhere yet: due')
+    settle(quiet, 'updated')
+    due('settled, and not swept: nothing for the quiet goal')
+    # A goal that began long before the keeper looked: read whole, once.
+    progress.clear()
+    progress['generation'] = KEEPER['generation']
+    w.said(w.owner, 'assistant', 'Old work.', at=made + MINUTE, phase='commentary')
+    due('goals that began days ago and were never updated: read whole once, and due at once')
+    due('the same again: they were caught up, and are not read whole a second time')
+    goal_keeper._seen, goal_keeper._needs_stall_flag = seen_of, flag_of
+    for plan_ids in ([first], [second, first], []):
+        w.steps.append({'what': 'request_id', 'config': KEEPER, 'plans': plan_ids, 'now': w.now,
+                        'id': goal_keeper.request_id(KEEPER, plan_ids, w.now)})
+
+
+SCENARIOS = [a_goal_with_its_helpers_and_jobs, a_goal_that_stalls, what_is_made_of_an_answer, when_a_goal_is_due]
 
 # What the attachments of a keeper say it watches.
 CONFIGS = [
@@ -466,10 +606,12 @@ def main(argv: list[str]) -> int:
                'system': goal_keeper.SYSTEM, 'scenarios': scenarios, 'watched': watched}
     OUT.write_text(json.dumps(vectors, ensure_ascii=False, indent=1) + '\n')
     looks = sum(1 for s in scenarios for step in s['steps'] if 'given' in step)
-    decided = sum(1 for s in scenarios for step in s['steps'] if step['what'] == 'decide')
+    count = lambda what: sum(1 for s in scenarios for step in s['steps'] if step['what'] == what)
     stalled = sum(1 for s in scenarios for step in s['steps'] if step.get('stall'))
-    print(f'{OUT.relative_to(REPO)}: {len(scenarios)} scenarios, {looks} looks ({stalled} stalled), {decided} answers decided, '
-          f'{len(watched)} configurations, {OUT.stat().st_size} bytes')
+    ready = sum(len(step['ready']) for s in scenarios for step in s['steps'] if step['what'] == 'due')
+    print(f'{OUT.relative_to(REPO)}: {len(scenarios)} scenarios, {looks} looks ({stalled} stalled), {count("decide")} answers decided, '
+          f'{count("due")} times asked what is due ({ready} goals ready), {count("settle")} ends settled, '
+          f'{count("request_id")} request ids, {len(watched)} configurations, {OUT.stat().st_size} bytes')
     return 0
 
 

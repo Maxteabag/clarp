@@ -235,7 +235,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911009963,
+       "ts": 1794911330222,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -854,7 +854,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911009963,
+       "ts": 1794911330222,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -1584,7 +1584,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911009963,
+       "ts": 1794911330222,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -2366,7 +2366,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911009963,
+       "ts": 1794911330222,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -2976,7 +2976,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911009963,
+       "ts": 1794911330222,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -3737,7 +3737,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911009963,
+       "ts": 1794911330222,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -4193,7 +4193,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -4459,7 +4459,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -4740,7 +4740,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5025,7 +5025,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5310,7 +5310,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5600,7 +5600,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5917,7 +5917,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911010039,
+       "ts": 1794911330286,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -18991,6 +18991,3208 @@
       "progress": "p",
       "next_work": ""
      }
+    }
+   ]
+  },
+  {
+   "name": "when_a_goal_is_due",
+   "what": "When the keeper updates a goal: its triggers folded, a retry after a failure, the sweep.",
+   "steps": [
+    {
+     "what": "due",
+     "note": "a goal nobody worked on: nothing to do, and the sweep is given its time",
+     "now": 1808524001000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "the owner's turn ended two seconds ago: folded, not yet",
+     "now": 1808524003000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a second turn end within the fold: the fold counts from the first",
+     "now": 1808524243000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "five minutes after the first: due",
+     "now": 1808524303000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808524303000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "failed",
+     "error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false,
+        "last_error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "failures": 1,
+        "retry_at": 1808524363000
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "it failed: left alone for a minute",
+     "now": 1808524303000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false,
+        "last_error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "failures": 1,
+        "retry_at": 1808524363000
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {},
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false,
+        "last_error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "failures": 1,
+        "retry_at": 1808524363000
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a minute later: tried again",
+     "now": 1808524364000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false,
+        "last_error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "failures": 1,
+        "retry_at": 1808524363000
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false,
+        "last_error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "failures": 1,
+        "retry_at": 1808524363000
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808524364000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "failed",
+     "error": "parse_error",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false,
+        "last_error": "TimeoutError xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "failures": 1,
+        "retry_at": 1808524363000
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error"
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "it failed twice: nothing until after the next sweep",
+     "now": 1808524364000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error"
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {},
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error"
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "the sweep comes: the goal is free again and has what it had",
+     "now": 1808527364000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error"
+       }
+      },
+      "next_sweep_at": 1808524800000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error",
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "its fold is over again",
+     "now": 1808527964000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error",
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error",
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808527964000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "conflict",
+     "error": "owner_changed_plan",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808524800000,
+        "last_error": "parse_error",
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527979000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 1
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "the owner wrote meanwhile: read again after fifteen seconds, not before",
+     "now": 1808527978000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527979000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 1
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {},
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527979000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 1
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "after fifteen seconds",
+     "now": 1808527980000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527979000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 1
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527979000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 1
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808527980000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "conflict",
+     "error": "owner_changed_plan",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527979000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 1
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527995000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 2
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808527980000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "conflict",
+     "error": "owner_changed_plan",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527995000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 2
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527995000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 3
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808527980000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "conflict",
+     "error": "owner_changed_plan",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808527995000,
+        "last_error": "owner_changed_plan",
+        "first_at": 1808524002000,
+        "fast": false,
+        "conflicts": 3
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808528400000,
+        "last_error": "owner_changed_plan"
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "after the fourth conflict in a row it waits for the sweep",
+     "now": 1808527980000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808528400000,
+        "last_error": "owner_changed_plan"
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {},
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808528400000,
+        "last_error": "owner_changed_plan"
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808527980000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "updated",
+     "error": "",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "retry_at": 1808528400000,
+        "last_error": "owner_changed_plan"
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "updated: its state is gone",
+     "now": 1808527980000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "the user paused it: a change of state is folded for half a minute only",
+     "now": 1808527982000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "half a minute later: due",
+     "now": 1808528012000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808528012000,
+     "plan": "04vera0000000000:ship:00000002",
+     "outcome": "skipped",
+     "error": "",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "two goals: the one that has something is due, in the order the goals are held",
+     "now": 1808528376000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a keeper that watches the first owner only: the other goal is none of its own, and its state goes",
+     "now": 1808528376000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [
+        "04vera0000000000"
+       ],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a keeper that watches all but the first owner",
+     "now": 1808528376000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": [
+        "04vera0000000000"
+       ]
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [],
+     "after": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a keeper that watches turn ends only: a change of the goal's state is nothing to it",
+     "now": 1808528408000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {},
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ]
+       ],
+       "status_change": false,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a keeper with no sweep",
+     "now": 1808528408000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": false
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808528408000,
+     "plan": "04other000000000:docs:00000005",
+     "outcome": "updated",
+     "error": "",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808528400000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "a new book: the sweep is given its time",
+     "now": 1808528408000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808532000000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "the sweep finds a row no trigger covered: due at once",
+     "now": 1808532008000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808532000000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": false
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": false
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": true
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false,
+       "stall_flag": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002",
+      "04other000000000:docs:00000005"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808531708000
+       }
+      },
+      "next_sweep_at": 1808535600000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808532008000,
+     "plan": "04other000000000:docs:00000005",
+     "outcome": "updated",
+     "error": "",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808531708000
+       }
+      },
+      "next_sweep_at": 1808535600000,
+      "caught_up": {}
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808535600000,
+      "caught_up": {}
+     }
+    },
+    {
+     "what": "due",
+     "note": "four days later: goals that were never updated are read whole, once; the quiet one has nothing",
+     "now": 1808877608000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true
+       }
+      },
+      "next_sweep_at": 1808535600000,
+      "caught_up": {}
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": true
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": true,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": true,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": true
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": true,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false,
+       "stall_flag": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002",
+      "04other000000000:docs:00000005",
+      "04quiet000000000:wait:0000000a"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       },
+       "04quiet000000000:wait:0000000a": {
+        "first_at": 1808877308000
+       }
+      },
+      "next_sweep_at": 1808881200000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     }
+    },
+    {
+     "what": "due",
+     "note": "at the next sweep the quiet goal is found stalled, and says so nowhere yet: due",
+     "now": 1808881208000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       },
+       "04quiet000000000:wait:0000000a": {
+        "first_at": 1808877308000
+       }
+      },
+      "next_sweep_at": 1808881200000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": true
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": false
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false,
+       "stall_flag": true
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false,
+       "stall_flag": true
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002",
+      "04other000000000:docs:00000005",
+      "04quiet000000000:wait:0000000a"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       },
+       "04quiet000000000:wait:0000000a": {
+        "first_at": 1808877308000
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     }
+    },
+    {
+     "what": "settle",
+     "now": 1808881208000,
+     "plan": "04quiet000000000:wait:0000000a",
+     "outcome": "updated",
+     "error": "",
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       },
+       "04quiet000000000:wait:0000000a": {
+        "first_at": 1808877308000
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     },
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     }
+    },
+    {
+     "what": "due",
+     "note": "settled, and not swept: nothing for the quiet goal",
+     "now": 1808881208000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": true
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": false
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002",
+      "04other000000000:docs:00000005"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808524002000,
+        "fast": true,
+        "catch_up": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808877308000,
+        "catch_up": true
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808877608000,
+       "04other000000000:docs:00000005": 1808877608000,
+       "04quiet000000000:wait:0000000a": 1808877608000
+      }
+     }
+    },
+    {
+     "what": "due",
+     "note": "goals that began days ago and were never updated: read whole once, and due at once",
+     "now": 1808881208000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": true
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": true,
+       "triggers": [
+        [
+         1808524002000,
+         "owner turn end"
+        ],
+        [
+         1808524243000,
+         "owner turn end"
+        ],
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": true
+      },
+      "04other000000000:docs:00000005": {
+       "full": true,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": true
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": true,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002",
+      "04other000000000:docs:00000005"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808880908000,
+        "catch_up": true,
+        "fast": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808880908000,
+        "catch_up": true
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808881208000,
+       "04other000000000:docs:00000005": 1808881208000,
+       "04quiet000000000:wait:0000000a": 1808881208000
+      }
+     }
+    },
+    {
+     "what": "due",
+     "note": "the same again: they were caught up, and are not read whole a second time",
+     "now": 1808881208000,
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "before": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808880908000,
+        "catch_up": true,
+        "fast": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808880908000,
+        "catch_up": true
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808881208000,
+       "04other000000000:docs:00000005": 1808881208000,
+       "04quiet000000000:wait:0000000a": 1808881208000
+      }
+     },
+     "open": [
+      {
+       "plan_id": "04vera0000000000:ship:00000002",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04other000000000:docs:00000005",
+       "catch_up": true
+      },
+      {
+       "plan_id": "04quiet000000000:wait:0000000a",
+       "catch_up": true
+      }
+     ],
+     "looked": {
+      "04vera0000000000:ship:00000002": {
+       "full": false,
+       "triggers": [
+        [
+         1808527981000,
+         "goal pause"
+        ],
+        [
+         1808528377000,
+         "goal resume"
+        ]
+       ],
+       "status_change": true,
+       "any_messages": false
+      },
+      "04other000000000:docs:00000005": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      },
+      "04quiet000000000:wait:0000000a": {
+       "full": false,
+       "triggers": [],
+       "status_change": false,
+       "any_messages": false
+      }
+     },
+     "ready": [
+      "04vera0000000000:ship:00000002",
+      "04other000000000:docs:00000005"
+     ],
+     "after": {
+      "generation": 3,
+      "goals": {
+       "04vera0000000000:ship:00000002": {
+        "first_at": 1808880908000,
+        "catch_up": true,
+        "fast": true
+       },
+       "04other000000000:docs:00000005": {
+        "first_at": 1808880908000,
+        "catch_up": true
+       }
+      },
+      "next_sweep_at": 1808884800000,
+      "caught_up": {
+       "04vera0000000000:ship:00000002": 1808881208000,
+       "04other000000000:docs:00000005": 1808881208000,
+       "04quiet000000000:wait:0000000a": 1808881208000
+      }
+     }
+    },
+    {
+     "what": "request_id",
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "plans": [
+      "04vera0000000000:ship:00000002"
+     ],
+     "now": 1808881208000,
+     "id": "9302ad3f0883d9571b87db35aa646bb45bc7f126"
+    },
+    {
+     "what": "request_id",
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "plans": [
+      "04other000000000:docs:00000005",
+      "04vera0000000000:ship:00000002"
+     ],
+     "now": 1808881208000,
+     "id": "aba818f28eb44a9bc9c0aeae5fcc4cb34db06989"
+    },
+    {
+     "what": "request_id",
+     "config": {
+      "agent_id": "keeper-agent",
+      "generation": 3,
+      "scope": {
+       "agent_ids": [],
+       "exclude_agent_ids": []
+      },
+      "options": {
+       "max_goals_per_run": 5
+      },
+      "attachments": [
+       {
+        "attachment_id": "k1",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "agent-work-completed",
+        "config": {
+         "coalesce_seconds": 300
+        }
+       },
+       {
+        "attachment_id": "k2",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "goal-activity-observed",
+        "config": {}
+       },
+       {
+        "attachment_id": "k3",
+        "enabled": true,
+        "trigger_version": 1,
+        "trigger_id": "schedule",
+        "config": {
+         "cron": "0 * * * *",
+         "timezone": "UTC"
+        }
+       }
+      ]
+     },
+     "plans": [],
+     "now": 1808881208000,
+     "id": "1e42404f1686e0692771ea8d96bfe5b578776194"
     }
    ]
   }
