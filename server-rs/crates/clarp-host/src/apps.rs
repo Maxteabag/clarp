@@ -471,18 +471,11 @@ async fn status(
 /// the Python Host says a list, and empty. An app that reads them shows nothing there,
 /// where an answer of "no such route" would be an error on its screen.
 ///
-/// Teams, janitors and what the Host does by itself are not built, and no voice speaks
+/// Teams and what the Host does by itself are not built, and no voice speaks
 /// here yet (what listens is in `heard.rs`). Which models an agent can be given is a
 /// catalogue this Host does not keep yet; an agent's model is set by name (`/agent-llm`).
 async fn teams() -> Json<Value> {
     Json(json!({ "teams": [] }))
-}
-
-async fn janitors() -> Json<Value> {
-    Json(json!({
-        "janitors": [], "providers": [], "runtime_available": false, "templates": [],
-        "triggers": [],
-    }))
 }
 
 /// `GET /controller-actions`: what a button of a controller (a Flic, the Watch) can run
@@ -791,7 +784,6 @@ pub fn routes() -> Router<App> {
         .route("/clog", post(app_log))
         .route("/crash", post(app_diagnostics))
         .route("/teams", get(teams))
-        .route("/janitors", get(janitors))
         .route("/automation-settings", get(automation_settings))
         .route("/dirs", get(dirs))
         .route("/past-sessions", get(past_sessions))

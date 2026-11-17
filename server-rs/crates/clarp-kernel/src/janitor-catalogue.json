@@ -1,0 +1,684 @@
+{
+ "templates": [
+  {
+   "id": "heartbeat-decider",
+   "name": "Heartbeat keeper",
+   "description": "Decide whether, when and how an idle agent should continue current commitments.",
+   "recommended_backend": "codex",
+   "recommended_model": "gpt-6-sol",
+   "recommended_effort": "low",
+   "allowed_effects": [
+    "heartbeat_decision"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "heartbeat-decision-requested"
+   ],
+   "default_trigger_id": "heartbeat-decision-requested",
+   "supported_providers": [
+    "openai",
+    "claude",
+    "codex",
+    "agy",
+    "grok",
+    "opencode",
+    "deepseek",
+    "muse"
+   ],
+   "options": [
+    {
+     "key": "review_interval_seconds",
+     "label": "Minimum review interval (seconds)",
+     "type": "integer",
+     "default": 300,
+     "min": 60,
+     "max": 86400
+    },
+    {
+     "key": "timeout_ms",
+     "label": "Decision timeout (milliseconds)",
+     "type": "integer",
+     "default": 30000,
+     "min": 1000,
+     "max": 120000
+    }
+   ]
+  },
+  {
+   "id": "quota-monitor",
+   "name": "Quota keeper",
+   "description": "Monitor provider quota, notify and coordinate authorized runtime account recovery.",
+   "recommended_backend": "codex",
+   "recommended_model": "gpt-6-sol",
+   "recommended_effort": "low",
+   "allowed_effects": [
+    "quota_monitor"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "quota-check-requested"
+   ],
+   "default_trigger_id": "quota-check-requested",
+   "supported_providers": [
+    "openai",
+    "claude",
+    "codex",
+    "agy",
+    "grok",
+    "opencode",
+    "deepseek",
+    "muse"
+   ],
+   "options": [
+    {
+     "key": "interval_seconds",
+     "label": "Check interval (seconds)",
+     "type": "integer",
+     "default": 300,
+     "min": 60,
+     "max": 86400
+    },
+    {
+     "key": "remaining_threshold",
+     "label": "Notify at remaining percent",
+     "type": "integer",
+     "default": 25,
+     "min": 0,
+     "max": 100
+    },
+    {
+     "key": "recovery_mode",
+     "label": "Account recovery",
+     "type": "choice",
+     "default": "notify",
+     "choices": [
+      {
+       "value": "notify",
+       "label": "Notify only"
+      },
+      {
+       "value": "ask",
+       "label": "Ask before recovery"
+      },
+      {
+       "value": "automatic",
+       "label": "Use configured runtime account selector"
+      }
+     ]
+    },
+    {
+     "key": "max_interval_seconds",
+     "label": "Longest interval when idle (seconds)",
+     "type": "integer",
+     "default": 0,
+     "min": 0,
+     "max": 604800,
+     "description": "Each run that finds nothing to do doubles the wait, up to this; a run that does something returns to the configured interval. 0 keeps the interval fixed."
+    }
+   ]
+  },
+  {
+   "id": "account-hotseat",
+   "name": "Hotseat switcher",
+   "description": "Switch the default Claude or Codex account through Hotseat before its quota window runs out.",
+   "recommended_backend": "codex",
+   "recommended_model": "gpt-6-sol",
+   "recommended_effort": "low",
+   "allowed_effects": [
+    "account_switch"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "account-switch-requested"
+   ],
+   "default_trigger_id": "account-switch-requested",
+   "supported_providers": [
+    "openai",
+    "claude",
+    "codex",
+    "agy",
+    "grok",
+    "opencode",
+    "deepseek",
+    "muse"
+   ],
+   "options": [
+    {
+     "key": "interval_seconds",
+     "label": "Claude check interval (seconds)",
+     "type": "integer",
+     "default": 300,
+     "min": 60,
+     "max": 86400
+    },
+    {
+     "key": "codex_interval_seconds",
+     "label": "Codex check interval (seconds)",
+     "type": "integer",
+     "default": 900,
+     "min": 300,
+     "max": 86400,
+     "description": "Codex quota is probed per saved profile, so check it less often."
+    },
+    {
+     "key": "claude_min_remaining",
+     "label": "Claude floor: 5-hour window percent remaining",
+     "type": "integer",
+     "default": 25,
+     "min": 0,
+     "max": 100,
+     "description": "Switch when the account in use is under this and another account is at or above it. Below the floor the ladder drops to 10%, then 0%."
+    },
+    {
+     "key": "codex_min_remaining",
+     "label": "Codex floor: weekly window percent remaining",
+     "type": "integer",
+     "default": 10,
+     "min": 0,
+     "max": 100
+    },
+    {
+     "key": "mode",
+     "label": "Switching",
+     "type": "choice",
+     "default": "automatic",
+     "choices": [
+      {
+       "value": "notify",
+       "label": "Notify only"
+      },
+      {
+       "value": "automatic",
+       "label": "Switch through Hotseat"
+      }
+     ]
+    },
+    {
+     "key": "hotseat_command",
+     "label": "Hotseat command",
+     "type": "string",
+     "default": "hotseat"
+    },
+    {
+     "key": "auto_repair_auth",
+     "label": "Repair saved Claude authentication",
+     "type": "boolean",
+     "default": false,
+     "description": "Optional exact-profile repair; repaired authentication is verified separately from usable quota and model limits."
+    },
+    {
+     "key": "max_interval_seconds",
+     "label": "Longest interval when idle (seconds)",
+     "type": "integer",
+     "default": 0,
+     "min": 0,
+     "max": 604800,
+     "description": "Each run that finds nothing to do doubles the wait, up to this; a run that does something returns to the configured interval. 0 keeps the interval fixed."
+    }
+   ]
+  },
+  {
+   "id": "task-labels",
+   "name": "Task labels",
+   "description": "Keep agents' current task labels clear and useful.",
+   "recommended_backend": "codex",
+   "recommended_model": "gpt-6-sol",
+   "recommended_effort": "low",
+   "allowed_effects": [
+    "task_label"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "agent-work-completed",
+    "schedule",
+    "active-interval"
+   ],
+   "default_trigger_id": "agent-work-completed",
+   "options": [
+    {
+     "key": "max_interval_seconds",
+     "label": "Longest interval when idle (seconds)",
+     "type": "integer",
+     "default": 86400,
+     "min": 0,
+     "max": 604800,
+     "description": "Each run that finds nothing to do doubles the wait, up to this; a run that does something returns to the configured interval. 0 keeps the interval fixed."
+    }
+   ]
+  },
+  {
+   "id": "scheduled-prompt",
+   "name": "Scheduled task",
+   "description": "On a schedule, carry out the configured instructions in this Janitor's own workspace. Runs that find nothing to do back off, up to a day.",
+   "recommended_backend": "codex",
+   "recommended_model": null,
+   "recommended_effort": null,
+   "allowed_effects": [
+    "scheduled_task"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "schedule"
+   ],
+   "default_trigger_id": "schedule",
+   "options": [
+    {
+     "key": "instructions",
+     "label": "Instructions",
+     "type": "text",
+     "default": "",
+     "max_length": 8000,
+     "description": "What each run does. Delivered as the run's prompt, with the closing-report contract."
+    },
+    {
+     "key": "max_interval_seconds",
+     "label": "Longest interval when idle (seconds)",
+     "type": "integer",
+     "default": 86400,
+     "min": 0,
+     "max": 604800,
+     "description": "Each run that finds nothing to do doubles the wait, up to this; a run that does something returns to the configured interval. 0 keeps the interval fixed."
+    }
+   ]
+  },
+  {
+   "id": "message-delegator",
+   "name": "Message delegator",
+   "description": "Choose an eligible recipient for an explicitly requested message route.",
+   "recommended_backend": "codex",
+   "recommended_model": "gpt-6-sol",
+   "recommended_effort": "low",
+   "allowed_effects": [
+    "message_route"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "routing-requested"
+   ],
+   "default_trigger_id": "routing-requested",
+   "supported_providers": [
+    "openai",
+    "claude",
+    "codex",
+    "agy",
+    "grok",
+    "opencode",
+    "deepseek",
+    "muse"
+   ],
+   "options": [
+    {
+     "key": "fallback_only",
+     "label": "Only when name matching cannot decide",
+     "type": "boolean",
+     "default": true,
+     "description": "Ask the delegator when the recipient cannot be selected directly from an agent name."
+    },
+    {
+     "key": "hands_free_only",
+     "label": "Only in hands-free mode",
+     "type": "boolean",
+     "default": true
+    },
+    {
+     "key": "confidence_threshold",
+     "label": "Routing confidence",
+     "type": "number",
+     "default": 0.78,
+     "min": 0.5,
+     "max": 0.99,
+     "step": 0.01
+    },
+    {
+     "key": "timeout_ms",
+     "label": "Routing timeout (milliseconds)",
+     "type": "integer",
+     "default": 30000,
+     "min": 250,
+     "max": 60000,
+     "step": 250
+    },
+    {
+     "key": "voice_id",
+     "label": "Routing voice",
+     "type": "string",
+     "default": "79f8b5fb-2cc8-479a-80df-29f7a7cf1a3e"
+    }
+   ]
+  },
+  {
+   "id": "audio-bookkeeper",
+   "name": "Audio bookkeeper",
+   "description": "Record producer and client-reported audio lifecycle facts deterministically; no model or primary-agent skill.",
+   "recommended_backend": "codex",
+   "recommended_model": null,
+   "recommended_effort": null,
+   "allowed_effects": [
+    "audio_lifecycle_receipt"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "audio-lifecycle-observed"
+   ],
+   "default_trigger_id": "audio-lifecycle-observed",
+   "supported_providers": [
+    "codex"
+   ],
+   "options": []
+  },
+  {
+   "id": "label-auditor",
+   "name": "Label checker",
+   "description": "Hourly, ask Jev whether each working agent's label still describes what it is doing, and list the ones that do not in Updates. Report only; needs the labels judgment site.",
+   "recommended_backend": "codex",
+   "recommended_model": null,
+   "recommended_effort": null,
+   "allowed_effects": [
+    "label_report"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "label-audit-requested"
+   ],
+   "default_trigger_id": "label-audit-requested",
+   "supported_providers": [
+    "codex"
+   ],
+   "options": [
+    {
+     "key": "interval_seconds",
+     "label": "Check interval (seconds)",
+     "type": "integer",
+     "default": 3600,
+     "min": 900,
+     "max": 86400
+    },
+    {
+     "key": "autocorrect",
+     "label": "Correct labels automatically",
+     "type": "boolean",
+     "default": false,
+     "description": "Reserved. Mismatches are only reported today; nothing is changed."
+    },
+    {
+     "key": "max_interval_seconds",
+     "label": "Longest interval when idle (seconds)",
+     "type": "integer",
+     "default": 86400,
+     "min": 0,
+     "max": 604800,
+     "description": "Each run that finds nothing to do doubles the wait, up to this; a run that does something returns to the configured interval. 0 keeps the interval fixed."
+    }
+   ]
+  },
+  {
+   "id": "goal-keeper",
+   "name": "Goal keeper",
+   "description": "Keep agents' durable goals current beside them: after a turn, a helper's report, a job or a pause, restate the goal's steps and write a short checkpoint. The agents are never prompted; it cannot complete, pause or cancel a goal or record evidence.",
+   "recommended_backend": "agy",
+   "recommended_model": "gemini-4-hydrogen-low",
+   "recommended_effort": null,
+   "allowed_effects": [
+    "goal_update"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "agent-work-completed",
+    "goal-activity-observed",
+    "schedule"
+   ],
+   "default_trigger_id": "agent-work-completed",
+   "seed_execution": {
+    "isolated": true
+   },
+   "seed_attachments": [
+    {
+     "trigger_id": "agent-work-completed",
+     "config": {
+      "coalesce_seconds": 300
+     }
+    },
+    {
+     "trigger_id": "goal-activity-observed",
+     "config": {}
+    },
+    {
+     "trigger_id": "schedule",
+     "config": {
+      "cron": "17 * * * *",
+      "timezone": "UTC"
+     }
+    }
+   ],
+   "options": [
+    {
+     "key": "max_goals_per_run",
+     "label": "Goals updated at once",
+     "type": "integer",
+     "default": 5,
+     "min": 1,
+     "max": 6,
+     "description": "One run updates up to this many goals in parallel; each is one model call."
+    }
+   ]
+  },
+  {
+   "id": "tool-explainer",
+   "name": "Tool explainer",
+   "description": "Explain requested tool activity using bounded read-only input.",
+   "recommended_backend": "codex",
+   "recommended_model": "gpt-6-sol",
+   "recommended_effort": "low",
+   "allowed_effects": [
+    "tool_explanation"
+   ],
+   "creatable": true,
+   "supported_trigger_ids": [
+    "tool-explanation-requested"
+   ],
+   "default_trigger_id": "tool-explanation-requested",
+   "supported_providers": [
+    "codex"
+   ],
+   "options": [
+    {
+     "key": "detail_level",
+     "label": "Tool detail",
+     "type": "choice",
+     "default": 0,
+     "description": "Choose how requested tool activity is explained. Developer keeps the original activity.",
+     "choices": [
+      {
+       "value": 0,
+       "label": "Developer"
+      },
+      {
+       "value": 1,
+       "label": "Technical"
+      },
+      {
+       "value": 2,
+       "label": "Balanced"
+      },
+      {
+       "value": 3,
+       "label": "Plain English"
+      },
+      {
+       "value": 4,
+       "label": "Grandma"
+      }
+     ]
+    },
+    {
+     "key": "explanation_sources",
+     "label": "Explanation sources",
+     "type": "choice",
+     "default": 0,
+     "description": "Known tool calls use scripted templates; Jev can pick a known template for unfamiliar ones when its judgment site is on; the configured model explains the rest.",
+     "choices": [
+      {
+       "value": 0,
+       "label": "Scripted, Jev, then model"
+      },
+      {
+       "value": 1,
+       "label": "Scripted, then model"
+      },
+      {
+       "value": 2,
+       "label": "Model only"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "triggers": [
+  {
+   "trigger_id": "account-switch-requested",
+   "version": 1,
+   "name": "When the account in use runs low",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "active-interval",
+   "version": 1,
+   "name": "Periodically while using the app",
+   "kind": "interval",
+   "defaults": {
+    "interval_seconds": 900,
+    "idle_timeout_seconds": 300,
+    "run_on_resume": true,
+    "max_targets": 3,
+    "coalesce_seconds": 0
+   }
+  },
+  {
+   "trigger_id": "agent-work-completed",
+   "version": 1,
+   "name": "After an agent finishes a turn",
+   "kind": "event",
+   "defaults": {
+    "coalesce_seconds": 8,
+    "max_targets": 3
+   }
+  },
+  {
+   "trigger_id": "audio-lifecycle-observed",
+   "version": 1,
+   "name": "When audio lifecycle facts are observed",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "goal-activity-observed",
+   "version": 1,
+   "name": "When a helper reports, a job ends or a goal is paused",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "heartbeat-decision-requested",
+   "version": 1,
+   "name": "When continuity needs review",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "label-audit-requested",
+   "version": 1,
+   "name": "When working labels need checking",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "quota-check-requested",
+   "version": 1,
+   "name": "When provider quota needs checking",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "routing-requested",
+   "version": 1,
+   "name": "When a message needs a recipient",
+   "kind": "demand",
+   "defaults": {}
+  },
+  {
+   "trigger_id": "schedule",
+   "version": 1,
+   "name": "On a schedule",
+   "kind": "schedule",
+   "defaults": {
+    "cron": "0 9 * * *",
+    "timezone": "UTC",
+    "max_targets": 3
+   }
+  },
+  {
+   "trigger_id": "tool-explanation-requested",
+   "version": 1,
+   "name": "When a tool explanation is requested",
+   "kind": "demand",
+   "defaults": {}
+  }
+ ],
+ "turn_templates": [
+  "scheduled-prompt",
+  "task-labels"
+ ],
+ "providers": {
+  "routing": [
+   "claude",
+   "codex",
+   "agy",
+   "grok",
+   "opencode",
+   "deepseek",
+   "muse"
+  ],
+  "isolating": [
+   "agy"
+  ],
+  "backend_of": {
+   "openai": "codex",
+   "local": "local",
+   "claude": "claude",
+   "codex": "codex",
+   "agy": "agy",
+   "grok": "grok",
+   "opencode": "opencode",
+   "deepseek": "deepseek",
+   "muse": "muse"
+  }
+ },
+ "roles": [
+  "message-delegator",
+  "tool-explainer",
+  "audio-bookkeeper",
+  "heartbeat-decider",
+  "quota-monitor",
+  "label-auditor",
+  "goal-keeper"
+ ],
+ "optional_roles": [
+  "account-hotseat"
+ ],
+ "own_ids": {
+  "audio-bookkeeper": "64ec70b5-eab5-5d21-b961-4997e204d74e",
+  "goal-keeper": "e24442f7-0e1e-57fb-9fce-ff579e87a2cf",
+  "heartbeat-decider": "a358bf56-f11e-5b19-a860-5531843fe013",
+  "label-auditor": "6a65e11f-224e-563c-9786-798679e93d4d",
+  "message-delegator": "6e6bf19b-68ea-5f3e-8ac4-07c7acd78f5c",
+  "quota-monitor": "79a5cb05-dc07-5cf5-b788-5e008a25c968",
+  "tool-explainer": "e72df736-82de-59a6-9afe-8f6c08b89e73"
+ },
+ "portraits": {
+  "task-labels": "rivet-task-label-keeper.jpg",
+  "message-delegator": "delegator-message-dispatcher.jpg",
+  "tool-explainer": "explainer-tool-guide.jpg"
+ }
+}

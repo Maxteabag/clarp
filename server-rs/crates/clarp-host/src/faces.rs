@@ -94,6 +94,16 @@ impl Faces {
         }
     }
 
+    /// Where the picture a janitor is shown with is fetched: the one of its job, else the
+    /// one every janitor has. Empty: this Host ships neither.
+    pub fn janitor(&self, file: &str) -> String {
+        let files = vec![file.to_string(), "janitor-default.jpg".to_string()];
+        match self.first("janitor-avatars", files) {
+            Some((file, version)) => format!("/static/janitor-avatars/{file}?v={version}"),
+            None => String::new(),
+        }
+    }
+
     /// Where the picture of an agent on the model it runs is fetched, for a name that has
     /// one drawn for that family of model. Empty: it has none.
     pub fn on_model(&self, persona: &str, backend: &str, model: &str) -> String {

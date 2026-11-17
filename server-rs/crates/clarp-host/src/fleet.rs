@@ -92,6 +92,10 @@ pub struct AgentRecord {
     /// any other.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub role: String,
+    /// It has a job of maintenance and is no agent to chat with ([`clarp_kernel::janitors`]).
+    /// It is a member of the fleet and not of the roster: the apps list it apart.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_janitor: bool,
     /// How a helper's work stands ([`clarp_kernel::helpers`]). Nothing for an agent that
     /// is no helper.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,6 +177,8 @@ pub enum Amend {
     Voice(String),
     /// How much it says while it works, from 0 to 3.
     Narration(i64),
+    /// Whether it is a janitor: an agent is made one, and a janitor is let go.
+    Janitor(bool),
     /// The portraits it keeps, and the picture it wears among them when that changes.
     Portraits {
         kept: Vec<Portrait>,
@@ -245,7 +251,11 @@ pub struct Member {
 /// The fleet as a whole, as it was when it last changed.
 #[derive(Default)]
 pub struct Directory {
+    /// The agents of the roster: everyone a person can speak to.
     pub members: Vec<Arc<Member>>,
+    /// The janitors: members of the fleet with a job of maintenance, apart from the roster.
+    /// Nothing that goes through the agents meets them; who means one asks for it.
+    pub janitors: Vec<Arc<Member>>,
     /// The agent that is open, by id.
     pub focus: Option<String>,
     /// The paired devices that may speak, by the digest of their token.
@@ -270,6 +280,28 @@ pub struct PersonaSaid {
     pub personality: String,
     /// The picture it is given, in base64. Empty: none.
     pub picture: String,
+}
+
+/// What a janitor's row says it is, where an agent's says `agent` and a helper's `helper`.
+const JANITOR: &str = "janitor";
+
+/// The members of the fleet as the roster and the janitors apart from it.
+fn apart(members: &[Arc<Member>]) -> (Vec<Arc<Member>>, Vec<Arc<Member>>) {
+    let all = members.iter().cloned();
+    all.partition(|member| !member.record.is_janitor)
+}
+
+/// A janitor that is made as one: who it is, and where it works.
+#[derive(Debug, Clone, Default)]
+pub struct JanitorSeed {
+    /// Its id, for one of the Host's own: the same on every Host. `None`: one is drawn.
+    pub agent_id: Option<String>,
+    pub session: String,
+    pub persona: String,
+    pub backend: String,
+    pub cwd: String,
+    pub model: String,
+    pub effort: String,
 }
 
 /// What was left with the Host of one kind: each key with what is under it.
@@ -306,6 +338,19 @@ impl Directory {
                 .iter()
                 .find(|member| member.record.agent_id == key)
         })
+    }
+
+    /// The janitor a request names, by its session name or by its id.
+    pub fn janitor(&self, key: &str) -> Option<&Arc<Member>> {
+        let by = |find: &dyn Fn(&AgentRecord) -> bool| {
+            self.janitors.iter().find(|member| find(&member.record))
+        };
+        by(&|record| record.session == key).or_else(|| by(&|record| record.agent_id == key))
+    }
+
+    /// The agent or the janitor a request names: for what is read of either.
+    pub fn anyone(&self, key: &str) -> Option<&Arc<Member>> {
+        self.named(key).or_else(|| self.janitor(key))
     }
 
     /// The device that presents this token, when it is paired and not revoked.
@@ -398,11 +443,18 @@ enum Ask {
         request: CreateAgentRequest,
         answer: Answer<Result<AgentRecord, NotMade>>,
     },
-    /// The user changes something about an agent.
+    /// The user changes something about an agent. `of_any`: the change is the janitors'
+    /// own, and may be of a janitor.
     Amend {
         key: String,
         change: Amend,
+        of_any: bool,
         answer: Answer<Result<Amended, NotAmended>>,
+    },
+    /// A janitor is made as one: one of the Host's own, or one its owner asks for.
+    MakeJanitor {
+        seed: JanitorSeed,
+        answer: Answer<Result<AgentRecord, NotMade>>,
     },
     /// A helper is marked done, failed or working again: by `by`, an agent, or by the
     /// user when nobody is named.
@@ -556,6 +608,15 @@ impl FleetHandle {
         self.ask(|answer| Ask::Create { request, answer }).await
     }
 
+    /// Makes a janitor as one: a member of the fleet that is no agent of the roster. It has
+    /// no voice and nobody is told that a chat is ready. The inner error says why not.
+    pub async fn make_janitor(
+        &self,
+        seed: JanitorSeed,
+    ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
+        self.ask(|answer| Ask::MakeJanitor { seed, answer }).await
+    }
+
     /// Changes something about the agent a request names, by its session name or its id.
     /// Answers the agent as it then is, when its own thread has the change too: what the
     /// agent says next, it says as what it now is.
@@ -564,10 +625,31 @@ impl FleetHandle {
         key: String,
         change: Amend,
     ) -> Result<Result<AgentRecord, NotAmended>, Unavailable> {
+        self.amended(key, change, false).await
+    }
+
+    /// Changes something about a member of the fleet, an agent of the roster or a janitor:
+    /// what the janitors' own routes change. What a chat's controls change goes through
+    /// [`Self::amend`], which finds no janitor.
+    pub async fn amend_any(
+        &self,
+        key: String,
+        change: Amend,
+    ) -> Result<Result<AgentRecord, NotAmended>, Unavailable> {
+        self.amended(key, change, true).await
+    }
+
+    async fn amended(
+        &self,
+        key: String,
+        change: Amend,
+        of_any: bool,
+    ) -> Result<Result<AgentRecord, NotAmended>, Unavailable> {
         let amended = self
             .ask(|answer| Ask::Amend {
                 key,
                 change,
+                of_any,
                 answer,
             })
             .await?;
@@ -965,8 +1047,10 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
             .map_err(|error| format!("the entry for the peer {name} cannot be read: {error}"))?;
         peers.insert(name, peer);
     }
+    let (roster, janitors) = apart(&members);
     let (directory, read) = watch::channel(Arc::new(Directory {
-        members: members.clone(),
+        members: roster,
+        janitors,
         focus: focus.clone(),
         devices: devices.clone(),
         push: Arc::new(push.clone()),
@@ -1041,9 +1125,13 @@ impl Fleet {
                 Ask::Amend {
                     key,
                     change,
+                    of_any,
                     answer,
                 } => {
-                    let _ = answer.send(self.amend(&key, change));
+                    let _ = answer.send(self.amend(&key, change, of_any));
+                }
+                Ask::MakeJanitor { seed, answer } => {
+                    let _ = answer.send(Ok(self.make_janitor(seed)));
                 }
                 Ask::Adopt { record, answer } => {
                     let _ = answer.send(Ok(self.adopt(record)));
@@ -1188,8 +1276,10 @@ impl Fleet {
         let settings = Arc::new(self.settings.clone());
         // The one that works out what agents' tools are told reads the same settings.
         self.works.telling.settings_are(settings.clone());
+        let (roster, janitors) = apart(&self.members);
         self.directory.send_replace(Arc::new(Directory {
-            members: self.members.clone(),
+            members: roster,
+            janitors,
             focus: self.focus.clone(),
             devices: self.devices.clone(),
             push: Arc::new(self.push.clone()),
@@ -1606,12 +1696,56 @@ impl Fleet {
         Ok(record)
     }
 
+    /// Makes a janitor as one. An id or a session name another member has is not given
+    /// twice, and neither is a tool this Host has not.
+    fn make_janitor(&mut self, seed: JanitorSeed) -> Result<AgentRecord, NotMade> {
+        let agent_id = seed.agent_id.unwrap_or_else(|| ids::hex(8));
+        let has_id = |member: &Arc<Member>| member.record.agent_id == agent_id;
+        if seed.session.is_empty() || self.taken(&seed.session) || self.members.iter().any(has_id) {
+            let why = "The janitor's identity is already owned";
+            return Err(Told::new(409, "creation_conflict", why).into());
+        }
+        let default_cwd = &self.works.config.default_cwd;
+        let cwd = crate::config::working_dir(&seed.cwd, &crate::config::home(), default_cwd);
+        let record = AgentRecord {
+            agent_id,
+            session: seed.session,
+            persona: seed.persona,
+            backend: seed.backend,
+            cwd: cwd.display().to_string(),
+            model: seed.model,
+            effort: seed.effort,
+            conversation_id: ids::uuid(),
+            created_at_ms: self.now_ms(),
+            is_janitor: true,
+            role: JANITOR.to_string(),
+            // The Python Host's word for no voice of its own.
+            voice_id: "{}".to_string(),
+            ..AgentRecord::default()
+        };
+        let setup = setup(&self.works, &record)?;
+        self.put(&record)?;
+        self.members.push(Arc::new(Member {
+            record: record.clone(),
+            agent: agent::spawn(setup),
+        }));
+        self.publish();
+        Ok(record)
+    }
+
+    /// `of_any`: the change is the janitors' own, and may be of a janitor.
     fn amend(
         &mut self,
         key: &str,
         change: Amend,
+        of_any: bool,
     ) -> Result<Result<Amended, NotAmended>, Unavailable> {
-        let Some(at) = self.place_of(key) else {
+        let found = if of_any {
+            self.place_of_any(key)
+        } else {
+            self.place_of(key)
+        };
+        let Some(at) = found else {
             return Ok(Err(NotAmended::Unknown));
         };
         let before = &self.members[at].record;
@@ -1640,6 +1774,17 @@ impl Fleet {
             }
             Amend::Voice(voices) => record.voice_id = voices,
             Amend::Narration(level) => record.narration = level,
+            // A janitor is that and nothing else: no helper of anybody, and not woken by
+            // the heartbeat. Let go, it is an agent like any other again.
+            Amend::Janitor(is) => {
+                record.is_janitor = is;
+                record.role = if is {
+                    JANITOR.to_string()
+                } else {
+                    String::new()
+                };
+                record.heartbeat_enabled = record.heartbeat_enabled && !is;
+            }
             Amend::Portraits { kept, worn } => {
                 record.portraits = kept;
                 if worn.is_some() {
@@ -1668,7 +1813,15 @@ impl Fleet {
     }
 
     /// Where the agent a request names is in the list: by its session name, or by its id.
+    /// A janitor is no agent a request means: what is done to an agent of the roster is
+    /// not done to one ([`Self::place_of_any`] is for who means either).
     fn place_of(&self, key: &str) -> Option<usize> {
+        self.place_of_any(key)
+            .filter(|at| !self.members[*at].record.is_janitor)
+    }
+
+    /// Where a member of the fleet is in the list, an agent of the roster or a janitor.
+    fn place_of_any(&self, key: &str) -> Option<usize> {
         if key.is_empty() {
             return None;
         }
@@ -1876,7 +2029,7 @@ impl Fleet {
             .map(str::to_string)
             .collect();
         for agent_id in done {
-            if let Ok(Ok(amended)) = self.amend(&agent_id, Amend::Archive(true)) {
+            if let Ok(Ok(amended)) = self.amend(&agent_id, Amend::Archive(true), false) {
                 self.tell_roster("helper-state", &amended.record.session);
             }
         }
@@ -1932,11 +2085,9 @@ impl Fleet {
     }
 
     fn remove(&mut self, session: &str) -> Result<bool, Unavailable> {
-        let Some(at) = self
-            .members
-            .iter()
-            .position(|member| member.record.session == session)
-        else {
+        let of_the_roster =
+            |member: &Arc<Member>| member.record.session == session && !member.record.is_janitor;
+        let Some(at) = self.members.iter().position(of_the_roster) else {
             return Ok(false);
         };
         let mut record = self.members[at].record.clone();
@@ -1951,6 +2102,11 @@ impl Fleet {
         }
         self.publish();
         self.tell_roster("deleted", session);
+        // And that it stopped, because it was removed.
+        let now = self.now_ms();
+        for told in wire::removed(&record, now) {
+            self.works.hub.publish(told, now);
+        }
         Ok(true)
     }
 
@@ -1962,7 +2118,7 @@ impl Fleet {
         let Some(record) = self
             .members
             .iter()
-            .find(|member| member.record.session == session)
+            .find(|member| member.record.session == session && !member.record.is_janitor)
             .map(|member| member.record.clone())
         else {
             return Ok(None);

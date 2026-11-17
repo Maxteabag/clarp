@@ -164,6 +164,7 @@ async fn serve(config: Config) -> Result<(), String> {
         chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
         schedules: Arc::default(),
         heartbeat: Arc::default(),
+        janitors: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
         ears: {
@@ -197,6 +198,10 @@ async fn serve(config: Config) -> Result<(), String> {
             .any(|member| member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING))
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    // The janitors a Host has of its own are installed, each once, paused.
+    if let Err(why) = clarp_host::janitors::install(&app).await {
+        eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
     }
     // A ring that rang when the Host stopped has its time again, or is missed now: the apps
     // and its agent are told without anybody having to ask first.

@@ -179,6 +179,8 @@ pub struct App {
     pub schedules: Arc<crate::schedules::Desk>,
     /// The heartbeat: its settings, and what is remembered of each agent it wakes.
     pub heartbeat: Arc<crate::heartbeat::Desk>,
+    /// The janitors: what is kept of each agent that has a job of maintenance.
+    pub janitors: Arc<crate::janitors::Desk>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
@@ -366,6 +368,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::schedules::routes())
         .merge(crate::heartbeat::routes())
         .merge(crate::forks::routes())
+        .merge(crate::janitors::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
@@ -826,12 +829,26 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let without_archived = query.include_archived.as_deref() == Some("0");
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
     let families = Families::of(&directory);
-    let agents: Vec<Value> = directory
+    let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| agent_row(&directory, &families, member, &app.faces))
         .collect();
+    // And the janitors, after them: members of the fleet that are no agents to chat with.
+    // An app tells them by `is_janitor` and lists them apart; each is shown with the
+    // picture of its job.
+    let jobs = crate::janitors::jobs(&app).await;
+    for member in &directory.janitors {
+        if without_archived && put_away(member) {
+            continue;
+        }
+        let mut row = agent_row(&directory, &families, member, &app.faces);
+        let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
+        row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
+        row["model_avatar_url"] = json!("");
+        agents.push(row);
+    }
     // Who an agent can be: the personas this Host has built in, with the voices the owner's
     // file gives them and the look the owner gave them, and the personas the owner made.
     let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
@@ -869,7 +886,8 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         "tool_explanations": apps::explanations_told(&app),
     });
     if without_archived {
-        let archived = directory.members.iter().filter(|member| put_away(member));
+        let all = directory.members.iter().chain(&directory.janitors);
+        let archived = all.filter(|member| put_away(member));
         body["archived_count"] = json!(archived.count());
         body["archived_parents"] = json!(Families::archived_parents(&directory));
     }
@@ -1025,17 +1043,17 @@ async fn create_agent(State(app): State<App>, body: axum::body::Bytes) -> Respon
     }
 }
 
-async fn remove_agent(
-    State(app): State<App>,
-    Path(session): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    if app.fleet.remove(session.clone()).await? {
-        Ok(Json(json!({ "ok": true, "session": session })))
-    } else {
-        Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            format!("unknown session {session}"),
-        ))
+/// `DELETE /agents/<session>`: an agent is removed. Answered as the Python Host answers it:
+/// that it is done, or that there is no such agent, in a word for the reason and in words.
+async fn remove_agent(State(app): State<App>, Path(session): Path<String>) -> Response {
+    match app.fleet.remove(session.clone()).await {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => {
+            let why = format!("No active agent session: {session}");
+            let told = json!({ "error": "agent_not_found", "message": why });
+            (StatusCode::NOT_FOUND, Json(told)).into_response()
+        }
+        Err(why) => ApiError::from(why).into_response(),
     }
 }
 
