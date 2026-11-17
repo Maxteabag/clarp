@@ -18,6 +18,7 @@ use clarp_spool::Record;
 
 pub mod claude;
 pub mod codex;
+pub mod history;
 pub mod past;
 pub mod scripted;
 
