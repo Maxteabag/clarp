@@ -686,8 +686,10 @@ and `clarp-admin location`, which gives the place the phone last said when it is
 asks the phone and waits for one said since (the skill `location`; the route was there, the command was
 not, so an agent here could not ask). Read in the owner's skills and the repository's: one script speaks to
 a Host by itself and not through a command, the calendar skill's, which finds its Host by `CLARP_SERVER_URL`
-and a token; a turn of this Host is not given those yet, so that script still reaches the Python Host. The
-other ten of the eleven: an agent's slot given back by hand
+and a token (`CLARP_AUTH_TOKEN`), and failing those by the Python Host's own settings. Left to itself it
+would ask the Python Host of the machine for an agent of this one. So a turn of this Host is told this Host
+under those two names, with the token of its agent's tools, and that token opens the calendar request beside
+the tools and nothing else: held by the test of what a turn is given. The other ten of the eleven: an agent's slot given back by hand
 (`POST /repair-slot`, five), and teams (three routes, three requests).
 
 **The models an app's picker offers** (17 Nov 2026). The same week's log, read for what was asked and
@@ -733,7 +735,8 @@ two are different things, as the Python Host's own note on it says: a turn's sum
 turn anew, so a turn of thirty steps says thirty times what the conversation holds. How full it is, is what
 the last answer was made from, which Claude Code says with every answer; that is now told by itself
 (`Signal::Context`), kept with the turn's end, and what the gauge shows. A tool that says no such thing
-(Codex in the mode this Host runs it) is shown as before, by what its turn took in.
+has no gauge, as on the Python Host, which shows one for Claude Code alone: Codex keeps its conversation
+within bounds by itself. This Host had shown what a Codex turn took in as its gauge.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
