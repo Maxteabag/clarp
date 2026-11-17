@@ -159,6 +159,9 @@ def own(room: dict) -> dict:
             answered, refused = None, str(error)
         changed = [personas.public(row) for row in personas.list_all()
                    if not row['builtin'] or row.get('avatar_symbol') or row.get('avatar_path')]
+        # By their ids, for the same reason as the built-in ones: two that were written within one
+        # millisecond are listed in either order.
+        changed.sort(key=lambda persona: persona['id'])
         done.append({'step': step, 'answered': answered, 'refused': refused, 'changed': changed,
                      'next_voice': contact_minting.pick_available_voice()})
     shutil.rmtree(root, ignore_errors=True)

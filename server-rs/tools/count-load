@@ -24,7 +24,10 @@ import re
 import subprocess
 import sys
 
-LINE = re.compile(r'"(GET|POST|PUT|DELETE|PATCH) (/[^ ?"]*)(?:\?[^ "]*)? HTTP/[0-9.]+" (\d{3})')
+# A path ends where a query begins, and also at the first `&` or `=`: a request whose query was
+# glued on without its `?` (seen: `/backends&token=...`) must not have its parameters taken for a
+# part of the path and printed.
+LINE = re.compile(r'"(GET|POST|PUT|DELETE|PATCH) (/[^ ?&="]*)(?:[?&=][^ "]*)? HTTP/[0-9.]+" (\d{3})')
 METHOD = re.compile(r'\b(get|post|put|delete|patch|any)\(')
 # What names one thing in a path: a number, a digest, an id a Host or an app minted, a file.
 ONE_THING = re.compile(
