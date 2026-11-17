@@ -1412,6 +1412,12 @@ impl Actor {
         self.after_of(revision, limit, Which::All)
     }
 
+    /// The revision the conversation had at a time: what is newer than it is what was
+    /// written after that time ([`conversation::revision_at`]).
+    pub fn revision_at(&self, ts_ms: i64) -> Result<u64, ActorError> {
+        conversation::revision_at(self.recorder.log(), self.span(), ts_ms)
+    }
+
     /// Up to `limit` things a reader asks for that are newer than `revision`.
     pub fn after_of(&self, revision: u64, limit: usize, which: Which) -> Result<Page, ActorError> {
         conversation::after(

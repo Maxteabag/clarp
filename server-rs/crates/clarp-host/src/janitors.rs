@@ -56,9 +56,10 @@ const OWN_TOOL: &str = "codex";
 const FROM_A_JANITOR: &str = "janitor";
 
 /// What an app is told when it turns on a janitor whose job does not run here.
-const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task and the router of spoken \
-                          messages, and no other job yet: this janitor is made, set and paused \
-                          here, and nothing starts it. Nothing was turned on.";
+const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task, the router of spoken \
+                          messages, the explainer of tools and the Goal keeper, and no other \
+                          job yet: this janitor is made, set and paused here, and nothing \
+                          starts it. Nothing was turned on.";
 
 /// The janitors of this Host. `None` until the book was read where it is kept.
 #[derive(Default)]
@@ -619,7 +620,11 @@ async fn more(
         .janitors
         .read(&app, |book, world, _| book.runs_of(&key, limit, world));
     match read.await {
-        Ok(Ok(runs)) => Json(json!({ "runs": runs })).into_response(),
+        Ok(Ok(mut runs)) => {
+            // A run of the Goal keeper says what it did with each goal.
+            crate::keeper::with_receipts(&app, &mut runs).await;
+            Json(json!({ "runs": runs })).into_response()
+        }
         Ok(Err(refused)) => refusal(&refused),
         Err(why) => unavailable(&why),
     }
@@ -841,6 +846,7 @@ async fn change(
                 runs::SCHEDULED_TASK,
                 clarp_kernel::router::JOB,
                 crate::explain::JOB,
+                clarp_kernel::goals::keeper::ROLE,
             ];
             if on && !runs_here.iter().any(|job| agent["template_id"] == *job) {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);

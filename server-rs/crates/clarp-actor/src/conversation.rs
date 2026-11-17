@@ -380,6 +380,24 @@ pub(crate) fn older(
     })
 }
 
+/// The revision the conversation had at a time: that of the newest thing of it that was
+/// written at or before `ts_ms`, and where the conversation begins when everything in it is
+/// newer. What is newer than this revision ([`after`]) is what was written after that time.
+/// A log is in the order it was written, so the times in it do not go back, and the place
+/// is searched for and not read up to: a few items, however long the conversation.
+pub(crate) fn revision_at(log: &dyn AgentLog, span: Span, ts_ms: i64) -> Result<u64, ActorError> {
+    // Everything up to `low` was written by then; everything from `high` on, after.
+    let (mut low, mut high) = (span.floor, log.last_seq()?.saturating_add(1));
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        match log.read_after(middle - 1, kind::CONVERSATION, 1)?.first() {
+            Some(item) if item.seq < high && item.ts_ms <= ts_ms => low = item.seq,
+            _ => high = middle,
+        }
+    }
+    Ok(low * REVISION_STEP)
+}
+
 /// Up to `limit` things that are newer than `revision`, in the order they changed.
 pub(crate) fn after(
     log: &dyn AgentLog,

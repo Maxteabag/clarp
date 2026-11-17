@@ -118,6 +118,10 @@ async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
         Ok(ask) => ask,
         Err(said) => return said,
     };
+    // The keeper's receipts of a goal are the Host's own, whoever owns the goal.
+    if let goaltool::Ask::Receipts { plan_id, limit } = &ask {
+        return crate::keeper::receipts_said(app, plan_id, *limit).await;
+    }
     let member = match ask.about() {
         About::Session(session) => app.member(session),
         About::Plan(plan_id) => {
@@ -132,7 +136,8 @@ async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
         return goaltool::nobody(&ask, app.clock.now_ms());
     };
     match member.agent.goal(ask).await {
-        Ok(said) => said,
+        // A plan is printed with how the Goal keeper stands to it, as an app reads it.
+        Ok(said) => crate::keeper::told_in(app, said).await,
         Err(error) => ToolAnswer::said(
             1,
             format!("agent_tasks: the Host could not do it: {}", error.0),

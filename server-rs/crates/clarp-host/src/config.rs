@@ -46,6 +46,8 @@ pub struct Config {
     pub heartbeats_checked_every_ms: u64,
     /// How often the janitors' runner looks at what is due and at the runs that are out.
     pub janitors_checked_every_ms: u64,
+    /// How often the Goal keeper looks at the open goals for what is due.
+    pub goals_kept_every_ms: u64,
     /// How often the fleet looks after the helpers nobody speaks of any more.
     pub helpers_checked_every_ms: u64,
     /// How long a helper that is working may sit idle before it counts as having reported.
@@ -114,7 +116,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--launcher direct|systemd] [--shim PATH] \
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
-[--janitors-checked-every-ms N] \
+[--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
 [--accounts none|follow] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -256,6 +258,7 @@ impl Config {
         let mut schedules_checked_every_ms = 15_000;
         let mut heartbeats_checked_every_ms = 60_000;
         let mut janitors_checked_every_ms = 2_000;
+        let mut goals_kept_every_ms = 15_000;
         let mut helpers_checked_every_ms = 60_000;
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
         let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
@@ -323,6 +326,11 @@ impl Config {
                     janitors_checked_every_ms = value("a number of milliseconds")?
                         .parse()
                         .map_err(|_| "--janitors-checked-every-ms needs a number".to_string())?;
+                }
+                "--goals-kept-every-ms" => {
+                    goals_kept_every_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--goals-kept-every-ms needs a number".to_string())?;
                 }
                 "--helpers-checked-every-ms" => {
                     helpers_checked_every_ms = value("a number of milliseconds")?
@@ -430,6 +438,7 @@ impl Config {
             schedules_checked_every_ms,
             heartbeats_checked_every_ms,
             janitors_checked_every_ms,
+            goals_kept_every_ms,
             helpers_checked_every_ms,
             helper_idle_after_ms,
             helper_archive_grace_ms,

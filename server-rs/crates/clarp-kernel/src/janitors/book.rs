@@ -254,7 +254,7 @@ impl Book {
     }
 
     /// The triggers a janitor has, in the order they were given it.
-    pub(super) fn triggers_of(&self, agent_id: &str) -> Vec<(&String, &Trigger)> {
+    pub fn triggers_of(&self, agent_id: &str) -> Vec<(&String, &Trigger)> {
         let mut own: Vec<(&String, &Trigger)> = self
             .triggers
             .iter()

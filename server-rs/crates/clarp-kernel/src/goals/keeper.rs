@@ -769,6 +769,48 @@ pub fn prompt(plan: &Value, sheet: &Value, said: &str) -> String {
     head + body
 }
 
+/// The shape a model's answer has to have, for a tool that can hold a model to one: every
+/// step the prompt shows by its short id, each with its status, what shows it and a note,
+/// and the checkpoint's two texts. It is the shape [`SYSTEM`] asks for in words; the Python
+/// Host has the words only, and reads whatever JSON comes back.
+pub fn schema(plan: &Value) -> Value {
+    let plan_id = plan["plan_id"].as_str().unwrap_or_default();
+    let text = json!({ "type": "string" });
+    let step = json!({
+        "type": "object",
+        "properties": {
+            "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "blocked"] },
+            "evidence": text, "note": text,
+        },
+        "required": ["status", "evidence", "note"],
+        "additionalProperties": false,
+    });
+    let mut steps = Map::new();
+    for item in steps_of(plan).into_iter().take(STEPS_MOST) {
+        let id = short(plan_id, item["item_id"].as_str().unwrap_or_default());
+        steps.insert(id.to_string(), step.clone());
+    }
+    let named: Vec<String> = steps.keys().cloned().collect();
+    json!({
+        "type": "object",
+        "properties": {
+            "steps": {
+                "type": "object", "properties": steps, "required": named,
+                "additionalProperties": false,
+            },
+            "checkpoint": {
+                "type": "object",
+                "properties": { "progress": text, "next_work": text },
+                "required": ["progress", "next_work"],
+                "additionalProperties": false,
+            },
+            "changed": { "type": "boolean" },
+        },
+        "required": ["steps", "checkpoint", "changed"],
+        "additionalProperties": false,
+    })
+}
+
 /// What is taken from a model's answer: for each step it names that the plan has, its
 /// status and a note, and the checkpoint's two texts (`decide`). A step called done with no
 /// evidence quoted stays in progress, and says so.
