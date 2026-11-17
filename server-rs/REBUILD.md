@@ -1154,10 +1154,22 @@ itself as it is (`fork_session_id`). It is how a conversation held in a terminal
   of a request that says to open what is there, and otherwise makes the agent, whose tool then looks for the
   session in vain (`fork.py`'s own words: Claude Code finds a conversation only under the directory it is
   started in). An agent whose session could not be taken up does not stay (`resume_failed`).
-- Held by the vectors, and by `a_new_agent_begins_with_a_session_its_tool_kept` on a Host whose user has a
-  home of their own: the session offered, the refusals, the agent that takes it up with its rows, its tool's
+- Held by the vectors, by `a_new_agent_begins_with_a_session_its_tool_kept` on a Host whose user has a
+  home of their own (the session offered, the refusals, the agent that takes it up with its rows, its tool's
   card and its model, its next turn in that session, the second taking refused and opened, a fork here and a
-  fork for another directory.
+  fork for another directory), and by the scenario `past-sessions` (29 steps): the suite's stand-in for
+  Claude Code keeps its sessions where the real one does, so both Hosts are asked about a session an agent's
+  own turn left behind.
+- **The Python Host was asked before this was finished** (run 44024248012). Every status was the same on
+  both Hosts at that first asking: in use, opened, the two refusals, the fork, the session of a removed
+  agent taken up, and in use again. What differed decided four things above: that the agent is new until
+  its first turn (this Host had it at rest, as one that arrived from another Host), how a row read from a
+  transcript is named and what it is in its conversation, and that two agents never share a conversation's
+  name here (the Python Host showed the second agent the first one's conversation, counted on). It also
+  showed two things a comparison must not take for answers: the moment a session's file was last written,
+  and the session's id inside the words of a refusal. At the second asking (run 44026732020) the Python
+  Host answered as it had, and the two Hosts differ in five places, all of them the one thing meant: the
+  name of the conversation of the agent that took the session up, registered.
 
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one
