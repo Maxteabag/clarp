@@ -306,7 +306,7 @@ def scene(number: int) -> dict:
     totals = learning.stats('24h', 'hour', prompt_version=tool_explanations.PROMPT_VERSION, templates_version=templates.VERSION)['totals']
     builtin = janitor_builtins.get_builtin('tool-explainer')
     return {'name': told['name'], 'files': told.get('files') or {}, 'failure_ttl_ms': int(told.get('failure_ttl', 60) * 1000),
-            'debounce_ms': int(told.get('debounce', .15) * 1000), 'work': str(work), 'model': builtin['model'], 'steps': steps, 'asked': asked,
+            'debounce_ms': int(told.get('debounce', .15) * 1000), 'work': str(work.relative_to(root)), 'model': builtin['model'], 'steps': steps, 'asked': asked,
             'learned': learned, 'counts': totals['counts'], 'totals': {k: v for k, v in totals.items() if k != 'counts'}}
 
 

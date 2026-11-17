@@ -70,8 +70,12 @@ class World:
         self.db, self.agents = db, agents
         self.now = T0 + number * 40 * DAY
         self.ids = self.seq = self.jobs = 0
-        for module in (clock, db):
-            module.now_ms = lambda: self.now
+        # Every module of the Host that took the clock's reading by name is given this clock:
+        # what a function of the Host writes by itself (an agent's first state) is then of the
+        # scenario's day, and the same in every run.
+        for module in [clock, db, *sys.modules.values()]:
+            if getattr(module, '__name__', '').startswith('lib.') and hasattr(module, 'now_ms'):
+                module.now_ms = lambda: self.now
         secrets.token_hex = self.token_hex
         db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
         self.number = number

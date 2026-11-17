@@ -235,7 +235,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330222,
+       "ts": 1798156000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -854,7 +854,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330222,
+       "ts": 1798156000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -1584,7 +1584,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330222,
+       "ts": 1798156000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -2366,7 +2366,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330222,
+       "ts": 1798156000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -2976,7 +2976,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330222,
+       "ts": 1798156000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -3737,7 +3737,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330222,
+       "ts": 1798156000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera1\"}"
       },
@@ -4193,7 +4193,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -4459,7 +4459,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -4740,7 +4740,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5025,7 +5025,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5310,7 +5310,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5600,7 +5600,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
@@ -5917,7 +5917,7 @@
        }
       ],
       "last_state": {
-       "ts": 1794911330286,
+       "ts": 1801612000000,
        "kind": "spawned",
        "detail": "{\"session\": \"vera2\"}"
       },
