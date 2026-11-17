@@ -724,7 +724,11 @@ and was removed has still spent what it spent). The other half is how much of an
 Python Host asks the providers with the accounts' own logins: this Host asks nobody yet, and says that it
 does not in the part of the answer that is for it. Codex's row is counted the same way here; the Python Host
 has for it what Codex itself reports of its limits. What a turn cost is counted where the tool says so
-(Claude Code does, to the millionth of a dollar here). Reading for this found a number this Host had wrong since the first turn it ran: what a turn
+(Claude Code does, to the millionth of a dollar here). The Python Host could not be asked for its usage
+screen after a turn of the suite's stand-in: asked for it, that Host starts its tools to learn what is left
+of the accounts, and with the suite's stand-ins for them its agent never came to rest again (run
+44034994886; a scenario of fifteen steps, taken out of the corpus again). So this is held by what that
+Host's own functions answer, and by this Host's tests, and by no scenario. Reading for this found a number this Host had wrong since the first turn it ran: what a turn
 took in was counted as `input_tokens` alone, where the Python Host counts with it what the turn wrote to
 the cache and read from it (`turn_stop._result_detail`), and a turn of Claude Code that goes on in a long
 conversation reads nearly all of what it takes in from the cache. No scenario saw it, because the suite's
