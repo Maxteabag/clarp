@@ -202,17 +202,18 @@ def test_codex_free_tier_probe_appends_paid_and_api_fallback_models_with_efforts
         "gpt-6-luna", "gpt-5.6-terra", "gpt-5.6-luna"]
     assert all(m["source"]["kind"] == "cli_probe" for m in row["models"][:3])
     assert {
-        "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra",
+        "gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra",
         "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5",
     } <= by_id.keys()
     assert len(row["models"]) == len(by_id)
-    for paid in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol", "gpt-5.6-sol"):
+    for paid in ("gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra", "gpt-6-sol", "gpt-5.6-sol"):
         assert by_id[paid]["source"]["kind"] == "static_fallback"
         assert by_id[paid]["supported_efforts"] == [
             "low", "medium", "high", "xhigh", "max", "ultra"]
     assert by_id["gpt-6.1-terra"]["default_effort"] == "low"
+    assert by_id["gpt-6.2-astra"]["default_effort"] == "low"
     for med_default in (
-        "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol",
+        "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol",
         "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5",
     ):
         assert by_id[med_default]["default_effort"] == "medium"

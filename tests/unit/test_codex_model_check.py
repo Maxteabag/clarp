@@ -9,6 +9,8 @@ without a list read from the CLI the id is accepted as before.
 """
 from __future__ import annotations
 
+import json
+import subprocess
 import time
 
 import pytest
@@ -103,3 +105,32 @@ def test_a_janitor_refusal_without_a_list_says_only_that_it_is_invalid(monkeypat
     with pytest.raises(janitors.JanitorError) as refused:
         janitors._model({"backend": "codex"}, "x" * 161, None)     # too long, whatever the list
     assert str(refused.value) == "Invalid model for this agent"
+
+
+@pytest.mark.parametrize("state", ["cli-lists-astra", "fallback-appended", "offline"])
+def test_codex_62_astra_accepted_from_discovered_catalogue(monkeypatch, state):
+    class RealModels(FakeBackends):
+        is_valid_model = staticmethod(backends.is_valid_model)
+        known_models = staticmethod(backends.known_models)
+
+    model = "gpt-6.2-astra"
+    listed = model if state == "cli-lists-astra" else "gpt-6.1-sol"
+
+    def run(argv, **_kwargs):
+        output = ("codex-cli 0.167.1" if argv[-1] == "--version" else
+                  json.dumps({"models": [{"slug": listed, "visibility": "list"}]}))
+        return subprocess.CompletedProcess(argv, 0, stdout=output, stderr="")
+
+    catalogue = provider_capabilities._discover_provider(
+        "codex", "2026-11-17T20:05:00Z",
+        resolve=lambda _: None if state == "offline" else "/synthetic/codex", run=run)
+    monkeypatch.setattr(provider_capabilities, "_cache",
+                        (time.monotonic(), {"providers": {"codex": catalogue}}, ()))
+    [astra] = [m for m in catalogue["models"] if m["id"] == model]
+    assert astra["source"]["kind"] == ("cli_probe" if state == "cli-lists-astra" else "static_fallback")
+
+    result = agent_spec.AgentSpec.parse(
+        {"name": "Helper", "backend": "codex", "model": model},
+        backends=RealModels(), roster=VIEW, personas=PERSONAS)
+    assert isinstance(result, agent_spec.AgentSpec)
+    assert result.model == model

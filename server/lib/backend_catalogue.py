@@ -185,6 +185,8 @@ CODEX = BackendDefinition(
     model_family='codex',
     contact_tier='codex',
     fallback_models=(
+        ('gpt-6.2-sol', 'GPT-6.2-Sol'),
+        ('gpt-6.2-astra', 'GPT-6.2-Astra'),
         ('gpt-6.1-sol', 'GPT-6.1 Sol'),
         ('gpt-6-astra', 'GPT-6 Astra'),
         ('gpt-6.1-terra', 'GPT-6.1 Terra'),
@@ -196,6 +198,8 @@ CODEX = BackendDefinition(
         ('gpt-5.5', 'GPT-5.5'),
     ),
     fallback_model_efforts=MappingProxyType({
+        'gpt-6.2-sol': _CODEX_ULTRA_EFFORTS,
+        'gpt-6.2-astra': _CODEX_ULTRA_EFFORTS,
         'gpt-6.1-sol': _CODEX_ULTRA_EFFORTS,
         'gpt-6-astra': _CODEX_ULTRA_EFFORTS,
         'gpt-6.1-terra': _CODEX_ULTRA_EFFORTS,
@@ -207,6 +211,8 @@ CODEX = BackendDefinition(
         'gpt-5.5': _CODEX_XHIGH_EFFORTS,
     }),
     fallback_model_defaults=MappingProxyType({
+        'gpt-6.2-sol': 'medium',
+        'gpt-6.2-astra': 'low',
         'gpt-6.1-sol': 'medium',
         'gpt-6-astra': 'medium',
         'gpt-6.1-terra': 'low',
