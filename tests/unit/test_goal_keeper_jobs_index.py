@@ -66,7 +66,7 @@ def test_held_writer_does_not_turn_optional_index_into_a_startup_failure(monkeyp
         assert con.execute('SELECT 1').fetchone()[0] == 1
         assert not _has_index(con)
         assert con.execute('PRAGMA user_version').fetchone()[0] == version
-        assert duration < 0.5, 'optional index used the normal multi-second writer deadline'
+        assert 0.07 <= duration < 0.5, 'optional index must allow its short writer wait only'
         lines = [line for line in capsys.readouterr().err.splitlines() if INDEX in line]
         assert len(lines) == 1 and ('BUSY' in lines[0] or 'timeout' in lines[0])
     finally:
@@ -230,7 +230,7 @@ def test_index_build_exhausting_budget_rolls_back_without_losing_jobs(monkeypatc
                     [(str(i),'owner','owner','Synthetic',1,2,2) for i in range(500)])
     # The CREATE itself exceeds its progress deadline, after admission succeeds.
     ticks = iter([0.0, 0.0])
-    monkeypatch.setattr(db_migrations.time, 'monotonic', lambda: next(ticks, 1.0))
+    monkeypatch.setattr(db_migrations.time, 'monotonic', lambda: next(ticks, 3.0))
     monkeypatch.setattr(db, '_SERVICE', 'host')
     assert not db.ensure_service_indexes(con)
     assert not _has_index(con)
@@ -239,3 +239,88 @@ def test_index_build_exhausting_budget_rolls_back_without_losing_jobs(monkeypatc
     assert not con.in_transaction
     lines = [line for line in capsys.readouterr().err.splitlines() if INDEX in line]
     assert len(lines) == 1 and 'INTERRUPT' in lines[0]
+
+
+def test_writer_wait_does_not_consume_the_separate_build_budget(monkeypatch):
+    from lib import db_migrations
+    path, version = _existing_without_index()
+    con = db.conn()
+    con.executemany("INSERT INTO background_jobs(job_id,agent_id,session,title,started_at,updated_at) VALUES(?,?,?,?,?,?)",
+                    [(str(i),'owner','owner','Synthetic',1,2) for i in range(500)])
+    clock = [0.0]
+    class TimedBuild(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql.startswith('CREATE INDEX'):
+                # 90 ms writer wait plus 1.95 s build: within each own bound.
+                clock[0] = 2.04
+            result = super().execute(sql, *args)
+            if sql == 'BEGIN IMMEDIATE':
+                clock[0] = 0.09
+            return result
+    connect = sqlite3.connect
+    def timed(*args, **kwargs):
+        if 0 < kwargs.get('timeout', 5) < 1:
+            kwargs['factory'] = TimedBuild
+        return connect(*args, **kwargs)
+    monkeypatch.setattr(sqlite3, 'connect', timed)
+    monkeypatch.setattr(db_migrations.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(db, '_SERVICE', 'host')
+    assert db.ensure_service_indexes(con)
+    assert _has_index(con)
+    assert con.execute('PRAGMA user_version').fetchone()[0] == version
+
+
+def test_artificially_slow_build_hits_build_deadline_and_rolls_back(monkeypatch, capsys):
+    path, version = _existing_without_index()
+    con = db.conn()
+    con.executemany("INSERT INTO background_jobs(job_id,agent_id,session,title,started_at,updated_at) VALUES(?,?,?,?,?,?)",
+                    [(str(i),'owner','owner','Synthetic',1,2) for i in range(5000)])
+    class SlowBuild(sqlite3.Connection):
+        def set_progress_handler(self, callback, n):
+            if callback is None:
+                return super().set_progress_handler(None, n)
+            def delayed():
+                time.sleep(0.05)  # finite simulated storage latency, no CPU load
+                return callback()
+            return super().set_progress_handler(delayed, n)
+    connect = sqlite3.connect
+    def slow(*args, **kwargs):
+        if 0 < kwargs.get('timeout', 5) < 1:
+            kwargs['factory'] = SlowBuild
+        return connect(*args, **kwargs)
+    monkeypatch.setattr(sqlite3, 'connect', slow)
+    monkeypatch.setattr(db, '_SERVICE', 'host')
+    at = time.monotonic()
+    assert not db.ensure_service_indexes(con)
+    elapsed = time.monotonic() - at
+    assert 1.8 <= elapsed < 2.8, elapsed
+    assert not _has_index(con)
+    assert con.execute('SELECT COUNT(*) FROM background_jobs').fetchone()[0] == 5000
+    assert con.execute('PRAGMA user_version').fetchone()[0] == version
+    assert not con.in_transaction
+    lines = [line for line in capsys.readouterr().err.splitlines() if INDEX in line]
+    assert len(lines) == 1 and 'failed' in lines[0] and 'INTERRUPT' in lines[0]
+
+
+def test_connection_setup_checks_the_index_once_per_host_process(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    con = db.conn()
+    path = db.DB_PATH
+    opened = db._open_connection
+    statements = []
+    def traced():
+        connection = opened()
+        connection.set_trace_callback(statements.append)
+        return connection
+    monkeypatch.setattr(db, '_open_connection', traced)
+    _start(monkeypatch, path, 'host')
+    db.conn().execute('SELECT 1')
+    def other_thread():
+        try:
+            return db.conn().execute('SELECT 1').fetchone()[0]
+        finally:
+            db.close_local()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        assert pool.submit(other_thread).result(timeout=5) == 1
+    checks = [sql for sql in statements if sql.startswith('SELECT 1 FROM sqlite_master') and INDEX in sql]
+    assert len(checks) == 1
