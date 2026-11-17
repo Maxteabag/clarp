@@ -208,7 +208,15 @@ def run() -> dict:
             del heard[:]
             result = act(one)
             held = {sid: manager.held_clips(sid) for sid in list(AGENTS) + ['stranger', '']}
-            rows.append({'step': one, 'result': result, 'heard': [dict(event) for event in heard],
+            told = [dict(event) for event in heard]
+            # Where a sentence lets more than one agent speak, the Python Host lets them speak
+            # in the order of a set of their sessions, which is another from one start to the
+            # next (reference defect R52). Written here in the order of the sessions' names,
+            # so that the same steps give the same file: the order is no part of what is held.
+            if isinstance(result, dict) and len(result.get('granted') or []) > 1:
+                result = {**result, 'granted': sorted(result['granted'])}
+                told.sort(key=lambda event: str(event.get('session') or ''))
+            rows.append({'step': one, 'result': result, 'heard': told,
                          'pending': sorted(manager.pending_heralds()),
                          'held': {sid: urls for sid, urls in held.items() if urls}})
         return {'name': script['name'], 'steps': rows}

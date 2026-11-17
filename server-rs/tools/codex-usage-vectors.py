@@ -282,6 +282,13 @@ def told(story):
     from lib import backend_usage_store as store
     from lib import db
     store_of_all = db.conn()
+    # Which Host this is, and the ids it draws: the same in every run, so that the same
+    # stories give the same file (a Host draws its name, and an id for every stretch and every
+    # event; here they are numbered in the order they are drawn).
+    import uuid
+    store._computer_id = lambda: 'a-host'
+    drawn = iter(range(1, 1_000_000))
+    uuid.uuid4 = lambda: uuid.UUID(int=next(drawn))
     # An agent of each tool, for the turns a story says ended.
     for tool in ('codex', 'claude'):
         store_of_all.execute(

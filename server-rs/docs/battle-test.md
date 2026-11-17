@@ -1116,6 +1116,27 @@ of the check held at its first run. What it does not show: a warning or a hard l
 (this one has no five-hour window), and what an agent's row says of an account that is used up, which
 is not in this build.
 
+## What is left of a Claude account, after a real turn
+
+17 Nov 2026, 22:38, the installed Host on the build `fe0d981feb90` (installed at 22:38:11 by the
+installer; its relay was back after 68 ms). One check (`verify-claude-limits.py`) and one turn of Claude
+Code on Sonnet: an agent of the check's own is asked for a single word, and the usage screen's answer
+(`GET /backend-usage`) is read before the turn and after it.
+
+| What was read | What the installed Host answered |
+|---|---|
+| Before the turn | of Claude nothing was seen (`unavailable`, "No structured usage evidence for this provider"), no window |
+| After the turn (its state `done`, the word answered) | of Claude: `fresh`, from `claude-code/rate_limit_event`; two windows, the five hours first and the week (`five_hour`, `seven_day`), each with how much of it is used, in percent, when it begins anew, an id, and its limit `normal`; the row of Claude among the tools is what this Host counted itself (`clarp-turn-accounting`) |
+| What the agents' rows say of their tools' accounts | nothing (`backend_quota` is `null` in all 23: 12 of Claude, 11 of Codex): neither account is used up |
+| Limits told meanwhile | none |
+| Afterwards | the agent removed; the Host has its 23 agents |
+
+The figures and the moments of the resets are the owner's account's and are not written here. Every
+point of the check held at its first run. Read on the same build without a turn: of Codex the week's
+window as it was said at the soak's turn of 22:02, by now `stale` with its limit `unknown`, kept across
+the restart. What this does not show: a real account that is used up, and a warning (neither account
+was near either).
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

@@ -110,7 +110,10 @@ def one(case: dict) -> dict:
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
     from lib import config, personas, roster
-    listed = [personas.public(row) for row in personas.list_all()]
+    # By their ids. The Python Host lists them by when each was written into its table, and
+    # those it has built in are written within a millisecond or two of each other, so that
+    # their order is another from one start to the next: it is no part of what is held.
+    listed = sorted((personas.public(row) for row in personas.list_all()), key=lambda persona: persona['id'])
     lists = {
         'roster': [[name, voice] for name, voice in config.DEFAULT_ROSTER.items()],
         'cartesia': dict(config.DEFAULT_CARTESIA_VOICES),
@@ -136,6 +139,11 @@ def own(room: dict) -> dict:
     sys.path.insert(0, str(REPO / 'server'))
     from lib import contact_minting, personas
     personas.ensure_builtins()
+    # The ids the Host draws for an owner's own personas: numbered in the order they are
+    # drawn, so that the same steps give the same file.
+    import secrets
+    drawn = iter(range(1, 1_000_000))
+    secrets.token_hex = lambda count=32: f'{next(drawn):0{2 * count}x}'
     done = []
     for step in room['steps']:
         (what, given), = step.items()
