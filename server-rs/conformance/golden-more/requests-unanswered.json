@@ -1,0 +1,614 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "no_label": "No",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "The first?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 1,
+      "status": "pending",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {},
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "The first?",
+     "title": "Synthetic first",
+     "type": "decision",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 201,
+   "step": "ask the first"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:1>",
+     "completed_at": "<time>",
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": false,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "blocks_progress": false,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:3>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "no_label": "No",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "The first?",
+      "recommended_option_id": null,
+      "resolved_at": "<time>",
+      "resolved_by": "user",
+      "resolved_choice": "dismissed",
+      "response_effort": "review",
+      "response_type": "approval",
+      "revision": 2,
+      "status": "cancelled",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {},
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "cancelled",
+     "summary": "The first?",
+     "title": "Synthetic first",
+     "type": "decision",
+     "updated_at": "<time>"
+    },
+    "changed": true,
+    "delivery_pending": false
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:3>/dismiss",
+   "status": 200,
+   "step": "discard it"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:4>",
+     "completed_at": null,
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": true,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "blocks_progress": false,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:5>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "input_hint": "one_time_code",
+      "no_label": "No",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "The second?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "text_input",
+      "revision": 1,
+      "status": "pending",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {
+      "input_hint": "one_time_code"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "active",
+     "summary": "The second?",
+     "title": "Synthetic second",
+     "type": "question",
+     "updated_at": "<time>"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions",
+   "status": 201,
+   "step": "ask the second"
+  },
+  {
+   "body": {
+    "error": "only the asking agent may withdraw this request"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:5>/withdraw",
+   "status": 403,
+   "step": "someone else takes it back"
+  },
+  {
+   "body": {
+    "count": 1,
+    "decision_format": 2,
+    "items": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "allow_custom_text": true,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "blocks_progress": false,
+      "context": "",
+      "created_at": "<time>",
+      "deadline_at": null,
+      "decision_id": "decision-<id:5>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "input_hint": "one_time_code",
+      "kind": "question",
+      "no_label": "No",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "The second?",
+      "recommended_option_id": null,
+      "resolved_at": null,
+      "resolved_by": "",
+      "resolved_choice": "",
+      "response_effort": "review",
+      "response_type": "text_input",
+      "revision": 1,
+      "session": "claire",
+      "status": "pending",
+      "summary": "The second?",
+      "title": "Synthetic second",
+      "updated_at": "<time>",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     }
+    ],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "get /attention?decision_format=2"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:2>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "artifact-<id:4>",
+     "completed_at": "<time>",
+     "created_at": "<time>",
+     "decision": {
+      "allow_custom_text": true,
+      "answer": null,
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "blocks_progress": false,
+      "context": "",
+      "deadline_at": null,
+      "decision_id": "decision-<id:5>",
+      "delivery_pending": false,
+      "expires_at": null,
+      "input_hint": "one_time_code",
+      "no_label": "No",
+      "options": [],
+      "priority": 100,
+      "priority_reason": "",
+      "question": "The second?",
+      "recommended_option_id": null,
+      "resolved_at": "<time>",
+      "resolved_by": "agent",
+      "resolved_choice": "withdrawn",
+      "response_effort": "review",
+      "response_type": "text_input",
+      "revision": 2,
+      "status": "cancelled",
+      "urgency": "normal",
+      "yes_label": "Yes"
+     },
+     "deleted_at": null,
+     "payload": {
+      "input_hint": "one_time_code"
+     },
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "cancelled",
+     "summary": "The second?",
+     "title": "Synthetic second",
+     "type": "question",
+     "updated_at": "<time>"
+    },
+    "changed": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/decision-<id:5>/withdraw",
+   "status": 200,
+   "step": "the agent takes it back"
+  },
+  {
+   "body": {
+    "error": "decision not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/no-such/dismiss",
+   "status": 409,
+   "step": "discard what is not there"
+  },
+  {
+   "body": {
+    "error": "decision not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/decisions/no-such/resolve",
+   "status": 409,
+   "step": "answer what is not there"
+  },
+  {
+   "body": {
+    "count": 0,
+    "decision_format": 2,
+    "items": [],
+    "janitor_items": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/attention",
+   "status": 200,
+   "step": "the inbox, empty"
+  },
+  {
+   "body": {
+    "artifacts": [
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:4>",
+      "completed_at": "<time>",
+      "created_at": "<time>",
+      "decision": {
+       "allow_custom_text": true,
+       "answer": null,
+       "archived_at": null,
+       "artifact_id": "artifact-<id:4>",
+       "blocks_progress": false,
+       "context": "",
+       "deadline_at": null,
+       "decision_id": "decision-<id:5>",
+       "delivery_pending": false,
+       "expires_at": null,
+       "input_hint": "one_time_code",
+       "no_label": "No",
+       "options": [],
+       "priority": 100,
+       "priority_reason": "",
+       "question": "The second?",
+       "recommended_option_id": null,
+       "resolved_at": "<time>",
+       "resolved_by": "agent",
+       "resolved_choice": "withdrawn",
+       "response_effort": "review",
+       "response_type": "text_input",
+       "revision": 2,
+       "status": "cancelled",
+       "urgency": "normal",
+       "yes_label": "Yes"
+      },
+      "deleted_at": null,
+      "payload": {
+       "input_hint": "one_time_code"
+      },
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "cancelled",
+      "summary": "The second?",
+      "title": "Synthetic second",
+      "type": "question",
+      "updated_at": "<time>"
+     },
+     {
+      "agent_id": "<id:2>",
+      "agent_name": "Claire",
+      "archived_at": null,
+      "artifact_id": "artifact-<id:1>",
+      "completed_at": "<time>",
+      "created_at": "<time>",
+      "decision": {
+       "allow_custom_text": false,
+       "answer": null,
+       "archived_at": null,
+       "artifact_id": "artifact-<id:1>",
+       "blocks_progress": false,
+       "context": "",
+       "deadline_at": null,
+       "decision_id": "decision-<id:3>",
+       "delivery_pending": false,
+       "expires_at": null,
+       "no_label": "No",
+       "options": [],
+       "priority": 100,
+       "priority_reason": "",
+       "question": "The first?",
+       "recommended_option_id": null,
+       "resolved_at": "<time>",
+       "resolved_by": "user",
+       "resolved_choice": "dismissed",
+       "response_effort": "review",
+       "response_type": "approval",
+       "revision": 2,
+       "status": "cancelled",
+       "urgency": "normal",
+       "yes_label": "Yes"
+      },
+      "deleted_at": null,
+      "payload": {},
+      "payload_version": 1,
+      "pinned": false,
+      "pinned_at": null,
+      "reference_id": "",
+      "session": "claire",
+      "source_message_id": "",
+      "source_trace_id": "",
+      "status": "cancelled",
+      "summary": "The first?",
+      "title": "Synthetic first",
+      "type": "decision",
+      "updated_at": "<time>"
+     }
+    ]
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "get /artifacts?session=claire&order=created"
+  },
+  {
+   "body": {
+    "conversation_id": "",
+    "cwd": "<ROOT>/workspace",
+    "delivery_scope": {
+     "agent_id": "<id:2>",
+     "runtime_instance": "<instance>",
+     "runtime_release": "in-process",
+     "server_id": "<id:6>"
+    },
+    "delivery_stop_generation": 0,
+    "file": null,
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 0,
+    "latest_ts": "",
+    "missing": true,
+    "replace_required": false,
+    "turns": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "requests-unanswered",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#1@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#1@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#1@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#1@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:1>",
+    "event_id": "<eid:artifact-updated#2@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#2@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#2@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#2@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:4>",
+    "event_id": "<eid:artifact-updated#3@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#3@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 1,
+    "event_id": "<eid:attention-updated#3@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#3@cf004e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:2>",
+    "artifact_id": "artifact-<id:4>",
+    "event_id": "<eid:artifact-updated#4@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#4@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#4@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#4@cf004e>"
+  }
+ ]
+}

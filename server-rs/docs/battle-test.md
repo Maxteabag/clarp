@@ -174,11 +174,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 02:13 (17 Nov) | the Host updated by the installer, `d63e4c09` to `35dd10c4`: the build in which an agent forks itself into helpers, and a message the Host sends by itself is told to the apps under no id. The relay was on: the new Host was connected to it again 119 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 03:48 (17 Nov) | the Host updated by the installer, `35dd10c4` to `2b48004c`: the build with the janitors as they are kept and set (nothing of one runs in it yet). At its first start it installed the seven janitors a Host has of its own. The relay was on: the new Host was connected to it again 40 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 04:26 (17 Nov) | the Host updated by the installer, `2b48004c` to `34641890`: the build in which a janitor's scheduled task runs. The relay was on: the new Host was connected to it again 146 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
+| 04:56 (17 Nov) | the Host updated by the installer, `34641890` to `c7332730`: the build in which a janitor is looked at and not spoken to, a janitor is made as a new agent, and the rules of a run that answers one request are in. The relay was on: the new Host was connected to it again 66 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and twenty-two turns in
-thirty-six exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-thirty of Codex in the ten since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and twenty-five turns in
+thirty-seven exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+thirty-three of Codex in the eleven since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -669,6 +670,19 @@ Host's own and the same everywhere: the files of that directory that are no zone
 (`2b48004c`) was green in `Server (Rust)` (44002161507), in the repository's gates with the release, and in
 the conformance run on the same commit (44002165436: 82 differences, all registered; every planted change
 caught), as the run of the first candidate had been (44000762295).
+
+Two things of the janitors landed with `c7332730` (17 Nov, 04:55, installed by exercise 37 at 04:56) and were
+tried where it is installed two minutes after, by the same check grown by nine points (37, all as meant; the
+check of a scheduled task with a real Codex agent was run after it on the same build, and came out as in the
+section below).
+
+| What | On the installed Host |
+|---|---|
+| Looked at and not spoken to | a message for a janitor, a stop for it and its removal as an agent are each refused in the Python Host's word and words (403, `janitor_inspection_only`). The build before answered a message for one as for nobody (404) |
+| Made as a new agent | a request with a name, a tool, a directory and a scheduled task, under an id of its own: a janitor under a session name the Host drew from the name (`nightcheck-` and six signs), paused, with no voice of its own; one agent more on the Host |
+| The same request again | answers the same janitor, and the Host has no second agent |
+| The same id for another janitor | refused (409) |
+| Afterwards | let go and removed with the check's other agents; every agent that was there still there |
 
 ## A scheduled task runs
 
