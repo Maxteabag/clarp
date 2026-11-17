@@ -10029,6 +10029,8 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         "echo \"host_token=${CLARP_HOST_TOKEN+given}\"\n",
         "echo \"push_credential=${CLARP_PUSH_CREDENTIAL+given}\"\n",
         "echo \"tool_token=$CLARP_TOOL_TOKEN\"\n",
+        "echo \"script_url=$CLARP_SERVER_URL\"\n",
+        "echo \"script_token=$CLARP_AUTH_TOKEN\"\n",
         &format!(
             "\"{}\" tool clarp-admin sessions > /dev/null 2>&1\n",
             env!("CARGO_BIN_EXE_clarp-host")
@@ -10071,6 +10073,14 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     assert_ne!(tools, token);
     assert_eq!(said("tool_token"), tools, "{seen}");
     assert_eq!(said("tool_exit"), "0", "{seen}");
+    // A skill's own script that speaks to its Host by itself is told this Host, and the
+    // same token.
+    assert_eq!(
+        said("script_url"),
+        format!("http://{}", host.address),
+        "{seen}"
+    );
+    assert_eq!(said("script_token"), tools, "{seen}");
 
     // That token opens the tools, from this machine, and nothing the apps read or do.
     let by_hand = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
@@ -10102,6 +10112,15 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     }
     let (_, refused) = host.ask_as(&tools, "GET", "/agents/snapshot", None);
     assert_eq!(refused["error"], "an agent's tools may ask for tools only");
+    // But for what an agent asks of its user's phone by a script of its own: an event for
+    // the calendar. Nothing beside it, and not by another way of asking.
+    let event = json!({ "session": agent, "title": "T", "start": "s", "end": "e" });
+    let (status, asked) = host.ask_as(&tools, "POST", "/calendar/request", Some(&event));
+    assert_eq!((status, &asked["ok"]), (200, &json!(true)), "{asked}");
+    for (method, path) in [("GET", "/calendar/request"), ("POST", "/location/request")] {
+        let (status, _) = host.ask_as(&tools, method, path, Some(&event));
+        assert_eq!(status, 403, "{method} {path}");
+    }
     // The administrator still calls a tool by hand with the administrator's token.
     let (code, _, err) = tool(&host, &place.root, None, &["clarp-admin", "sessions"]);
     assert_eq!(code, 0, "{err}");
@@ -10128,8 +10147,8 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
         init,
         "echo 'Error: the tool broke' >&2\nexit 1 ;;\n*count*)\n",
         init,
-        "printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_9\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"counted\"}]}}'\n",
-        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"counted\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2}}'\n",
+        "printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_9\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"counted\"}],\"usage\":{\"input_tokens\":4,\"cache_read_input_tokens\":5,\"output_tokens\":2}}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"counted\",\"usage\":{\"input_tokens\":8,\"cache_read_input_tokens\":10,\"output_tokens\":4}}'\n",
         "exit 0 ;;\nesac\n",
         STAND_IN_ANSWERS,
     ]
@@ -10259,8 +10278,10 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
     );
     assert_eq!(rows[4]["turn"], Value::Null);
 
-    // How full the conversation is, is what a turn last said of it. A tool that dies says
-    // nothing: the gauge stays, and the Host still knows it after it was started again.
+    // How full the conversation is, is what the turn's last answer was made from (nine
+    // tokens here), and not what the turn took in, which counts every step of it anew
+    // (eighteen). A tool that dies says nothing: the gauge stays, and the Host still knows it
+    // after it was started again.
     host.send(&agent, "count this", "november");
     wait_for("the count", || {
         host.turns(&agent).len() == 8 && host.state(&agent) == "done"

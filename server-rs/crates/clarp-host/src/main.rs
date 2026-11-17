@@ -261,12 +261,22 @@ async fn told_to_stop() {
 }
 
 /// What every turn is told of its Host: where it listens, and the token its agent's tools
-/// present. Never the administrator's token.
+/// present. Never the administrator's token. A skill's own script that speaks to its Host
+/// by itself is told the same Host and the same token, under the names it reads: left to
+/// itself it would find the Python Host of the machine, and ask there for an agent of this
+/// one.
 fn tool_env(address: &str, administrators: &str) -> Vec<(String, String)> {
-    let mut env = vec![(clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string())];
+    let mut env = vec![
+        (clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string()),
+        (
+            clarp_host::SCRIPT_URL_ENV.to_string(),
+            format!("http://{address}"),
+        ),
+    ];
     let token = clarp_host::tool_token(administrators);
     if !token.is_empty() {
-        env.push((clarp_host::TOOL_TOKEN_ENV.to_string(), token));
+        env.push((clarp_host::TOOL_TOKEN_ENV.to_string(), token.clone()));
+        env.push((clarp_host::SCRIPT_TOKEN_ENV.to_string(), token));
     }
     env
 }

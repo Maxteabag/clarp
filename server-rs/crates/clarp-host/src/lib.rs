@@ -74,6 +74,13 @@ pub const TOOL_ADDR_ENV: &str = "CLARP_HOST_ADDR";
 /// [`tool_token`].
 pub const TOOL_TOKEN_ENV: &str = "CLARP_TOOL_TOKEN";
 
+/// The environment variables by which a skill's own script that speaks to its Host by itself
+/// finds one, as the Python Host's skills read them: where the Host is, and the token to
+/// present. A turn of this Host is told this Host under them, with the token of its agent's
+/// tools ([`tool_token`]): what such a script may ask is what that token opens.
+pub const SCRIPT_URL_ENV: &str = "CLARP_SERVER_URL";
+pub const SCRIPT_TOKEN_ENV: &str = "CLARP_AUTH_TOKEN";
+
 /// What in the Host's environment is the Host's alone. Nothing the Host starts is given these:
 /// a turn's environment is read by every command an agent runs, and what an agent prints is in
 /// its conversation.
@@ -88,9 +95,10 @@ pub const OWN_SECRETS: &[&str] = &[
 ///
 /// It follows from the administrator's token, so it is the same after the Host is started
 /// again and a turn that went on meanwhile still reaches its Host; and it does not give the
-/// administrator's token away. It opens the agents' tools (`/tools/`) from this machine and
-/// nothing else: not the conversations, not the devices, not the pairing. A Host without a
-/// token gives its turns none.
+/// administrator's token away. It opens the agents' tools (`/tools/`) from this machine, and
+/// the one thing an agent asks of its user's phone by a script that speaks to the Host
+/// itself (an event for the calendar); nothing else: not the conversations, not the
+/// devices, not the pairing. A Host without a token gives its turns none.
 pub fn tool_token(administrators: &str) -> String {
     if administrators.is_empty() {
         return String::new();

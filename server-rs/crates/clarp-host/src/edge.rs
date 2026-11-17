@@ -598,9 +598,11 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     if path.starts_with("/tools/") {
         return !matches!(principal, Principal::Administrator | Principal::Tools);
     }
-    // And that token opens nothing else: what the apps read and do is not a tool's.
+    // And that token opens nothing else: what the apps read and do is not a tool's. But
+    // for what an agent asks of its user's phone by a script that speaks to the Host
+    // itself: an event for the calendar.
     if matches!(principal, Principal::Tools) {
-        return true;
+        return !(method == Method::POST && path == "/calendar/request");
     }
     let Principal::Device {
         scope: Scope::Limited,
