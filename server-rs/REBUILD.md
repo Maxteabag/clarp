@@ -874,6 +874,36 @@ count did not recognise as one filled the list before the forks came. The count 
 elitebook's log were 167,364 requests over 139 routes, all but 41 of them to a route this Host has, and of
 what was done there seven requests have no route here, the four and the three above.
 
+**The fork of an agent** (17 Nov 2026). An agent forks itself into helpers that start from its conversation
+and each get a task: `POST /agents/<session>/fork`, and for the agents themselves `clarp-admin agent fork`
+(the skill `clarp-sub-agents`). It was the one thing agents did on the owner's Host in those three days that
+this Host had no route for, besides a janitor's own settings. The rules are the Python Host's
+(`agent_fork.py`) and are held by vectors (`tools/fork-vectors.py`: 90 requests, 61 of them refused in nine
+words for the reason; 24 first messages; 15 places of a worktree): what a request asks for, read strictly,
+so that one that asks wrongly makes nothing; a child's first message (what it is, the part of its maker's
+conversation it starts from, its task, how to report back with `clarp-admin prompt`); and where a child's
+git worktree is put when the request does not say (`fork.rs` in the kernel). The Host's part is `forks.rs`:
+it finds the agent that forks, makes a child's worktree before the child (a new branch from `HEAD` or from
+the base the request names, or the worktree that is there on that branch already), makes the helper and
+sends it its task as a message from its maker. Children are independent: one that cannot be made is told in
+its own row of the answer, and its siblings are made. Git is run for at most two minutes a command and is
+ended when it takes longer (`tokio`'s `process`, a feature of a dependency the workspace had; no new
+package). A child here always starts from the conversation **as words** (`fork: seed`): the newest part of
+this Host's own record of it, at most 60,000 signs. The Python Host has the tool copy the conversation
+itself where the tool can and falls back to words; a tool's own copy is not made here yet, which is one
+registered difference in the scenario `agent-forks` and four rows in `docs/differences.md`. The scenario
+asks 24 requests that are refused (a fork of an agent that has said nothing among them, on either tool: 409
+on both Hosts), two children that cannot be made, and one that is; its first asking (run 43986165062, the
+one scenario) found two events to differ besides: **a message the Host sends by itself is told to the apps
+under no id** on the Python Host (`client_msg_id: ""`), and this Host told its own id for it. An app looks under that id for the bubble it painted, and nobody painted what the Host sent.
+So it is here now, for the task of a fork, for a heartbeat and for a prompt at a set time
+(`Message::told_id`): the message is filed and waits in the queue under the id the Host gave it, as before,
+and the events name none. No scenario had compared such an event before: the heartbeat is off in the suite,
+and no schedule comes due in it. The second asking (43987643044) found one thing more, by the first agent
+of the corpus that is made and never spoken to: this Host said that a conversation had changed
+(`transcript-updated`) when an agent was made, and the Python Host says it when the first thing is written
+to one. It is not said at the making any more.
+
 Reading for the queue's routes found what no run had: **the phone's ids for its messages begin with `u-`**,
 the mark a message's id has in a conversation (`"u-" + id` in the phone app's source, and so in the log:
 `DELETE /turn-queue/u-6485F414-...`); the desk's come without. The Python Host files a message under its
@@ -1079,4 +1109,10 @@ Reviewers use a different model family from the authors and never edit sources.
   not run again for a move no scenario can reach (tests, documents, and the modules the corpus has no door to:
   the janitors' own, the hotseat, dreaming, the scheduler), because the reference it compares with would answer
   the same. Which it was is written down with the landing. A wrong reading costs nothing that runs: the next
-  candidate's run compares with the newest reference, and says so.
+  candidate's run compares with the newest reference, and says so. Where main moved by nothing either run
+  reads at all, no reading is needed: `tools/gated-trees <the commit the verdict was given for> <the new
+  commit>` compares the trees and files the two runs build and run (`server`, `server-rs`, `tests/replay`,
+  `bin`, the lock of the Python packages, the two workflows) and ends 0 when every one is the same. Then the
+  verdicts stand, and what runs again on the new commit is what reads the rest of the repository: its own
+  gates, and the release that is installed (17 Nov 2026: main moved twice under one green candidate within
+  twenty minutes, both times by a hook of Claude Code and its tests).

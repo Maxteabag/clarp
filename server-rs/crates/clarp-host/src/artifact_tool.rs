@@ -75,7 +75,7 @@ impl Parsed {
     }
 
     /// An option that has to be a whole number.
-    fn whole(&self, name: &str) -> Result<Option<i64>, String> {
+    pub(crate) fn whole(&self, name: &str) -> Result<Option<i64>, String> {
         match self.option(name) {
             None => Ok(None),
             Some(given) => given

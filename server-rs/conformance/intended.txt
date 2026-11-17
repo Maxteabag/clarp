@@ -162,6 +162,11 @@ f357d30076fb  live-items: the answer's live item names the row the conversation 
 a807b17a302e  live-items: the notification names the row of the answer
 b35c53b1f0b2  live-items: what was said before the first tool names the row the conversation has
 f4fe4a319b70  live-items: the same, where the item is first sent
+# The same defect in a first turn that is not streamed (run 43985072956, both recordings of
+# who-is-told; the run before had neither): the first reply is the transcript's row, without the
+# turn's summary, and its notification names the row it was written into while the turn ran.
+209384b9be4e  who-is-told: the first reply carries the turn's summary
+42acf6278790  who-is-told: the notification of the first reply names the row of the reply
 
 # The reference speaks in its own test harness though speech is off: the harness gives it a
 # stand-in engine (`FakeTTSEngine`, tests/replay/host.py) that writes a clip for whatever it is
@@ -178,3 +183,8 @@ f4fe4a319b70  live-items: the same, where the item is first sent
 4f6c44ebe464  rings: the same, taken back after it was declined
 024c2d132b22  rings: the event that it rings
 7932b1936451  rings: the event that it was declined
+
+# A child a fork makes starts from its maker's conversation as words on this Host (`fork: seed`).
+# The Python Host has the tool copy the conversation itself where the tool can (`native`), and
+# gives words only where it cannot.
+2d3d21b8313e  agent-forks: how the child that was made started

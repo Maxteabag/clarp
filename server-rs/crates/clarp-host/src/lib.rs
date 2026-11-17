@@ -25,6 +25,7 @@ pub mod edge;
 pub mod faces;
 pub mod files;
 pub mod fleet;
+pub mod forks;
 pub mod goaltool;
 pub mod heard;
 pub mod heartbeat;

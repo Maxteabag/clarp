@@ -325,14 +325,7 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
     asked.insert("voice_id".to_string(), json!(voice));
     // A directory is named from where the tool was called.
     if let Some(cwd) = parsed.option("--cwd").filter(|cwd| !cwd.is_empty()) {
-        let from = std::path::Path::new(&call.cwd);
-        let whole = match cwd.strip_prefix("~/") {
-            Some(rest) => home().join(rest),
-            None if cwd == "~" => home(),
-            None => from.join(cwd),
-        };
-        let whole = whole.canonicalize().unwrap_or(whole);
-        asked.insert("cwd".to_string(), json!(whole.display().to_string()));
+        asked.insert("cwd".to_string(), json!(named_from(call, cwd)));
     }
     match edge::make_agent(app, &asked).await {
         Ok(made) => shown(&made),
@@ -342,6 +335,171 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME").map_or_else(|| std::path::PathBuf::from("/"), std::path::PathBuf::from)
+}
+
+/// A path as it was written where the tool was called: `~` is the home of whoever runs
+/// this Host, anything that does not begin at the root begins where the tool was called.
+fn written_from(call: &ToolCall, path: &str) -> std::path::PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => home().join(rest),
+        None if path == "~" => home(),
+        None => std::path::Path::new(&call.cwd).join(path),
+    }
+}
+
+/// The same path as the one it is, whatever it was written as: without the links on its
+/// way, where it is there.
+fn named_from(call: &ToolCall, path: &str) -> String {
+    let whole = written_from(call, path);
+    let whole = whole.canonicalize().unwrap_or(whole);
+    whole.display().to_string()
+}
+
+/// `clarp-admin agent fork [NAME] (--task TEXT | --task-file FILE | --spec FILE) [--count N]
+/// [--worktree REPO:BRANCH] [--cwd DIR] [--from SESSION] [--backend B] [--model M]
+/// [--effort E]`: the agent that calls it forks itself into helpers that start from its
+/// conversation and each get a task (the skill `clarp-sub-agents`). What it asks of the Host
+/// is what the Python tool asks (`agent_fork_request`), and it prints the Host's answer as
+/// that tool does: exit 1 when a child was not made.
+async fn agent_fork(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let valued = [
+        "--task",
+        "--task-file",
+        "--count",
+        "--spec",
+        "--worktree",
+        "--cwd",
+        "--from",
+        "--backend",
+        "--model",
+        "--effort",
+    ];
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin agent fork [-h] [--task TASK] [--task-file TASK_FILE] \
+                 [--count COUNT] [--spec SPEC] [--worktree WORKTREE] [--cwd CWD] \
+                 [--from FROM_SESSION] [--backend BACKEND] [--model MODEL] [--effort EFFORT] \
+                 [name]\n\
+                 clarp-admin agent fork: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(args, &valued, &[], &["[name]"]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let count = match parsed.whole("--count") {
+        Ok(count) => count.unwrap_or(0),
+        Err(why) => return usage(&why),
+    };
+    let stopped = |why: String| ToolAnswer::said(1, why);
+    // What was given, and is something.
+    let given = |name: &str| parsed.option(name).filter(|value| !value.is_empty());
+    let told = |name: &str| call.env.get(name).map(String::as_str);
+    let own = told("CLARP_SESSION").filter(|session| !session.is_empty());
+    let own = own.or_else(|| told(SESSION_ENV).filter(|session| !session.is_empty()));
+    let Some(parent) = given("--from").or(own) else {
+        return stopped("agent fork needs --from SESSION or $CLARP_SESSION".to_string());
+    };
+    let read = |path: &str| {
+        let file = written_from(call, path);
+        std::fs::read_to_string(&file).map_err(|error| {
+            stopped(format!(
+                "clarp-admin agent fork: {}: {error}",
+                file.display()
+            ))
+        })
+    };
+    let mut asked = roster::Fields::new();
+    if let Some(spec) = given("--spec") {
+        if spec == "-" {
+            // A tool of this Host is a pipe to it, and what is piped into the tool is not
+            // carried along.
+            let why = "agent fork: --spec - (the list on standard input) is not read on this \
+                       Host (the Rust Host): write the list to a file and name the file. \
+                       Nothing was done.";
+            return stopped(why.to_string());
+        }
+        let raw = match read(spec) {
+            Ok(raw) => raw,
+            Err(why) => return why,
+        };
+        let children = match serde_json::from_str::<Value>(&raw) {
+            Ok(Value::Object(mut whole)) => whole.remove("children").unwrap_or(Value::Null),
+            Ok(children) => children,
+            Err(error) => {
+                return stopped(format!(
+                    "clarp-admin agent fork: --spec is not JSON: {error}"
+                ));
+            }
+        };
+        if !children
+            .as_array()
+            .is_some_and(|children| !children.is_empty())
+        {
+            let why = "--spec must hold a JSON list of {name, task, ...} children";
+            return stopped(why.to_string());
+        }
+        asked.insert("children".to_string(), children);
+    } else {
+        let task = match given("--task-file") {
+            Some(file) => match read(file) {
+                Ok(task) => python::strip(&task).to_string(),
+                Err(why) => return why,
+            },
+            None => python::strip(parsed.option("--task").unwrap_or("")).to_string(),
+        };
+        if task.is_empty() {
+            let why = "agent fork needs --task TEXT, --task-file FILE or --spec FILE";
+            return stopped(why.to_string());
+        }
+        let Some(name) = parsed.positional.first().filter(|name| !name.is_empty()) else {
+            return stopped("agent fork needs a NAME (or --spec FILE)".to_string());
+        };
+        let mut child = roster::Fields::new();
+        child.insert("name".to_string(), json!(name));
+        child.insert("task".to_string(), json!(task));
+        if let Some(cwd) = given("--cwd") {
+            child.insert("cwd".to_string(), json!(named_from(call, cwd)));
+        }
+        if let Some(tree) = given("--worktree") {
+            let Some((repo, branch)) = tree
+                .rsplit_once(':')
+                .filter(|(repo, branch)| !repo.is_empty() && !branch.is_empty())
+            else {
+                return stopped("--worktree must be REPO:BRANCH".to_string());
+            };
+            let tree = json!({ "repo": named_from(call, repo), "branch": branch });
+            child.insert("worktree".to_string(), tree);
+        }
+        if count == 0 {
+            asked.insert("children".to_string(), json!([child]));
+        } else {
+            // So many of the one task: the Host names them and gives each its branch.
+            asked.insert("count".to_string(), json!(count));
+            asked.append(&mut child);
+        }
+    }
+    for key in ["backend", "model", "effort"] {
+        if let Some(value) = given(&format!("--{key}")) {
+            asked.insert(key.to_string(), json!(value));
+        }
+    }
+    match crate::forks::fork_agent(app, parent, &Value::Object(asked)).await {
+        Ok(answer) => {
+            let children = answer["children"].as_array();
+            let failed = children.is_some_and(|children| {
+                let mut children = children.iter();
+                children.any(|child| child.get("error").is_some())
+            });
+            let mut said = shown(&answer);
+            said.exit = if failed { 1 } else { said.exit };
+            said
+        }
+        Err((status, why)) => refused_by_host(status.as_u16(), &why),
+    }
 }
 
 /// `clarp-admin agent helper-state SESSION [done|failed|running] [--from SESSION]`: shows
@@ -394,7 +552,7 @@ async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     match args.split_first() {
         Some((command, rest)) if command == "create" => agent_create(app, call, rest).await,
         Some((command, rest)) if command == "helper-state" => agent_helper_state(app, rest).await,
-        // A helper that starts from its maker's conversation is not built yet.
+        Some((command, rest)) if command == "fork" => agent_fork(app, call, rest).await,
         Some((command, _)) => not_here(&format!("agent {command}")),
         None => ToolAnswer::said(2, "usage: clarp-admin agent {create,fork,helper-state} ..."),
     }

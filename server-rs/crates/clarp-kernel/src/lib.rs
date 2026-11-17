@@ -16,6 +16,7 @@ pub mod conversation;
 pub mod devices;
 pub mod difflib;
 pub mod failures;
+pub mod fork;
 pub mod goals;
 pub mod heard;
 pub mod heartbeat;

@@ -825,7 +825,7 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     // What the Host may need to know of where the tool was called. Never a token.
     let env: std::collections::BTreeMap<String, String> = std::env::vars()
         .filter(|(key, _)| key.starts_with("CLARP_") || key.starts_with("CLAUDE_PWA_"))
-        .filter(|(key, _)| key != "CLARP_HOST_TOKEN" && key != "CLARP_SOURCE_TOKEN")
+        .filter(|(key, _)| !key.ends_with("_TOKEN"))
         .collect();
     let cwd = std::env::current_dir()
         .map(|dir| dir.display().to_string())

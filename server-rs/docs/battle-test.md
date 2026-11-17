@@ -170,15 +170,31 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 22:30 (16 Nov) | the Host updated by the installer, `6390a692` to `a60c7839`: the build that keeps an answer to a heartbeat as one line, and takes a name off a spoken message as the Python Host does since its second fix of the evening. The first update with the connection relay on: the new Host was connected to it again 194 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 00:07 (17 Nov) | the Host updated by the installer, `a60c7839` to `22ca39e7`: the build with the heartbeat, a message filed under the id its app gave it, the queue by its user's hand, and the portraits an agent keeps. The relay was on: the new Host was connected to it again 95 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 00:40 (17 Nov) | the Host updated by the installer, `22ca39e7` to `aada15c0`: the build that counts a heartbeat's turn by its last answer. The relay was on: the new Host was connected to it again 44 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
+| 01:35 (17 Nov) | the Host updated by the installer, `aada15c0` to `d63e4c09`: the build whose tools take off the mark of another Host's hand-over before they run (the release owner's addition to issue 388). The relay was on: the new Host was connected to it again 42 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and ten turns in thirty-two
-exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and eighteen of Codex
-in the six since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and thirteen turns in
+thirty-three exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+twenty-one of Codex in the seven since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
 just landed, not out of the working tree: what runs is what is on main.
+
+What the update of 01:35 on 17 Nov installed was then looked at where it is installed: each of the fourteen
+tool scripts under `~/.local/share/clarp-host/tools` has the line that takes off `CLARP_WRAPPER_HANDOVER`; a
+call that carries the mark, made as a turn of this Host makes it, was answered (exit 0); and the script's own
+lines, run with the mark set, leave none in the environment before the Host's binary is run. How that commit
+landed is the first use of a rule written down before it was needed (REBUILD.md, "A candidate lands"): main
+moved twice under it within twenty minutes (pull requests 394 and 392, a hook of Claude Code and its tests),
+`Server (Rust)` (43987962764) and the repository's gates with the release ran on the commit itself, and the
+conformance verdict is that of run 43981568229, given for a commit in which nothing that run reads differs
+(`git diff` over the crates, the corpus, `server/`, `tests/replay/` and what installs them: empty). A second
+run on the same inputs (43985072956) ended with two differences in `who-is-told`, and they are the
+reference's: both of its recordings had the first reply of the conversation without the turn's summary and
+with a notification that names a row the conversation does not have (defect R19, there for the first time in
+a turn that is not streamed), where the recordings of the evening before had neither. The Rust Host's answer
+was the same in both runs. The two places are registered beside R19's others.
 
 ## An agent publishes a file
 
