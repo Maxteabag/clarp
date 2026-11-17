@@ -162,26 +162,22 @@ async fn no_janitors() -> ApiError {
     not_built("Janitors are")
 }
 
-/// What the Python Host answers of the machine's account seats before anything was read
-/// of them, said at this moment. This Host reads no seat and changes no login: on a
-/// machine with another Host, that Host's selector does (`docs/differences.md`).
-fn seats(app: &App, path: &str) -> Json<Value> {
-    let mut said = kept(path);
-    said["served_at"] = json!(app.clock.now_ms());
-    Json(said)
-}
-
-/// `GET /hotseat/status`: how the account seats stand, as they were last read.
+/// `GET /hotseat/status`: how the account seats stand, as they were last read. Nothing is
+/// read for it (`crate::seats`).
 async fn hotseat_status(State(app): State<App>) -> Json<Value> {
-    seats(&app, "/hotseat/status")
+    Json(crate::seats::status(&app).await)
 }
 
-/// `GET /hotseat/desk`: the desk of the account seats, whether or not a new reading is
-/// asked for (`refresh`): nothing here reads one.
-async fn hotseat_desk(State(app): State<App>) -> Json<Value> {
-    seats(&app, "/hotseat/desk")
+/// `GET /hotseat/desk`: the desk of the account seats as it is kept; with `refresh=1` (or
+/// `true`, `yes`), after a new reading of the owner's tool where one is allowed.
+async fn hotseat_desk(State(app): State<App>, Query(asked): Asked) -> Json<Value> {
+    let refresh = asked.get("refresh").map(|said| said.to_lowercase());
+    let refresh = matches!(refresh.as_deref(), Some("1" | "true" | "yes"));
+    Json(crate::seats::asked(&app, refresh).await)
 }
 
+/// This Host reads the seats and moves none: on a machine with another Host, that Host's
+/// selector does (`docs/differences.md`).
 async fn no_hotseat() -> ApiError {
     not_built("Changing the account seats is")
 }

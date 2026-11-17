@@ -64,14 +64,16 @@ pub const MIN_IOS_CONTRACT: u64 = 1;
 /// listed, some on it being listed with its number. A feature is listed here when everything
 /// it names is built and held to the Python Host; what is half there is not listed.
 const CHIP: &str = "live_activity_push";
+const SEATS: &str = "hotseat_desk";
 
 /// The features this Host has now: all of [`FEATURES`], without what it cannot do as it is
 /// set up.
 fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let chip = app.chip.pushes();
+    let seats = app.seats.told();
     FEATURES
         .iter()
-        .filter(move |(feature, _)| *feature != CHIP || chip)
+        .filter(move |(feature, _)| (*feature != CHIP || chip) && (*feature != SEATS || seats))
 }
 
 pub const FEATURES: &[(&str, u64)] = &[
@@ -153,6 +155,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // for Codex by what Codex writes of its account and by a turn that failed for a usage
     // limit, for Claude by what Claude Code says as it runs. No provider is asked.
     ("backend_quota", 3),
+    // The desk of the machine's account seats (`GET /hotseat/desk`): every saved account of
+    // the agents' tools with its windows, its state and its clocks, read with the owner's
+    // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
+    // Reading only: switching and continuing (`hotseat_desk_actions`) are not built.
+    (SEATS, 84),
 ];
 
 /// The most a conversation that arrives from another Host may weigh, as JSON.
@@ -206,6 +213,8 @@ pub struct App {
     pub audio: Arc<crate::audio::Desk>,
     /// What the tools said is left of their accounts.
     pub limits: Arc<crate::quota::Desk>,
+    /// The desk of the machine's account seats, as the owner's own tool says them.
+    pub seats: Arc<crate::seats::Desk>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to

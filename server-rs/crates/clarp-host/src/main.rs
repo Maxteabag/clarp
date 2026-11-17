@@ -204,6 +204,11 @@ async fn serve(config: Config) -> Result<(), String> {
         keeper: Arc::default(),
         audio: Arc::default(),
         limits,
+        // A Host that keeps the logins itself lets the owner's tool renew one as it reads.
+        seats: Arc::new(clarp_host::seats::Desk::new(
+            &config.seats_tool,
+            config.accounts == clarp_kernel::recovery::Accounts::Select,
+        )),
         models: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),

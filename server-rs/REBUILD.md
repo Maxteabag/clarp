@@ -968,6 +968,49 @@ reading that says its age, the skips the switcher has and one it has not, a rece
 it is kept): 44 cases, and all 38 plants are caught. Nothing of the Host reads the owner's tool with it yet:
 that is the desk, which is next.
 
+**The seats of the machine's accounts: the desk** (17 Nov 2026). `GET /hotseat/desk` is the whole desk of the
+owner's own tool, for an app with its owner's full rights: every saved account of Claude, Codex and Muse with
+its windows, its state, its clocks of signing in, the work that stopped and the work that was done. The tool
+is asked three things at once (its desk, its list, its work), each in a group of its own and with its time;
+what they answered is made into one desk, kept, and served as it was read, with how old each number is. A
+window whose time to begin anew has passed since it was read is served without its number, and an account
+that was used up by such a window is no longer said to be. A read is one at a time, no sooner than a minute
+after the last that worked and ten seconds after any attempt, and only when an app asks for one; a read of
+which the tool's own desk failed makes none and the desk before stays, stale; one of which the list or the
+work failed is made of what answered and says which did not. The list is also what the strict answer
+(`GET /hotseat/status`) is made of, so a read here hands it over.
+
+`clarp-kernel` `desk.rs` is the Python Host's `hotseat_desk.py` and `hotseat_desk_reading.py`, by that Host's
+own answers: `tools/desk-vectors.py` runs its `HotseatDesk` through 18 stories with the clock held (119 steps,
+58 reads asked for, 63 askings, 200 accounts served: every state of an account, the windows of each tool,
+what is said oddly, reads that fail in every way one can and how soon the next may be, a Host started anew,
+a window that begins anew while nobody reads, a desk that was never read) and writes two tables beside them
+(204 labels of windows, 16 names of tools). The port matched all of it at its first compile, so 158 wrong
+rules were planted into it one at a time: 152 were caught and six were not. Four for want of a case (a sign
+between two words that is no space, a label that names thirty days and a week, a reason kept with its blanks,
+an alias with blanks looked up in the list): the cases were written and answered by the Python Host. One
+could never be seen: a list of codes a kept text was looked up in, where how a read failed is now one of
+three things by its type (`Failed`). One changes nothing by construction (what the strict answer says is left
+of a window is what was worked out from what is used). With this Host's own rule below there are 168 in the
+list, and each is caught.
+
+Three things are this Host's own, each in `docs/differences.md`:
+
+- **Which tool is run.** A Host is told its owner's tool (`--seats-tool`; `tools/install-host` names the one
+  it finds). One that was told none runs nothing, says `installed: false` and does not list `hotseat_desk`:
+  no Host started bare, for a test or to try something, ever asks the providers about the owner's accounts.
+  The Python Host runs `hotseat` wherever it finds it.
+- **It reads and moves nothing.** Beside another Host the tool is told to renew no login as it reads
+  (`HOTSEAT_NO_REFRESH=1`), and the Host's own token is never in the tool's environment. Switching and
+  continuing (`POST /hotseat/switch`, `/hotseat/resume`) stay refused; there is no switcher here.
+- **Of agents it says its own word.** What the tool's list says of a Clarp Host's agents and of a Host's
+  stopped work, it has from the Host it is bridged to. Measured on elitebook: run in the environment this
+  Host gives it, the tool listed six pieces of stopped work, and none was of an agent of this Host; its
+  bridge reaches the Python Host of the machine. So this Host counts its own agents in that place, each on
+  the account its tool is on (`desk::of_this_host`); of the work the tool says stopped it leaves a Host's
+  own to that Host and shows a session that is no Host's, unless that is the session of one of its own
+  agents. Its own agents that stopped are not listed yet: that comes with continuing them.
+
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
 every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain
