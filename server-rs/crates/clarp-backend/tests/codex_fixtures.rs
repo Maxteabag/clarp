@@ -14,6 +14,7 @@ use clarp_backend::{Interpreter, Signal};
 use clarp_kernel::conversation::ToolStatus;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
+use serde_json::json;
 
 const THREAD: &str = "00000000-0000-7000-8000-000000000002";
 
@@ -80,6 +81,22 @@ fn a_real_turn_that_runs_a_command_and_answers() {
         (ToolStatus::Ok, Some("hello-from-codex\n"))
     );
     assert!(calls[1].ended_at_ms > Some(calls[1].started_at_ms));
+    // What a conversation shows of the call: the cell Codex's own reader makes of it,
+    // known by the call, without the shell that was only wrapped around the command.
+    assert_eq!(
+        calls[0].cell,
+        Some(json!({
+            "id": "c-m1-item_0", "kind": "command", "title": "Running", "summary": "echo hello-from-codex",
+            "status": "running", "lines": [],
+        }))
+    );
+    assert_eq!(
+        calls[1].cell,
+        Some(json!({
+            "id": "c-m1-item_0", "kind": "command", "title": "Ran", "summary": "echo hello-from-codex",
+            "status": "ok", "lines": [{ "label": "", "text": "hello-from-codex", "kind": "output" }],
+        }))
+    );
     let replies: Vec<_> = signals
         .iter()
         .filter_map(|signal| match signal {

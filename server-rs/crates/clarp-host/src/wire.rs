@@ -1017,6 +1017,31 @@ fn card(call: &ToolCall) -> Value {
     card
 }
 
+/// The cell of a call as its row shows it: as it was made when the call was last seen. A
+/// call its turn was interrupted under runs no longer: its cell says so.
+fn cell_shown(cell: &Value, call: &ToolCall) -> Value {
+    let mut cell = cell.clone();
+    if call.status == ToolStatus::Interrupted && cell["status"] == "running" {
+        let over = match cell["title"].as_str() {
+            Some("Running") => Some("Ran"),
+            Some("Calling") => Some("Called"),
+            Some("Searching") => Some("Searched"),
+            Some("Exploring") => Some("Explored"),
+            _ => None,
+        };
+        if let Some(over) = over {
+            cell["title"] = json!(over);
+        }
+        cell["status"] = json!("recorded");
+        let cut_off = json!({ "label": "", "text": "(interrupted)", "kind": "muted" });
+        match cell["lines"].as_array_mut() {
+            Some(lines) => lines.push(cut_off),
+            None => cell["lines"] = json!([cut_off]),
+        }
+    }
+    cell
+}
+
 /// One thing of a conversation as the contract's "turn": a row, with every field of a row.
 pub fn row(version: &Versioned) -> Value {
     if let Entry::Imported(imported) = &version.entry {
@@ -1109,7 +1134,12 @@ pub fn row(version: &Versioned) -> Value {
             row["trace_id"] = json!(call.trace_id.clone().unwrap_or_default());
             row["origin"] = json!(call.origin.name());
             row["tool_name"] = json!(call.name);
-            row["tools"] = json!([card(call)]);
+            // Shown as its tool's own reader shows it where that is a cell, and as a card
+            // otherwise: never both, since an app shows each.
+            match &call.cell {
+                Some(cell) => row["display_cells"] = json!([cell_shown(cell, call)]),
+                None => row["tools"] = json!([card(call)]),
+            }
         }
         // Why a turn failed, under the message that caused it: the Host's own word, not the
         // agent's and not the user's.
@@ -1748,6 +1778,46 @@ mod tests {
             head_revision: 7 << 20,
             begins_after: 0,
         }
+    }
+
+    #[test]
+    fn a_call_of_codex_is_shown_as_its_cell_and_not_as_a_card() {
+        let cell = json!({
+            "id": "c-m1-item_0", "kind": "command", "title": "Running", "summary": "cargo test",
+            "status": "running", "lines": [],
+        });
+        let call = |status, cell: Option<&Value>| ToolCall {
+            id: "c-m1-item_0".to_string(),
+            turn: 1,
+            name: "shell".to_string(),
+            input: json!({"command": "/usr/bin/bash -lc 'cargo test'"}),
+            status,
+            started_at_ms: 10,
+            cell: cell.cloned(),
+            ..ToolCall::default()
+        };
+        let shown = |call: ToolCall| row(&version(Entry::Tool(call), 3 << 20, None));
+        let running = shown(call(ToolStatus::Running, Some(&cell)));
+        assert_eq!(
+            (&running["kind"], &running["tool_name"]),
+            (&json!("tool"), &json!("shell"))
+        );
+        assert_eq!(running["tools"], json!([]), "never both: an app shows each");
+        assert_eq!(running["display_cells"], json!([cell]));
+        // Its turn was interrupted under it: it runs no longer, and says so.
+        let cut = shown(call(ToolStatus::Interrupted, Some(&cell)));
+        assert_eq!(
+            cut["display_cells"],
+            json!([{
+                "id": "c-m1-item_0", "kind": "command", "title": "Ran", "summary": "cargo test",
+                "status": "recorded",
+                "lines": [{ "label": "", "text": "(interrupted)", "kind": "muted" }],
+            }])
+        );
+        // A call of a tool whose reader has no cells is a card, as before.
+        let card = shown(call(ToolStatus::Running, None));
+        assert_eq!(card["display_cells"], json!([]));
+        assert_eq!(card["tools"][0]["name"], "shell");
     }
 
     #[test]

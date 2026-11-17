@@ -334,6 +334,15 @@ fn call_of(item: &Value) -> (String, Value) {
     }
 }
 
+/// The cell a conversation shows of a call: what Codex's own reader makes of the item, read
+/// while all of it is there (`history::codex_cell`). One call is one row of the conversation
+/// here, so its cell is known by the call, also where it only looked at things.
+fn cell_of(step: &str, item: &Value, call_id: &str) -> Option<Value> {
+    let mut cell = crate::history::codex_cell(step, item)?;
+    cell["id"] = Value::from(call_id);
+    Some(cell)
+}
+
 /// What a finished tool call gave back.
 fn result_of(item: &Value) -> String {
     for field in ["aggregated_output", "output"] {
@@ -601,6 +610,7 @@ impl CodexInterpreter {
                 };
                 call.output = Some(shorten(&result_of(item), MAX_TOOL_OUTPUT));
                 call.ended_at_ms = Some(t);
+                call.cell = cell_of("item.completed", item, &call.id);
                 out.push(Signal::Tool(call.clone()));
                 self.moved(Activity::Thinking, out);
             }
@@ -609,9 +619,11 @@ impl CodexInterpreter {
                     return; // an update of a call that is known: nothing new to store
                 }
                 let (name, input) = call_of(item);
+                let call_id = format!("c-{}-{id}", self.name);
                 let call = ToolCall {
                     origin: clarp_kernel::turn::Origin::User,
-                    id: format!("c-{}-{id}", self.name),
+                    cell: cell_of("item.started", item, &call_id),
+                    id: call_id,
                     turn: self.turn,
                     name: name.clone(),
                     input,

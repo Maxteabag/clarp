@@ -165,6 +165,11 @@ pub struct ToolCall {
     /// call is a row by itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
+    /// The cell a conversation shows of the call, where its tool's own reader shows what an
+    /// agent did as cells and not as cards (Codex): made when the call was last seen, from
+    /// all of it, of which the Host keeps only a part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<Value>,
 }
 
 /// Tool work came after a reply in the same turn: what the reply said was said along the way,
