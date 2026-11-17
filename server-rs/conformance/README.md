@@ -92,8 +92,12 @@ Python Host can take the tool's end before it has written down that the turn beg
 the end and then writes the beginning, and the agent stays busy (defect R43). It takes a tool
 that answers within the instant its Host needs for its own bookkeeping, which the stand-in did:
 in thirteen runs 25 of 122 recordings of the reference were left so, and it failed each of the
-last three. Two things follow. The stand-in takes half a second before it answers a
-turn, as every real tool does (`fake_claude.py`, `CLARP_QA_ANSWER_AFTER`), for both Hosts. And
+last three. Two things follow. The stand-in takes half a second before it does anything in
+the first turn of a conversation, as every real tool does (`fake_claude.py`,
+`CLARP_QA_ANSWER_AFTER`), for both Hosts; in no other turn, since a moment in every turn turned
+another race of the reference the other way (run 44096945408: a reply that closes a later
+turn was left without its mark in a quarter of such rows instead of a sixth, defect R6, and
+the run differed at 21 places nobody had seen it differ at). And
 a recording of the reference that still did not run a scenario to its end is asked again on a
 fresh Host, as it was asked the first time, at most twice: the first answer that ran to its
 end takes its place, and the report says every time it happened. A scenario the reference

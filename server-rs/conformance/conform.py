@@ -111,7 +111,12 @@ NO_STATE = {'schema': [], 'tables': {}, 'files': [], 'cli': [], 'sse_log': []}
 
 def claude_shim(path: Path) -> None:
     """Makes `path` the program that runs this suite's fake Claude."""
-    path.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_CLAUDE))} "$@"\n')
+    # How long the stand-in takes before it does anything is said by whoever runs the suite
+    # (`CLARP_QA_ANSWER_AFTER`, to try another moment), and is the same for both Hosts: a test
+    # Host hands its tools only the environment it makes for them.
+    pace = os.environ.get('CLARP_QA_ANSWER_AFTER', '')
+    env = f'CLARP_QA_ANSWER_AFTER={shlex.quote(pace)} ' if pace else ''
+    path.write_text(f'#!/bin/sh\n{env}exec {shlex.quote(sys.executable)} {shlex.quote(str(FAKE_CLAUDE))} "$@"\n')
     path.chmod(0o755)
 
 
