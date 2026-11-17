@@ -10,11 +10,13 @@ import threading
 import pytest
 
 from lib import agents, db, heartbeat, message_store, settings_store
+from lib.protocol import AgentState
 from tests.unit.test_heartbeat_turn_accounting import _activate, _turn, _end
 from tests.unit.test_heartbeat_accounting_review import _Status
 
 PERSISTED = ('last_started', 'noop_streak', 'dormant', 'last_wake_signal_ms')
 MUTATORS = ('run-start', 'interrupted-noop', 'plain-noop', 'activity', 'external-wake')
+POLICY_MUTATORS = (*MUTATORS, 'policy')
 ORDERS = ('first-commit/second-complete/first-publish',
           'first-commit/second-prewrite/first-publish/second-write',
           'second-prewrite/first-complete/second-write')
@@ -52,6 +54,10 @@ def _call(world, path, started=99.0):
         heartbeat.record_heartbeat_activity(aid)
     elif path == 'external-wake':
         heartbeat._wake_from_external_signal(aid, heartbeat._state_for(aid))
+    elif path == 'policy':
+        decision = heartbeat._observe_dormancy_decision(aid, agents.latest_state(aid) or {}, now=70_000.0)
+        assert decision is not None
+        heartbeat._record_policy_dormancy(aid, decision)
     else:
         raise AssertionError(path)
 
@@ -65,6 +71,10 @@ def _expected(initial, path, threshold, signal, started):
     elif path == 'run-start':
         out['last_started'] = started
         out['last_wake_signal_ms'] = max(out['last_wake_signal_ms'], signal)
+    elif path == 'policy':
+        if out['dormant']:
+            return out
+        out['dormant'] = 1
     elif path == 'activity':
         out['noop_streak'] = out['dormant'] = 0
     elif path == 'external-wake':
@@ -101,6 +111,9 @@ print(json.dumps({k:getattr(s,k) for k in ('last_started','noop_streak','dormant
 
 def _schedule(monkeypatch, world, first, second, order, signal):
     """A commits first; B may have prepared inputs before A wrote anything."""
+    if 'policy' in (first, second):
+        agents.record_state(world['aid'], AgentState.INTERRUPTED, {'reason':'usage_limit'})
+        db.conn().execute('UPDATE state_log SET ts=10000000 WHERE agent_id=?', (world['aid'],))
     signals = signal if isinstance(signal, tuple) else (signal, signal)
     monkeypatch.setattr(heartbeat, '_latest_wake_signal_ms',
         lambda aid: signals[0 if threading.current_thread().name == 'protocol-a' else 1])
@@ -153,7 +166,10 @@ def _schedule(monkeypatch, world, first, second, order, signal):
     assert not a.is_alive() and not b.is_alive() and not failures, failures
     # These three orderings all linearize A's durable operation before B's.
     expected = _expected(world['row'], first, world['threshold'], signals[0], 99.0)
-    expected = _expected(expected, second, world['threshold'], signals[1], 101.0)
+    # B captured the initial row before A wrote in the third ordering. An
+    # obsolete policy may publish A's row, but must not replace A's mutation.
+    if not (second == 'policy' and order == ORDERS[2] and expected != world['row']):
+        expected = _expected(expected, second, world['threshold'], signals[1], 101.0)
     actual = _row(world['aid']); cache = _persistent_cache(world['aid'])
     restarted = _fresh_process(world['aid'])
     assert actual == expected
@@ -174,12 +190,20 @@ def test_counter_and_mutator_schedules(monkeypatch, profile, order, path):
 
 
 @pytest.mark.parametrize('order', ORDERS)
-@pytest.mark.parametrize('first', MUTATORS)
-@pytest.mark.parametrize('second', MUTATORS)
+@pytest.mark.parametrize('first', POLICY_MUTATORS)
+@pytest.mark.parametrize('second', POLICY_MUTATORS)
 def test_mutator_against_mutator_schedules(monkeypatch, order, first, second):
     world = _seed(monkeypatch)
     _schedule(monkeypatch, world, first, second, order,
               (5000 if first == 'external-wake' else 0, 5000 if second == 'external-wake' else 0))
+
+
+@pytest.mark.parametrize('profile', ['warm', 'threshold', 'cold'])
+@pytest.mark.parametrize('order', ORDERS)
+@pytest.mark.parametrize('first,second', [('counter','policy'),('policy','counter')])
+def test_policy_and_counter_schedules(monkeypatch, profile, order, first, second):
+    world = _seed(monkeypatch, profile)
+    _schedule(monkeypatch, world, first, second, order, 0)
 
 
 @pytest.mark.parametrize('run_first', [False, True])

@@ -6,6 +6,7 @@ when something useful needs attention.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -270,9 +271,13 @@ def pending_heartbeat_agents(*, now: float | None = None,
             continue
         state = _state_for(agent_id)
         _wake_from_external_signal(agent_id, state)
-        reason = _skip_reason(snapshot=_gather_snapshot(agent, now), state=state, now=now)
-        if reason == "dormant" and not state.dormant:
-            _record_policy_dormancy(agent_id)
+        snapshot = _gather_snapshot(agent, now)
+        decision = None
+        if not state.dormant and _interrupted_retry_expired(snapshot.latest, now):
+            decision = _observe_dormancy_decision(agent_id, snapshot.latest, now=now)
+        reason = _skip_reason(snapshot=snapshot, state=state, now=now)
+        if reason == "dormant" and not state.dormant and decision is not None:
+            _record_policy_dormancy(agent_id, decision)
         if reason:
             log("heartbeatSkip", f"agent={agent_id} session={session} reason={reason}")
             continue
@@ -652,7 +657,7 @@ def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float
         else 0.0
     )
     is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
-    if is_interrupted and interrupted_at and (now - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
+    if _interrupted_retry_expired(latest, now):
         return "dormant"
     last_event = max(state.last_started, interrupted_at)
     if last_event and now - last_event < MIN_WAKE_SPACING_SEC:
@@ -873,12 +878,71 @@ def _wake_from_external_signal(agent_id: str, state: _HeartbeatState) -> None:
         log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
 
 
-def _record_policy_dormancy(agent_id: str) -> None:
+def _interrupted_retry_expired(latest: dict, now: float) -> bool:
+    if latest.get("kind") != AgentState.INTERRUPTED or _is_user_stopped(latest):
+        return False
+    interrupted_at = float(latest.get("ts") or 0.0) / 1000.0
+    return bool(interrupted_at and now - interrupted_at >= MAX_INTERRUPTED_RETRY_SEC)
+
+
+@dataclass(frozen=True)
+class _DormancyDecision:
+    state_key: tuple
+    row_version: tuple | None
+    latest: dict
+    at: float
+
+
+def _observe_dormancy_decision(agent_id: str, observed: dict, *, now: float) -> _DormancyDecision | None:
+    # One read observes both identities before the decision. Absence is None,
+    # never a row of defaults that a subsequent reset could also produce.
+    row = conn().execute(
+        "SELECT s.state_id,s.kind,s.ts,s.detail,h.rowid AS heartbeat_rowid,"
+        "h.last_started,h.noop_streak,h.dormant,h.last_wake_signal_ms,h.updated_at "
+        "FROM (SELECT state_id,agent_id,kind,ts,detail FROM state_log WHERE agent_id=? "
+        "ORDER BY ts DESC,state_id DESC LIMIT 1) s "
+        "LEFT JOIN heartbeat_state h ON h.agent_id=s.agent_id", (agent_id,)).fetchone()
+    if row is None:
+        return None
+    latest = {name: row[name] for name in ("kind", "ts", "detail")}
+    if latest["detail"]:
+        try:
+            latest["detail"] = json.loads(latest["detail"])
+        except json.JSONDecodeError as exc:
+            log_exception("heartbeatPolicyStateDetailFail", exc, detail=agent_id)
+            latest["detail"] = {}  # preserve latest_state's malformed-detail fallback
+    if latest != {name: observed.get(name) for name in ("kind", "ts", "detail")}:
+        return None  # the gather's facts already moved; do not revise that decision in place
+    version = None if row["heartbeat_rowid"] is None else tuple(row[name] for name in (
+        "heartbeat_rowid", "last_started", "noop_streak", "dormant", "last_wake_signal_ms", "updated_at"))
+    return _DormancyDecision(tuple(row[name] for name in ("state_id", "kind", "ts", "detail")),
+                             version, latest, now)
+
+
+def _record_policy_dormancy(agent_id: str, decision: _DormancyDecision) -> None:
     stamp = now_ms()
-    _snapshot, changed = _change_state(agent_id, lambda database: _state_update(database,
-        "INSERT INTO heartbeat_state(agent_id,dormant,updated_at) VALUES(?,1,?) "
-        "ON CONFLICT(agent_id) DO UPDATE SET dormant=1,updated_at=excluded.updated_at "
-        "WHERE dormant=0", (agent_id, stamp)),
+    def write(database):
+        # This read must follow BEGIN IMMEDIATE, including after a writer wait.
+        current = database.execute(
+            "SELECT state_id,kind,ts,detail FROM state_log WHERE agent_id=? "
+            "ORDER BY ts DESC,state_id DESC LIMIT 1", (agent_id,)).fetchone()
+        if (current is None or tuple(current) != decision.state_key
+                or not _interrupted_retry_expired(decision.latest, decision.at)):
+            return None
+        if decision.row_version is None:
+            if database.execute("SELECT 1 FROM heartbeat_state WHERE agent_id=?", (agent_id,)).fetchone():
+                return None
+            # Writer admission makes the absence check and insert atomic. No
+            # conflict UPDATE can turn a later created/reset row dormant.
+            return _state_update(database,
+                "INSERT INTO heartbeat_state(agent_id,dormant,updated_at) VALUES(?,1,?)",
+                (agent_id, stamp))
+        return _state_update(database,
+            "UPDATE heartbeat_state SET dormant=1,updated_at=? WHERE agent_id=? "
+            "AND rowid=? AND last_started IS ? AND noop_streak IS ? AND dormant IS ? "
+            "AND last_wake_signal_ms IS ? AND updated_at IS ? AND dormant=0",
+            (stamp, agent_id, *decision.row_version))
+    _snapshot, changed = _change_state(agent_id, write,
         # A failed policy write is logged by the protocol and retried by the
         # next selection. A projection still applies the age gate meanwhile.
         failed=lambda state: False)
