@@ -20,6 +20,7 @@ from lib.heartbeat import HEARTBEAT_OK, HEARTBEAT_PROMPT
 from lib.team_leader import LEADER_NOOP, TICK_PROMPT
 from tests.readmodel import corpus
 from tests.readmodel import rm_n14_harness as harness
+from tests.readmodel.test_rm_n14_automation import _sent
 from tests.readmodel.test_rm_n14_equivalence import _clones
 
 
@@ -46,7 +47,7 @@ def _automation_history(backend: str, kind: str = "heartbeat", count: int = 20) 
 
 def _claude_plain_turn(prompt: str, answer: str) -> bytes:
     """Turn 0 is one prompt and one reply, nothing in between."""
-    stamp = "2026-10-11T00:00:00.000Z"
+    stamp = corpus.iso(0, 0)
     records = [{"type": role, "timestamp": stamp, "message": {"role": role, "content": text}}
                for role, text in (("user", prompt), ("assistant", answer))]
     return b"".join(json.dumps(r, separators=(",", ":")).encode() + b"\n" for r in records)
@@ -54,7 +55,7 @@ def _claude_plain_turn(prompt: str, answer: str) -> bytes:
 
 def _claude_agent_turn() -> bytes:
     """Turn 0 calls Claude's Agent tool (call c0, child agent a0)."""
-    stamp = "2026-10-11T00:00:00.000Z"
+    stamp = corpus.iso(0, 0)
 
     def record(role, content, **extra):
         return {"type": role, "timestamp": stamp,
@@ -111,6 +112,9 @@ def _transcript_rows(database):
 def test_old_settled_automation_admits_a_frontier_and_full_tail_full_keeps_rows(
         tmp_path, backend, kind):
     reference, candidate = _clones(tmp_path, backend)
+    if kind == "heartbeat":
+        # Turn zero starts 500 ms before its transcript and settles 400 ms after.
+        _sent((reference, candidate), kind, 0, at_ordinal=0, activation_ms=harness.BASE_MS + 500)
     transcript = tmp_path / "synthetic.jsonl"
     transcript.write_bytes(_automation_history(backend, kind))
     with harness.PersistentLane(reference, transcript, backend, "reference") as full:
@@ -144,16 +148,16 @@ def test_old_settled_automation_admits_a_frontier_and_full_tail_full_keeps_rows(
             assert actual.tick(4)["apply_mode"] == "tail"
             harness.assert_product_equal(reference, candidate)
             if kind == "heartbeat":
-                # Accounted once by the import that stored the turn (its first
-                # reply counts as activity), never again by a later import.
+                # Completed before accounting activated: replay never backfills it.
                 with sqlite3.connect(candidate) as connection:
                     assert connection.execute(
-                        "SELECT outcome FROM heartbeat_accounting").fetchall() == [("activity",)]
+                        "SELECT outcome FROM heartbeat_accounting").fetchall() == []
 
 
 def test_heartbeat_noop_is_counted_once_across_full_tail_full(tmp_path):
     backend = "claude"
     reference, candidate = _clones(tmp_path, backend)
+    _sent((reference, candidate), "heartbeat", 0, at_ordinal=0, activation_ms=harness.BASE_MS - 1000)
     transcript = tmp_path / "synthetic.jsonl"
     transcript.write_bytes(_claude_plain_turn(HEARTBEAT_PROMPT, HEARTBEAT_OK) + b"".join(
         harness.append_bytes(backend, i) for i in range(1, 20)))
@@ -161,6 +165,9 @@ def test_heartbeat_noop_is_counted_once_across_full_tail_full(tmp_path):
         with harness.PersistentLane(candidate, transcript, backend, "candidate") as actual:
             full.tick(0)
             assert "checkpoint_closed_effects" in _codes(actual.tick(0), "transcriptTailRetention")
+            with sqlite3.connect(candidate) as connection:
+                assert connection.execute(
+                    "SELECT outcome FROM heartbeat_accounting").fetchall() == [("noop",)]
             _append(transcript, harness.append_bytes(backend, 20))
             full.tick(1)
             assert actual.tick(1)["apply_mode"] == "tail"
