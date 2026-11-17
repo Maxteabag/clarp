@@ -87,6 +87,24 @@ not marked, one that never read the answer is not marked, a sound third answer i
 nothing asked after it, a mark every time adds nothing, a try that did not run to its end is no
 answer, and a scenario with one sound recording is not recorded again).
 
+A test Host of the reference sometimes does not come to rest. On an agent's first turn the
+Python Host can take the tool's end before it has written down that the turn began; it refuses
+the end and then writes the beginning, and the agent stays busy (defect R43). It takes a tool
+that answers within the instant its Host needs for its own bookkeeping, which the stand-in did:
+in thirteen runs 25 of 122 recordings of the reference were left so, and it failed each of the
+last three. Two things follow. The stand-in takes half a second before it answers a
+turn, as every real tool does (`fake_claude.py`, `CLARP_QA_ANSWER_AFTER`), for both Hosts. And
+a recording of the reference that still did not run a scenario to its end is asked again on a
+fresh Host, as it was asked the first time, at most twice: the first answer that ran to its
+end takes its place, and the report says every time it happened. A scenario the reference
+never runs to its end still fails the run. The Rust Host is never asked again: a scenario it
+does not run to its end is a run error. What a test Host left of such a scenario is kept with
+the report, under `unfinished/`: the end of its log without the requests it answered, what its
+stand-in tool did, and (the reference) the agent's last states. The rule is tried before every
+run that records (`conform.py selftest`: a recording that ran to its end is not asked again, a
+first answer that is whole takes the other's place and nothing beside it is touched, a second
+is taken when the first is cut short again, and a scenario that is never whole stays cut short).
+
 ## What is compared as what a client may rely on
 
 Some things are each Host's own choice, and comparing their values would only compare the
