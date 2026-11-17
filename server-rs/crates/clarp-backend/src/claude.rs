@@ -624,8 +624,11 @@ impl ClaudeInterpreter {
                         tokens_out: count("output_tokens"),
                     });
                 }
-                // What it says the turn cost: what the calls would be billed at, also on
-                // an account that pays by the month.
+                // What it says its session has cost so far: what the calls would be billed
+                // at, also on an account that pays by the month. The running total of the
+                // session, carried over where one is continued, and not the turn's own cost:
+                // three calls in one session on 17 Nov 2026 said 0.0765, 0.1266 and 0.1436
+                // dollars, the second for a turn that took less than the first.
                 let cost = event["total_cost_usd"].as_f64();
                 if let Some(cost) = cost.filter(|cost| cost.is_finite() && *cost >= 0.0) {
                     out.push(Signal::Cost {
