@@ -287,20 +287,6 @@ def record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None) 
         _record_heartbeat_noop(agent_id)
 
 
-def record_heartbeat_noop_once(
-    agent_id: str,
-    accounting_key: str,
-    *,
-    is_interrupted: bool | None = None,
-) -> None:
-    if not _claim_accounting_key(agent_id, accounting_key, "noop"):
-        return
-    if is_interrupted is not None:
-        _record_heartbeat_noop(agent_id, is_interrupted=is_interrupted)
-    else:
-        _record_heartbeat_noop(agent_id)
-
-
 def _record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None) -> None:
     if not agent_id:
         return
@@ -324,12 +310,6 @@ def record_heartbeat_activity(agent_id: str) -> None:
     _record_heartbeat_activity(agent_id)
 
 
-def record_heartbeat_activity_once(agent_id: str, accounting_key: str) -> None:
-    if not _claim_accounting_key(agent_id, accounting_key, "activity"):
-        return
-    _record_heartbeat_activity(agent_id)
-
-
 def _record_heartbeat_activity(agent_id: str) -> None:
     if not agent_id:
         return
@@ -340,32 +320,104 @@ def _record_heartbeat_activity(agent_id: str) -> None:
     _persist_state_snapshot(agent_id, snapshot)
 
 
-def _claim_accounting_key(agent_id: str, accounting_key: str,
-                          outcome: str) -> bool:
-    key = str(accounting_key or "").strip()
-    if not agent_id or not key:
-        return True
+KEY_ACCOUNTING_ACTIVATION = "heartbeat.accounting_activation_ms"
+
+
+def activate_accounting() -> int:
+    """One persistent boundary: imports never account turns predating this code.
+
+    INSERT OR IGNORE also fences simultaneous Host starts. An in-flight turn
+    at the first start is deliberately excluded, including after later restarts.
+    """
+    database = conn()
+    row = database.execute("SELECT value FROM settings WHERE key=?",
+                           (KEY_ACCOUNTING_ACTIVATION,)).fetchone()
+    if row is None:
+        stamp = now_ms()
+        database.execute("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                         (KEY_ACCOUNTING_ACTIVATION, str(stamp), stamp))
+        row = database.execute("SELECT value FROM settings WHERE key=?",
+                               (KEY_ACCOUNTING_ACTIVATION,)).fetchone()
+    return int(row["value"])
+
+
+def record_ended_turn(agent_id: str, trace_id: str, last_answer: str) -> None:
+    """First authoritative reading wins, with claim and counter in one commit.
+
+    Both writers call AFTER their message transaction commits. Only Host-owned,
+    successfully settled heartbeat turns qualify; the interrupted-failure retry
+    path has its own existing accounting. Neither outcome also seals the turn.
+    """
+    if not agent_id or not trace_id:
+        return
     try:
-        cur = conn().execute(
-            """INSERT OR IGNORE INTO heartbeat_accounting (
-                   accounting_key, agent_id, outcome, counted_at
-               ) VALUES (?, ?, ?, ?)""",
-            (key, agent_id, outcome, now_ms()),
-        )
-        if cur.rowcount == 1:
-            return True
-        if outcome != "activity":
-            return False
-        cur = conn().execute(
-            """UPDATE heartbeat_accounting
-                  SET outcome = ?, counted_at = ?
-                WHERE accounting_key = ? AND outcome = 'noop'""",
-            (outcome, now_ms(), key),
-        )
-        return cur.rowcount == 1
-    except Exception as e:  # noqa: BLE001
-        log_exception("heartbeatAccountingFail", e, detail=agent_id)
-        return True
+        database = conn()
+        if database.in_transaction:
+            raise RuntimeError("heartbeat accounting requires committed messages")
+        activation = activate_accounting()
+        turn = database.execute(
+            "SELECT started_at,settled_at,outcome FROM turns WHERE agent_id=? AND trace_id=? "
+            "ORDER BY started_at DESC LIMIT 1", (agent_id, trace_id)).fetchone()
+        if (turn is None or int(turn["started_at"]) < activation
+                or turn["settled_at"] is None or turn["outcome"] != "completed"):
+            return
+        if database.execute("SELECT 1 FROM messages WHERE agent_id=? AND trace_id=? "
+                            "AND role='user' AND origin='heartbeat' LIMIT 1",
+                            (agent_id, trace_id)).fetchone() is None:
+            return
+        skip, clean = strip_heartbeat_ack(last_answer)
+        outcome = "noop" if skip else (
+            "neither" if is_neutral_heartbeat_status(clean) else "activity")
+        key = f"heartbeat-turn:{agent_id}:{trace_id}"
+        existing = database.execute("SELECT outcome FROM heartbeat_accounting WHERE accounting_key=?",
+                                    (key,)).fetchone()
+        if existing is not None and existing["outcome"] == outcome:
+            return
+        conflict = None
+        # Serialize the cache update with the commit, preserving volatile flood
+        # history. Never publish an uncommitted streak into the process cache.
+        with _STATE_LOCK:
+            database.execute("BEGIN IMMEDIATE")
+            try:
+                inserted = database.execute(
+                    "INSERT OR IGNORE INTO heartbeat_accounting(accounting_key,agent_id,outcome,counted_at) "
+                    "VALUES(?,?,?,?)",
+                    (key, agent_id, outcome, now_ms())).rowcount == 1
+                if inserted and outcome != "neither":
+                    threshold = _dormant_after_noops()
+                    database.execute(
+                        "INSERT INTO heartbeat_state(agent_id,last_started,noop_streak,dormant,"
+                        "last_wake_signal_ms,updated_at) VALUES(?,0,?,?,0,?) "
+                        "ON CONFLICT(agent_id) DO UPDATE SET "
+                        "noop_streak=CASE WHEN ?='noop' THEN noop_streak+1 ELSE 0 END,"
+                        "dormant=CASE WHEN ?='activity' THEN 0 WHEN ?>0 AND noop_streak+1>=? "
+                        "THEN 1 ELSE dormant END,updated_at=excluded.updated_at",
+                        (agent_id, 1 if outcome == "noop" else 0,
+                         int(outcome == "noop" and threshold == 1), now_ms(),
+                         outcome, outcome, threshold, threshold))
+                elif not inserted:
+                    first = database.execute("SELECT outcome FROM heartbeat_accounting "
+                                             "WHERE accounting_key=?", (key,)).fetchone()["outcome"]
+                    if first != outcome:
+                        logged = database.execute(
+                            "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                            (f"heartbeat.accounting_conflict:{key}", f"{first}/{outcome}", now_ms()))
+                        if logged.rowcount == 1:
+                            conflict = f"agent={agent_id} turn={trace_id} first={first} later={outcome}"
+                snapshot = database.execute("SELECT noop_streak,dormant FROM heartbeat_state "
+                                            "WHERE agent_id=?", (agent_id,)).fetchone()
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+            cached = _STATE_BY_AGENT.get(agent_id)
+            if cached is not None and snapshot is not None:
+                cached.noop_streak, cached.dormant = int(snapshot["noop_streak"]), bool(snapshot["dormant"])
+        if conflict is not None:
+            log("heartbeatAccountingConflict", conflict)
+    except Exception as exc:  # noqa: BLE001 - a derived count cannot break message delivery
+        log_exception("heartbeatAccountingFail", exc, detail=agent_id)
 
 
 def _reset_backoff_locked(state: _HeartbeatState) -> None:
@@ -851,6 +903,7 @@ class HeartbeatScheduler:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
+        activate_accounting()
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()

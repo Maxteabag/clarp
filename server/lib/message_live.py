@@ -434,11 +434,7 @@ def finalize_live_assistant_message(*, agent_id: str, backend_session_id: str,
         conn(), agent_id, backend_session_id)
     final_text = str(row.get("text") or "")
     if origin == "heartbeat":
-        skip, _clean = heartbeat.strip_heartbeat_ack(text)
-        if skip:
-            heartbeat.record_heartbeat_noop_once(agent_id, user_key)
-        elif not heartbeat.is_neutral_heartbeat_status(final_text):
-            heartbeat.record_heartbeat_activity_once(agent_id, user_key)
+        heartbeat.record_ended_turn(agent_id, trace_id, text)
     dreaming.process_assistant_text(agent_id, text, live=False, origin=origin)
     team_store.capture_assistant_message(
         agent_id=agent_id, source_message_id=str(row["id"]),
@@ -720,11 +716,7 @@ def apply_final_assistant_side_effects(*, agent_id: str,
         conn(), agent_id, backend_session_id)
     final_text = str(row.get("text") or "")
     if origin == "heartbeat":
-        skip, _clean = heartbeat.strip_heartbeat_ack(final_text)
-        if skip:
-            heartbeat.record_heartbeat_noop_once(agent_id, user_key)
-        elif not heartbeat.is_neutral_heartbeat_status(final_text):
-            heartbeat.record_heartbeat_activity_once(agent_id, user_key)
+        heartbeat.record_ended_turn(agent_id, trace_id, final_text)
     dreaming.process_assistant_text(agent_id, final_text, live=False, origin=origin)
     team_store.capture_assistant_message(
         agent_id=agent_id, source_message_id=str(row["id"]),
