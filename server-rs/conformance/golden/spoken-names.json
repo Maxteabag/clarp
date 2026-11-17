@@ -5843,6 +5843,46 @@
   },
   {
    "data": {
+    "agent_id": "<id:1>",
+    "detail": {
+     "session": "nova"
+    },
+    "event_id": "<eid:agent-state#1@95ff8e>",
+    "kind": "spawned",
+    "persona": "Nova",
+    "session": "nova",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@95ff8e>"
+  },
+  {
+   "data": {
+    "action": "started",
+    "agent_id": "<id:1>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@95ff8e>",
+    "file_path": "",
+    "kind": "spawned",
+    "persona": "Nova",
+    "phase": "spawned",
+    "session": "nova",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Started",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@95ff8e>"
+  },
+  {
+   "data": {
     "agent_id": "<id:3>",
     "event_id": "<eid:agent-focus#1@81b1d3>",
     "session": "claire",
@@ -5886,46 +5926,6 @@
    },
    "event": null,
    "id": "<eid:agent-state#1@cfc612>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "detail": {
-     "session": "nova"
-    },
-    "event_id": "<eid:agent-state#1@95ff8e>",
-    "kind": "spawned",
-    "persona": "Nova",
-    "session": "nova",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@95ff8e>"
-  },
-  {
-   "data": {
-    "action": "started",
-    "agent_id": "<id:1>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#2@95ff8e>",
-    "file_path": "",
-    "kind": "spawned",
-    "persona": "Nova",
-    "phase": "spawned",
-    "session": "nova",
-    "started_at_ms": null,
-    "state": "idle",
-    "status": "ok",
-    "summary": "Started",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": null,
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#2@95ff8e>"
   },
   {
    "data": {

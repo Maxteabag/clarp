@@ -5864,32 +5864,6 @@
   {
    "data": {
     "agent_id": "<id:1>",
-    "event_id": "<eid:delivery-updated#1@9d5c4f>",
-    "message_id": "u-namealfa",
-    "session": "nova",
-    "type": "delivery-updated"
-   },
-   "event": null,
-   "id": "<eid:delivery-updated#1@9d5c4f>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "namealfa",
-    "event_id": "<eid:agent-state#1@cfc612>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "nova",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@cfc612>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
     "detail": {
      "session": "nova"
     },
@@ -5926,6 +5900,32 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@95ff8e>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "event_id": "<eid:delivery-updated#1@9d5c4f>",
+    "message_id": "u-namealfa",
+    "session": "nova",
+    "type": "delivery-updated"
+   },
+   "event": null,
+   "id": "<eid:delivery-updated#1@9d5c4f>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "namealfa",
+    "event_id": "<eid:agent-state#1@cfc612>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "nova",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@cfc612>"
   },
   {
    "data": {
