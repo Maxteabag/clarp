@@ -1172,8 +1172,8 @@ pub(crate) async fn make_agent(
             let home = crate::config::home();
             let cwd = crate::config::working_dir(said_cwd, &home, &app.config.default_cwd);
             let begins = crate::past::begins(app, asked, &cwd).await?;
-            let (session, rows) = match begins {
-                crate::past::Begins::Afresh => (None, Vec::new()),
+            let taken = match begins {
+                crate::past::Begins::Afresh => None,
                 // An agent has that session, and the request said to open what is there.
                 crate::past::Begins::Open(owner) => {
                     let directory = app.fleet.directory();
@@ -1188,7 +1188,7 @@ pub(crate) async fn make_agent(
                 }
                 crate::past::Begins::With {
                     session,
-                    rows,
+                    turns,
                     parent,
                     model,
                 } => {
@@ -1206,24 +1206,30 @@ pub(crate) async fn make_agent(
                     if !named(&request.model) && !model.is_empty() {
                         request.model = Some(model);
                     }
-                    (Some(session), rows)
+                    Some((session, turns))
                 }
             };
-            let forked = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
-            // Its conversation goes by the name of the session it begins with: it is that
-            // session, which goes on, whatever its tool calls it later.
+            let forks = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
+            // An agent that takes a session up has a conversation of its own, under a name
+            // of its own: the session may have been another agent's conversation before, and
+            // whoever read that one counts from another place. A fork's conversation goes
+            // by the name of its copy, which nobody had.
+            let forked = taken
+                .as_ref()
+                .filter(|_| forks)
+                .map(|(session, _)| session.clone());
             let made = app
                 .fleet
-                .create_as(request, forked, session.clone())
+                .create_as(request, forked)
                 .await
                 .map_err(unavailable)?;
             let record = made.map_err(not_made)?;
-            if let Some(session) = session {
+            if let Some((session, turns)) = taken {
                 let member = app.fleet.directory().named(&record.agent_id).cloned();
                 let taken = match member {
                     Some(member) => {
-                        let from = "a session its tool kept".to_string();
-                        member.agent.import(from, Some(session), rows).await
+                        let rows = crate::past::rows_of(&record.agent_id, &session, &turns);
+                        member.agent.take_up(session, rows).await
                     }
                     None => Ok(Err("the agent is gone".to_string())),
                 };

@@ -444,8 +444,7 @@ enum Ask {
     /// The inner error is a refusal: the request cannot be met, and says why.
     Create {
         request: CreateAgentRequest,
-        forked: bool,
-        conversation: Option<String>,
+        forked: Option<String>,
         answer: Answer<Result<AgentRecord, NotMade>>,
     },
     /// An agent is started again in place. `dry`: only what would be is answered.
@@ -617,23 +616,21 @@ impl FleetHandle {
         &self,
         request: CreateAgentRequest,
     ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
-        self.create_as(request, false, None).await
+        self.create_as(request, None).await
     }
 
-    /// Makes an agent that begins with a session its tool kept. `forked`: with a copy of
-    /// one, and the apps are told of it as of a fork. `conversation`: the name of that
-    /// session, which the agent's conversation goes by: it is the tool's session, which
-    /// goes on.
+    /// Makes an agent. `forked`: it begins with a copy of a session its tool kept, made
+    /// for it under this name, and the apps are told of it as of a fork. Its conversation
+    /// goes by the copy's name, as a new agent's goes by the name its tool's session will
+    /// have: the copy is new, and nobody else ever read a conversation of that name.
     pub async fn create_as(
         &self,
         request: CreateAgentRequest,
-        forked: bool,
-        conversation: Option<String>,
+        forked: Option<String>,
     ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
         self.ask(|answer| Ask::Create {
             request,
             forked,
-            conversation,
             answer,
         })
         .await
@@ -1158,10 +1155,9 @@ impl Fleet {
                 Ask::Create {
                     request,
                     forked,
-                    conversation,
                     answer,
                 } => {
-                    let _ = answer.send(Ok(self.create(request, forked, conversation)));
+                    let _ = answer.send(Ok(self.create(request, forked)));
                 }
                 Ask::StartAgain {
                     replaces,
@@ -1700,9 +1696,9 @@ impl Fleet {
     fn create(
         &mut self,
         request: CreateAgentRequest,
-        forked: bool,
-        conversation: Option<String>,
+        forked: Option<String>,
     ) -> Result<AgentRecord, NotMade> {
+        let was_forked = forked.is_some();
         let persona = request.name.trim().to_string();
         if persona.is_empty() {
             return Err(Told::new(400, "name required", "name required").into());
@@ -1830,7 +1826,7 @@ impl Fleet {
             cwd,
             model: request.model.unwrap_or_default().trim().to_string(),
             effort,
-            conversation_id: conversation.unwrap_or_else(ids::uuid),
+            conversation_id: forked.unwrap_or_else(ids::uuid),
             created_at_ms: self.now_ms(),
             parent_agent_id: parent,
             role: if role == "helper" {
@@ -1863,7 +1859,7 @@ impl Fleet {
         // conversation changed is not said: nothing is in it, and the Python Host says so
         // when the first thing is written to it, as the agent's own thread does here.
         let (hub, now, new) = (&self.works.hub, self.now_ms(), agent::never_ran());
-        let made = if forked {
+        let made = if was_forked {
             wire::roster_forked(&record)
         } else {
             wire::roster_created(&record)

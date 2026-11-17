@@ -210,6 +210,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }
+        | AgentEvent::TookUp { .. }
         | AgentEvent::StartedAgain { .. }
         | AgentEvent::Labelled { .. } => None,
     };

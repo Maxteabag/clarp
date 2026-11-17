@@ -69,6 +69,30 @@ fn the_model_a_session_last_ran_on_is_read_as_the_python_host_reads_it() {
 }
 
 #[test]
+fn what_each_turn_is_in_its_conversation_is_told_as_the_python_host_tells_it() {
+    let vectors = vectors();
+    let made_up = vectors["phased"].as_array().unwrap();
+    let transcripts = vectors["transcripts"].as_array().unwrap();
+    let (mut asked, mut commentary, mut last) = (0, 0, 0);
+    for row in made_up.iter().chain(transcripts) {
+        let turns = row["turns"].as_array().unwrap();
+        let theirs = row["phases"].as_array().unwrap();
+        let ours = history::phases(turns);
+        assert_eq!(&ours, theirs, "{}: {}", row["name"], row["what"]);
+        asked += turns.len();
+        commentary += theirs.iter().filter(|phase| *phase == "commentary").count();
+        last += theirs.iter().filter(|phase| *phase == "final").count();
+    }
+    assert_eq!((asked, commentary, last), (47, 5, 18));
+    // The tools a turn itself used do not follow what it said: named, since it reads oddly.
+    let own = made_up
+        .iter()
+        .find(|row| row["name"] == "its-own-tools")
+        .unwrap();
+    assert_eq!(own["phases"], json!([null, "final", "final"]));
+}
+
+#[test]
 fn a_transcript_that_says_nothing_has_no_turns() {
     assert_eq!(history::claude(""), Vec::<Value>::new());
     assert_eq!(

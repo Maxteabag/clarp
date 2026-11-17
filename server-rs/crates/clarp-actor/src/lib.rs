@@ -390,6 +390,8 @@ pub struct Status {
     /// failed or was stopped leaves both as they were.
     pub completed_at_ms: Option<i64>,
     pub answered_by: Option<String>,
+    /// The agent came from another Host, where it had worked.
+    pub arrived: bool,
 }
 
 /// What changed in the agent's books together, to be written together: a goal,
@@ -1187,6 +1189,7 @@ impl Actor {
             context_tokens: self.remembered.context_tokens,
             completed_at_ms: self.remembered.completed_at_ms,
             answered_by: self.remembered.answered_by.clone(),
+            arrived: agent.arrived(),
         }
     }
 
@@ -1745,6 +1748,35 @@ impl Actor {
         rows: Vec<ImportedRow>,
         now_ms: i64,
     ) -> Result<(Result<usize, String>, Outputs), ActorError> {
+        let adopt = Command::Adopt {
+            from: from.to_string(),
+            backend_session,
+        };
+        self.begin_with(adopt, rows, now_ms)
+    }
+
+    /// Begins with a session the agent's tool kept on this machine: what was said in it, as
+    /// rows read from the tool's own transcript, and the session to continue. In one write or
+    /// not at all, and only for an agent that has no history here.
+    pub fn take_up(
+        &mut self,
+        session: &str,
+        rows: Vec<ImportedRow>,
+        now_ms: i64,
+    ) -> Result<(Result<usize, String>, Outputs), ActorError> {
+        let take = Command::TakeUp {
+            backend_session: session.to_string(),
+        };
+        self.begin_with(take, rows, now_ms)
+    }
+
+    /// Writes the rows an agent begins with and what says where they came from, together.
+    fn begin_with(
+        &mut self,
+        how: Command,
+        rows: Vec<ImportedRow>,
+        now_ms: i64,
+    ) -> Result<(Result<usize, String>, Outputs), ActorError> {
         if self.recorder.last_seq() != 0 {
             let refusal = "the agent already has a history on this Host".to_string();
             return Ok((Err(refusal), Outputs::default()));
@@ -1759,11 +1791,7 @@ impl Actor {
             });
             batch.item(written(&piece, ts_ms)?);
         }
-        let adopt = Command::Adopt {
-            from: from.to_string(),
-            backend_session,
-        };
-        if let Err(refusal) = batch.command(adopt, now_ms) {
+        if let Err(refusal) = batch.command(how, now_ms) {
             return Ok((Err(refusal.to_string()), Outputs::default()));
         }
         batch.commit()?;

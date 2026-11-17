@@ -88,6 +88,9 @@ pub enum Command {
         from: String,
         backend_session: Option<String>,
     },
+    /// The agent begins with a session its tool kept on this machine: its first turn
+    /// continues it. Only before its first turn.
+    TakeUp { backend_session: String },
     /// The agent is started again: its next turn begins a conversation with its tool
     /// instead of continuing the one it has. Only when no turn runs: a turn that runs is
     /// stopped first.
@@ -138,6 +141,13 @@ pub enum AgentEvent {
     Adopted {
         from: String,
         backend_session: Option<String>,
+        at_ms: i64,
+    },
+    /// The agent began with a session its tool kept on this machine. Its first turn
+    /// continues that session. It has worked nowhere yet: it is as new as an agent that
+    /// begins with nothing.
+    TookUp {
+        backend_session: String,
         at_ms: i64,
     },
     /// The agent was started again. The tool's session it had is no longer continued, and
@@ -235,6 +245,8 @@ pub struct Agent {
     label: String,
     /// What the agent rests in since it last said so, until its next turn starts.
     resting: Option<Rest>,
+    /// The agent came from another Host, where it had worked.
+    arrived: bool,
 }
 
 /// What an agent that runs no turn rests in, when it has said so itself.
@@ -263,6 +275,7 @@ impl Default for Agent {
             backend_session: None,
             label: String::new(),
             resting: None,
+            arrived: false,
         }
     }
 }
@@ -308,6 +321,12 @@ impl Agent {
     /// The tool's own session, where the agent's next turn continues.
     pub fn backend_session(&self) -> Option<&str> {
         self.backend_session.as_deref()
+    }
+
+    /// Whether the agent came from another Host, where it had worked. One that has run no
+    /// turn here is then at rest, and not new.
+    pub fn arrived(&self) -> bool {
+        self.arrived
     }
 
     /// What the agent says it is busy with beyond its turns. Empty: nothing.
@@ -447,6 +466,15 @@ impl Agent {
                 }
                 work.record(AgentEvent::Adopted {
                     from,
+                    backend_session,
+                    at_ms: now_ms,
+                });
+            }
+            Command::TakeUp { backend_session } => {
+                if work.agent.next_turn != 1 {
+                    return Err(Refusal::AlreadyAtWork);
+                }
+                work.record(AgentEvent::TookUp {
                     backend_session,
                     at_ms: now_ms,
                 });
@@ -643,7 +671,13 @@ impl Agent {
             }
             AgentEvent::Adopted {
                 backend_session, ..
-            } => self.backend_session.clone_from(backend_session),
+            } => {
+                self.backend_session.clone_from(backend_session);
+                self.arrived = true;
+            }
+            AgentEvent::TookUp {
+                backend_session, ..
+            } => self.backend_session = Some(backend_session.clone()),
             AgentEvent::StartedAgain { .. } => self.backend_session = None,
             AgentEvent::Labelled { text, .. } => {
                 self.resting = Some(if text.is_empty() {
@@ -1598,6 +1632,28 @@ mod tests {
             "an agent arrives once, before it works"
         );
         assert_eq!(a.agent.backend_session(), Some("sess-9"));
+        assert!(a.agent.arrived());
+    }
+
+    #[test]
+    fn an_agent_that_begins_with_a_session_its_tool_kept_continues_it_and_is_new() {
+        let mut a = Driven::new();
+        a.send(Command::TakeUp {
+            backend_session: "kept-1".to_string(),
+        })
+        .unwrap();
+        assert_eq!(a.agent.backend_session(), Some("kept-1"));
+        assert!(!a.agent.arrived(), "it has worked nowhere");
+        a.user(10);
+        a.finish(1);
+        assert_eq!(
+            a.send(Command::TakeUp {
+                backend_session: "kept-2".to_string(),
+            }),
+            Err(Refusal::AlreadyAtWork),
+            "a session is taken up once, before the agent works"
+        );
+        assert_eq!(a.agent.backend_session(), Some("kept-1"));
     }
 
     #[test]

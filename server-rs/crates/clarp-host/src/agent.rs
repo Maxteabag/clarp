@@ -129,6 +129,13 @@ pub enum Ask {
         rows: Vec<ImportedRow>,
         answer: Answer<Result<usize, String>>,
     },
+    /// Begin with a session the agent's tool kept on this machine. Answers how many rows
+    /// came, or why it cannot be done.
+    TakeUp {
+        session: String,
+        rows: Vec<ImportedRow>,
+        answer: Answer<Result<usize, String>>,
+    },
     Withdraw {
         turn: TurnId,
         by: String,
@@ -400,6 +407,21 @@ impl AgentHandle {
         .await
     }
 
+    /// Begins with a session the agent's tool kept on this machine: what was said in it,
+    /// and the session to continue.
+    pub async fn take_up(
+        &self,
+        session: String,
+        rows: Vec<ImportedRow>,
+    ) -> Result<Result<usize, String>, Unavailable> {
+        self.ask(|answer| Ask::TakeUp {
+            session,
+            rows,
+            answer,
+        })
+        .await
+    }
+
     /// Takes a waiting message back. Answers whether it waited, and how the queue stands.
     pub async fn withdraw(
         &self,
@@ -646,6 +668,7 @@ pub(crate) fn never_ran() -> Status {
         context_tokens: None,
         completed_at_ms: None,
         answered_by: None,
+        arrived: false,
     }
 }
 
@@ -1510,6 +1533,11 @@ impl Worker {
                 rows,
                 answer,
             } => answered(actor.import(&from, backend_session, rows, now), answer)?,
+            Ask::TakeUp {
+                session,
+                rows,
+                answer,
+            } => answered(actor.take_up(&session, rows, now), answer)?,
             Ask::Withdraw { turn, by, answer } => {
                 let withdrawn = actor.withdraw(turn, &by, now);
                 let queue = actor.queue_state();
@@ -2117,7 +2145,9 @@ fn refuse_for(
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
-            Ok(Ask::Import { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
+                drop(answer.send(Err(refusal())));
+            }
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Reword { answer, .. }) => drop(answer.send(Err(refusal()))),
