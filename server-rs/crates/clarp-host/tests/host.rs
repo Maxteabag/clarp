@@ -9192,6 +9192,105 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
 }
 
 #[test]
+fn what_the_hosts_own_turns_used_is_counted_for_an_apps_usage_screen() {
+    let place = Place::new("usage");
+    // A stand-in for Claude Code that says what its turn took in and gave out.
+    let claude = place.root.join("claude");
+    let script = "#!/bin/sh\nread message\n\
+printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
+printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
+printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1,\"usage\":{\"input_tokens\":12,\"output_tokens\":3}}'\n";
+    program(&claude, script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let of = |host: &Host, tool: &str| -> Value {
+        let told = host.get("/backend-usage");
+        let rows = told["backends"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["backend"] == tool);
+        row.cloned().unwrap()
+    };
+
+    // Before any turn: nothing was counted, and it is said so.
+    let nothing = of(&host, "claude");
+    assert_eq!(
+        (
+            &nothing["source"],
+            &nothing["freshness"],
+            &nothing["error"],
+            &nothing["fetched_at"],
+            &nothing["used_percentage"]
+        ),
+        (
+            &json!("clarp-turn-accounting"),
+            &json!("unknown"),
+            &json!("no turns recorded yet"),
+            &Value::Null,
+            &Value::Null
+        ),
+        "{nothing}"
+    );
+    assert_eq!(nothing["totals"]["five_hour"]["turns"], 0);
+
+    // A turn ends, and what its tool said it used is in both windows.
+    let (_, made) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({ "name": "Counter", "backend": "claude" })),
+    );
+    let agent = made["session"].as_str().unwrap().to_string();
+    host.send(&agent, "one", "u-1");
+    wait_for("the first turn to be counted", || {
+        of(&host, "claude")["totals"]["five_hour"]["turns"] == 1
+    });
+    let one = of(&host, "claude");
+    let window = json!({ "turns": 1, "tokens_in": 12, "tokens_out": 3, "cost_usd": null,
+                         "window_minutes": 300 });
+    assert_eq!(one["totals"]["five_hour"], window, "{one}");
+    assert_eq!(one["totals"]["seven_day"]["window_minutes"], 10_080);
+    assert_eq!(
+        (&one["freshness"], &one["error"], &one["windows"]),
+        (&json!("fresh"), &json!(""), &json!({})),
+        "{one}"
+    );
+    assert!(one["fetched_at"].as_str().unwrap().ends_with('Z'), "{one}");
+    host.send(&agent, "two", "u-2");
+    wait_for("the second turn to be counted", || {
+        of(&host, "claude")["totals"]["five_hour"]["turns"] == 2
+    });
+    let two = of(&host, "claude");
+    assert_eq!(
+        (
+            &two["totals"]["seven_day"]["tokens_in"],
+            &two["totals"]["seven_day"]["tokens_out"]
+        ),
+        (&json!(24), &json!(6)),
+        "{two}"
+    );
+    // Codex ran nothing here, and how much of an account is left is not asked of anybody.
+    assert_eq!(of(&host, "codex")["totals"]["seven_day"]["turns"], 0);
+    let told = host.get("/backend-usage");
+    assert_eq!(told["providers"]["claude"]["source"]["kind"], "unavailable");
+    assert_eq!(told["providers"]["claude"]["windows"], json!([]));
+
+    // A Host that starts again has counted what it had: each turn once, also the one every
+    // agent tells again when it is opened.
+    drop(host);
+    let host = place.start_in("", &[], &world);
+    // The agent is opened, which is when it tells its last turn again; that has a moment to
+    // arrive before what was used is asked for.
+    assert!(!host.conversation(&agent).is_empty());
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        of(&host, "claude")["totals"]["five_hour"],
+        two["totals"]["five_hour"]
+    );
+    // What was used belongs to the Host: an agent that is removed takes none of it along.
+    let (status, _) = host.ask("DELETE", &format!("/agents/{agent}"), None);
+    assert_eq!(status, 200);
+    assert_eq!(of(&host, "claude")["totals"]["seven_day"]["turns"], 2);
+}
+
+#[test]
 fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     let place = Place::new("model-options");
     // Stand-ins for the two tools: each says its version, and Codex lists its models.

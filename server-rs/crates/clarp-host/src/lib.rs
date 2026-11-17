@@ -59,6 +59,7 @@ pub mod schedules;
 pub mod screens;
 pub mod telling;
 pub mod tools;
+pub mod usage;
 pub mod voice;
 pub mod voices;
 pub mod wire;

@@ -702,6 +702,27 @@ again for five minutes unless a login changed. Three things are this Host's own:
 runs and no other; what it cannot do with a tool yet it does not say it can, whatever is declared of the
 tool; and it reads only what a tool prints, as the Python Host does where it runs for real.
 
+**What the Host's own turns used** (17 Nov 2026). The usage screen (`GET /backend-usage`, asked 71 times
+that week) was answered as unknown. One half of what the Python Host tells there needs nobody outside: what
+each turn's tool said the turn took in and gave out, summed over the last five hours and the last seven days
+(`turn_usage.py`); for Claude Code that is what its row is made of there. This Host wrote those numbers at
+every turn's end already, in the agent's own log. Now it also counts them for the Host (`clarp-kernel`
+`usage.rs`: the sums and the row an app is given, held by what the Python Host's accounting answers for 23
+made-up turns asked at 13 moments, the edges of the windows to the millisecond among them): an agent's
+thread says what a turn used when the turn ends, it is kept with the fleet under a name of the turn's own, so
+that the turn a Host tells again when it starts is counted once, and what is older than seven days is let
+go. The use belongs to the Host: an agent that is removed takes none of it along (a helper that did its work
+and was removed has still spent what it spent). The other half is how much of an account is left, which the
+Python Host asks the providers with the accounts' own logins: this Host asks nobody yet, and says that it
+does not in the part of the answer that is for it. Codex's row is counted the same way here; the Python Host
+has for it what Codex itself reports of its limits. What a turn cost, where Claude Code says so, is not
+counted yet. Reading for this found a number this Host had wrong since the first turn it ran: what a turn
+took in was counted as `input_tokens` alone, where the Python Host counts with it what the turn wrote to
+the cache and read from it (`turn_stop._result_detail`), and a turn of Claude Code that goes on in a long
+conversation reads nearly all of what it takes in from the cache. No scenario saw it, because the suite's
+stand-in for Claude Code reports no cache; it is in a row's summary of its turn (`tokens_in`) as in the
+tally. Now as there, held by the backend's own test.
+
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
 until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the

@@ -273,47 +273,6 @@ async fn no_logins() -> ApiError {
     not_built("Signing a tool in or out from an app is")
 }
 
-/// What is said where an app looks for how much of an account is used.
-const USAGE_UNREAD: &str = "Usage is not read on this Host yet";
-
-/// `GET /backend-usage`: how much of each tool's account is used. This Host asks no
-/// provider and keeps no account of its turns' cost, so each tool is told as unknown, in
-/// the Python Host's fields: an app shows that, and no gauge.
-async fn usage(State(app): State<App>) -> Json<Value> {
-    let tools = ["claude", "codex"];
-    let backends: Vec<Value> = tools
-        .iter()
-        .map(|tool| {
-            json!({
-                "backend": tool, "error": USAGE_UNREAD, "fetched_at": null,
-                "freshness": "unknown", "resets_at": null, "source": "none",
-                "used_percentage": null, "windows": {},
-            })
-        })
-        .collect();
-    let providers: serde_json::Map<String, Value> = tools
-        .iter()
-        .map(|tool| {
-            let provider = json!({
-                "freshness": "unknown", "observed_at": null, "provider_id": tool,
-                "provider_instance_id": format!("{}:{tool}", app.server_id),
-                "source": { "detail": USAGE_UNREAD, "kind": "unavailable" },
-                "windows": [],
-            });
-            ((*tool).to_string(), provider)
-        })
-        .collect();
-    Json(json!({
-        "backends": backends,
-        "capability_catalog_schema_version": 2,
-        "computer_id": app.server_id,
-        "limit_events": [],
-        "observed_at": crate::wire::iso(app.clock.now_ms()),
-        "providers": providers,
-        "schema_version": 1,
-    }))
-}
-
 // ---- the Host's own software and the skills of its agents' tools -----------------------------
 
 /// `GET /server-update`: who this Host is and whether a newer one is to be had. It is: who
@@ -402,7 +361,6 @@ pub fn routes() -> Router<App> {
         .route("/server-update", get(software).post(no_update))
         .route("/managed-skills", get(skills).post(no_skills))
         .route("/backend-auth", get(logins))
-        .route("/backend-usage", get(usage))
         .route("/backend-auth/{action}", post(no_logins))
         .route("/agent-dreaming", post(set_dreaming))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))

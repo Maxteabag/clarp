@@ -49,4 +49,5 @@ pub mod told;
 pub mod tools;
 pub mod trust;
 pub mod turn;
+pub mod usage;
 pub mod voices;

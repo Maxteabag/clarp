@@ -197,11 +197,6 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
     row
 }
 
-/// The moment as the catalogue writes one: to the second.
-fn to_the_second(now_ms: i64) -> String {
-    crate::wire::iso(now_ms.div_euclid(1_000) * 1_000).replace(".000Z", "Z")
-}
-
 impl Shelf {
     /// The catalogue: what was found within the last five minutes under the logins that
     /// are there now, or what the tools say when they are asked now. Who asks while the
@@ -218,7 +213,7 @@ impl Shelf {
         {
             return kept.told.clone();
         }
-        let observed_at = to_the_second(now_ms);
+        let observed_at = crate::wire::to_the_second(now_ms);
         let [first, second] = TOOLS;
         let (one, other) = tokio::join!(
             row_of(first, &home, &observed_at),
@@ -251,6 +246,7 @@ mod tests {
 
     #[test]
     fn a_moment_is_written_to_the_second() {
+        let to_the_second = crate::wire::to_the_second;
         assert_eq!(to_the_second(1_800_000_000_999), "2027-01-15T08:00:00Z");
         assert_eq!(to_the_second(0), "1970-01-01T00:00:00Z");
     }
