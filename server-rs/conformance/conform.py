@@ -589,6 +589,20 @@ def outline(body):
     return {key: kind(value) for key, value in body.items()} if isinstance(body, dict) else kind(body)
 
 
+def what_was_spent(body):
+    """`GET /backend-usage` as what both Hosts count in the same way: the row of the tool the
+    scenarios' agent runs on, which is what the Host's own turns used (its sums over the two
+    windows, where they come from and how fresh they are), with the moment of the newest turn
+    as just a moment. The rest is each Host's own: how much of an account is left, which the
+    Python Host asks providers for with the accounts' logins and this Host asks nobody; and
+    the other tools each knows. Of that, the fields and their kinds are compared."""
+    if not isinstance(body, dict) or not isinstance(body.get('backends'), list):
+        return body
+    spent = [{**row, 'fetched_at': '<time>' if row.get('fetched_at') else row.get('fetched_at')}
+             for row in body['backends'] if isinstance(row, dict) and row.get('backend') == 'claude']
+    return {**outline(body), 'backends': spent}
+
+
 def kept_where(body):
     """The answer to a file a user attached, with where it is kept as the agent's directory and
     the file's name: under which directory a Host keeps its uploads is the Host's own, and the
@@ -745,6 +759,8 @@ def core(raw: dict) -> dict:
             else exchange for exchange in http]
     http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange
             for exchange in http]
+    http = [{**exchange, 'body': what_was_spent(exchange['body'])} if exchange.get('path') == '/backend-usage'
+            else exchange for exchange in http]
     http = [{**exchange, 'body': by_fiat(exchange.get('path'), exchange['body'])} for exchange in http]
     sse = []
     for frame in raw['sse']:
