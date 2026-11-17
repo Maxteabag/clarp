@@ -748,6 +748,8 @@ CREATE TABLE background_jobs (
 );
 CREATE INDEX idx_background_jobs_active ON background_jobs(status, updated_at DESC);
 CREATE INDEX idx_background_jobs_agent_active ON background_jobs(agent_id) WHERE terminal_at IS NULL;
+-- Additive Host-service index at schema 127: intentionally no user_version bump.
+CREATE INDEX idx_background_jobs_agent_terminal ON background_jobs(agent_id, terminal_at);
 CREATE INDEX idx_background_jobs_session ON background_jobs(session, updated_at DESC);
 CREATE INDEX idx_background_jobs_computer ON background_jobs(owner_kind, computer_id, updated_at DESC);
 

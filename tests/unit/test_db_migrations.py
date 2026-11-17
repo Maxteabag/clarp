@@ -65,6 +65,7 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        DROP INDEX IF EXISTS idx_background_jobs_agent_terminal;
         ALTER TABLE device_tokens DROP COLUMN principal;
         ALTER TABLE device_tokens DROP COLUMN provider;
         DROP INDEX idx_task_plans_recovery;
@@ -206,7 +207,7 @@ def test_v64_adds_the_permanent_voice_timeline(tmp_path):
                 upgraded, "index")
 
 
-def test_upgraded_database_matches_fresh_schema(tmp_path):
+def test_upgraded_database_matches_fresh_schema(tmp_path, monkeypatch):
     """The migration and _SCHEMA_SQL must describe the same shape."""
     fresh = _fresh(tmp_path / "fresh.sqlite")
     upgraded_path = tmp_path / "upgraded.sqlite"
@@ -215,6 +216,19 @@ def test_upgraded_database_matches_fresh_schema(tmp_path):
     upgraded.close()
     upgraded = _connect(upgraded_path)
     db._migrate(upgraded)
+
+    if db._SCHEMA_VERSION == 127:
+        # The sole approved additive exception keeps old rollback Hosts at
+        # schema 127 runnable. The next REAL version migration must create
+        # this index too; at any later version the normal strict check below
+        # applies BEFORE service setup and catches a forgotten chain step.
+        optional = {"idx_background_jobs_agent_terminal"}
+        assert _names(fresh, "index") - _names(upgraded, "index") == optional
+        assert _names(upgraded, "index") - _names(fresh, "index") == set()
+        with monkeypatch.context() as patch:
+            patch.setattr(db, "_SERVICE", "host")
+            db.reset_for_tests(upgraded_path)
+            db.conn()  # the actual Host bootstrap must make the shapes equal
 
     for kind in ("table", "view", "index"):
         assert _names(upgraded, kind) == _names(fresh, kind), kind

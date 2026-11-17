@@ -7,8 +7,12 @@ tests/fixtures/schema/. Any schema change shows up here as a reviewable diff;
 the two goldens differ only where an upgraded file legitimately keeps another
 shape (ALTER TABLE appends columns at the end).
 
-A schema change is a contract change: bump _SCHEMA_VERSION, add the migration
-and regenerate with
+A schema change is a contract change: normally bump _SCHEMA_VERSION and add
+its migration. The named v127 Host-service performance index is the explicit
+rollback-safe exception: fresh includes it, pre-service v61-upgraded may not;
+test_db_migrations pins exactly that difference and proves Host bootstrap
+restores strict equality. A later version gets no exemption.
+Regenerate with
 
     UPDATE_SCHEMA_GOLDENS=1 uv run --frozen --group dev python -m pytest \
         -p no:xdist tests/unit/test_schema_golden.py

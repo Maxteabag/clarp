@@ -794,6 +794,9 @@ class MaintenanceWorker:
     def check_sizes(self) -> dict[str, int]:
         """The size bounds alone, between the hourly passes. With nothing over
         its bound this is a few file sizes and three pragmas."""
+        # Existing five-minute size checks are also the periodic owner of
+        # bounded optional-index retries; no new worker or cadence is added.
+        db.ensure_service_indexes()
         counts: dict[str, int] = {}
         try:
             counts["event_logs"] = self._prune_event_logs()
