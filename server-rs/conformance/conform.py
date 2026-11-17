@@ -74,6 +74,36 @@ HTTP_OPS = ('get', 'post', 'put', 'delete', 'patch')
 # it wrote while the turn ran. A read before that is done sees a state no client is meant to keep.
 SETTLED_S = 3.0
 SETTLE_TIMEOUT_S = 30
+# Where what a test Host left of a scenario it did not run to its end is written: under the
+# directory of the report (`--out`), when the run has one.
+UNFINISHED = None
+ASKED_LINE = re.compile(r'^\S+ "(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \S+ HTTP/[0-9.]+" \d{3} ')
+
+
+def diagnose(host, root: Path, scenario: str, error: str) -> None:
+    """What a test Host left of a scenario it did not run to its end, for whoever reads the
+    report: the agent's last states (the reference), what its stand-in tool was started for
+    and how that went, and the end of the Host's own log. As synthetic as the corpus."""
+    if UNFINISHED is None:
+        return
+    said = [f'{root.parent.name} / {scenario}: {error}']
+    if isinstance(host, PythonHost):
+        said.append(replay._state_tail(root, scenarios.AGENT))
+    for title, path, most in (('the stand-in tool', root / 'provider' / 'claude-procs.jsonl', 40),
+                              ('the Host', root.parent / f'{root.name}.host.log', 150)):
+        try:
+            written = path.read_text(errors='replace').splitlines()
+        except OSError:
+            written = []
+        # What the Host wrote of each request it answered is left out: a wait asks it many
+        # times a second, and those lines would be all there is.
+        lines = [line for line in written if not ASKED_LINE.match(line)]
+        said += ['', f'# {title}: the last {min(most, len(lines))} of {len(lines)} line(s)'
+                 + (f' ({len(written) - len(lines)} more of requests it answered)' if len(written) > len(lines)
+                    else ''), *lines[-most:]]
+    with contextlib.suppress(OSError):
+        UNFINISHED.mkdir(parents=True, exist_ok=True)
+        (UNFINISHED / f'{root.parent.name}-{scenario}.txt').write_text('\n'.join(said) + '\n')
 # What a normalized capture holds besides the two channels a client sees. Both sides get the
 # same empty values, so the differ compares nothing there.
 NO_STATE = {'schema': [], 'tables': {}, 'files': [], 'cli': [], 'sse_log': []}
@@ -381,6 +411,8 @@ def capture(make_host, scenario, root: Path) -> dict:
     health = {'errors': events.errors if events else ['not connected'], 'ended_early': bool(events and events.ended)}
     if error is None and (health['errors'] or health['ended_early']):
         error = 'the event stream was unhealthy: ' + ', '.join(health['errors'] or ['ended early'])
+    if error is not None:
+        diagnose(host, root, scenario['id'], error)
     return {'timings': {}, 'scenario': scenario['id'], 'error': error, 'root': str(root), 'build': str(host.build),
             'http': http, 'sse': frames, 'sse_health': health,
             'db': {'schema': [], 'pk': {}, 'tables': {}}, 'files': [], 'cli': []}
@@ -1141,6 +1173,43 @@ def recorded_again(recordings: list, chosen, again) -> tuple:
     return recordings, lines
 
 
+# How often the reference is asked again for a scenario it did not run to its end.
+UNFINISHED_TRIES = 2
+
+
+def finished_again(recording: dict, chosen, again, label: str) -> tuple:
+    """A recording with the scenarios the reference did not run to its end asked again, and
+    what the report says of it.
+
+    Every scenario runs against a fresh Host of its own, so one that is asked again is asked
+    as it was the first time (`again(scenarios, attempt)` answers scenario id -> its two
+    views), up to `UNFINISHED_TRIES` times: the first answer that ran to its end takes the
+    place of the one that did not. A test Host that does not come to rest is a defect of the
+    reference (R43) and says nothing of the Rust Host, which is compared with what the
+    reference answers when it does. Every time it happens is said. A scenario the reference
+    never runs to its end is left as it is, and fails the run as before."""
+    cut = [scenario for scenario in chosen if recording[scenario['id']]['full']['error']]
+    if not cut:
+        return recording, []
+    recording = dict(recording)
+    said = {scenario['id']: recording[scenario['id']]['full']['error'] for scenario in cut}
+    done: dict = {}
+    for attempt in range(1, UNFINISHED_TRIES + 1):
+        left = [scenario for scenario in cut if scenario['id'] not in done]
+        if not left:
+            break
+        more = again(left, attempt)
+        for scenario in left:
+            views = more[scenario['id']]
+            if not views['full']['error']:
+                recording[scenario['id']], done[scenario['id']] = views, attempt
+    return recording, [
+        f'{label} / {name}: {said[name]}; '
+        + (f'asked again, and it ran to its end (try {done[name]})' if name in done else
+           f'asked {UNFINISHED_TRIES} more time(s), and it never did')
+        for name in said]
+
+
 def selftest() -> list:
     """The rule above, tried on captures made for it: what it must do and what it must not.
     Raises when it does otherwise; the lines say what was tried. A tool that judges is tried
@@ -1185,7 +1254,38 @@ def selftest() -> list:
     # A scenario the reference is known to waver in is not counted, and not recorded again.
     kept, lines = recorded_again([{'s': marked}, {'s': marked}], [{'id': 's', 'unsteady': True}], again([sound]))
     assert len(kept) == 2 and not asked, 'a scenario that is not counted was recorded again'
-    return ['the rule for a scenario whose every recording carries the mark of defect R19: tried on 5 cases, holds']
+    # The other rule: a scenario the reference did not run to its end is asked again.
+    cut = capture('<row:1>', error='step 7 (quiesce): timed out waiting for the agent idle')
+    two = [{'id': 's'}, {'id': 't'}]
+    asked.clear()
+    # Nothing was cut short: nothing is asked, and the recording is the one that was given.
+    whole = {'s': sound, 't': sound}
+    kept, lines = finished_again(whole, two, again([sound]), 'python')
+    assert kept is whole and not asked and not lines, 'a recording that ran to its end was asked again'
+    # One scenario cut short, the first try whole: it takes the other's place, the scenario
+    # beside it is not touched, the recording that was given is not changed, and it is said.
+    def again_of(answers):
+        def give(left, attempt):
+            asked.append((attempt, [scenario['id'] for scenario in left]))
+            return {scenario['id']: answers[min(attempt, len(answers)) - 1] for scenario in left}
+        return give
+    given = {'s': cut, 't': marked}
+    kept, lines = finished_again(given, two, again_of([sound]), 'python')
+    assert kept['s'] is sound and kept['t'] is marked and given['s'] is cut and asked == [(1, ['s'])], asked
+    assert lines == ['python / s: step 7 (quiesce): timed out waiting for the agent idle; '
+                     'asked again, and it ran to its end (try 1)'], lines
+    # Cut short again, then whole: the second try is kept, and nothing is asked after it.
+    asked.clear()
+    kept, lines = finished_again({'s': cut, 't': sound}, two, again_of([cut, sound, cut]), 'python again')
+    assert kept['s'] is sound and asked == [(1, ['s']), (2, ['s'])] and 'try 2' in lines[0], (asked, lines)
+    # Never whole: it stays cut short, which fails the run, and it was tried as often as it may be.
+    asked.clear()
+    kept, lines = finished_again({'s': cut, 't': cut}, two, again_of([cut]), 'python')
+    assert kept['s'] is cut and kept['t'] is cut, 'a scenario that never ran to its end was taken as run'
+    assert asked == [(attempt, ['s', 't']) for attempt in range(1, UNFINISHED_TRIES + 1)], asked
+    assert len(lines) == 2 and all('never did' in line for line in lines), lines
+    return ['the rule for a scenario whose every recording carries the mark of defect R19: tried on 5 cases, holds',
+            'the rule for a scenario the reference did not run to its end: tried on 4 cases, holds']
 
 
 
@@ -1208,9 +1308,23 @@ def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
     harness_run.pin_static_mtimes(build)
     first = corpus(python_host(build), chosen, run.label('py-a'), jobs)
     second = corpus(python_host(build), chosen, run.label('py-b'), jobs)
+    # A test Host of the reference that did not come to rest in a scenario (its defect R43)
+    # is asked again, and every time it happened is said.
+    unfinished = []
+    for at, (label, name) in enumerate((('python', 'py-a'), ('python again', 'py-b'))):
+        whole, said = finished_again(
+            (first, second)[at], chosen,
+            lambda left, attempt, name=name: corpus(
+                python_host(build), left, run.label(f'{name}-again-{attempt}'), jobs),
+            label)
+        first, second = (whole, second) if at == 0 else (first, whole)
+        unfinished += said
     errors = run_errors(first, 'python') + run_errors(second, 'python again')
     report = differences(first, second, steady(chosen), view='core')
     lines = [diff.render(report, set(), 'the Python Host against itself', errors)]
+    if unfinished:
+        lines += ['', '# The reference did not run a scenario to its end (a test Host of it that did not come '
+                  'to rest: its defect R43)', *unfinished]
     unsteady = differences(first, second, [s for s in chosen if s.get('unsteady')], view='core')
     if unsteady.items:
         lines.append(diff.render(unsteady, set(), 'scenarios the reference is known not to answer the same '
@@ -1338,7 +1452,9 @@ def main(argv=None) -> int:
     parser.add_argument('--rust', type=Path, help='the clarp-host binary (clarp-shim beside it)')
     parser.add_argument('--golden', type=Path, default=HERE / 'golden')
     parser.add_argument('--out', type=Path, help='cross: where the report and the written-down answers go; '
-                        'compare: where what the Rust Host answered goes, when it is wanted')
+                        'compare: where what the Rust Host answered goes, when it is wanted; in every mode: '
+                        'what a test Host left of a scenario it did not run to its end goes under it '
+                        '(unfinished/)')
     parser.add_argument('--intended', default=str(HERE / 'intended.txt'))
     parser.add_argument('--scenarios', help='a comma-separated subset of the corpus')
     parser.add_argument('--plant', type=int, help='plants: only the planted change of this number, from 0')
@@ -1352,6 +1468,9 @@ def main(argv=None) -> int:
     parser.add_argument('--keep', action='store_true', help='keep the scratch directory')
     args = parser.parse_args(argv)
     chosen = choose(args.scenarios)
+    if args.out is not None:
+        global UNFINISHED
+        UNFINISHED = args.out.resolve() / 'unfinished'
     for needed, modes in (('build', ('record', 'plants', 'cross')), ('rust', ('compare', 'cross', 'rust')),
                           ('out', ('cross', 'rust'))):
         if args.mode in modes and getattr(args, needed) is None:

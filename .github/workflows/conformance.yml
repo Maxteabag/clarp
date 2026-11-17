@@ -97,10 +97,13 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p conformance-proof
+          # What a test Host left of a scenario it did not run to its end is kept beside the
+          # console (`unfinished/`): its log and what its stand-in tool did.
           bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py plants \
-            --build . --fresh --plant ${{ matrix.plant }} | tee conformance-proof/console.txt
+            --build . --fresh --plant ${{ matrix.plant }} --out conformance-proof \
+            | tee conformance-proof/console.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: conformance-proof-${{ matrix.plant }}
-          path: conformance-proof/console.txt
+          path: conformance-proof/
