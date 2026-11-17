@@ -169,8 +169,8 @@ impl Desk {
         Ok(held)
     }
 
-    /// One reading of the book.
-    async fn read<T>(
+    /// One reading of the book. Nothing is kept, and nothing of it is copied.
+    pub(crate) async fn read<T>(
         &self,
         app: &App,
         read: impl FnOnce(&Book, &Around<'_>, i64) -> T,
