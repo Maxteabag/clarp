@@ -6,7 +6,9 @@
 //! the JSON found in what it answered ([`extract_json`]), the decision read from that
 //! ([`Decision::read`]), what of a decision an app is told ([`Decision::told`]), when the
 //! router asks once more with every agent in view ([`asks_again`]), and the names a
-//! provider goes by ([`provider`]).
+//! provider goes by ([`provider`]). What a model is shown is in [`packet`], and a
+//! message's way through the router, from the moment it comes in to what is kept of it,
+//! in [`flow`].
 //!
 //! The rules are the Python Host's (`server/lib/orchestrator.py`, `orchestrator_model.py`,
 //! `orchestrator_types.py`), held by `tests/fixtures/router-vectors.json`
@@ -16,6 +18,9 @@ use serde_json::{Map, Value, json};
 
 use crate::janitors;
 use crate::python;
+
+pub mod flow;
+pub mod packet;
 
 /// How sure the router has to be to act without asking, unless its owner sets another bar;
 /// how sure for the agent that is open, and below what it does not even ask.
