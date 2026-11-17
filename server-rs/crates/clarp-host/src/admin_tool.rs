@@ -15,6 +15,11 @@
 //! `clarp-admin agent create` and `clarp-admin agent helper-state`: these are what the
 //! program `clarp-sub-agent` calls (the skill `clarp-sub-agents`).
 //!
+//! Two more are what an agent asks of its user's phone: `clarp-admin location` gives where
+//! the user is, asking the phone for it when what is known is old (the skill `location`),
+//! and `clarp-admin calendar` asks for an event in the user's calendar (the skill
+//! `calendar`).
+//!
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
@@ -1511,6 +1516,143 @@ async fn janitor(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     answer
 }
 
+/// What argparse says of the command line of a command that has no commands of its own,
+/// when it cannot read it; and exits 2 with.
+fn misread(command: &str, line: &str, why: &str) -> ToolAnswer {
+    let named = format!("clarp-admin {command}");
+    ToolAnswer::said(
+        2,
+        format!("usage: {named} [-h] {line}\n{named}: error: {why}"),
+    )
+}
+
+/// The options a command must be given, of those it was not given: what argparse says.
+fn left_out(parsed: &crate::artifact_tool::Parsed, needed: &[&str]) -> Option<String> {
+    let missing: Vec<&str> = needed
+        .iter()
+        .copied()
+        .filter(|name| parsed.option(name).is_none())
+        .collect();
+    (!missing.is_empty()).then(|| {
+        format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        )
+    })
+}
+
+/// How long `clarp-admin location` waits between two looks for a place that was asked for.
+const LOOKED_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// `clarp-admin location --session SESSION [--max-age SECONDS] [--timeout SECONDS]`: where
+/// the agent's user is. The last place the phone said is given when it is no older than
+/// `--max-age` (300); else the phone is asked, and the tool waits up to `--timeout` (35)
+/// for a place said since. Printed as the Python tool prints it.
+async fn location(app: &App, args: &[String]) -> ToolAnswer {
+    const LINE: &str = "--session SESSION [--max-age MAX_AGE] [--timeout TIMEOUT]";
+    let valued = ["--session", "--max-age", "--timeout"];
+    let parsed = match parse(args, &valued, &[], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return misread("location", LINE, &why),
+    };
+    if let Some(extra) = parsed.positional.first() {
+        return misread(
+            "location",
+            LINE,
+            &format!("unrecognized arguments: {extra}"),
+        );
+    }
+    if let Some(why) = left_out(&parsed, &["--session"]) {
+        return misread("location", LINE, &why);
+    }
+    let (max_age, timeout) = match (parsed.whole("--max-age"), parsed.whole("--timeout")) {
+        (Ok(max_age), Ok(timeout)) => (max_age.unwrap_or(300), timeout.unwrap_or(35)),
+        (Err(why), _) | (_, Err(why)) => return misread("location", LINE, &why),
+    };
+    let session = parsed.option("--session").unwrap_or_default();
+    let unavailable =
+        |why: Unavailable| ToolAnswer::said(1, format!("clarp-admin location: {}", why.0));
+    let told = |place: &Value| {
+        ToolAnswer::printed(0, serde_json::to_string_pretty(place).unwrap_or_default())
+    };
+    let said_at = |place: &Value| place["ts"].as_i64().filter(|at| *at != 0);
+    let now = app.clock.now_ms();
+    let current = match crate::places::last(app, session).await {
+        Ok(current) => current,
+        Err(why) => return unavailable(why),
+    };
+    if said_at(&current).is_some_and(|at| now - at <= max_age.saturating_mul(1_000)) {
+        return told(&current);
+    }
+    crate::places::ask(app, python::strip(session));
+    let waits_until = tokio::time::Instant::now()
+        + std::time::Duration::from_secs(u64::try_from(timeout).unwrap_or(0));
+    while tokio::time::Instant::now() < waits_until {
+        tokio::time::sleep(LOOKED_EVERY).await;
+        match crate::places::last(app, session).await {
+            Ok(current) if said_at(&current).is_some_and(|at| at >= now) => return told(&current),
+            Ok(_) => {}
+            Err(why) => return unavailable(why),
+        }
+    }
+    ToolAnswer::said(1, "location was not shared before timeout")
+}
+
+/// `clarp-admin calendar --session SESSION --title TITLE --start START --end END ...`: an
+/// agent asks for an event in its user's calendar. What the Host answers is printed as the
+/// Python tool prints it; what it refuses is said in a line, with exit 1.
+fn calendar(app: &App, args: &[String]) -> ToolAnswer {
+    const LINE: &str = "--session SESSION --title TITLE --start START --end END \
+                        [--time-zone TIME_ZONE] [--location LOCATION] [--notes NOTES] [--url URL] \
+                        [--calendar CALENDAR] [--all-day]";
+    let valued = [
+        "--session",
+        "--title",
+        "--start",
+        "--end",
+        "--time-zone",
+        "--location",
+        "--notes",
+        "--url",
+        "--calendar",
+    ];
+    let parsed = match parse(args, &valued, &["--all-day"], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return misread("calendar", LINE, &why),
+    };
+    if let Some(extra) = parsed.positional.first() {
+        return misread(
+            "calendar",
+            LINE,
+            &format!("unrecognized arguments: {extra}"),
+        );
+    }
+    if let Some(why) = left_out(&parsed, &["--session", "--title", "--start", "--end"]) {
+        return misread("calendar", LINE, &why);
+    }
+    let said = |name: &str| parsed.option(name).unwrap_or_default();
+    let asked = json!({
+        "session": said("--session"), "title": said("--title"),
+        "start": said("--start"), "end": said("--end"),
+        "time_zone": said("--time-zone"), "location": said("--location"),
+        "notes": said("--notes"), "url": said("--url"), "calendar": said("--calendar"),
+        "all_day": parsed.flags.contains("--all-day"),
+    });
+    let Some(asked) = asked.as_object() else {
+        return ToolAnswer::said(1, "clarp-admin calendar: the request could not be written");
+    };
+    match crate::calendar::request(app, asked) {
+        Ok(answered) => ToolAnswer::printed(
+            0,
+            serde_json::to_string_pretty(&answered).unwrap_or_default(),
+        ),
+        Err(why) => ToolAnswer::said(
+            1,
+            format!("clarp-admin calendar: HTTP Error 400: Bad Request ({why})"),
+        ),
+    }
+}
+
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
@@ -1524,6 +1666,8 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "schedule" => schedule(app, rest).await,
         Some((command, rest)) if command == "janitor" => janitor(app, call, rest).await,
         Some((command, rest)) if command == "trigger" => trigger(app, rest).await,
+        Some((command, rest)) if command == "location" => location(app, rest).await,
+        Some((command, rest)) if command == "calendar" => calendar(app, rest),
         Some((command, _)) => not_here(command),
         None => ToolAnswer::said(2, "usage: clarp-admin COMMAND ..."),
     }

@@ -680,7 +680,13 @@ reads no time. The rule is the Python Host's (`calendar_request.py`), held by wh
 fifty made-up requests (`tools/calendar-vectors.py`: what a request must say and the words it is refused
 with, the zone under either of its two names, a number or a list where a word is expected written as Python
 writes it, and `all_day` by what Python takes for something, so that the word "false" is a yes), by a Host
-test and by the scenario `calendar` (11 steps, no difference at its first asking, run 44028268830). The
+test and by the scenario `calendar` (11 steps, no difference at its first asking, run 44028268830). An
+agent asks through a command, and so the commands are served too (`admin_tool.rs`): `clarp-admin calendar`,
+and `clarp-admin location`, which gives the place the phone last said when it is new enough and otherwise
+asks the phone and waits for one said since (the skill `location`; the route was there, the command was
+not, so an agent here could not ask). Read in the owner's skills and the repository's: one script speaks to
+a Host by itself and not through a command, the calendar skill's, which finds its Host by `CLARP_SERVER_URL`
+and a token; a turn of this Host is not given those yet, so that script still reaches the Python Host. The
 other ten of the eleven: an agent's slot given back by hand
 (`POST /repair-slot`, five), and teams (three routes, three requests).
 

@@ -9468,6 +9468,137 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
 }
 
 #[test]
+fn an_agents_own_commands_ask_its_users_phone_for_a_place_and_for_an_event() {
+    let place = Place::new("phone-asked");
+    let host = place.start();
+    let heard = host.listen();
+    let told = |kind: &str| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let events = heard.iter().filter(|event| event["type"] == kind);
+        events.cloned().collect()
+    };
+    let admin = |args: &[&str]| {
+        let mut all = vec!["clarp-admin"];
+        all.extend(args);
+        tool(&host, &place.root, None, &all)
+    };
+
+    // The calendar: what the Host answers is printed, and the apps are told the event.
+    let (exit, out, err) = admin(&[
+        "calendar",
+        "--session",
+        "mike",
+        "--title",
+        "Standup",
+        "--start",
+        "2027-01-15T09:00:00+01:00",
+        "--end",
+        "2027-01-15T09:15:00+01:00",
+        "--time-zone",
+        "Europe/Oslo",
+        "--all-day",
+    ]);
+    assert_eq!(exit, 0, "{err}");
+    let answered: Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        answered["ok"] == true && out.starts_with("{\n  \"ok\": true"),
+        "{out}"
+    );
+    wait_for("the apps to be told of the event", || {
+        told("calendar-request").len() == 1
+    });
+    let event = told("calendar-request").remove(0);
+    assert_eq!(
+        (
+            &event["request_id"],
+            &event["title"],
+            &event["all_day"],
+            &event["notes"]
+        ),
+        (
+            &answered["request_id"],
+            &json!("Standup"),
+            &json!(true),
+            &json!("")
+        ),
+        "{event}"
+    );
+    // What argparse would not read is not read here; what the Host refuses is said in a line.
+    let (exit, _, err) = admin(&["calendar", "--session", "mike", "--title", "T"]);
+    assert_eq!(exit, 2);
+    assert!(
+        err.contains("the following arguments are required: --start, --end"),
+        "{err}"
+    );
+    let (exit, _, err) = admin(&[
+        "calendar",
+        "--session",
+        "mike",
+        "--title",
+        " ",
+        "--start",
+        "s",
+        "--end",
+        "e",
+    ]);
+    assert_eq!(exit, 1);
+    assert!(err.contains("title required"), "{err}");
+    assert_eq!(told("calendar-request").len(), 1);
+
+    // A place the phone said a moment ago is given at once, and nobody is asked.
+    let (status, _) = host.ask(
+        "POST",
+        "/location",
+        Some(&json!({ "session": "mike", "lat": 59.91, "lng": 10.75, "accuracy": 12 })),
+    );
+    assert_eq!(status, 200);
+    let (exit, out, err) = admin(&["location", "--session", "mike"]);
+    assert_eq!(exit, 0, "{err}");
+    let fix: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        (&fix["lat"], &fix["lng"]),
+        (&json!(59.91), &json!(10.75)),
+        "{out}"
+    );
+    assert!(told("location-request").is_empty());
+    // One that is older than the agent accepts: the phone is asked, and the tool waits for
+    // a place said since. Nobody shares one here, so it gives up when its time is over.
+    std::thread::sleep(Duration::from_millis(1_100));
+    let began = Instant::now();
+    let (exit, _, err) = admin(&[
+        "location",
+        "--session",
+        "mike",
+        "--max-age",
+        "1",
+        "--timeout",
+        "1",
+    ]);
+    assert_eq!(exit, 1, "{err}");
+    assert!(
+        err.contains("location was not shared before timeout"),
+        "{err}"
+    );
+    assert!(began.elapsed() >= Duration::from_secs(1));
+    let asked = told("location-request");
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0]["session"], "mike");
+    // And a number that is none is refused as argparse refuses it.
+    let (exit, _, err) = admin(&["location", "--session", "mike", "--max-age", "soon"]);
+    assert_eq!(exit, 2);
+    assert!(
+        err.contains("argument --max-age: invalid int value: 'soon'"),
+        "{err}"
+    );
+    let (exit, _, err) = admin(&["location"]);
+    assert_eq!(exit, 2);
+    assert!(
+        err.contains("the following arguments are required: --session"),
+        "{err}"
+    );
+}
+
+#[test]
 fn an_agent_asks_for_an_event_in_its_users_calendar() {
     let place = Place::new("calendar");
     let host = place.start();

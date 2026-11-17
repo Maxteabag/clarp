@@ -13,21 +13,27 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use clarp_kernel::calendar;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::edge::{ApiError, App};
 use crate::ids;
 use crate::personas::object;
 
+/// Gives a request its id and tells the apps: what the asker is answered, or the words a
+/// request is refused with that leaves out what it must say.
+pub(crate) fn request(app: &App, said: &Map<String, Value>) -> Result<Value, String> {
+    let request_id = format!("cal-{}", ids::hex(8));
+    let event = calendar::asked(said, &request_id)?;
+    app.hub.publish(event, app.clock.now_ms());
+    Ok(json!({ "ok": true, "request_id": request_id }))
+}
+
 /// `POST /calendar/request`: an agent asks for an event. Answered with the id the request
 /// goes by; a request that leaves out what it must say is refused with what is missing.
 async fn asked(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
-    let said = object(&body)?;
-    let request_id = format!("cal-{}", ids::hex(8));
-    let event = calendar::asked(&said, &request_id)
-        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
-    app.hub.publish(event, app.clock.now_ms());
-    Ok(Json(json!({ "ok": true, "request_id": request_id })))
+    let answered = request(&app, &object(&body)?);
+    let answered = answered.map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    Ok(Json(answered))
 }
 
 pub fn routes() -> Router<App> {
