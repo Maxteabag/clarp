@@ -80,6 +80,12 @@ pub fn from_iso(text: &str) -> Option<i64> {
     Some(days * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1_000 + millis)
 }
 
+/// A moment written to the second (`2027-01-15T08:00:00Z`), as the Python Host writes one
+/// where it tells when something was found.
+pub fn to_the_second(ms: i64) -> String {
+    iso(ms.div_euclid(1_000) * 1_000).replace(".000Z", "Z")
+}
+
 /// The state an app shows for an agent.
 pub fn state_kind(status: &Status) -> AgentStateKind {
     match (&status.live, &status.last) {

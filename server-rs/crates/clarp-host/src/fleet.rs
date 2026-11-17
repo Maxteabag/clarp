@@ -438,6 +438,8 @@ pub struct Works {
     pub speaks: crate::voice::Speaks,
     /// What the tools of this Host's agents are told, by what holds when one is asked.
     pub telling: crate::telling::Telling,
+    /// The way to the tally of what turns used.
+    pub tally: crate::usage::Tally,
 }
 
 enum Ask {
@@ -1011,6 +1013,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         blobs: works.blobs.clone(),
         speaks: works.speaks.clone(),
         telling: works.telling.clone(),
+        tally: works.tally.clone(),
     })
 }
 

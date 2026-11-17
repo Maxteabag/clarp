@@ -102,6 +102,8 @@ async fn serve(config: Config) -> Result<(), String> {
     let (pusher, to_push) = pusher::pusher();
     // And so is who has something to say: said once the one that speaks runs.
     let (speaks, to_speak) = clarp_host::voice::mouth();
+    // What turns used is taken from the first moment on, and kept once the fleet is there.
+    let (tally, used) = clarp_host::usage::tally();
     let works = Works {
         config: config.clone(),
         engine,
@@ -116,10 +118,12 @@ async fn serve(config: Config) -> Result<(), String> {
         speaks,
         // Who speaks for an agent is in the owner's file, where the keys of speech are.
         telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
+        tally,
     };
     // The pictures this Host ships: for the list of agents, and for the face a push shows.
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
     let fleet = fleet::start(works, store)?;
+    tokio::spawn(clarp_host::usage::keep(fleet.clone(), used, clock.clone()));
     let desks = Arc::new(Mutex::new(Presence::new()));
     // The relay tells what paces the chip when it is asked too much, by an alert as well.
     let (limited, is_limited) = tokio::sync::mpsc::unbounded_channel();

@@ -338,6 +338,8 @@ pub struct Setup {
     pub speaks: Speaks,
     /// What the agent's tool is told, by what holds when it is asked.
     pub telling: crate::telling::Telling,
+    /// The way to the tally of what turns used.
+    pub tally: crate::usage::Tally,
 }
 
 /// The way to an agent's thread.
@@ -1892,10 +1894,29 @@ impl Worker {
                 .as_ref()
                 .and_then(|told| told.last.as_ref())
                 .map(|was| was.id);
+        let now = self.now_ms();
         if turn_ended {
             self.ended = self.last_end();
+            // What the turn used is told to the Host's tally, under the turn's own name: a
+            // Host that starts again tells an agent's last turn once more, and it is still
+            // counted once. What is too old to be counted is not told again.
+            let counted_since = now - clarp_kernel::usage::KEPT_FOR_MS;
+            if let Some(end) = self
+                .ended
+                .as_ref()
+                .filter(|end| end.ended_at_ms > counted_since)
+                && let Some(used) = clarp_kernel::usage::Used::said(
+                    backend,
+                    end.ended_at_ms,
+                    end.tokens_in,
+                    end.tokens_out,
+                    None,
+                )
+            {
+                let agent_id = &self.setup.record.agent_id;
+                self.setup.tally.ended(agent_id, end.turn, used);
+            }
         }
-        let now = self.now_ms();
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
 
         // The queue: a message joined it, one left it to run, it was held or let go.

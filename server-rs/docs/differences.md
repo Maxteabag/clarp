@@ -69,7 +69,7 @@ Host's first day says there what this Host must not say of itself.
 | A ring held as a live voice call, a ring that listens first, a phone's own switch for rings (`/calls/ring/live`, `/calls/ring/live/close`, `/calls/ring/live/fallback`, `/calls/live`, `/calls/ring/opening`, `/calls/ring/device`) | nothing: these have no screen that is read | refused in words (501). Calls and the ring whose opening line is said are built: see below |
 | The Oracle (`GET /oracle/status`, `/oracle/contact`, `/oracle/delegations`, `/oracle/calls/status`) | not available, and nothing it could do is claimed; nobody is put through; nothing was handed on | refused |
 | The tools' logins (`GET /backend-auth`) | whether each tool this Host runs (Claude Code, Codex) is installed and has a login, read off the file the tool keeps it in; a login that is there is told as not verified, because this Host asks no provider; no account's name | signing in or out from an app is refused: it is done with the tool itself |
-| How much of an account is used (`GET /backend-usage`) | unknown for each tool: this Host asks no provider and keeps no account of what its turns cost | none |
+| How much of an account is used (`GET /backend-usage`) | what this Host's own turns used on each tool over the last five hours and the last seven days (turns, tokens in and out), counted as the Python Host counts its turns; how much of an account is left is unknown: this Host asks no provider | none |
 | The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
 | The skills kept installed for the tools (`GET /managed-skills`) | none: this Host manages no skills | refused |
 
