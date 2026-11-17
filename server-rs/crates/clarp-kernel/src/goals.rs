@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 
 use crate::jobs::parse_handle;
 
+pub mod keeper;
 mod wake;
 
 pub use wake::{Looked, Seen, TurnSeen, WAKE_PREFIX};
