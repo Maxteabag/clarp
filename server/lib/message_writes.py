@@ -1569,13 +1569,30 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
     # A leftover live row goes only when a reply of ITS OWN turn landed in
     # this batch; another turn's kept row waits for its own reply, and a reply
     # of unknown turn clears nothing.
-    for live in database.execute(
-        """SELECT message_id, text, trace_id FROM messages
-            WHERE agent_id = ? AND backend_session_id = ?
-              AND source_file LIKE 'live:%'
-              AND role = 'assistant'""",
-        (agent_id, backend_session_id),
-    ).fetchall():
+    traces = tuple(dict.fromkeys(trace for trace, _ in batch_finals if trace))
+    live_rows = []
+    # Measured: ~6 VM steps per history row versus ~29 per selected trace.
+    # A full replay naming most turns is cheaper as the original single walk.
+    # total_turns is already known; choosing the shape needs no COUNT query.
+    if len(traces) > max(1, total_turns // 5):
+        live_rows = database.execute(
+            """SELECT message_id, text, trace_id FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?
+                  AND source_file LIKE 'live:%'
+                  AND role = 'assistant'""",
+            (agent_id, backend_session_id),
+        ).fetchall()
+    else:
+        for start in range(0, len(traces), 32):
+            selected = traces[start:start + 32]
+            live_rows.extend(database.execute(
+                """SELECT message_id, text, trace_id FROM messages INDEXED BY idx_messages_trace
+                    WHERE agent_id = ? AND backend_session_id = ?
+                      AND source_file LIKE 'live:%' AND role = 'assistant'
+                      AND trace_id IN (""" + ",".join("?" for _ in selected) + ")",
+                (agent_id, backend_session_id, *selected),
+            ).fetchall())
+    for live in live_rows:
         live_text = _strip_voice_markup(live["text"])
         if not live_text:
             continue
