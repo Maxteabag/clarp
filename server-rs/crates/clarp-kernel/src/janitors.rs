@@ -25,6 +25,7 @@ use crate::schedules;
 pub mod adaptive;
 pub mod book;
 pub mod creation;
+pub mod demand;
 pub mod runs;
 pub mod schedule;
 
@@ -79,6 +80,7 @@ struct Catalogue {
     backend_of: Map<String, Value>,
     default_models: Map<String, Value>,
     roles: Vec<String>,
+    optional_roles: Vec<String>,
     own_ids: Map<String, Value>,
     portraits: Map<String, Value>,
 }
@@ -104,6 +106,7 @@ fn catalogue() -> &'static Catalogue {
             backend_of: map(&whole["providers"]["backend_of"]),
             default_models: map(&whole["providers"]["default_models"]),
             roles: words(&whole["roles"]),
+            optional_roles: words(&whole["optional_roles"]),
             own_ids: map(&whole["own_ids"]),
             portraits: map(&whole["portraits"]),
         }
@@ -135,6 +138,13 @@ pub fn turn_templates() -> &'static [String] {
 /// The jobs a Host installs a janitor of its own for.
 pub fn roles() -> &'static [String] {
     &catalogue().roles
+}
+
+/// The jobs whose runs may answer one request: the Host's own, and the one a Host has only
+/// where its owner makes it (the switching of account seats).
+pub fn demand_roles() -> impl Iterator<Item = &'static String> {
+    let listed = catalogue();
+    listed.roles.iter().chain(&listed.optional_roles)
 }
 
 /// The id the janitor a Host installs for a job has, on every Host: the Python Host makes

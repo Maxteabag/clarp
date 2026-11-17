@@ -85,6 +85,14 @@ pub struct Run {
     /// What the run said of itself: `worked`, `idle` or `failed`, and one line.
     pub activity: String,
     pub activity_summary: String,
+    /// For a run that answers one request: when the claim to call a model for it was taken,
+    /// when that claim was over, and what came of the request, kept once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claim_finished_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub demand_result: Option<Value>,
 }
 
 impl Run {
@@ -112,7 +120,8 @@ impl Run {
             "finished_at": self.finished_at, "error": self.error, "activity": self.activity,
             "activity_summary": self.activity_summary, "queue_id": self.run_id,
             "client_msg_id": self.run_id, "candidates": [],
-            "configuration": self.configuration, "demand_result": null, "results": [],
+            "configuration": self.configuration, "demand_result": self.demand_result,
+            "results": [],
         })
     }
 }
@@ -260,6 +269,24 @@ fn one_line(text: &str) -> String {
         .filter(|word| !word.is_empty())
         .collect();
     words.join(" ")
+}
+
+/// What a run says of itself, as it is kept: one of the three words, and one line of at most
+/// three hundred signs. Otherwise why not, in the Python Host's words.
+pub(super) fn activity_values(activity: &str, summary: &str) -> Result<(String, String), Refused> {
+    let invalid = |why: String| Refused::new(400, "invalid_activity", why);
+    if !adaptive::known(activity) {
+        return Err(invalid(
+            "Activity must be worked, idle or failed".to_string(),
+        ));
+    }
+    let summary = one_line(summary);
+    let most = adaptive::SUMMARY_MOST;
+    if summary.chars().count() > most {
+        let why = format!("The summary is one line of at most {most} characters");
+        return Err(invalid(why));
+    }
+    Ok((activity.to_string(), summary))
 }
 
 impl Book {
@@ -588,7 +615,7 @@ impl Book {
 
     /// A run that is out and may still act: the trigger and the job it was made for are
     /// as they were. Otherwise why not, in the Python Host's words.
-    fn acting_run(&self, run_id: &str, world: &dyn World) -> Result<&Run, Refused> {
+    pub(super) fn acting_run(&self, run_id: &str, world: &dyn World) -> Result<&Run, Refused> {
         let run = self.runs.get(run_id);
         let run = run.ok_or_else(|| refused(404, "run_not_found", NO_RUN))?;
         if !run.out() {
@@ -640,21 +667,10 @@ impl Book {
         summary: &str,
         world: &dyn World,
     ) -> Result<Value, Refused> {
-        let invalid = |why: String| Refused::new(400, "invalid_activity", why);
-        if !adaptive::known(activity) {
-            return Err(invalid(
-                "Activity must be worked, idle or failed".to_string(),
-            ));
-        }
-        let summary = one_line(summary);
-        let most = adaptive::SUMMARY_MOST;
-        if summary.chars().count() > most {
-            let why = format!("The summary is one line of at most {most} characters");
-            return Err(invalid(why));
-        }
+        let (activity, summary) = activity_values(activity, summary)?;
         self.acting_run(run_id, world)?;
         if let Some(run) = self.runs.get_mut(run_id) {
-            run.activity = activity.to_string();
+            run.activity.clone_from(&activity);
             run.activity_summary.clone_from(&summary);
         }
         Ok(json!({ "run_id": run_id, "activity": activity, "summary": summary }))
@@ -738,7 +754,7 @@ impl Book {
     }
 
     /// Of the runs of a janitor that are over, the newest hundred are kept.
-    fn forget_old(&mut self, agent_id: &str) {
+    pub(super) fn forget_old(&mut self, agent_id: &str) {
         let over = self.newest_first(agent_id).into_iter();
         let over = over.filter(|run| !run.out()).skip(RUNS_MOST);
         let old: Vec<String> = over.map(|run| run.run_id.clone()).collect();
@@ -759,7 +775,7 @@ impl Book {
 
 /// Whose model a run is run by, as it was when the run was made. A job the Host does by
 /// itself has none.
-fn chain(backend: &str, model: &str, config: &Config) -> Value {
+pub(super) fn chain(backend: &str, model: &str, config: &Config) -> Value {
     let named =
         |key: &str, word: &str| config.execution.get(key).and_then(Value::as_str) == Some(word);
     if named("executor", "deterministic") || named("provider", "local") {

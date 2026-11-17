@@ -254,7 +254,7 @@ impl Book {
     }
 
     /// The triggers a janitor has, in the order they were given it.
-    fn triggers_of(&self, agent_id: &str) -> Vec<(&String, &Trigger)> {
+    pub(super) fn triggers_of(&self, agent_id: &str) -> Vec<(&String, &Trigger)> {
         let mut own: Vec<(&String, &Trigger)> = self
             .triggers
             .iter()
@@ -843,7 +843,8 @@ impl Book {
             "configured_option_keys": chosen, "avatar_url": face,
             "capabilities": { "can_change_template": own, "can_remove": own, "can_release": own },
             "supported_trigger_ids": supported_triggers(job),
-            "cancellation_pending": !config.enabled && agent.busy,
+            "cancellation_pending": !config.enabled
+                && (agent.busy || self.pending_claim(id, now_ms)),
             "generation": config.generation, "template_id": config.template_id,
             "model": agent.model, "effort": agent.effort, "backend": agent.backend,
             "scope": config.scope, "health": health, "last_error": config.last_error,
