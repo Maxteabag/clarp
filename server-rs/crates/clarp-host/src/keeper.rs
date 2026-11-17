@@ -389,8 +389,9 @@ fn last_written(member: &Member) -> Option<i64> {
 
 /// A goal's world as it was read, for the rules to look at.
 struct Gathered {
-    /// The plan as it is read.
+    /// The plan as it is read, where it was read for an update.
     plan: Value,
+    title: String,
     status: String,
     created_at: i64,
     revision: i64,
@@ -557,7 +558,13 @@ async fn gather(
         persona => persona,
     };
     Some(Gathered {
-        plan: book.get(plan_id, now)?,
+        // The plan as it is read is what a model is shown: a look has no use for it.
+        plan: if whole {
+            book.get(plan_id, now)?
+        } else {
+            Value::Null
+        },
+        title: plan.title.clone(),
         status: plan.status.clone(),
         created_at: plan.created_at,
         revision: plan.revision,
@@ -610,7 +617,7 @@ struct Done {
 }
 
 async fn current(app: &App, run_id: &str) -> bool {
-    let asked = app.janitors.with(app, |book, world, now_ms| {
+    let asked = app.janitors.read(app, |book, world, now_ms| {
         book.is_current(run_id, world, now_ms)
     });
     asked.await.unwrap_or(false)
@@ -697,7 +704,7 @@ async fn keep(
     let Some(read) = gather(app, &directory, owner, plan_id, now, (full, true)).await else {
         return Ended::Skipped("closed");
     };
-    receipt["title"] = json!(clip(read.plan["title"].as_str().unwrap_or_default(), 200));
+    receipt["title"] = json!(clip(&read.title, 200));
     if !matches!(read.status.as_str(), "active" | "paused") {
         return Ended::Skipped("closed");
     }
@@ -1045,7 +1052,7 @@ async fn pass(app: &App) {
     let Ok(_one) = app.keeper.passing.try_lock() else {
         return;
     };
-    let keepers = app.janitors.with(app, |book, world, now_ms| {
+    let keepers = app.janitors.read(app, |book, world, now_ms| {
         let on = book.eligible(ROLE, world).into_iter();
         let read = on.filter_map(|agent_id| {
             let shown = book.shown(&agent_id, world, now_ms).ok()?;
@@ -1080,7 +1087,7 @@ pub fn run(app: &App) {
 /// Host has of its own, this goal's last failed update and when it is tried again, and the
 /// newest receipt of the goal.
 pub(crate) async fn tell<'a>(app: &App, plans: impl Iterator<Item = &'a mut Value>) {
-    let own = app.janitors.with(app, |book, _, _| {
+    let own = app.janitors.read(app, |book, _, _| {
         let agent_id = clarp_kernel::janitors::own_id(ROLE)?;
         let config = book.configs.get(agent_id)?;
         let mut kept_under = book.triggers_of(agent_id).into_iter();
