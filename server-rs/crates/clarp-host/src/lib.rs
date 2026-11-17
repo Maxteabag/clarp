@@ -17,6 +17,7 @@ pub mod admin_tool;
 pub mod agent;
 pub mod apps;
 pub mod artifact_tool;
+pub mod audio;
 pub mod calendar;
 pub mod calls;
 pub mod chip;

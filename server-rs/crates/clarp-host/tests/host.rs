@@ -19265,3 +19265,202 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
         3
     );
 }
+
+/// The stages the audio bookkeeper's runs tell of a clip, in the order they were seen.
+fn written_of(host: &Host, clip: u64) -> Vec<String> {
+    let runs = host.get("/janitors/clarp-audio-bookkeeper/runs?limit=100");
+    let mut of_the_clip: Vec<(u64, String)> = runs["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|run| run["configuration"]["context"]["clip_id"] == clip)
+        .map(|run| {
+            let seen = run["configuration"]["context"]["event_id"]
+                .as_u64()
+                .unwrap();
+            (
+                seen,
+                run["demand_result"]["status"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    of_the_clip.sort();
+    of_the_clip.into_iter().map(|(_, stage)| stage).collect()
+}
+
+#[test]
+fn the_audio_bookkeeper_writes_down_what_becomes_of_a_clip() {
+    let place = Place::new("audio-books");
+    let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
+    let voice = cartesia_stand_in(sound);
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"key-in-the-owners-file\"\n\n\
+         [cartesia.voices]\nMaximus = \"voice-of-maximus\"\n",
+    )
+    .unwrap();
+    let args = [
+        "--speech-keys",
+        owners.to_str().unwrap(),
+        "--janitors-checked-every-ms",
+        "100",
+    ];
+    // No engine outside is reached, whatever keys the machine that runs this test has.
+    let world = [
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let session = host.new_agent("Maximus");
+    let heard = host.listen();
+    let announced = || -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let clips = heard.iter().filter(|event| event["type"] == "audio");
+        clips.cloned().collect()
+    };
+    let ack = |host: &Host, clip: u64, status: &str| {
+        let said = json!({ "clip_id": clip, "status": status });
+        host.ask("POST", "/clips/ack", Some(&said))
+    };
+    let says = |id: &str, line: &str| {
+        host.post(
+            "/send",
+            json!({
+                "session": session, "text": format!("Looking. <speak>{line}</speak>"),
+                "client_msg_id": id, "origin": "schedule", "synthesize_audio": true,
+            }),
+        );
+    };
+    let sorted = |mut stages: Vec<String>| {
+        stages.sort();
+        stages
+    };
+
+    // As it comes the bookkeeper is paused. A clip is made, announced and played, and
+    // nothing is written down: what was seen waits.
+    says("m1", "The build is green.");
+    wait_for("the first clip to be announced", || !announced().is_empty());
+    let first = announced()[0]["clip_id"].as_u64().unwrap();
+    wait_for("the app's word of the clip to be taken", || {
+        ack(&host, first, "play-start") == (200, json!({ "ok": true, "updated": true }))
+    });
+    assert_eq!(ack(&host, first, "play-ok").1["updated"], true);
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(written_of(&host, first), Vec::<String>::new());
+
+    // Turned on, which this Host does for its bookkeeper. What waited is written down:
+    // each stage the clip was in, once, as a run of the janitor that asked no model.
+    let keeper = host.get("/janitors/clarp-audio-bookkeeper")["janitor"].clone();
+    let (status, on) = host.ask(
+        "POST",
+        "/janitors/clarp-audio-bookkeeper/enabled",
+        Some(&json!({ "expected_revision": keeper["revision"], "enabled": true })),
+    );
+    assert_eq!(
+        (status, &on["janitor"]["enabled"]),
+        (200, &json!(true)),
+        "{on}"
+    );
+    let whole_life = [
+        "client:broadcast",
+        "client:play-ok",
+        "client:play-start",
+        "client:synthesized",
+        "producer:complete",
+        "producer:streaming",
+    ];
+    wait_for("the first clip's books", || {
+        written_of(&host, first).len() == whole_life.len()
+    });
+    assert_eq!(sorted(written_of(&host, first)), whole_life);
+    let runs = host.get("/janitors/clarp-audio-bookkeeper/runs?limit=100");
+    let runs = runs["runs"].as_array().unwrap();
+    let played = runs
+        .iter()
+        .find(|run| run["demand_result"]["status"] == "client:play-ok")
+        .unwrap();
+    let context = &played["configuration"]["context"];
+    assert_eq!(
+        (
+            &played["status"],
+            &played["outcome"],
+            &played["configuration"]["executor"],
+            &context["target_agent_id"],
+            &played["demand_result"]["summary"],
+            &played["demand_result"]["item_count"],
+        ),
+        (
+            &json!("completed"),
+            &json!("completed"),
+            &json!("deterministic"),
+            &json!(row_id(&host, &session)),
+            &json!("Audio lifecycle fact recorded"),
+            &json!(1),
+        ),
+        "{played}"
+    );
+    assert_eq!(
+        played["run_id"],
+        json!(format!("audio-bookkeeping-{}", context["event_id"]))
+    );
+    let keeper = host.get("/janitors/clarp-audio-bookkeeper")["janitor"].clone();
+    assert!(keeper["last_run_at"].is_i64(), "{keeper}");
+
+    // Played a second time: nothing new was seen.
+    let _ = ack(&host, first, "play-start");
+    let _ = ack(&host, first, "play-ok");
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(written_of(&host, first).len(), whole_life.len());
+
+    // A second clip, with the books kept: written down as it happens, and what an app
+    // could not play is told as that.
+    says("m2", "And the tests pass.");
+    wait_for("the second clip to be announced", || announced().len() == 2);
+    let second = announced()[1]["clip_id"].as_u64().unwrap();
+    assert_ne!(first, second);
+    let made = [
+        "client:broadcast",
+        "client:synthesized",
+        "producer:complete",
+        "producer:streaming",
+    ];
+    wait_for("the second clip's making", || {
+        written_of(&host, second).len() == made.len()
+    });
+    assert_eq!(sorted(written_of(&host, second)), made);
+    wait_for("the app's word of the second clip to be taken", || {
+        ack(&host, second, "play-fail").1["updated"] == true
+    });
+    wait_for("the play that failed", || {
+        written_of(&host, second).contains(&"client:play-fail".to_string())
+    });
+    // The first clip's books are as they were.
+    assert_eq!(written_of(&host, first).len(), whole_life.len());
+
+    // The Host is killed. What was written down is told when it is back, the bookkeeper is
+    // still on, and what an app says again of an old clip is still no new fact.
+    let before = (written_of(&host, first), written_of(&host, second));
+    host.kill();
+    let host = place.start_in("", &args, &world);
+    assert_eq!(
+        (written_of(&host, first), written_of(&host, second)),
+        before
+    );
+    let _ = ack(&host, first, "play-ok");
+    let _ = ack(&host, second, "play-fail");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        (written_of(&host, first), written_of(&host, second)),
+        before
+    );
+    // What an app says for the first time is a fact, also of an old clip.
+    assert_eq!(ack(&host, second, "play-start").1["updated"], true);
+    wait_for("the new fact of the old clip", || {
+        written_of(&host, second).contains(&"client:play-start".to_string())
+    });
+    let keeper = host.get("/janitors/clarp-audio-bookkeeper")["janitor"].clone();
+    assert_eq!(keeper["enabled"], true);
+}

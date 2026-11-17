@@ -57,9 +57,9 @@ const FROM_A_JANITOR: &str = "janitor";
 
 /// What an app is told when it turns on a janitor whose job does not run here.
 const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task, the router of spoken \
-                          messages, the explainer of tools and the Goal keeper, and no other \
-                          job yet: this janitor is made, set and paused here, and nothing \
-                          starts it. Nothing was turned on.";
+                          messages, the explainer of tools, the Goal keeper and the audio \
+                          bookkeeper, and no other job yet: this janitor is made, set and \
+                          paused here, and nothing starts it. Nothing was turned on.";
 
 /// The janitors of this Host. `None` until the book was read where it is kept.
 #[derive(Default)]
@@ -433,6 +433,9 @@ async fn look(app: &App) -> Result<(), Unavailable> {
             take_back(app, &hand.session, &hand.run_id).await;
         }
     }
+    // After every look, what was seen of clips is written down: the bookkeeper asks no
+    // model and has no turn of its own.
+    crate::audio::keep(app).await;
     Ok(())
 }
 
@@ -847,6 +850,7 @@ async fn change(
                 clarp_kernel::router::JOB,
                 crate::explain::JOB,
                 clarp_kernel::goals::keeper::ROLE,
+                clarp_kernel::janitors::audio::ROLE,
             ];
             if on && !runs_here.iter().any(|job| agent["template_id"] == *job) {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);

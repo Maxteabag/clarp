@@ -1356,11 +1356,16 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
         },
         Meant::NoClip => None,
     };
-    let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?))) {
-        Some((member, clip)) => {
+    let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?, line.turn))) {
+        Some((member, clip, turn)) => {
             let error = error.map(str::to_string);
             let played = member.agent.line_played(clip, status.to_string(), error);
-            played.await?
+            let updated = played.await?;
+            // What an app says of a clip is seen as it says it, for the clip's books.
+            if updated {
+                crate::audio::said(&app, &member.record.agent_id, clip, turn, status).await;
+            }
+            updated
         }
         None => false,
     };

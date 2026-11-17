@@ -924,6 +924,23 @@ the goal untouched and says when it is tried again; and what it kept is there af
 Not held by a test of the Host: a stalled goal and a goal read from its start, which need days to pass
 (the rules for both are held by the vectors).
 
+**The audio bookkeeper** (17 Nov 2026). The third of the Host's own janitors by how much it runs (444 runs
+in the counted week), and the one that asks no model: the first time a clip is seen in a stage (what its
+producer says of it: `producer:streaming`, `producer:complete`, `producer:failed`; what was done with it for
+its listener: `client:synthesized`, `client:broadcast`, `client:queued`, `client:play-start`,
+`client:play-ok`, `client:play-fail`, `client:held`), that is written down as a completed run of the janitor
+that keeps the books for the clip's agent. A clip played a second time is no new fact, and what nobody keeps
+the books for waits until somebody does. The rule is in the kernel (`janitors/audio.rs`: `Seen::observe`,
+`Book::keep_audio`), held to the Python Host's own functions and to its database's triggers by 64 recorded
+steps in which 15 passes write 66 facts down (`tools/audio-bookkeeper-vectors.py`; the reference's numbers
+are written without the gaps its database leaves, and the generator says so). At the Host's edge
+(`audio.rs`) a line an agent says aloud is looked at when it changed, on the janitors' tick, and what an app
+says of a clip (`POST /clips/ack`) is seen as it says it; what was seen is kept with the fleet for the week
+a clip is kept. Installed paused, where the Python Host has it on from the first day. Held through the Host
+by two clips of a stand-in engine: nothing is written while it is paused, what waited is written when it is
+turned on (the six stages of a clip that was played, each once), a second playing adds nothing, a play that
+failed is told as that, and after the Host was killed the books are as they were.
+
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
 until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the
@@ -1257,8 +1274,8 @@ a turn in the janitor's own conversation.
   agent is made as a janitor on the model its tool has for janitors, it is given its job, and what was
   answered is kept as the answer. Sent again it makes nothing; under the same id with other settings it is
   refused.
-- Not yet: the jobs that are no scheduled task, no routing, no explaining and no keeping of goals (the
-  label keeper, the audio bookkeeper, the janitors of accounts), and a janitor's own goals and published
+- Not yet: the jobs that are no scheduled task, no routing, no explaining and no keeping of goals or of
+  audio's books (the label keeper, the janitors of accounts), and a janitor's own goals and published
   files.
 
 **The router of spoken messages** (17 Nov 2026). The owner's own words for what this is for: hands-free,

@@ -172,6 +172,7 @@ async fn serve(config: Config) -> Result<(), String> {
         router: Arc::default(),
         explain: Arc::default(),
         keeper: Arc::default(),
+        audio: Arc::default(),
         models: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
