@@ -262,7 +262,14 @@ def run() -> dict:
             if item['attachment_id'].startswith('<drawn:'):
                 item['attachment_id'] = '<drawn>'
         said['attachments'].append({'template': template, 'given': given, **result})
-    said['scopes'] = [{'given': given, **attempt(lambda: janitors._scope(filled(given)))} for given in SCOPES]
+    def by_name(result):
+        """The Python Host sorts a scope by the ids it drew, which are others in every run: told
+        here in the order of their names, so that what is written is the same in every run."""
+        if 'taken' in result:
+            result['taken'] = {side: sorted(agent_ids) for side, agent_ids in result['taken'].items()}
+        return result
+
+    said['scopes'] = [{'given': given, **by_name(attempt(lambda: janitors._scope(filled(given))))} for given in SCOPES]
     said['executions'] = [{'template': template, 'given': given, 'backend': backend,
                            **attempt(lambda: janitors._execution(template, given, backend))}
                           for template, given, backend in EXECUTIONS]
