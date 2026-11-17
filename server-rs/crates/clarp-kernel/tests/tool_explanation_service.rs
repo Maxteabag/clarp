@@ -178,7 +178,8 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
             |desk: &mut Desk, janitor: &Janitor, now: &mut i64, asked: &mut usize, apart: bool| {
                 for _ in 0..64 {
                     *now += pace.debounce_ms + 1;
-                    while let Some(batch) = desk.claim(Some(janitor), *now) {
+                    let current = |identity: &str| janitor.identity.as_deref() == Some(identity);
+                    while let Some(batch) = desk.claim(&current, *now) {
                         let how = match told.get(*asked) {
                             Some(theirs) => {
                                 let theirs_about = about(theirs["requests"].as_array().unwrap());
@@ -189,6 +190,7 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
                                 );
                                 assert_eq!(batch.level, theirs["level"], "{name}: batch {asked}");
                                 assert_eq!(batch.model, janitor.model, "{name}");
+                                assert!(current(&batch.identity), "{name}");
                                 theirs["how"].as_str().unwrap()
                             }
                             None => {
@@ -319,15 +321,16 @@ fn an_app_is_answered_as_the_python_hosts_service_answers() {
             "{name}: the ledger's sums"
         );
     }
-    // Counted by the tool that wrote the vectors: 22 scenes, 104 requests of which 23 are
-    // refused and 2 fail on the Python Host; the model was asked 32 times about 84 parts
-    // there, and 76 rows were learned. Here the model is also asked about the commands the
-    // Python Host fails on: one time and two parts more, in the last scene.
+    // Counted by the tool that wrote the vectors: 23 scenes, 107 requests of which 23 are
+    // refused and 3 fail on the Python Host (defects R39 and R40); the model was asked 33
+    // times about 85 parts there, and 77 rows were learned. Here the model is also asked
+    // about what the Python Host fails on: two times and three parts more. The row that
+    // Host learned in a scene before it failed is not counted here.
     assert_eq!(
         (scenes, requests, refused, where_python_fails),
-        (22, 104, 23, 2)
+        (23, 107, 23, 3)
     );
-    assert_eq!((batches, parts, learned), (32 + 1, 84 + 2, 76));
+    assert_eq!((batches, parts, learned), (33 + 2, 85 + 3, 77 - 1));
 }
 
 #[test]
