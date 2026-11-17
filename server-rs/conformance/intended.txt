@@ -193,3 +193,14 @@ f4fe4a319b70  live-items: the same, where the item is first sent
 # The Python Host has the tool copy the conversation itself where the tool can (`native`), and
 # gives words only where it cannot.
 2d3d21b8313e  agent-forks: how the child that was made started
+
+# An agent that takes up a session its tool kept has a conversation of its own on this Host,
+# under a name of its own. On the Python Host its conversation goes by the name of the session,
+# which here was the conversation of the agent that had the session before: that Host counts
+# every row it has in one sequence, this one each agent's rows by themselves, and a reader's
+# place in the first agent's conversation would mean something else in the second's.
+5e6a85675834  past-sessions: the conversation of the agent that took the session up
+c3b1b59e98c4  past-sessions: the file it is named after
+993b209d8a9d  past-sessions: the same conversation with a message after
+f85f0a1fc780  past-sessions: its file, with a message after
+4bee9b170f22  past-sessions: the conversation in the agent's row
