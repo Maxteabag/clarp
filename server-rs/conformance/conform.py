@@ -153,15 +153,15 @@ class RustHost(replay.Host):
         provider = self.root / 'provider'
         for path in (provider / 'bin', self.root / 'workspace', self.root / 'home', self.root / 'tmp'):
             path.mkdir(parents=True)
-        # The stand-in takes no moment before a first turn of this Host. The moment keeps the
-        # reference out of a race of its own (R43), which this Host does not have. And with it
-        # the stand-in's turn, which it prints in one breath, begins while this Host is already
-        # reading, and may be read in two: then a state the agent passed through in between
-        # (using a tool, answering) is told, where otherwise the state at the end is. In run
-        # 44111344344 that happened in tool-turns and live-items, 29 differences. That this
-        # Host's telling of states depends on how a burst is read is a weakness of its own,
-        # written down in REBUILD.md; until it is mended the suite does not lean on it.
-        claude_shim(provider / 'bin' / 'claude', os.environ.get('CLARP_QA_ANSWER_AFTER_RUST', '0'))
+        # The same stand-in as the reference's, with the moment it takes before a first turn.
+        # The moment keeps the reference out of a race of its own (R43), which this Host does
+        # not have; but both Hosts are asked through the same tool. For one landing this Host
+        # was asked without it: with the moment, the stand-in's turn, which it prints in one
+        # breath, begins while this Host is already reading and may be read in two, and what
+        # this Host told of the agent's states depended on that (run 44111344344, 29
+        # differences). It no longer does (REBUILD.md, section 7). Whoever runs the suite can
+        # give this Host another moment, or none (`CLARP_QA_ANSWER_AFTER_RUST=0`), to try that.
+        claude_shim(provider / 'bin' / 'claude', os.environ.get('CLARP_QA_ANSWER_AFTER_RUST'))
         # The owner's file of settings, of the reference Host's kind: what a scenario gives the
         # reference Host as its config, this Host reads its owner's choices of speech from. With
         # none, speech out is off on both (tests/replay/host.py, isolate).
@@ -1300,7 +1300,8 @@ def selftest() -> list:
     assert len(lines) == 2 and all('never did' in line for line in lines), lines
     return ['the rule for a scenario whose every recording carries the mark of defect R19: tried on 5 cases, holds',
             'the rule for a scenario the reference did not run to its end: tried on 4 cases, holds',
-            f'the rules for defects of the reference told by their shape: tried on {shapes_tried()} cases, hold']
+            f'the rules for defects of the reference told by their shape: tried on {shapes_tried()} cases, hold',
+            f'the rule for an event\'s place in its lane: tried on {places_tried()} cases, holds']
 
 
 def shapes_tried() -> int:
@@ -1390,7 +1391,100 @@ def shapes_tried() -> int:
     told('', place, theirs, answered(resting('a text')))
     told('', place, answered(resting(None, session='mike')), ours)
     told('', place, answered(resting({'state': 'working'})), ours)
+
+    # R19: the turn's end, which the reference has on no row of a conversation's first turn.
+    ended = {'status': 'completed'}
+
+    def reply(text='The answer', phase='final', **more):
+        return {'role': 'assistant', 'phase': phase, 'text': text, **more}
+
+    def spoken(*rows):
+        return answered({'turns': [{'role': 'user', 'text': 'A question'}, *rows]})
+    place = '[0].body.turns[2].turn'
+    theirs = spoken(reply('A remark', 'commentary'), reply())
+    ours = spoken(reply('A remark', 'commentary'), reply(turn=ended))
+    for kind in ('field-added', 'changed'):
+        told('R19', place, theirs, ours, kind=kind)
+    told('R19', place, spoken(reply('A remark', 'commentary'), reply(turn=None)), ours)
+    told('', place, theirs, ours, kind='field-removed')              # another kind of difference
+    told('', place, ours, theirs, kind='field-added')                # the other way round
+    told('', place, theirs, ours, kind='field-added', channel='sse')
+    told('', '[0].body.turns[1].turn', theirs, ours, kind='field-added')    # a row that closes nothing
+    told('', '[0].body.turns[9].turn', theirs, ours, kind='field-added')    # no such row
+    for theirs_rows, ours_rows in (
+            # The reference does not say the row closed the turn.
+            ((reply('A remark', 'commentary'), reply(phase=None)), (reply('A remark', 'commentary'), reply(turn=ended))),
+            # A turn that did not complete here.
+            ((reply(), reply()), (reply(), reply(turn={'status': 'failed'}))),
+            # Not the same reply.
+            ((reply(), reply('One reply')), (reply(), reply('Another', turn=ended))),
+            ((reply(), reply('')), (reply(), reply('', turn=ended))),
+            # The reference has the end on another row of the turn: that is another difference.
+            ((reply(turn=ended), reply()), (reply(), reply(turn=ended))),
+            # Not what the contract asks for: the row that carries it here closed nothing.
+            ((reply(), reply(phase='commentary')), (reply(), reply(phase='commentary', turn=ended))),
+            ((reply(), {**reply(), 'role': 'user'}), (reply(), {**reply(turn=ended), 'role': 'user'}))):
+        told('', place, spoken(*theirs_rows), spoken(*ours_rows), kind='field-added')
+    # A later turn of what was read: the defect is known of a first turn, and anything else is looked at.
+    later = [{'role': 'user', 'text': 'Before'}, reply('Earlier', turn=ended)]
+    told('', '[0].body.turns[4].turn',
+         answered({'turns': [*later, {'role': 'user', 'text': 'A question'}, reply('A remark', 'commentary'), reply()]}),
+         answered({'turns': [*later, {'role': 'user', 'text': 'A question'}, reply('A remark', 'commentary'),
+                             reply(turn=ended)]}), kind='field-added')
+    # The row is not the turn's last: more of the agent's follows it.
+    told('', place, spoken(reply('A remark', 'commentary'), reply(), reply('More')),
+         spoken(reply('A remark', 'commentary'), reply(turn=ended), reply('More')), kind='field-added')
+    # The next turn follows it: it is the first turn's last row still.
+    told('R19', place, spoken(reply('A remark', 'commentary'), reply(), {'role': 'user', 'text': 'Next'}, reply(turn=ended)),
+         spoken(reply('A remark', 'commentary'), reply(turn=ended), {'role': 'user', 'text': 'Next'}, reply(turn=ended)),
+         kind='field-added')
     return tried
+
+
+def places_tried() -> int:
+    """The rule for an event's place in its lane, tried on differences made for it: it holds
+    where both names are the names of places in the lane the difference is in, and nowhere
+    else. Raises when it does otherwise; answers how many cases were tried."""
+    def named(kind, place, lane='0952e1'):
+        return f'<eid:{kind}#{place}@{lane}>'
+
+    def at(locator, base, head, kind='changed', channel='sse'):
+        return {'channel': channel, 'kind': kind, 'locator': locator, 'base': base, 'head': head}
+    lane = 'lane[agent-state@0952e1]'
+    cases = (
+        # The third event of the lane here, the eleventh there: under both of its names.
+        (True, at(f'{lane}[2].id', named('agent-state', 3), named('agent-state', 11))),
+        (True, at(f'{lane}[2].data.event_id', named('agent-state', 3), named('agent-state', 11))),
+        # An activity in the lane of the states: the lane has the name of its first event.
+        (True, at(f'{lane}[3].id', named('agent-activity', 4), named('agent-activity', 12))),
+        # Fewer events before it there.
+        (True, at(f'{lane}[9].id', named('agent-state', 10), named('agent-state', 2))),
+        # A lane whose name is not one of the words the report prints as they are.
+        (True, at('lane[str[12]#70fe911f@0952e1][0].id', named('agent-state', 1), named('agent-state', 5))),
+        # Another kind of event at that place: not the same event at another place.
+        (False, at(f'{lane}[2].id', named('agent-state', 3), named('agent-activity', 11))),
+        # Another lane.
+        (False, at(f'{lane}[2].id', named('agent-state', 3), named('agent-state', 11, 'f5caa0'))),
+        (False, at(f'{lane}[2].id', named('agent-state', 3, 'f5caa0'), named('agent-state', 11, 'f5caa0'))),
+        # The reference's name is not the name of the place the difference is at.
+        (False, at(f'{lane}[2].id', named('agent-state', 7), named('agent-state', 11))),
+        # An event named in another field, or in an answer: which event is meant is content.
+        (False, at(f'{lane}[2].data.detail.event_id', named('agent-state', 3), named('agent-state', 11))),
+        (False, at(f'{lane}[2].data.next.event_id', named('agent-state', 3), named('agent-state', 11))),
+        (False, at('[4].body.event_id', named('agent-state', 3), named('agent-state', 11), channel='http')),
+        (False, at(f'{lane}[2].id', named('agent-state', 3), named('agent-state', 11), channel='http')),
+        # Another kind of difference at that place.
+        (False, at(f'{lane}[2].id', named('agent-state', 3), named('agent-state', 11), kind='field-added')),
+        (False, at(f'{lane}[2:2]->[2:10]', '-', 'message agent-state kind=tool', kind='sequence-insert')),
+        # A name that is no place: an event the stream never carried, an event of the kept log.
+        (False, at(f'{lane}[2].id', named('agent-state', 3), '<eid:?4>')),
+        (False, at(f'{lane}[2].id', '<eid:log:agent-state#3@0952e1>', '<eid:log:agent-state#11@0952e1>')),
+        (False, at(f'{lane}[2].id', named('agent-state', 3), 'str[12]#70fe911f')),
+        (False, at(f'{lane}[2].id', named('agent-state', 3), 'null')),
+    )
+    for n, (expected, difference) in enumerate(cases):
+        assert only_its_place(difference) is expected, (n, difference)
+    return len(cases)
 
 
 
@@ -1576,13 +1670,35 @@ def _no_line_at_rest(base: dict, head: dict, exchange: int, at: int, _bases) -> 
             and theirs.get('session') == ours.get('session'))
 
 
-# The defect, where a difference of its shape lies (the exchange and the row), and what the
-# rows have to say for it to be that defect.
+def _end_on_no_row(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
+    """R19: once a turn has ended, its last row carries the turn's end (`turn`); in the first
+    turn of a conversation the reference has it on no row, though its own row says that it
+    closed the turn (`final`)."""
+    theirs, ours = _row(base, exchange, 'turns', at), _row(head, exchange, 'turns', at)
+    if not (_closes_a_completed_turn(ours) and ours.get('phase') == 'final' and bool(ours.get('text'))
+            and theirs.get('role') == 'assistant' and theirs.get('phase') == 'final'
+            and theirs.get('turn') is None and theirs.get('text') == ours.get('text')):
+        return False
+    body = base['http'][exchange].get('body')
+    rows = [row if isinstance(row, dict) else {} for row in body['turns']]
+    asked = [n for n, row in enumerate(rows) if row.get('role') == 'user']
+    # The first turn of what was read, and it ends with this row: the next row, where there
+    # is one, is a user's.
+    if len([n for n in asked if n < at]) != 1 or (at + 1 < len(rows) and at + 1 not in asked):
+        return False
+    return not any(row.get('turn') is not None for row in rows[:at])
+
+
+# The defect, the kinds of difference it shows as, where a difference of its shape lies (the
+# exchange and the row), and what the rows have to say for it to be that defect.
 SHAPES = (
-    ('R6', re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.phase$'), _unmarked_reply),
-    ('R12', re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.last_completed_message$'), _stale_last_completed),
-    ('R13', re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.model$'), _model_not_shown),
-    ('R17', re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.live_activity$'), _no_line_at_rest),
+    ('R6', ('changed',), re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.phase$'), _unmarked_reply),
+    ('R12', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.last_completed_message$'),
+     _stale_last_completed),
+    ('R13', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.model$'), _model_not_shown),
+    ('R17', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.live_activity$'), _no_line_at_rest),
+    # A row without the field at all, or with nothing in it.
+    ('R19', ('field-added', 'changed'), re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.turn$'), _end_on_no_row),
 )
 
 
@@ -1590,25 +1706,66 @@ def told_by_shape(difference: dict, base: dict, head: dict, bases=()) -> str:
     """The defect of the reference a difference is an instance of, by its shape; '' for none.
     `base` and `head`: what the reference and the Rust Host answered in the scenario (the view
     that is compared); `bases`: every recording of the reference there is of it."""
-    if difference.get('channel') != 'http' or difference.get('kind') != 'changed':
+    if difference.get('channel') != 'http':
         return ''
-    for defect, where, holds in SHAPES:
+    for defect, kinds, where, holds in SHAPES:
         found = where.match(difference.get('locator') or '')
-        if found and holds(base, head, int(found.group(1)), int(found.group(2)), bases or (base,)):
+        if (found and difference.get('kind') in kinds
+                and holds(base, head, int(found.group(1)), int(found.group(2)), bases or (base,))):
             return defect
     return ''
 
 
+# ---- an event's place in its lane ----------------------------------------------------------
+#
+# An event of the stream is named after its lane and its place in it (`<eid:agent-state#3@0952e1>`:
+# the third event of that lane; tests/replay/normalize.py, `lane_names`), since the number a Host
+# gives an event is its own. A lane is compared as a sequence: events one Host has more or fewer
+# show as that, and the events after them are paired and compared field by field. Each of those
+# then differs in its name, twice (`id`, `data.event_id`), by as many places as were added or are
+# missing before it. Such a difference says nothing of its own: it cannot be there without the
+# events before it, each of which the report shows by itself and which is registered or
+# unexplained as what it is. It was registered by its id, two lines for every event after the
+# place (forty lines for the three scenarios an agent uses tools in). It is told by its shape
+# instead: the name on each side is the name of that side's own place.
+PLACE = 'its place'
+ITS_PLACE = re.compile(r'^lane\[.+@([0-9a-f]{6})\]\[(\d+)\]\.(?:id|data\.event_id)$')
+NAMED_BY_PLACE = re.compile(r'^<eid:([a-z][a-z0-9_-]{0,40})#(\d+)@([0-9a-f]{6})>$')
+
+
+def only_its_place(difference: dict) -> bool:
+    """Whether a difference says only where an event stands in its lane: on both sides the name
+    of an event of the same kind in the same lane, the reference's the name of the place the
+    difference is at, the Rust Host's the name of another place."""
+    found = ITS_PLACE.match(difference.get('locator') or '')
+    if difference.get('channel') != 'sse' or difference.get('kind') != 'changed' or not found:
+        return False
+    theirs, ours = (NAMED_BY_PLACE.match(str(difference.get(side) or '')) for side in ('base', 'head'))
+    return bool(theirs and ours and theirs.group(1) == ours.group(1)
+                and theirs.group(3) == ours.group(3) == found.group(1)
+                and int(theirs.group(2)) == int(found.group(2)) + 1
+                and int(ours.group(2)) != int(theirs.group(2)))
+
+
+def told_by_rule(difference: dict, base: dict, head: dict, bases=()) -> str:
+    """What a rule says a difference is, as the report words it; '' where no rule says anything."""
+    defect = told_by_shape(difference, base, head, bases)
+    return f'defect {defect}' if defect else PLACE if only_its_place(difference) else ''
+
+
 def rendered(report, intended: set, shaped: dict, title: str, errors=()) -> str:
-    """A report of differences in three kinds: registered by its id, a defect of the reference
-    told by its shape, and unexplained."""
+    """A report of differences in four kinds: registered by its id, a defect of the reference
+    told by its shape, an event's place in its lane, and unexplained. `shaped`: what a rule says
+    of a difference, by its id (`told_by_rule`)."""
     explained = lambda d: d['id'] in intended or d['id'] in shaped  # noqa: E731
     unexplained = [d for d in report.items if not explained(d)]
-    by_shape = sum(1 for d in report.items if d['id'] not in intended and d['id'] in shaped)
+    ruled = [shaped[d['id']] for d in report.items if d['id'] not in intended and d['id'] in shaped]
+    placed = ruled.count(PLACE)
+    by_shape = len(ruled) - placed
     lines = [f'# Replay difference report: {title}', '',
              f'differences: {len(report.items)}  registered intended: '
-             f'{len(report.items) - len(unexplained) - by_shape}  a defect of the reference by its shape: '
-             f'{by_shape}  unexplained: {len(unexplained)}']
+             f'{len(report.items) - len(unexplained) - len(ruled)}  a defect of the reference by its shape: '
+             f'{by_shape}  only an event\'s place in its lane: {placed}  unexplained: {len(unexplained)}']
     counts: dict = {}
     for d in report.items:
         counts[d['scenario']] = counts.get(d['scenario'], 0) + 1
@@ -1617,7 +1774,7 @@ def rendered(report, intended: set, shaped: dict, title: str, errors=()) -> str:
     if report.items:
         lines += ['', 'id            class        scenario / channel / locator / kind: base -> head']
     for d in report.items:
-        kind = 'intended' if d['id'] in intended else f'defect {shaped[d["id"]]}' if d['id'] in shaped else 'UNEXPLAINED'
+        kind = 'intended' if d['id'] in intended else shaped[d['id']] if d['id'] in shaped else 'UNEXPLAINED'
         lines.append(f"{d['id']}  {kind:<11}  {d['scenario']} / {d['channel']} / {d['locator']} / "
                      f"{d['kind']}: {d['base']} -> {d['head']}")
     return '\n'.join(lines) + '\n'
@@ -1639,7 +1796,7 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple
         counted = [[d for d in items if place(d) in everywhere] for items in against]
         bases = [recording[name]['core'] for recording in recordings]
         head = seen[name]['core']
-        told = [{d['id']: told_by_shape(d, bases[n], head, bases) for d in counted[n] if d['id'] not in intended}
+        told = [{d['id']: told_by_rule(d, bases[n], head, bases) for d in counted[n] if d['id'] not in intended}
                 for n in range(len(recordings))]
         nearest = min(range(len(recordings)), key=lambda n: sum(1 for defect in told[n].values() if not defect))
         report.items.extend(counted[nearest])
@@ -1653,10 +1810,12 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple
                            f"{' ...' if len(elsewhere) > 6 else ''})")
     unexplained = [d for d in report.items if d['id'] not in intended and d['id'] not in shaped]
     lines = [rendered(report, intended, shaped, 'the Python Host (base) against the Rust Host (head)', errors)]
-    if shaped:
-        by_defect: dict = {}
-        for defect in shaped.values():
+    by_defect: dict = {}
+    for said in shaped.values():
+        if said != PLACE:
+            defect = said.removeprefix('defect ')
             by_defect[defect] = by_defect.get(defect, 0) + 1
+    if by_defect:
         lines += ['defects of the reference told by their shape: '
                   + ', '.join(f'{defect} at {count} place(s)' for defect, count in sorted(by_defect.items())), '']
     if held_to:

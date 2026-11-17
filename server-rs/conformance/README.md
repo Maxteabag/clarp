@@ -94,7 +94,7 @@ that answers within the instant its Host needs for its own bookkeeping, which th
 in thirteen runs 25 of 122 recordings of the reference were left so, and it failed each of the
 last three. Two things follow. The stand-in takes half a second before it does anything in
 the first turn of a conversation, as every real tool does (`fake_claude.py`,
-`CLARP_QA_ANSWER_AFTER`), for the reference and not for the Rust Host (see below), unless that turn is slow by its own mark and is there
+`CLARP_QA_ANSWER_AFTER`), for both Hosts, unless that turn is slow by its own mark and is there
 to be stopped or queued behind (run 44101297003: stopped before it had written anything, such
 a turn differed in 138 places in six scenarios); in no other turn, since a moment in every turn turned
 another race of the reference the other way (run 44096945408: a reply that closes a later
@@ -111,18 +111,22 @@ run that records (`conform.py selftest`: a recording that ran to its end is not 
 first answer that is whole takes the other's place and nothing beside it is touched, a second
 is taken when the first is cut short again, and a scenario that is never whole stays cut short).
 
-The Rust Host is asked without that moment. It does not have the race the moment is for, and
-the moment showed a weakness of its own: it tells the state an agent is in when what there is
-to read of its tool has been read, so a state the agent passed through within one read is not
-told, and one that a read happens to end in is. The stand-in prints a turn in one breath; with
-a moment before it the Host is already reading when the breath begins and may read it in two.
-In run 44111344344 it did, in `tool-turns` (it told that the agent was using a tool) and in
-`live-items` (that it was answering): 29 differences from a sequence it had given the same way
-in every run before. Which states an app is told must not depend on that, and is to be mended
-in the Host (`../REBUILD.md`); until then the suite does not lean on it
-(`CLARP_QA_ANSWER_AFTER_RUST` gives the Rust Host a moment, to try it).
+The Rust Host is asked through the same stand-in, with that moment. For one landing it was
+not: the moment showed a weakness of its own. It told the state an agent was in when what there
+was to read of its tool had been read, so a state the agent passed through within one read was
+not told, and one that a read happened to end in was. The stand-in prints a turn in one breath;
+with a moment before it the Host was already reading when the breath began and could read it in
+two. In run 44111344344 it did, in `tool-turns` (it told that the agent was using a tool) and
+in `live-items` (that it was answering): 29 differences from a sequence it had given the same
+way in every run before. That is mended in the Host (`../REBUILD.md`, section 7): it tells every
+state a turn passes through, in order, however the output is read. Tried here against both
+Hosts before it was landed, three times with the moment and once without
+(`CLARP_QA_ANSWER_AFTER_RUST=0` takes it from the Rust Host alone, to try that): the same events
+every time. They are more than the reference tells of a turn of the stand-in, which runs none
+of the hooks the reference learns of Claude Code's tools from; that difference is registered
+(`intended.txt`, `../docs/differences.md`).
 
-Four defects of the reference are told by their shape, not by the ids of their places. They
+Five defects of the reference are told by their shape, not by the ids of their places. They
 come and go with its clock, at places nobody can list, and two recordings can both have one
 where no run had it before: then they agree with each other, the Rust Host differs from both,
 and a register of ids lacks that place. On 17 Nov 2026 three runs failed so (44089630630 and
@@ -137,16 +141,41 @@ two rows it lies in have to say of themselves (`SHAPES` in `conform.py`):
 - **R13**, `agents[n].model`, an empty text where this Host names a model: the reference shows
   that model for that agent somewhere else in what was recorded.
 - **R17**, `agents[n].live_activity`, nothing where this Host has the line: both rows say `done`.
+- **R19**, `turns[n].turn`, nothing where this Host has the turn's end: both rows are the same
+  reply and say that it closed the turn (`final`), the turn completed here, it is the first turn
+  of what was read and the row is its last, and the reference has the end on no row of that
+  turn. (The mark above tells the defect where the reply's row was replaced. On 17 Nov 2026 a
+  recording had the row itself, named by its notification, without the turn's end, beside a
+  recording with the mark: no third recording was made, and four places differed.)
 
 A rule holds only where the reference's row gives the defect away or this Host's row shows that
 what it says is what the contract asks for; anything else at such a place is a difference like
 any other, and so is the same difference the other way round. The report counts them apart
 (`defect R6` beside `intended` and `UNEXPLAINED`). The rules are tried before every run
-(`selftest`: 41 cases, of which 6 are the defects and 35 are what they must not take for them),
+(`selftest`: 59 cases, of which 10 are the defects and 49 are what they must not take for them),
 and were tried on the runs that were written down: in run 44096945408 they tell 8 places of R6
 and 5 of R12 and leave 8 differences that are none of the four; in run 44101297003, whose 138
 differences were this suite's own doing, they tell none. With nothing registered they tell the
 places the register lists for these defects (run 44081827558: 7 of R6 and 9 of R12).
+
+One more kind of difference is told by its shape, and it is no defect of anybody: where an
+event stands in its lane. An event of the stream is named after its lane and its place in it
+(`<eid:agent-state#3@0952e1>`, the third event of that lane: the number a Host gives an event
+is its own). A lane is compared as a sequence: events one Host has more or fewer show as that
+(`sequence-insert`, `sequence-delete`), and the events after them are paired and compared field
+by field. Each of those then differs in its name, under both of its keys (`id`,
+`data.event_id`), by as many places as were added before it. Such a difference says nothing of
+its own, since it cannot be there without the events before it, and each of those is in the
+report by itself, registered or unexplained as what it is. They were registered one by one, two
+lines for every event after the place: forty lines for the three scenarios in which an agent
+uses tools. The report now calls such a difference `its place` and counts it apart
+(`only_its_place` in `conform.py`): the name on each side is the name of an event of the same
+kind in the lane the difference is in, the reference's that of the place the difference is at.
+An event that is named anywhere else (another field, an answer over HTTP, the kept log) is
+content, and a difference there is a difference. Tried before every run (`selftest`: 19 cases,
+of which 5 are a place and 14 are what must not be taken for one), and on run 44114347903 as
+it was written down: the four lines of that kind its register had are told as places, and
+nothing else is.
 
 A run that was written down can be judged again without starting a Host, as the rules and the
 register are now: `conform.py judge --golden <report>/golden --out <report>` reads the
