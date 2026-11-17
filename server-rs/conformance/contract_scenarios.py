@@ -1523,6 +1523,53 @@ SCENARIOS.append({
     ],
 })
 
+def to_nova(text, msg_id, **extra):
+    return {**send(text, msg_id, session=NOVA, **extra), 'name': f'send {msg_id} to the second agent'}
+
+
+SCENARIOS.append({
+    'id': 'started-again',
+    'what': 'an agent started again in place (`POST /agents` with `replace_sid`): what is refused, what '
+            'the agent keeps and what is new, what its conversation shows afterwards, a message after it, '
+            'another name, and a janitor. (Started again while its turn runs, and on a tool there is not, '
+            'the two Hosts do differently on purpose: docs/differences.md, from run 44018613566.)',
+    'sessions': (AGENT, NOVA),
+    'steps': [
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        to_nova('synthetic word alfa', 'againalfa'),
+        {'op': 'wait_reply', 'after': 'u-againalfa', 'session': NOVA},
+        {'op': 'quiesce', 'session': NOVA},
+        get(f'/log?session={NOVA}', 'its conversation before'),
+        post('/agents', {'replace_sid': 'nobody-there', 'name': 'Nobody', 'synthesize_audio': False},
+             'an agent the Host has not, started again'),
+        post('/agents', {'replace_sid': NOVA, 'synthesize_audio': False}, 'started again under no name'),
+        post('/agents', {'replace_sid': NOVA, 'name': 'Claire', 'synthesize_audio': False},
+             'started again under the name of another agent'),
+        post('/agents', {'replace_sid': NOVA, 'name': 'Nova', 'effort': 'enormous', 'synthesize_audio': False},
+             'started again with an effort its tool has not'),
+        post('/agents', {'replace_sid': NOVA, 'name': 'Nova', 'synthesize_audio': False}, 'started again in place'),
+        {'op': 'quiesce', 'session': NOVA},
+        SNAPSHOT,
+        get(f'/log?session={NOVA}', 'its conversation after it was started again'),
+        to_nova('synthetic word bravo [qa-who]', 'againbravo'),
+        {'op': 'wait_reply', 'after': 'u-againbravo', 'session': NOVA},
+        {'op': 'quiesce', 'session': NOVA},
+        get(f'/log?session={NOVA}', 'its conversation with a message after'),
+        post('/agents', {'replace_sid': NOVA, 'name': 'Nova Two', 'model': '', 'effort': '', 'synthesize_audio': False},
+             'started again under another name'),
+        {'op': 'quiesce', 'session': NOVA},
+        SNAPSHOT,
+        to_nova('synthetic word delta', 'againdelta'),
+        {'op': 'wait_reply', 'after': 'u-againdelta', 'session': NOVA},
+        {'op': 'quiesce', 'session': NOVA},
+        post('/agents', {'replace_sid': 'clarp-goal-keeper', 'name': 'Goal keeper', 'synthesize_audio': False},
+             'a janitor started again as an agent'),
+        get(f'/log?session={NOVA}', 'its conversation at the end'),
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
 PLACE = '/location'
 
 SCENARIOS.append({
