@@ -1010,8 +1010,11 @@ lists and 61 sessions listed), offered for a new agent (`GET /past-sessions?back
 wherever they ran (`POST /agents` with `resume_session_id`), with the Python Host's refusals in its
 words. Held through the Host with a made-up store and a stand-in: offered, taken up with the command as
 a card and a cell and what the model thought, continued by its name, in use, opened, not forked, not
-there, and one that began as a continuation read back without the Host's record. Not there yet: making
-a conversation shorter. No agent has run on it through an installed Host yet.
+there, and one that began as a continuation read back without the Host's record. And with the real agy
+1.5.10 through the Host installed on elitebook from main `01252f59` (17 Nov at 15:43, one turn on its
+cheapest model): the picker, the 61 conversations it kept offered, an agent's turn with a command, its
+conversation in agy's own store, and that conversation taken up by another agent from agy's transcript
+(`docs/battle-test.md`). Not there yet: making a conversation shorter.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

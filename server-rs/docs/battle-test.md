@@ -1025,8 +1025,30 @@ linked, its settings copied), so that nothing was added to its user's own conver
 | The home made for them | Antigravity made its own store in it (its conversations, its logs); it was removed afterwards |
 
 The turn is kept as a recording beside the older ones (`agy-1.5.10-tool.jsonl`, its conversation's name and
-its directory replaced), and the reader takes what a command printed out of what is written around it. Not
-done yet: a turn of Antigravity through an installed Host.
+its directory replaced), and the reader takes what a command printed out of what is written around it.
+
+## Antigravity through the installed Host
+
+The Host installed on elitebook from main `01252f59` (17 Nov at 15:42, back on the relay after 86 ms, its
+23 agents as before), with the real agy 1.5.10 as the installer found it. One check
+(`verify-agy.py`, 26 points, all held, eight seconds), which ran ONE turn of a model: an agent of the
+check's own on agy's cheapest model (`gemini-3.8-flash-low`), in a directory of the kind both Hosts take
+for their own scratch, so that its conversation is not offered to the owner among his own afterwards.
+
+| What was asked | What the installed Host did |
+|---|---|
+| The picker | Antigravity is there, in its version, with the 22 models agy lists, the cheapest among them; its conversations can be taken up, and none is made shorter yet |
+| What Antigravity kept on this machine (`GET /past-sessions?scope=all&backend=agy`) | 61 conversations of the owner's are offered, each one agy still has, with a transcript, none in a scratch directory of a Host. A count: nothing of them was read or printed |
+| One turn: run one harmless command of a made-up shape, and answer with what it printed and a word | done (the whole check took eight seconds); the command is a card under the name the conversation knows it by (`Bash`, ended well) with what it was given; the answer is the reply that closed the turn (`final`); the agent is in the conversation agy named, on the model it was given; agy has that conversation in its own store; the turn is counted (21,062 tokens in, 60 out) |
+| Another agent asks for that conversation while the first has it | refused, in use (409) |
+| The first agent is removed, and another takes the conversation up (`resume_session_id`) | it begins in that conversation and shows what was said and done in it as agy's own transcript has it: the user's message, the command as a card with what it printed, the answer, marked final. No second turn was run |
+| Afterwards | both agents removed; the Host has its 23 agents |
+
+Not done: a conversation agy has let go of continued by an installed Host (held by the Host's test with a
+stand-in that keeps its conversations as the tool does; agy lets go of nothing while it has fewer than
+some hundreds), a second turn in a conversation that was taken up, and a turn whose answer is spoken.
+The Host's own process holds 36 MB eighty seconds after it started; its unit holds 1.07 GB in all, and
+the only other process in it is the worker that listens (speech in, its model loaded from the start).
 
 ## What a round does not prove
 
