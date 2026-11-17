@@ -270,6 +270,8 @@ fn a_real_conversation_made_shorter_moves_the_agent_and_says_nothing() {
         tokens_out: 0
     }));
     assert!(signals.contains(&Signal::Cost { micros: 143_641 }));
+    // And how much the conversation holds afterwards: how full it is from here on.
+    assert!(signals.contains(&Signal::Context { tokens: 8_957 }));
 }
 
 #[test]

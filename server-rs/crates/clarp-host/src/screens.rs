@@ -336,12 +336,8 @@ async fn no_model_providers() -> ApiError {
     not_built("Signing a harness in to a provider of models is")
 }
 
-/// What an app can ask to have done to an agent that this Host cannot do yet: its
-/// conversation made shorter, servers of its own for its tool.
-async fn no_compaction() -> ApiError {
-    not_built("Compacting a conversation from an app is")
-}
-
+/// What an app can ask to have done to an agent that this Host cannot do yet: servers of
+/// its own for its tool.
 async fn no_servers() -> ApiError {
     not_built("Giving a tool servers of its own is")
 }
@@ -355,7 +351,6 @@ pub fn routes() -> Router<App> {
         .route("/harness-providers", get(model_providers))
         .route("/harness-providers/models", get(models_of_provider))
         .route("/harness-providers/{action}", post(no_model_providers))
-        .route("/compact", post(no_compaction))
         .route("/agent-mcp", post(no_servers))
         .route("/team-nudging", post(no_teams))
         .route("/server-update", get(software).post(no_update))

@@ -1014,7 +1014,23 @@ there, and one that began as a continuation read back without the Host's record.
 1.5.10 through the Host installed on elitebook from main `01252f59` (17 Nov at 15:43, one turn on its
 cheapest model): the picker, the 61 conversations it kept offered, an agent's turn with a command, its
 conversation in agy's own store, and that conversation taken up by another agent from agy's transcript
-(`docs/battle-test.md`). Not there yet: making a conversation shorter.
+(`docs/battle-test.md`). Not there yet: making a conversation of Antigravity shorter from an app.
+
+**A conversation made shorter** (17 Nov 2026). `POST /compact`, for Claude Code. The Python Host starts
+the tool's own screen in a terminal and types into it; this Host has no terminal. Measured first, with
+Claude Code 2.1.321 on Sonnet (three calls, the recording kept as a fixture): given `/compact` as its
+whole message in print mode, on a session continued by its name, the tool says that it is compacting,
+sums the conversation up, says how much it held before and holds after, and ends well under the same
+name without a word of its own. So it is a turn like any other (`clarp-host` `compact.rs`): a message of
+the Host's own (`Origin::Trigger` `compaction`, the tool's word from `Backend::shortens_with`), started
+bare by the actor (nothing of the Host's before it or beside it: a word more and the tool would answer
+it), left out of the chat an app reads, telling nobody. While it runs the agent's row says `compacting`
+(the adapter read that already, for the times the tool does it by itself in the middle of a turn);
+afterwards the row's `context_tokens` is what the tool said the conversation holds. The answers are the
+Python Host's, in its words: started, already at it, no such agent, no live session, busy, unsupported
+for the tool (Codex and Antigravity, which take no message for it that is known). Held through the Host
+with a stand-in that does what the recording shows. Not tried on the installed Host with the real tool
+yet.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

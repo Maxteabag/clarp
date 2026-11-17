@@ -196,6 +196,13 @@ pub trait Backend: Send + Sync {
         None
     }
 
+    /// The message that makes the tool shorten its own conversation in a turn of its own,
+    /// in which it says nothing, where it has one. It is sent as it is, with nothing of the
+    /// Host's beside it: a word more and the tool would take it for something to answer.
+    fn shortens_with(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Whether the tool still has the conversation of this name. A tool that lets go of old
     /// conversations would begin an empty one under the name of one it has no more, without
     /// a word: the Host asks first, and continues such a conversation in a new one that

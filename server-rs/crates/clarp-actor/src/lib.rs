@@ -47,8 +47,8 @@ use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::told::{self, Told};
 use clarp_kernel::turn::{
-    Activity, Admission, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId, Wait,
-    silent_when_failed,
+    Activity, Admission, COMPACTION, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId,
+    Wait, silent_when_failed,
 };
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
@@ -2370,11 +2370,14 @@ impl Actor {
             }
             _ => None,
         };
-        let prompt = match recovering {
+        // A turn in which the tool makes its conversation shorter is started with the tool's
+        // own word for it and nothing else: nothing of the Host's before it or beside it.
+        let bare = matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION);
+        let prompt = match recovering.filter(|_| !bare) {
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &message.text, relapsed),
             None => message.text,
         };
-        let prompt = if lost {
+        let prompt = if lost && !bare {
             let said = self.said_before(&message.id)?;
             let said: Vec<(bool, &str)> = said
                 .iter()
@@ -2390,12 +2393,12 @@ impl Actor {
         };
         // A user who began to speak before hearing the last reply: the tool is told so before
         // the words. The conversation keeps the words as they were said.
-        let prompt = if message.unheard {
+        let prompt = if message.unheard && !bare {
             told::unheard(&prompt)
         } else {
             prompt
         };
-        let told = self.profile.told.as_ref();
+        let told = self.profile.told.as_ref().filter(|_| !bare);
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
