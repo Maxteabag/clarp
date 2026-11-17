@@ -34,7 +34,7 @@ use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
-    Commentary, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, TurnEnd,
+    Commentary, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -433,6 +433,11 @@ struct LiveTurn {
     /// full its conversation was at its newest answer.
     model: Option<String>,
     tokens: Option<(u64, u64)>,
+    /// What the tool said its whole conversation has taken so far, where it says that and not
+    /// the turn's share; and what the conversation had taken before the turn, where that is
+    /// known: nothing for a conversation that begins with the turn.
+    total: Option<(u64, u64)>,
+    base: Option<(u64, u64)>,
     context: Option<u64>,
     cost: Option<u64>,
     interpreter: Box<dyn Interpreter>,
@@ -457,6 +462,8 @@ impl LiveTurn {
             trace_id: self.trace_id.clone(),
             model: self.model.clone(),
             tokens: self.tokens,
+            total: self.total,
+            base: self.base,
             context: self.context,
             cost: self.cost,
         }
@@ -700,6 +707,8 @@ struct Facts {
     trace_id: Option<String>,
     model: Option<String>,
     tokens: Option<(u64, u64)>,
+    total: Option<(u64, u64)>,
+    base: Option<(u64, u64)>,
     context: Option<u64>,
     cost: Option<u64>,
 }
@@ -712,6 +721,21 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     end.model = facts.model;
     end.tokens_in = facts.tokens.map(|(tokens_in, _)| tokens_in);
     end.tokens_out = facts.tokens.map(|(_, tokens_out)| tokens_out);
+    // A tool that told its conversation's running total: the turn's share is what the total
+    // grew by. Where what it stood at before is not known, the share is not either, and the
+    // total is kept for the turn after.
+    if let Some((tokens_in, tokens_out)) = facts.total {
+        let grew = facts
+            .base
+            .filter(|(before_in, before_out)| tokens_in >= *before_in && tokens_out >= *before_out);
+        end.tokens_in = grew.map(|(before_in, _)| tokens_in - before_in);
+        end.tokens_out = grew.map(|(_, before_out)| tokens_out - before_out);
+        end.total = batch.agent().backend_session().map(|session| Total {
+            session: session.to_string(),
+            tokens_in,
+            tokens_out,
+        });
+    }
     end.context_tokens = facts.context;
     end.cost_micros = facts.cost;
     Some(Entry::TurnEnd(end))
@@ -932,6 +956,8 @@ impl Actor {
                 origin: message.origin,
                 model: None,
                 tokens: None,
+                total: None,
+                base: actor.total_before(turn)?,
                 context: None,
                 cost: None,
                 offset: 0,
@@ -1242,6 +1268,24 @@ impl Actor {
             }
         }
         Ok(kept)
+    }
+
+    /// What the tool's conversation had taken before a turn, where the tool tells running
+    /// totals: nothing where the conversation begins with the turn (the agent has no session
+    /// of its tool yet), what was told at the end of the newest turn before it that told a
+    /// total, where that was the same conversation, and otherwise not known: a session that
+    /// was taken up, or one from before totals were kept. No further back than twenty turns.
+    fn total_before(&self, turn: TurnId) -> Result<Option<(u64, u64)>, ActorError> {
+        let Some(session) = self.recorder.agent().backend_session() else {
+            return Ok(Some((0, 0)));
+        };
+        for earlier in (turn.0.saturating_sub(20).max(1)..turn.0).rev() {
+            if let Some(total) = self.turn_end(earlier)?.and_then(|end| end.total) {
+                let same = total.session == session;
+                return Ok(same.then_some((total.tokens_in, total.tokens_out)));
+            }
+        }
+        Ok(None)
     }
 
     /// How the last turn that held the agent ended, with what its tool said of itself.
@@ -2272,9 +2316,21 @@ impl Actor {
         let interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
-        let (last_row, model, tokens, context) = match before {
-            Some(before) => (before.last_row, before.model, before.tokens, before.context),
-            None => (message.id.clone(), None, None, None),
+        // What the tool's conversation had taken before the turn is what it had taken before
+        // the turn's first attempt.
+        let base = match &before {
+            Some(before) => before.base,
+            None => self.total_before(turn)?,
+        };
+        let (last_row, model, tokens, total, context) = match before {
+            Some(before) => (
+                before.last_row,
+                before.model,
+                before.tokens,
+                before.total,
+                before.context,
+            ),
+            None => (message.id.clone(), None, None, None, None),
         };
         self.live = Some(LiveTurn {
             turn,
@@ -2287,6 +2343,8 @@ impl Actor {
             origin: message.origin,
             model,
             tokens,
+            total,
+            base,
             context,
             // What an attempt cost is the attempt's own: the next one says its own.
             cost: None,
@@ -2361,6 +2419,7 @@ impl Actor {
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
+        let mut total = None;
         let mut interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
@@ -2415,6 +2474,10 @@ impl Actor {
                             tokens_in,
                             tokens_out,
                         } => tokens = Some((tokens_in, tokens_out)),
+                        Signal::Total {
+                            tokens_in,
+                            tokens_out,
+                        } => total = Some((tokens_in, tokens_out)),
                         Signal::Context { tokens: held } => context = Some(held),
                         Signal::Cost { micros } => cost = Some(micros),
                         Signal::Glimpse(glimpse) => {
@@ -2449,6 +2512,8 @@ impl Actor {
             speak: message.speak,
             model,
             tokens,
+            total,
+            base: self.total_before(turn)?,
             context,
             cost,
             interpreter,
@@ -2738,6 +2803,13 @@ impl Actor {
                             tokens_out,
                         } => {
                             live.tokens = Some((tokens_in, tokens_out));
+                            continue;
+                        }
+                        Signal::Total {
+                            tokens_in,
+                            tokens_out,
+                        } => {
+                            live.total = Some((tokens_in, tokens_out));
                             continue;
                         }
                         Signal::Context { tokens } => {

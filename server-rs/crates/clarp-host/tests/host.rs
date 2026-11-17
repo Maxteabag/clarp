@@ -17996,6 +17996,62 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
 }
 
 #[test]
+fn a_turn_of_codex_is_counted_by_what_its_thread_grew_by() {
+    let place = Place::new("codex-usage");
+    let codex = place.root.join("codex-counts");
+    // A stand-in for Codex that counts on from turn to turn of a thread, as Codex does: a
+    // thread's first turn says 87,566 in and 36 out, and the next turn of the same thread
+    // 131,412 and 57 (the two recorded turns of codex-cli 0.167.1).
+    let script = r#"#!/usr/bin/env python3
+import json, sys
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+sys.stdin.read()
+args = sys.argv[1:]
+resumed = "resume" in args
+thread = args[args.index("resume") + 1] if resumed else "00000000-0000-7000-8000-00000000c0de"
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": "counted"})
+usage = {"input_tokens": 131412, "output_tokens": 57} if resumed else {"input_tokens": 87566, "output_tokens": 36}
+say(type="turn.completed", usage=usage)
+"#;
+    program(&codex, script);
+    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let counted = || -> Value {
+        let told = host.get("/backend-usage");
+        let rows = told["backends"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["backend"] == "codex").unwrap();
+        row["totals"]["five_hour"].clone()
+    };
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+
+    // The first turn of a thread: all the thread has taken is the turn's.
+    host.send(&agent, "one", "u-1");
+    wait_for("the first turn to be counted", || counted()["turns"] == 1);
+    let one = counted();
+    assert_eq!(
+        (&one["tokens_in"], &one["tokens_out"]),
+        (&json!(87_566), &json!(36)),
+        "{one}"
+    );
+    // The next turn continues the thread, and Codex says the thread's count again: the turn
+    // is counted by what the count grew by, not by the count.
+    host.send(&agent, "two", "u-2");
+    wait_for("the second turn to be counted", || counted()["turns"] == 2);
+    let two = counted();
+    assert_eq!(
+        (&two["tokens_in"], &two["tokens_out"]),
+        (&json!(131_412), &json!(57)),
+        "the two turns together are what the thread has taken: {two}"
+    );
+}
+
+#[test]
 fn an_agent_takes_up_a_session_codex_kept() {
     let place = Place::new("codex-past");
     let started = place.root.join("started");

@@ -1710,6 +1710,7 @@ mod tests {
             tokens_out: None,
             context_tokens: None,
             cost_micros: None,
+            total: None,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -1988,6 +1989,7 @@ mod tests {
             tokens_out: Some(7),
             context_tokens: None,
             cost_micros: None,
+            total: None,
         }
     }
 
