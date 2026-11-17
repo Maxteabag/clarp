@@ -1699,6 +1699,9 @@ impl Fleet {
     /// Makes a janitor as one. An id or a session name another member has is not given
     /// twice, and neither is a tool this Host has not.
     fn make_janitor(&mut self, seed: JanitorSeed) -> Result<AgentRecord, NotMade> {
+        // One of the Host's own comes with its id, and is installed before anybody listens.
+        // Any other is made because a request asked for it.
+        let by_request = seed.agent_id.is_none();
         let agent_id = seed.agent_id.unwrap_or_else(|| ids::hex(8));
         let has_id = |member: &Arc<Member>| member.record.agent_id == agent_id;
         if seed.session.is_empty() || self.taken(&seed.session) || self.members.iter().any(has_id) {
@@ -1719,8 +1722,9 @@ impl Fleet {
             created_at_ms: self.now_ms(),
             is_janitor: true,
             role: JANITOR.to_string(),
-            // The Python Host's word for no voice of its own.
-            voice_id: "{}".to_string(),
+            // No voice of its own, in the Python Host's two words for it: one for a janitor
+            // the Host installs, one for a janitor a request makes.
+            voice_id: if by_request { "" } else { "{}" }.to_string(),
             ..AgentRecord::default()
         };
         let setup = setup(&self.works, &record)?;
@@ -1730,6 +1734,14 @@ impl Fleet {
             agent: agent::spawn(setup),
         }));
         self.publish();
+        if by_request {
+            // The apps are told that it is there as what it is so far, as the Python Host
+            // tells them. That a chat is ready nobody is told: a janitor is not spoken to,
+            // and the janitors' own word follows when it has its job.
+            let (hub, now, new) = (&self.works.hub, self.now_ms(), agent::never_ran());
+            hub.publish(wire::state(&record, &new, &record.backend, None), now);
+            hub.publish(wire::activity(&record, &new), now);
+        }
         Ok(record)
     }
 
