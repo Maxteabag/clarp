@@ -32,12 +32,59 @@ use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
 use crate::{
-    Backend, ErrorTail, Interpreter, Launch, LiveReply, Question, SESSION_ENV, Signal, TurnSpec,
-    shorten,
+    Apart, Backend, ErrorTail, Interpreter, Launch, LiveReply, Question, Reading, SESSION_ENV,
+    Signal, TurnSpec, shorten,
 };
 
 /// How much of what a tool gave back is kept with the call.
 const MAX_TOOL_OUTPUT: usize = 4_000;
+/// What Codex is started without when it is only to read ([`Backend::reads`]).
+const NOTHING_TO_ACT_WITH: [&str; 18] = [
+    "shell_tool",
+    "unified_exec",
+    "apps",
+    "plugins",
+    "hooks",
+    "memories",
+    "multi_agent",
+    "multi_agent_v2",
+    "browser_use",
+    "computer_use",
+    "image_generation",
+    "view_image",
+    "code_mode_host",
+    "remote_plugin",
+    "skill_search",
+    "shell_snapshot",
+    "goals",
+    "sleep_tool",
+];
+/// What of the Host's environment Codex is left with then: where it is, who it runs as,
+/// where its login lies, and how it reaches its provider.
+const KEPT_APART: [&str; 22] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_RUNTIME_DIR",
+    "OPENAI_API_KEY",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
 
 pub struct Codex {
     program: String,
@@ -168,6 +215,69 @@ impl Backend for Codex {
             args,
             env: Vec::new(),
             stdin: question.prompt.clone().into_bytes(),
+        })
+    }
+
+    /// One `codex exec` that can read and do nothing else: no shell, no tools, no plugins,
+    /// no search, none of the user's own settings and rules, a sandbox it may only read in,
+    /// and an answer that has to have the shape it is given. As the Python Host starts
+    /// Codex to explain the use of tools (`lib/tool_explanations.py`, `_run_codex`).
+    fn reads(&self, reading: &Reading) -> Option<Apart> {
+        let mut args: Vec<String> = [
+            "exec",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--json",
+            "--color",
+            "never",
+            "--output-schema",
+            "{dir}/schema.json",
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        if let Some(model) = given(&reading.model) {
+            args.push("--model".to_string());
+            args.push(model);
+        }
+        let mut settings = vec![
+            setting("approval_policy", "never"),
+            setting("web_search", "disabled"),
+            "project_doc_max_bytes=0".to_string(),
+            "mcp_servers={}".to_string(),
+            setting("model_instructions_file", "{dir}/instructions.txt"),
+        ];
+        if let Some(effort) = given(&reading.effort) {
+            settings.push(setting("model_reasoning_effort", &effort));
+        }
+        for setting in settings {
+            args.push("-c".to_string());
+            args.push(setting);
+        }
+        for feature in NOTHING_TO_ACT_WITH {
+            args.push("--disable".to_string());
+            args.push(feature.to_string());
+        }
+        for arg in ["--enable", "skip_host_skill_discovery", "-"] {
+            args.push(arg.to_string());
+        }
+        Some(Apart {
+            launch: Launch {
+                program: self.program.clone(),
+                args,
+                env: Vec::new(),
+                stdin: reading.asked.clone().into_bytes(),
+            },
+            files: vec![
+                ("schema.json".to_string(), reading.schema.clone()),
+                ("instructions.txt".to_string(), reading.instructions.clone()),
+            ],
+            keeps: KEPT_APART.to_vec(),
         })
     }
 
@@ -1011,6 +1121,77 @@ mod tests {
             .filter(|signal| matches!(signal, Signal::Tool(_)))
             .count();
         assert_eq!(tools, 2, "started and ended, each once");
+    }
+
+    #[test]
+    fn codex_is_started_to_read_with_nothing_to_act_with() {
+        let codex = Codex::with_program("/opt/codex");
+        let reading = Reading {
+            instructions: "Write plainly.".to_string(),
+            asked: "{\"requests\": []}".to_string(),
+            schema: "{}".to_string(),
+            model: Some("gpt-6-sol".to_string()),
+            effort: Some("low".to_string()),
+        };
+        let apart = codex.reads(&reading).unwrap();
+        let args: Vec<&str> = apart.launch.args.iter().map(String::as_str).collect();
+        assert_eq!(
+            &args[..14],
+            [
+                "exec",
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "--json",
+                "--color",
+                "never",
+                "--output-schema",
+                "{dir}/schema.json",
+                "--model",
+                "gpt-6-sol",
+            ]
+        );
+        let after = |flag: &str| -> Vec<&str> {
+            let pairs = args.windows(2).filter(|pair| pair[0] == flag);
+            pairs.map(|pair| pair[1]).collect()
+        };
+        assert_eq!(
+            after("-c"),
+            [
+                "approval_policy=\"never\"",
+                "web_search=\"disabled\"",
+                "project_doc_max_bytes=0",
+                "mcp_servers={}",
+                "model_instructions_file=\"{dir}/instructions.txt\"",
+                "model_reasoning_effort=\"low\"",
+            ]
+        );
+        let without = after("--disable");
+        assert_eq!(without.len(), 18);
+        assert!(without.contains(&"shell_tool") && without.contains(&"unified_exec"));
+        assert_eq!(
+            &args[args.len() - 3..],
+            ["--enable", "skip_host_skill_discovery", "-"]
+        );
+        // What it reads comes on standard input, and its files lie beside it.
+        assert_eq!(apart.launch.stdin, reading.asked.as_bytes());
+        let files: Vec<&str> = apart.files.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(files, ["schema.json", "instructions.txt"]);
+        // It is left with where it is and who it is, and with nothing of the Host's own.
+        assert!(apart.keeps.contains(&"HOME") && apart.keeps.contains(&"CODEX_HOME"));
+        assert!(apart.keeps.iter().all(|name| !name.starts_with("CLARP")));
+        // Without a model and an effort it is Codex's own choice of both.
+        let plain = Reading::default();
+        let args = codex.reads(&plain).unwrap().launch.args;
+        assert!(!args.contains(&"--model".to_string()));
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.starts_with("model_reasoning_effort"))
+        );
     }
 
     #[test]

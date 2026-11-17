@@ -60,6 +60,34 @@ pub struct Question {
     pub effort: Option<String>,
 }
 
+/// Something a tool's model is to read and say something of, and must never act on: a
+/// janitor that explains what agents do is shown what they did, which is whatever stood in
+/// their work.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reading {
+    /// How to answer: for whom, how long.
+    pub instructions: String,
+    /// What is to be read.
+    pub asked: String,
+    /// The shape the answer has to have, as a JSON schema.
+    pub schema: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+/// How to start a tool for a [`Reading`]: in a directory of its own that holds these files
+/// and nothing else, with nothing to act with, and with no more of the Host's environment
+/// than is named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Apart {
+    /// `{dir}` in an argument stands for the directory the tool is started in.
+    pub launch: Launch,
+    /// The files it is given there, each by its name.
+    pub files: Vec<(String, String)>,
+    /// The variables of the environment it is left with.
+    pub keeps: Vec<&'static str>,
+}
+
 /// How to start the tool for one turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
@@ -167,6 +195,13 @@ pub trait Backend: Send + Sync {
     /// The answer in what the tool printed for one question. `Err`: why there is none.
     fn answered(&self, printed: &str) -> Result<String, String> {
         Ok(printed.to_string())
+    }
+
+    /// How to start the tool to read something it must not act on: with nothing to act
+    /// with. `None` for a tool that has no such way; it is then asked as for any question
+    /// ([`Backend::once`]), in a directory of its own.
+    fn reads(&self, _reading: &Reading) -> Option<Apart> {
+        None
     }
 }
 

@@ -183,6 +183,8 @@ pub struct App {
     pub janitors: Arc<crate::janitors::Desk>,
     /// The router of spoken messages: what it decided, and what it holds.
     pub router: Arc<crate::router::Desk>,
+    /// The explainer of the use of tools: what it learned, and what waits for its model.
+    pub explain: Arc<crate::explain::Desk>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to

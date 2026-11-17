@@ -837,7 +837,11 @@ async fn change(
                 return bad("enabled must be true or false");
             };
             let on = *on;
-            let runs_here = [runs::SCHEDULED_TASK, clarp_kernel::router::JOB];
+            let runs_here = [
+                runs::SCHEDULED_TASK,
+                clarp_kernel::router::JOB,
+                crate::explain::JOB,
+            ];
             if on && !runs_here.iter().any(|job| agent["template_id"] == *job) {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);
                 return refusal(&told);

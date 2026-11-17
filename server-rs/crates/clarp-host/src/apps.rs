@@ -522,22 +522,35 @@ async fn no_controller_actions() -> ApiError {
     )
 }
 
-/// Where the owner's choice of how much a tool's use is explained is kept.
+/// Where the owner's choice of how much a tool's use is explained is kept, and whether it
+/// is explained at all.
 const DETAIL_LEVEL_KEY: &str = "tool_explanations.detail_level";
-/// What it is where nobody chose: balanced.
+const EXPLAINED_KEY: &str = "tool_explanations.enabled";
+/// What the level is where nobody chose: balanced.
 const DETAIL_LEVEL: i64 = 2;
 
-/// Whether the use of a tool is explained in plain words on its row, and for which reader
-/// (`docs/live-items.md`, section 6). Nothing explains here yet, so it is off whatever was
-/// asked for: an app then shows the tool's own command on the row, which is there. The
-/// level is kept for the day something explains.
+/// Whether the owner has the use of tools explained. Where nobody chose it is off on this
+/// Host, where the Python Host has it on: a row of a tool does not carry its explanation
+/// here yet (`docs/live-items.md`, section 6), and an app that is told explaining is on
+/// shows the explanation in the place of the tool's own command, which would then be
+/// nothing. Who turns it on is answered when an app asks for explanations by itself.
+fn explained(app: &App) -> bool {
+    let directory = app.fleet.directory();
+    let kept = directory
+        .setting(EXPLAINED_KEY)
+        .map(|kept| kept.trim().to_lowercase());
+    kept.is_some_and(|kept| ["1", "true", "yes", "on"].contains(&kept.as_str()))
+}
+
+/// Whether the use of a tool is explained in plain words, and for which reader
+/// (`docs/live-items.md`, section 6).
 pub(crate) fn explanations_told(app: &App) -> Value {
     let directory = app.fleet.directory();
     let kept = directory.setting(DETAIL_LEVEL_KEY);
     let level = kept
         .and_then(|level| level.trim().parse::<i64>().ok())
         .map_or(DETAIL_LEVEL, |level| level.clamp(0, 4));
-    json!({ "enabled": false, "detail_level": level })
+    json!({ "enabled": explained(app), "detail_level": level })
 }
 
 async fn explanations(State(app): State<App>) -> Json<Value> {
@@ -545,21 +558,18 @@ async fn explanations(State(app): State<App>) -> Json<Value> {
 }
 
 /// `POST /tool-explanations/settings`: a change of a part of it. The rules and the words a
-/// change is refused in are the Python Host's; turning on what is not built is refused,
-/// and says so.
+/// change is refused in are the Python Host's.
 async fn set_explanations(
     State(app): State<App>,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    let bad = |why: &str| ApiError::new(StatusCode::BAD_REQUEST, why);
     let Ok(Value::Object(changes)) = serde_json::from_slice::<Value>(&body) else {
         return Err(bad("object required"));
     };
+    let mut kept = Vec::new();
     match changes.get("enabled") {
-        None | Some(Value::Bool(false)) => {}
-        Some(Value::Bool(true)) => {
-            return Err(bad("tool explanations are not built on this Host yet"));
-        }
+        None => {}
+        Some(Value::Bool(on)) => kept.push((EXPLAINED_KEY.to_string(), on.to_string())),
         Some(_) => return Err(bad("enabled must be true or false")),
     }
     if let Some(level) = changes.get("detail_level") {
@@ -568,7 +578,9 @@ async fn set_explanations(
         let Some(level) = whole else {
             return Err(bad("detail_level must be an integer from 0 to 4"));
         };
-        let kept = vec![(DETAIL_LEVEL_KEY.to_string(), level.to_string())];
+        kept.push((DETAIL_LEVEL_KEY.to_string(), level.to_string()));
+    }
+    if !kept.is_empty() {
         app.fleet.set(kept).await?;
     }
     Ok(Json(explanations_told(&app)))
@@ -578,9 +590,10 @@ async fn set_explanations(
 const EXPLAINED_AT_ONCE: usize = 8;
 
 /// `POST /tool-explanations`: an app asks for the use of tools to be explained in plain
-/// words. Nothing explains here, so it is answered as the Python Host answers where its
-/// owner turned explaining off: each thing that was asked about, the first eight, as
-/// `disabled`, and no model named. An app then shows the tool's own command.
+/// words. Where its owner has explaining off nobody is asked, as on the Python Host: each
+/// thing that was asked about, the first eight, is answered as `disabled`, and no model is
+/// named; an app then shows the tool's own command. Where it is on, the desk answers
+/// ([`crate::explain`]).
 async fn explain(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
     // Nothing at all is an empty object, as on the Python Host.
     let asked = match serde_json::from_slice::<Value>(&body) {
@@ -588,6 +601,10 @@ async fn explain(State(app): State<App>, body: axum::body::Bytes) -> Result<Json
         Ok(asked @ Value::Object(_)) => asked,
         _ => return Err(bad("object required")),
     };
+    if explained(&app) {
+        let desk = app.explain.clone();
+        return Ok(Json(desk.asked(&app, &asked).await?));
+    }
     let directory = app.fleet.directory();
     let session = asked["session"].as_str();
     if !session.is_some_and(|session| directory.named(session).is_some()) {
@@ -604,6 +621,28 @@ async fn explain(State(app): State<App>, body: axum::body::Bytes) -> Result<Json
         "model": "",
         "items": answered,
     })))
+}
+
+/// What of the explaining an app asks to be told about: over how long, in hours or days.
+#[derive(serde::Deserialize)]
+struct Explained {
+    window: Option<String>,
+    bucket: Option<String>,
+}
+
+/// `GET /tool-explanations/stats`: how the explaining went: how many answers came from
+/// each tier, hour by hour or day by day, and what was learned.
+async fn explained_how(
+    State(app): State<App>,
+    axum::extract::Query(asked): axum::extract::Query<Explained>,
+) -> Result<Json<Value>, ApiError> {
+    let window = asked.window.filter(|window| !window.is_empty());
+    let bucket = asked.bucket.filter(|bucket| !bucket.is_empty());
+    let (window, bucket) = (
+        window.as_deref().unwrap_or("24h"),
+        bucket.as_deref().unwrap_or("hour"),
+    );
+    Ok(Json(app.explain.stats(&app, window, bucket).await?))
 }
 
 /// Whether agents are told how they speak, as an app is told it.
@@ -772,6 +811,7 @@ pub fn routes() -> Router<App> {
             get(explanations).post(set_explanations),
         )
         .route("/tool-explanations", post(explain))
+        .route("/tool-explanations/stats", get(explained_how))
         .route(
             "/controller-actions",
             get(controller_actions).post(no_controller_actions),

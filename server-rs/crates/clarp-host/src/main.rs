@@ -170,6 +170,7 @@ async fn serve(config: Config) -> Result<(), String> {
         heartbeat: Arc::default(),
         janitors: Arc::default(),
         router: Arc::default(),
+        explain: Arc::default(),
         models: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
@@ -220,6 +221,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::heartbeat::run(&app);
     // And a janitor's scheduled task is run when its schedule says.
     clarp_host::janitors::run(&app);
+    // And what waits to be explained of the use of tools is asked of its janitor's model.
+    clarp_host::explain::run(&app);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",

@@ -16,7 +16,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
-use clarp_backend::{Launch, Question};
+use clarp_backend::{Launch, Question, Reading};
 use tokio::io::AsyncWriteExt as _;
 
 /// The least time a question is given.
@@ -65,10 +65,78 @@ pub async fn ask(
     tool.answered(&printed).map_err(Unanswered::NoAnswer)
 }
 
+/// Has a tool read something and answer in a shape it is given, for `within` at most:
+/// what it reads is whatever stood in somebody's work, and it must not act on it. It is
+/// started in a directory of its own, which is taken away afterwards, with nothing to act
+/// with where the tool has such a way ([`clarp_backend::Backend::reads`]); a tool that has
+/// none is asked as for any question, there, with the shape in words.
+pub async fn read(
+    backend: &str,
+    reading: &Reading,
+    within: Duration,
+) -> Result<String, Unanswered> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    let none = || Unanswered::NoSuchTool(backend.to_string());
+    let tool = clarp_backend::by_id(backend).ok_or_else(none)?;
+    let place = std::env::temp_dir().join(format!("clarp-reading-{}", crate::ids::hex(8)));
+    let made = std::fs::DirBuilder::new().mode(0o700).create(&place);
+    made.map_err(|error| Unanswered::NotStarted(format!("{}: {error}", place.display())))?;
+    let printed = match tool.reads(reading) {
+        Some(apart) => {
+            let here = place.to_string_lossy();
+            let mut launch = apart.launch;
+            for arg in &mut launch.args {
+                *arg = arg.replace("{dir}", &here);
+            }
+            let mut given = apart.files.iter();
+            match given.try_for_each(|(name, holds)| std::fs::write(place.join(name), holds)) {
+                Ok(()) => run_with(&launch, &place, within, Some(&apart.keeps)).await,
+                Err(error) => Err(Unanswered::NotStarted(error.to_string())),
+            }
+        }
+        None => {
+            let prompt = format!(
+                "{}\n{}\nReturn only the assistant answer as one JSON object matching this \
+                 exact schema: {}",
+                reading.instructions, reading.asked, reading.schema
+            );
+            let question = Question {
+                prompt,
+                model: reading.model.clone(),
+                effort: reading.effort.clone(),
+            };
+            match tool.once(&question) {
+                Some(launch) => run_with(&launch, &place, within, None).await,
+                None => Err(none()),
+            }
+        }
+    };
+    let _ = std::fs::remove_dir_all(&place);
+    tool.answered(&printed?).map_err(Unanswered::NoAnswer)
+}
+
 /// Runs a tool once, as it says it is started for one question, and answers what it
 /// printed.
 async fn run(launch: &Launch, cwd: &Path, within: Duration) -> Result<String, Unanswered> {
+    run_with(launch, cwd, within, None).await
+}
+
+/// The same; `keeps`: the only variables of the Host's environment the tool is left with.
+async fn run_with(
+    launch: &Launch,
+    cwd: &Path,
+    within: Duration,
+    keeps: Option<&[&str]>,
+) -> Result<String, Unanswered> {
     let mut command = tokio::process::Command::new(&launch.program);
+    if let Some(keeps) = keeps {
+        command.env_clear();
+        for name in keeps {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+    }
     command
         .args(&launch.args)
         .current_dir(cwd)
