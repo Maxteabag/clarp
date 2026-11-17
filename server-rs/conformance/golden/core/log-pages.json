@@ -74,15 +74,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      }
     ]
    },
@@ -243,15 +235,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      }
     ]
    },
@@ -296,15 +280,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      },
      {
       "automated": false,
@@ -642,7 +618,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "<row:1>",
+    "source_message_id": "<a row the conversation does not have>",
     "type": "user-notification",
     "unread": true
    },

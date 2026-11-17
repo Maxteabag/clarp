@@ -179,11 +179,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 06:27 (17 Nov) | the Host updated by the installer, `1473b6c7` to `bebd58a7`: the build in which an agent is started again in place. The relay was on: the new Host was connected to it again 177 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 07:48 (17 Nov) | the Host updated by the installer, `bebd58a7` to `e46cbf51`: the build in which a new agent begins with a session its tool kept, an agent asks for an event in its user's calendar, and an app's picker is told the models. The relay was on: the new Host was connected to it again 93 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 09:39 (17 Nov) | the Host updated by the installer, `e46cbf51` to `5bf5ab93`: the build in which the Host's own turns are counted for an app's usage screen, the gauge shows what the last answer was made from, a turn is told this Host under the names a skill's own script reads, and the explainer of the use of tools is in as far as its desk (nothing of it runs in this build). The relay was on: the new Host was connected to it again 134 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
+| 09:50 (17 Nov) | the Host updated by the installer, `5bf5ab93` to `382d1c37`: the build in which an app that asks for the use of tools to be explained is answered (off as it comes, and its janitor paused). The relay was on: the new Host was connected to it again 45 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and thirty-seven turns in
-forty-one exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-forty-five of Codex in the fifteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and forty turns in
+forty-two exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+forty-eight of Codex in the sixteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -803,6 +804,24 @@ Host with the real tools (`verify-usage.py`, 17 points): an agent of Codex and a
 | Its gauge | 31,684: what the answer was made from, which for a turn of one step is what the turn took in |
 | An agent's own command for its user's place | answered as the Python tool answers when nobody shares one in time: it ends with 1 and says so |
 | Afterwards | the check's two agents removed; the 23 agents that were there still are |
+
+## The use of tools explained
+
+Landed with `382d1c37` (17 Nov, 09:50, installed by exercise 42 a minute later) and tried on the installed
+Host with the real Codex (`verify-explain.py`, 18 points): an agent of the check's own that runs no turn, and
+an app's requests about made-up uses of tools. The owner's switch and the janitor that explains are off as
+installed; the check turns both on, and puts both back.
+
+| What | On the installed Host |
+|---|---|
+| With the switch off | every thing asked about is `disabled`, and nobody is asked |
+| With the switch on and the janitor paused | `disabled` still, and the answer names the model that would be asked (`gpt-6-sol`) |
+| A directory listed (`ls -la src`) | answered at once by a template: "Looks at the files and folders inside src." |
+| A program nobody has, with a file (`zorbulate-… reports/q3.csv`) | waits; Codex is asked once, started to read and nothing else (a sandbox it may only read in, no shell and no tools, a directory of its own, the shape its answer must have), and answers in 5.1 seconds: "Run an opaque command on the CSV file; its purpose is unknown." |
+| The same program with another file | answered at once from what was learned, and nobody is asked |
+| The ledger (`GET /tool-explanations/stats`) | the template, the one answer from what was learned and the one question to the model are counted; one row learned, with places |
+| The janitor's runs | one, completed |
+| Afterwards | the janitor paused, the switch off, the check's agent removed; the 23 agents that were there still are |
 
 ## The soak so far
 
