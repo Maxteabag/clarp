@@ -136,6 +136,19 @@ pub struct Kept {
     windows: Vec<Window>,
     episodes: Vec<Episode>,
     row: Option<Row>,
+    /// When a turn of the tool last completed.
+    done_ms: Option<i64>,
+}
+
+/// A window as an app is shown it.
+struct ShownWindow<'a> {
+    window: &'a Window,
+    kind: &'static str,
+    fresh: bool,
+    /// Where its limit stands: `normal`, `unknown`, or what was last told of its stretch.
+    state: &'a str,
+    /// The stretch its limit is of, for the five hours.
+    episode: Option<&'a Episode>,
 }
 
 /// What an app's usage screen is shown of a tool, and what happened at the asking.
@@ -507,16 +520,9 @@ impl Kept {
         }
     }
 
-    /// The provider as an app's usage screen reads it (`_structured_provider`).
-    fn provider(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Value {
-        let nothing = json!({
-            "provider_id": tool.provider,
-            "provider_instance_id": tool.instance,
-            "freshness": "unknown",
-            "observed_at": null,
-            "source": { "kind": "unavailable", "detail": NOTHING_SEEN },
-            "windows": [],
-        });
+    /// The windows an app is shown, of the account the Host is on: the newest word of the
+    /// five hours and of the week, each with whether it is fresh and where its limit stands.
+    fn shown(&self, login: Option<Login<'_>>, now_ms: i64) -> Vec<ShownWindow<'_>> {
         // Whose windows: the account's that the Host is on, as far as an account is known
         // (a window of no known account is its login's); any, where the Host is on no login.
         let of_the_login = |window: &&Window| match (login, &window.account) {
@@ -533,10 +539,9 @@ impl Kept {
             }
         }
         let Some(generation) = said_last.map(|window| window.generation.as_str()) else {
-            return nothing;
+            return Vec::new();
         };
         let mut shown = Vec::new();
-        let mut newest: Option<&Window> = None;
         for kind in ["five_hour", "seven_day"] {
             let of_kind = |window: &&Window| window.generation == generation && window.kind == kind;
             // The newest word of a window of this kind; of two as new, the one kept first.
@@ -549,69 +554,139 @@ impl Kept {
             let Some(window) = latest else {
                 continue;
             };
-            if newest.is_none_or(|kept| window.observed_at_ms > kept.observed_at_ms) {
-                newest = Some(window);
-            }
             let age = (now_ms - window.observed_at_ms).max(0);
             let reset = window.resets_at.as_deref().and_then(from_text);
             let fresh = age <= WINDOW_FRESH_MS && !reset.is_some_and(|reset_ms| now_ms >= reset_ms);
-            let plain = if fresh && window.used.is_some() {
-                "normal"
-            } else {
-                "unknown"
-            };
             let of_window = |episode: &&Episode| {
                 episode.window_id == window.window_id && episode.generation == window.generation
             };
+            // The limit of the five hours: the stretch of this window that began last.
             let mut episode: Option<&Episode> = None;
             for candidate in self.episodes.iter().filter(of_window) {
                 if episode.is_none_or(|kept| candidate.opened_at_ms > kept.opened_at_ms) {
                     episode = Some(candidate);
                 }
             }
-            let limit = match episode.filter(|_| kind == "five_hour") {
-                None => {
-                    json!({ "state": plain, "episode_id": null, "provider_limit_event_id": null })
-                }
-                Some(episode) => {
-                    let limited = matches!(episode.current_kind.as_str(), "warning" | "hard_limit");
-                    let state = if limited && !fresh {
-                        "unknown"
-                    } else {
-                        episode.current_kind.as_str()
-                    };
-                    json!({
-                        "state": state,
-                        "episode_id": episode.episode_id,
-                        "provider_limit_event_id": episode.current_event_id,
-                    })
-                }
+            let episode = episode.filter(|_| kind == "five_hour");
+            let state = match episode.map(|episode| episode.current_kind.as_str()) {
+                None if fresh && window.used.is_some() => "normal",
+                None => "unknown",
+                // A limit nobody has heard of lately is not known to stand.
+                Some("warning" | "hard_limit") if !fresh => "unknown",
+                Some(told) => told,
             };
-            shown.push(json!({
-                "window_id": window.window_id,
-                "kind": kind,
-                "scope": "account",
-                "unit": "percent",
-                "used_percentage": window.used,
-                "resets_at": window.resets_at,
-                "observed_at": moment(window.observed_at_ms),
-                "freshness": if fresh { "fresh" } else { "stale" },
-                "source": { "kind": "provider_reported", "detail": window.source_detail },
-                "limit": limit,
-            }));
+            shown.push(ShownWindow {
+                window,
+                kind,
+                fresh,
+                state,
+                episode,
+            });
+        }
+        shown
+    }
+
+    /// The provider as an app's usage screen reads it (`_structured_provider`).
+    fn provider(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Value {
+        let shown = self.shown(login, now_ms);
+        // The newest word among them; of two as new, the five hours'.
+        let mut newest: Option<&Window> = None;
+        for one in &shown {
+            if newest.is_none_or(|kept| one.window.observed_at_ms > kept.observed_at_ms) {
+                newest = Some(one.window);
+            }
         }
         let Some(newest) = newest else {
-            return nothing;
+            return json!({
+                "provider_id": tool.provider,
+                "provider_instance_id": tool.instance,
+                "freshness": "unknown",
+                "observed_at": null,
+                "source": { "kind": "unavailable", "detail": NOTHING_SEEN },
+                "windows": [],
+            });
         };
-        let all_fresh = shown.iter().all(|window| window["freshness"] == "fresh");
+        let all_fresh = shown.iter().all(|one| one.fresh);
+        let windows: Vec<Value> = shown
+            .iter()
+            .map(|one| {
+                let window = one.window;
+                json!({
+                    "window_id": window.window_id,
+                    "kind": one.kind,
+                    "scope": "account",
+                    "unit": "percent",
+                    "used_percentage": window.used,
+                    "resets_at": window.resets_at,
+                    "observed_at": moment(window.observed_at_ms),
+                    "freshness": if one.fresh { "fresh" } else { "stale" },
+                    "source": { "kind": "provider_reported", "detail": window.source_detail },
+                    "limit": {
+                        "state": one.state,
+                        "episode_id": one.episode.map(|episode| &episode.episode_id),
+                        "provider_limit_event_id":
+                            one.episode.and_then(|episode| episode.current_event_id.as_ref()),
+                    },
+                })
+            })
+            .collect();
         json!({
             "provider_id": tool.provider,
             "provider_instance_id": tool.instance,
             "freshness": if all_fresh { "fresh" } else { "stale" },
             "observed_at": moment(newest.observed_at_ms),
             "source": { "kind": "provider_reported", "detail": newest.source_detail },
-            "windows": shown,
+            "windows": windows,
         })
+    }
+
+    /// A turn of the tool completed, whatever agent's: an account that served a turn was not
+    /// used up when it did.
+    pub fn completed(&mut self, at_ms: i64) {
+        self.done_ms = Some(self.done_ms.map_or(at_ms, |done| done.max(at_ms)));
+    }
+
+    /// Whether the account the Host is on is used up, as far as what was said of it stands,
+    /// and what an agent's row says of its tool then (`backend_usage.exhausted_backends`): a
+    /// window that is fresh and all used, or at its hard limit, unless a turn of the tool
+    /// completed since that was said. What is no longer fresh says nothing: an account
+    /// that was filled up or changed for another does not stay marked.
+    pub fn used_up(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Option<Value> {
+        let all_used = |one: &ShownWindow<'_>| {
+            let full = one.window.used.is_some_and(|used| used >= 100.0);
+            one.fresh && (one.state == "hard_limit" || full)
+        };
+        let mut full: Vec<ShownWindow<'_>> = self.shown(login, now_ms);
+        full.retain(all_used);
+        let first_said = full.iter().map(|one| one.window.observed_at_ms).min()?;
+        // A turn that completed after the first of it was said: what still counts is what
+        // was said after that turn.
+        let since = |done: &i64| *done > first_said && *done <= now_ms;
+        if let Some(done) = self.done_ms.filter(since) {
+            full.retain(|one| one.window.observed_at_ms >= done);
+        }
+        // The account serves again when the last of its used-up windows begins anew; one
+        // that does not say when makes that unknown.
+        let unsaid = full.iter().find(|one| one.window.resets_at.is_none());
+        let reset_ms = |one: &ShownWindow<'_>| {
+            let said = one.window.resets_at.as_deref();
+            said.and_then(from_text).unwrap_or(0)
+        };
+        let mut last: Option<&ShownWindow<'_>> = None;
+        for one in &full {
+            if last.is_none_or(|kept| reset_ms(one) > reset_ms(kept)) {
+                last = Some(one);
+            }
+        }
+        let named = unsaid.or(last)?;
+        Some(json!({
+            "state": "exhausted",
+            "provider_id": tool.provider,
+            "reason": "usage_limit",
+            "window": named.kind,
+            "resets_at": named.window.resets_at,
+            "observed_at": moment(named.window.observed_at_ms),
+        }))
     }
 
     /// The tool's row (`_response_row`). It says when the record was seen and is fresh for

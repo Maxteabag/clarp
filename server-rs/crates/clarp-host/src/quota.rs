@@ -9,6 +9,10 @@
 //! (`GET /backend-usage`). Nobody is asked anything: a Host whose agents run no turn learns
 //! nothing new, and what it shows says how old its word is.
 //!
+//! An agent's row says of its tool that its account is used up (`backend_quota`) while a
+//! window that was said to be all used is fresh and no turn of the tool completed since:
+//! advice for whoever is about to write to the agent, and no refusal.
+//!
 //! Whose account a record is of is told by the login the tool is on when the record is
 //! read. The file the tool keeps its login in is read for the account and the token, and of
 //! both only a keyed digest is kept (the key is this Host's own, drawn once), so that
@@ -16,11 +20,14 @@
 //! written before the login file was last written is of nobody this Host can name, and is
 //! not kept.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::time::UNIX_EPOCH;
+use std::sync::{Arc, PoisonError};
+use std::time::{Duration, UNIX_EPOCH};
 
 use clarp_kernel::quota::{self, Kept, Login, Shown, Tool};
+use clarp_ports::clock::Clock;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -37,6 +44,8 @@ const KEY: &str = "key";
 const TAIL: u64 = 1024 * 1024;
 /// What is said of where a record was seen.
 pub const SEEN_IN: &str = "rollout/token_count";
+/// How often it is looked whether an account is still used up.
+const LOOKED_EVERY: Duration = Duration::from_secs(300);
 /// The tool whose records are read.
 pub const CODEX: &str = "codex";
 
@@ -52,60 +61,89 @@ pub struct With<'a> {
     pub now_ms: i64,
 }
 
-/// What the tools said of their accounts. One at a time reads what is kept, changes it and
-/// writes it back.
+impl<'a> With<'a> {
+    /// With what an app's request has, where the user's home is, and now.
+    pub fn of(app: &'a crate::edge::App, home: &'a Path) -> Self {
+        Self {
+            fleet: &app.fleet,
+            hub: &app.hub,
+            server_id: &app.server_id,
+            home,
+            now_ms: app.clock.now_ms(),
+        }
+    }
+}
+
+/// Which tools' accounts are used up, by the tool's name, with what an agent's row says of
+/// its tool then (`backend_quota`). A tool that is not named is not known to be.
+pub type UsedUp = BTreeMap<String, Value>;
+
+/// What the tools said of their accounts.
 #[derive(Default)]
 pub struct Desk {
-    held: tokio::sync::Mutex<()>,
+    /// What is kept: read from the fleet once, and written back with every change. One at a
+    /// time reads and changes it.
+    known: tokio::sync::Mutex<Known>,
+    /// Which accounts were used up when that was last looked at: to tell when it is no
+    /// longer as it was.
+    last: std::sync::Mutex<Option<Arc<UsedUp>>>,
 }
 
 impl Desk {
-    /// A turn of a tool ended, in the tool's own session: what the tool wrote of its
-    /// account's limits is read, kept, and what follows from it told. A tool that writes no
-    /// such record, and a turn that wrote none, leave everything as it is.
-    pub async fn turn_ended(&self, with: With<'_>, tool: &str, session: &str) {
-        if tool != CODEX || session.is_empty() {
+    /// A turn of a tool ended, in the tool's own session (`done_at_ms`: when it completed,
+    /// where it did): what the tool wrote of its account's limits is read, kept, and what
+    /// follows from it told. A tool that writes no such record, and a turn that wrote none,
+    /// leave the windows as they are.
+    pub async fn turn_ended(
+        &self,
+        with: With<'_>,
+        tool: &str,
+        session: &str,
+        done_at_ms: Option<i64>,
+    ) {
+        if tool != CODEX {
             return;
         }
-        let sessions = crate::past::codex_home(with.home).join("sessions");
-        let named = session.to_string();
-        let read = tokio::task::spawn_blocking(move || {
-            let rollout = clarp_backend::past::codex_rollout(&sessions, &named)?;
-            newest_record(&rollout)
-        });
-        let Ok(Some((record, written_ms))) = read.await else {
+        let read = written_in(with.home, session).await;
+        let mut known = self.known.lock().await;
+        let Some(before) = known.of(with.fleet, tool).await else {
             return;
         };
-        let Ok(snapshot) = clarp_backend::limits::codex(&json!({ "rate_limit": record })) else {
-            return;
-        };
-        let _held = self.held.lock().await;
-        let Some(on) = named_login(with, tool, true).await else {
-            return;
-        };
-        let mut kept = kept(with.fleet, tool).await;
-        let Some(at_ms) = taken(written_ms, on.since_ms, kept.seen_at_ms(), with.now_ms) else {
-            return;
-        };
+        let mut kept = before.clone();
+        // The key that logins are named with is drawn with the first record there is.
+        let on = known.login(with, tool, read.is_some()).await;
         let instance = format!("{}:{tool}", with.server_id);
         let of = Tool {
             instance: &instance,
             provider: tool,
         };
-        let events = kept.seen(of, on.login(), &snapshot, SEEN_IN, at_ms, &mut drawn);
-        keep(with.fleet, tool, &kept).await;
+        let mut events = Vec::new();
+        if let (Some((snapshot, written_ms)), Some(on)) = (&read, &on)
+            && let Some(at_ms) = taken(*written_ms, on.since_ms, kept.seen_at_ms(), with.now_ms)
+        {
+            events = kept.seen(of, on.login(), snapshot, SEEN_IN, at_ms, &mut drawn);
+        }
+        // An account that served a turn to its end was not used up when it did.
+        if let Some(done_at_ms) = done_at_ms {
+            kept.completed(done_at_ms.min(with.now_ms));
+        }
+        if kept != before {
+            known.keep(with.fleet, tool, kept.clone()).await;
+        }
         for event in events {
             with.hub.publish(event, with.now_ms);
         }
+        self.looked(with, tool, &kept, on.as_ref());
     }
 
     /// What an app's usage screen is shown of a tool, on the login the tool is on now. A
     /// limit whose window began anew since it was told is told as no longer known, to this
     /// app in the answer and to the others as it is told anything.
     pub async fn asked(&self, with: With<'_>, tool: &str) -> Shown {
-        let _held = self.held.lock().await;
-        let on = named_login(with, tool, false).await;
-        let mut kept = kept(with.fleet, tool).await;
+        let mut known = self.known.lock().await;
+        let on = known.login(with, tool, false).await;
+        let before = known.of(with.fleet, tool).await;
+        let mut kept = before.clone().unwrap_or_default();
         let instance = format!("{}:{tool}", with.server_id);
         let of = Tool {
             instance: &instance,
@@ -113,13 +151,152 @@ impl Desk {
         };
         let login = on.as_ref().map(Named::login);
         let shown = kept.asked(of, login, with.now_ms, &mut drawn);
-        if !shown.events.is_empty() {
-            keep(with.fleet, tool, &kept).await;
-            for event in &shown.events {
-                with.hub.publish(event.clone(), with.now_ms);
-            }
+        // Written back where it changed, and never over what could not be read.
+        if before.is_some_and(|before| before != kept) {
+            known.keep(with.fleet, tool, kept.clone()).await;
         }
+        for event in &shown.events {
+            with.hub.publish(event.clone(), with.now_ms);
+        }
+        self.looked(with, tool, &kept, on.as_ref());
         shown
+    }
+
+    /// Which accounts are used up now: looked at afresh.
+    pub async fn used_up(&self, with: With<'_>) -> Arc<UsedUp> {
+        let mut known = self.known.lock().await;
+        let on = known.login(with, CODEX, false).await;
+        let kept = known.of(with.fleet, CODEX).await.unwrap_or_default();
+        self.looked(with, CODEX, &kept, on.as_ref())
+    }
+
+    /// Looks whether a tool's account is used up, and remembers it. Where an app would show
+    /// another thing of it than at the last look (which window, until when), the apps are
+    /// told to read their agents' rows again. The first look tells nothing: nothing is
+    /// known to have changed.
+    fn looked(&self, with: With<'_>, tool: &str, kept: &Kept, on: Option<&Named>) -> Arc<UsedUp> {
+        let instance = format!("{}:{tool}", with.server_id);
+        let of = Tool {
+            instance: &instance,
+            provider: tool,
+        };
+        let now = kept.used_up(of, on.map(Named::login), with.now_ms);
+        let shown = |all: &UsedUp| {
+            let said = all.get(tool)?;
+            Some((said["window"].clone(), said["resets_at"].clone()))
+        };
+        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut all: UsedUp = last.as_deref().cloned().unwrap_or_default();
+        match now {
+            Some(said) => all.insert(tool.to_string(), said),
+            None => all.remove(tool),
+        };
+        let changed = last
+            .as_deref()
+            .is_some_and(|before| shown(before) != shown(&all));
+        let all = Arc::new(all);
+        *last = Some(all.clone());
+        drop(last);
+        if changed {
+            let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
+            with.hub.publish(again, with.now_ms);
+        }
+        all
+    }
+}
+
+/// Which accounts are used up now, for an app's request.
+pub async fn used_up(app: &crate::edge::App) -> Arc<UsedUp> {
+    let home = crate::config::home();
+    app.limits.used_up(With::of(app, &home)).await
+}
+
+/// That an account is used up stops being so with time, and nothing happens when it does:
+/// what was said of it grows old, its window begins anew. So it is looked at now and then
+/// (every five minutes, as the Python Host looks), and an app that shows an account as used
+/// up is told to look again.
+pub async fn watch(
+    desk: Arc<Desk>,
+    fleet: FleetHandle,
+    hub: Arc<Hub>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    server_id: String,
+) {
+    let home = crate::config::home();
+    loop {
+        tokio::time::sleep(LOOKED_EVERY).await;
+        let with = With {
+            fleet: &fleet,
+            hub: &hub,
+            server_id: &server_id,
+            home: &home,
+            now_ms: clock.now_ms(),
+        };
+        desk.used_up(with).await;
+    }
+}
+
+/// What the desk has in hand.
+#[derive(Default)]
+struct Known {
+    /// What is kept of each tool's account, by the tool's name, once it was read.
+    kept: BTreeMap<String, Kept>,
+    /// The key that logins are named with, once it was read or drawn.
+    key: Option<Vec<u8>>,
+}
+
+impl Known {
+    /// What is kept of a tool's account: read from the fleet the first time. `None` where
+    /// the fleet cannot be asked: nothing is known then, and nothing may be written over.
+    async fn of(&mut self, fleet: &FleetHandle, tool: &str) -> Option<Kept> {
+        if let Some(kept) = self.kept.get(tool) {
+            return Some(kept.clone());
+        }
+        let written = fleet.kept(KIND, tool.to_string()).await.ok()?;
+        let read = written.and_then(|bytes| serde_json::from_slice::<Kept>(&bytes).ok());
+        let kept = read.unwrap_or_default();
+        self.kept.insert(tool.to_string(), kept.clone());
+        Some(kept)
+    }
+
+    async fn keep(&mut self, fleet: &FleetHandle, tool: &str, kept: Kept) {
+        if let Ok(written) = serde_json::to_vec(&kept) {
+            let _ = fleet.keep(KIND, tool.to_string(), Some(written)).await;
+        }
+        self.kept.insert(tool.to_string(), kept);
+    }
+
+    /// The key that logins are named with: read from the fleet the first time, and drawn
+    /// where there is none and one is wanted (`draw`).
+    async fn key(&mut self, fleet: &FleetHandle, draw: bool) -> Option<Vec<u8>> {
+        if self.key.is_none() {
+            self.key = match fleet.kept(KIND, KEY.to_string()).await.ok()? {
+                None if draw => {
+                    let key = crate::ids::hex(32).into_bytes();
+                    let kept = fleet.keep(KIND, KEY.to_string(), Some(key.clone()));
+                    kept.await.ok()?;
+                    Some(key)
+                }
+                read => read,
+            };
+        }
+        self.key.clone()
+    }
+
+    /// The login a tool is on, named with this Host's key. `None`: the tool is on no login
+    /// that has an account's windows (no file, a key of the provider's in place of a login,
+    /// no account in it), or there is no key yet and none is to be drawn (nothing was ever
+    /// kept then, nothing is shown, and no login is read).
+    async fn login(&mut self, with: With<'_>, tool: &str, draw: bool) -> Option<Named> {
+        let file = clarp_backend::by_id(tool)?.login_file(with.home)?;
+        let key = self.key(with.fleet, draw).await?;
+        let read = tokio::task::spawn_blocking(move || {
+            let written = std::fs::metadata(&file).and_then(|of| of.modified()).ok()?;
+            let since = written.duration_since(UNIX_EPOCH).ok()?;
+            Some((std::fs::read(&file).ok()?, since.as_millis() as i64))
+        });
+        let (bytes, since_ms) = read.await.ok().flatten()?;
+        named(&bytes, &key, since_ms)
     }
 }
 
@@ -128,18 +305,21 @@ fn drawn(prefix: &str) -> String {
     format!("{prefix}{}", crate::ids::uuid())
 }
 
-/// What is kept of a tool's account: nothing, where nothing was kept or it cannot be read.
-async fn kept(fleet: &FleetHandle, tool: &str) -> Kept {
-    let written = fleet.kept(KIND, tool.to_string()).await.ok().flatten();
-    written
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
-
-async fn keep(fleet: &FleetHandle, tool: &str, kept: &Kept) {
-    if let Ok(written) = serde_json::to_vec(kept) {
-        let _ = fleet.keep(KIND, tool.to_string(), Some(written)).await;
+/// What Codex wrote of its account's limits in the newest record of a session's rollout, as
+/// its reader reads it, and when it was written.
+async fn written_in(home: &Path, session: &str) -> Option<(Value, i64)> {
+    if session.is_empty() {
+        return None;
     }
+    let sessions = crate::past::codex_home(home).join("sessions");
+    let named = session.to_string();
+    let read = tokio::task::spawn_blocking(move || {
+        let rollout = clarp_backend::past::codex_rollout(&sessions, &named)?;
+        newest_record(&rollout)
+    });
+    let (record, written_ms) = read.await.ok().flatten()?;
+    let snapshot = clarp_backend::limits::codex(&json!({ "rate_limit": record })).ok()?;
+    Some((snapshot, written_ms))
 }
 
 /// Whether a record is taken, and as seen when. It is taken as seen when it was written,
@@ -199,34 +379,6 @@ impl Named {
             account: Some(&self.account),
         }
     }
-}
-
-/// The login a tool is on, named with this Host's key. `None`: the tool is on no login that
-/// has an account's windows (no file, a key of the provider's in place of a login, no
-/// account in it), or there is no key yet and none is to be drawn (`draw`: nothing was ever
-/// kept then, and nothing is shown).
-async fn named_login(with: With<'_>, tool: &str, draw: bool) -> Option<Named> {
-    let file = clarp_backend::by_id(tool)?.login_file(with.home)?;
-    // The key first: a Host that never kept a record has none, and reads no login.
-    let key = match with.fleet.kept(KIND, KEY.to_string()).await.ok()? {
-        Some(key) => key,
-        None if draw => {
-            let key = crate::ids::hex(32).into_bytes();
-            with.fleet
-                .keep(KIND, KEY.to_string(), Some(key.clone()))
-                .await
-                .ok()?;
-            key
-        }
-        None => return None,
-    };
-    let read = tokio::task::spawn_blocking(move || {
-        let written = std::fs::metadata(&file).and_then(|of| of.modified()).ok()?;
-        let since = written.duration_since(UNIX_EPOCH).ok()?;
-        Some((std::fs::read(&file).ok()?, since.as_millis() as i64))
-    });
-    let (bytes, since_ms) = read.await.ok().flatten()?;
-    named(&bytes, &key, since_ms)
 }
 
 /// A login file's login, named with a key: as the Python Host names one

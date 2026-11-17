@@ -21363,3 +21363,164 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         assert!(!kept.contains(secret), "{secret} is in what the Host keeps");
     }
 }
+
+#[test]
+fn an_agents_row_says_that_its_tools_account_is_used_up_until_a_turn_of_the_tool_completes() {
+    let place = Place::new("codex-used-up");
+    let own = place.root.join("codex-own");
+    std::fs::create_dir_all(&own).unwrap();
+    let tokens = json!({ "account_id": "an-account", "access_token": "a-token" });
+    let login = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+    std::fs::write(own.join("auth.json"), login.to_string()).unwrap();
+    // A stand-in for Codex that writes of its account what the test wrote down for it, and
+    // then answers; or fails, where it is asked to.
+    let codex = place.root.join("codex-is-used-up");
+    let script = r#"#!/usr/bin/env python3
+import datetime, json, os, pathlib, sys
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+prompt = sys.stdin.read()
+args = sys.argv[1:]
+thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-00000000a11d"
+own = pathlib.Path(os.environ["CODEX_HOME"])
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+rollout = own / "sessions" / "2030" / "03" / "17" / f"rollout-2030-03-17T17-46-40-{thread}.jsonl"
+rollout.parent.mkdir(parents=True, exist_ok=True)
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+count = {"type": "token_count", "info": None, "rate_limits": json.loads((own / "limits.json").read_text())}
+with rollout.open("a") as out:
+    out.write(json.dumps({"timestamp": now, "ordinal": 1, "type": "event_msg", "payload": count}) + "\n")
+if "fail" in prompt:
+    say(type="turn.failed", error={"message": "The stand-in was asked to fail."})
+    sys.exit(1)
+say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": "done"})
+say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
+"#;
+    program(&codex, script);
+    let claude = place.root.join("claude-idle");
+    program(&claude, "#!/bin/sh\nexit 0\n");
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CODEX_HOME", own.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    // How often the apps were told to read their agents' rows again for an account's sake.
+    let told_again = |heard: &Arc<Mutex<Vec<Value>>>| -> usize {
+        let all = heard.lock().unwrap();
+        let again =
+            |event: &&Value| event["type"] == "agent-roster" && event["kind"] == "backend-quota";
+        all.iter().filter(again).count()
+    };
+    let seconds = now_ms() / 1000;
+    let says = |five: f64| {
+        let window = |used: f64, minutes: i64, resets: i64| json!({ "used_percent": used, "window_minutes": minutes, "resets_at": resets });
+        let record = json!({
+            "limit_id": "codex",
+            "primary": window(five, 300, seconds + 4 * 3_600),
+            "secondary": window(40.0, 10_080, seconds + 96 * 3_600),
+            "plan_type": "pro",
+        });
+        std::fs::write(own.join("limits.json"), record.to_string()).unwrap();
+    };
+    let quota_of = |host: &Host, session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let row = agents.iter().find(|agent| agent["session"] == session);
+        row.unwrap()["backend_quota"].clone()
+    };
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+    let made = host.post("/agents", json!({ "name": "Clara", "backend": "claude" }));
+    let clara = made["session"].as_str().unwrap().to_string();
+
+    // Nothing is known of the account: no row says anything of it.
+    assert_eq!(quota_of(&host, &cody), Value::Null);
+
+    // Codex says that all of the five hours is used, and the turn fails: the account is
+    // taken for used up, and every agent of Codex says so in its row.
+    says(100.0);
+    host.send(&cody, "fail, please", "u-1");
+    wait_for("the row to say that the account is used up", || {
+        !quota_of(&host, &cody).is_null()
+    });
+    let said = quota_of(&host, &cody);
+    assert_eq!(
+        (
+            &said["state"],
+            &said["provider_id"],
+            &said["reason"],
+            &said["window"]
+        ),
+        (
+            &json!("exhausted"),
+            &json!("codex"),
+            &json!("usage_limit"),
+            &json!("five_hour")
+        ),
+        "{said}"
+    );
+    let (until, since) = (&said["resets_at"], &said["observed_at"]);
+    let moments = [until.as_str().unwrap(), since.as_str().unwrap()];
+    assert!(
+        moments.iter().all(|at| at.len() == 20 && at.ends_with('Z')),
+        "{said}"
+    );
+    // In the fields, and their order, of the Python Host.
+    let fields: Vec<&str> = said
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let python = [
+        "state",
+        "provider_id",
+        "reason",
+        "window",
+        "resets_at",
+        "observed_at",
+    ];
+    assert_eq!(fields, python);
+    // An agent of another tool says nothing of it, and the apps were told to read the rows
+    // again.
+    assert_eq!(quota_of(&host, &clara), Value::Null);
+    wait_for("the apps to be told", || told_again(&heard) == 1);
+    // A new agent of Codex says it from its first row on.
+    let made = host.post("/agents", json!({ "name": "Cora", "backend": "codex" }));
+    assert_eq!(quota_of(&host, made["session"].as_str().unwrap()), said);
+
+    // A turn of Codex completes, though Codex says the same of the five hours in it: an
+    // account that served a turn was not used up. The rows say nothing again; the usage
+    // screen shows the window as it was said.
+    host.send(&cody, "go on", "u-2");
+    wait_for("the row to say nothing again", || {
+        quota_of(&host, &cody).is_null()
+    });
+    wait_for("the apps to be told again", || told_again(&heard) == 2);
+    let five = host.get("/backend-usage")["providers"]["codex"]["windows"][0].clone();
+    assert_eq!(
+        (&five["used_percentage"], &five["limit"]["state"]),
+        (&json!(100.0), &json!("hard_limit")),
+        "{five}"
+    );
+
+    // The Host is killed and started: that a turn completed since is not forgotten.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    assert_eq!(quota_of(&host, &cody), Value::Null);
+    // And a turn that fails after Codex said so once more: used up again.
+    host.send(&cody, "fail again", "u-3");
+    wait_for("the row to say that the account is used up again", || {
+        !quota_of(&host, &cody).is_null()
+    });
+    assert_eq!(quota_of(&host, &cody)["window"], "five_hour");
+    wait_for("the apps of the Host that came back to be told", || {
+        told_again(&heard) == 1
+    });
+}
