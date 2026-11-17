@@ -28,6 +28,7 @@ use clarp_backend::Reading;
 use clarp_kernel::explain::desk::{self as rules, Asked, Batch, Change, Janitor, Pace, Said};
 use clarp_kernel::explain::learned::{self, Row};
 use clarp_kernel::explain::read;
+use clarp_kernel::explain::rows::{Patch, Rows};
 use clarp_kernel::janitors::book::{Book, World};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -55,11 +56,41 @@ const SCRIPT_MOST: u64 = 65_536;
 const SCRIPT_READ: u64 = 8_192;
 const SCRIPTS_MOST: usize = 2;
 
-/// The explainer of this Host: its book. `None` until it was read where it is kept.
+/// How often the rows that wait for an explanation are looked at.
+const ROUND_EVERY: Duration = Duration::from_millis(700);
+
+/// The explainer of this Host: its book (`None` until it was read where it is kept), and
+/// the rows of tools that wait for their explanation while their turns are shown.
 #[derive(Default)]
 pub struct Desk {
     held: tokio::sync::Mutex<Option<rules::Desk>>,
     wake: tokio::sync::Notify,
+    rows: tokio::sync::Mutex<Rows>,
+}
+
+/// The owner's setting as it is now: whether the use of tools is explained, and for which
+/// reader a row is explained.
+fn setting(app: &App) -> (bool, u8) {
+    let told = crate::apps::explanations_told(app);
+    let level = told["detail_level"]
+        .as_u64()
+        .and_then(|level| u8::try_from(level).ok());
+    (told["enabled"] == true, level.unwrap_or(0))
+}
+
+/// Puts what the rows say on the items it is for: each through its agent's own thread, which
+/// tells whoever watches.
+fn put(app: &App, patches: Vec<Patch>) {
+    let directory = app.fleet.directory();
+    for patch in patches {
+        let all = directory.members.iter().chain(&directory.janitors);
+        let mut whose = all.filter(|member| member.record.agent_id == patch.agent_id);
+        if let Some(member) = whose.next() {
+            member
+                .agent
+                .explained(patch.item_id.clone(), patch.fields());
+        }
+    }
 }
 
 fn unread() -> Unavailable {
@@ -253,12 +284,7 @@ impl Desk {
         let Some(member) = member else {
             return Err(ApiError::new(StatusCode::NOT_FOUND, "agent not found"));
         };
-        let target = member.record.agent_id.clone();
-        let cwd = PathBuf::from(&member.record.cwd);
-        let looked = app.janitors.with(app, |book, world, now_ms| {
-            janitor_of(book, world, &target, now_ms)
-        });
-        let janitor = looked.await?;
+        let record = (member.record.agent_id.clone(), member.record.cwd.clone());
         let request = Asked {
             level: &asked["detail_level"],
             items: &asked["items"],
@@ -266,10 +292,26 @@ impl Desk {
             target: None,
             provenance: asked["include_provenance"] == true,
         };
+        self.answered(app, &record, &request).await
+    }
+
+    /// What is asked about an agent's tools (its id, and the directory it works in), answered
+    /// by the desk.
+    async fn answered(
+        &self,
+        app: &App,
+        (target, cwd): &(String, String),
+        request: &Asked<'_>,
+    ) -> Result<Value, ApiError> {
+        let cwd = PathBuf::from(cwd);
+        let looked = app.janitors.with(app, |book, world, now_ms| {
+            janitor_of(book, world, target, now_ms)
+        });
+        let janitor = looked.await?;
         let mut held = self.held(app).await?;
         let desk = held.as_mut().ok_or_else(unread)?;
         let scripts = |activity: &Map<String, Value>| scripts_read(&cwd, activity);
-        let answered = desk.request(&request, janitor.as_ref(), &scripts, app.clock.now_ms());
+        let answered = desk.request(request, janitor.as_ref(), &scripts, app.clock.now_ms());
         let changes = desk.changes();
         drop(held);
         keep(app, changes).await;
@@ -418,8 +460,86 @@ async fn ask(app: &App, batch: &Batch) -> Option<Said> {
     Some(said)
 }
 
-/// Starts the task that asks the model for what waits at the desk.
+impl Desk {
+    /// A round of the rows: what waited too long is settled, and the desk is asked about
+    /// each agent's rows that wait, as an app would ask about them.
+    async fn round(&self, app: &App) {
+        let (enabled, level) = setting(app);
+        let now = app.clock.now_ms();
+        let (settled, askings) = self.rows.lock().await.round(enabled, level, now);
+        put(app, settled);
+        for asking in askings {
+            let directory = app.fleet.directory();
+            let record = asking.agent_id.as_deref().and_then(|agent_id| {
+                let all = directory.members.iter().chain(&directory.janitors);
+                let mut whose = all.filter(|member| member.record.agent_id == agent_id);
+                whose
+                    .next()
+                    .map(|member| (agent_id.to_string(), member.record.cwd.clone()))
+            });
+            let (level_asked, items) = (json!(level), json!(asking.items));
+            let let_go = json!(asking.release);
+            let request = Asked {
+                level: &level_asked,
+                items: &items,
+                release: Some(&let_go),
+                target: None,
+                provenance: false,
+            };
+            // Rows of an agent that is no more are asked about for nobody: the desk is still
+            // told what to let go of, and answers that nothing explains.
+            let record = record.unwrap_or_default();
+            let patches = match self.answered(app, &record, &request).await {
+                Ok(answer) => self.rows.lock().await.answered(&asking, &answer, level),
+                Err(_) => self.rows.lock().await.unanswered(&asking, "error"),
+            };
+            put(app, patches);
+        }
+    }
+}
+
+/// Watches what agents' turns show: every new row of a tool is handed to the rows, and the
+/// rows are looked at while any waits. With the owner's switch off nothing is read at all.
+async fn watch(app: App) {
+    use tokio::sync::broadcast::error::RecvError;
+    let mut shown = app.hub.watch();
+    let mut round = tokio::time::interval(ROUND_EVERY);
+    round.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            heard = shown.recv() => {
+                let event = match heard {
+                    Ok(event) => event,
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => return,
+                };
+                let (enabled, level) = setting(&app);
+                // Most of what is shown is an answer as it grows: only what shows a tool or a
+                // turn is read.
+                let of_interest = event.whole.contains("\"tool\"") || event.whole.contains("\"turn\"");
+                if !enabled || level == 0 || !of_interest {
+                    continue;
+                }
+                let Ok(event) = serde_json::from_str::<Value>(&event.whole) else {
+                    continue;
+                };
+                let now = app.clock.now_ms();
+                let patches = app.explain.rows.lock().await.observe(&event, enabled, level, now);
+                put(&app, patches);
+            }
+            _ = round.tick() => {
+                if app.explain.rows.lock().await.busy() {
+                    app.explain.round(&app).await;
+                }
+            }
+        }
+    }
+}
+
+/// Starts the task that asks the model for what waits at the desk, and the one that puts
+/// explanations on the rows of tools while their turns are shown.
 pub fn run(app: &App) {
+    tokio::spawn(watch(app.clone()));
     let app = app.clone();
     tokio::spawn(async move {
         loop {

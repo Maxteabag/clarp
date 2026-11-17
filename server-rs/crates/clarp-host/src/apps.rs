@@ -530,10 +530,9 @@ const EXPLAINED_KEY: &str = "tool_explanations.enabled";
 const DETAIL_LEVEL: i64 = 2;
 
 /// Whether the owner has the use of tools explained. Where nobody chose it is off on this
-/// Host, where the Python Host has it on: a row of a tool does not carry its explanation
-/// here yet (`docs/live-items.md`, section 6), and an app that is told explaining is on
-/// shows the explanation in the place of the tool's own command, which would then be
-/// nothing. Who turns it on is answered when an app asks for explanations by itself.
+/// Host, where the Python Host has it on: a Host that explains asks a model about whatever
+/// no template fits and nothing was learned of, on its owner's account, and that is the
+/// owner's to turn on. With it off an app shows the tool's own command on the row.
 fn explained(app: &App) -> bool {
     let directory = app.fleet.directory();
     let kept = directory

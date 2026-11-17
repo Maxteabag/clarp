@@ -18329,3 +18329,150 @@ fn an_app_asks_for_the_use_of_tools_to_be_explained() {
     assert_eq!(went["totals"]["counts"]["learned"], json!(2), "{went}");
     assert_eq!(went["totals"]["learned_hits"], json!(2), "{went}");
 }
+
+#[test]
+fn a_tools_row_carries_its_explanation_while_its_turn_is_shown() {
+    let place = Place::new("explained-rows");
+    let claude = place.root.join("claude");
+    program(&claude, STAND_IN_STREAMS);
+    let (codex, asked) = explaining_model(&place);
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Watcher", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let live = || host.get(&format!("/live?session={agent}"));
+    // What the row of the turn's tool carries as its explanation.
+    let on_the_row = |shown: &Value| -> Value {
+        let items = shown["items"].as_array().unwrap();
+        let tool = items.iter().find(|item| item["kind"] == "tool");
+        tool.map_or(json!("no tool yet"), |item| item["tool"]["explain"].clone())
+    };
+    let questions = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&asked).unwrap_or_default();
+        let lines = written.lines();
+        lines
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let over = |id: &str| {
+        let turns = host.turns(&agent);
+        turns
+            .iter()
+            .any(|turn| turn["role"] == "assistant" && turn["text"] == "Found it.")
+            && host.state(&agent) == "done"
+            && live()["turn"]["status"] == "completed"
+            && host.turns(&agent).iter().any(|turn| turn["id"] == id)
+    };
+
+    // As it comes nothing explains: a row carries no explanation, and nobody is asked.
+    host.send(&agent, "look for one", "u-1");
+    wait_for("the first turn to be over", || over("u-1"));
+    assert_eq!(on_the_row(&live()), Value::Null);
+    assert!(questions().is_empty());
+
+    // Its owner turns explaining on, and starts the janitor that explains.
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/tool-explanations/settings",
+            Some(&json!({ "enabled": true }))
+        ),
+        (200, json!({ "enabled": true, "detail_level": 2 }))
+    );
+    let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    let (status, _) = host.ask(
+        "POST",
+        "/janitors/clarp-tool-explainer/enabled",
+        Some(&json!({ "expected_revision": explainer["revision"], "enabled": true })),
+    );
+    assert_eq!(status, 200);
+
+    // A turn whose tool takes a while: the row is told to wait for its explanation at once,
+    // and carries the sentence while the turn still runs.
+    let follows = host.listen_at(&format!("/events?live={agent}"));
+    wait_for("the connection to be open", || {
+        !follows.lock().unwrap().is_empty()
+    });
+    host.send(&agent, "look for two, slow", "u-2");
+    wait_for("the sentence on the row", || {
+        on_the_row(&live())["status"] == "ready"
+    });
+    let during = live();
+    // The command has two parts, and the sentence is of both.
+    assert_eq!(
+        on_the_row(&during),
+        json!({ "text": "Runs sleep. Then runs echo.", "level": 2, "status": "ready" })
+    );
+    assert_eq!(during["turn"]["status"], "running", "{during}");
+    assert_eq!(
+        during["tool_explanations"],
+        json!({ "enabled": true, "detail_level": 2 })
+    );
+    // Whoever follows the agent was sent both, in that order, on the row of the tool.
+    let told = || -> Vec<Value> {
+        let heard = follows.lock().unwrap();
+        let ops = heard
+            .iter()
+            .filter(|event| event["type"] == "live")
+            .flat_map(|event| event["ops"].as_array().unwrap().clone());
+        ops.filter(|op| op["kind"] == "tool" && !op["item"]["tool"]["explain"].is_null())
+            .map(|op| json!([op["id"], op["item"]["tool"]["explain"]["status"]]))
+            .collect()
+    };
+    wait_for("the sentence to be told", || {
+        told().last().is_some_and(|last| last[1] == "ready")
+    });
+    // A row is shown as its tool's command comes in, piece by piece: it is told to wait each
+    // time it is another command, and then given its sentence.
+    let mut steps = told();
+    steps.dedup();
+    assert_eq!(
+        steps,
+        [
+            json!(["cl:toolu_two", "pending"]),
+            json!(["cl:toolu_two", "ready"])
+        ],
+        "{:#?}",
+        follows.lock().unwrap()
+    );
+    // The model was asked once, about the two parts of the command the row shows.
+    let asked_of = questions();
+    assert_eq!(asked_of.len(), 1, "{asked_of:?}");
+    let parts: Vec<&Value> = asked_of[0]["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|request| &request["activity"]["command"])
+        .collect();
+    assert_eq!(parts, [&json!("sleep 2"), &json!("echo found")]);
+    wait_for("the second turn to be over", || over("u-2"));
+    assert_eq!(on_the_row(&live())["status"], "ready");
+
+    // The same use of the tool in the next turn: said at once from what was learned.
+    host.send(&agent, "look for one again", "u-3");
+    wait_for("the sentence on the next row", || {
+        let shown = live();
+        let items = shown["items"].as_array().unwrap();
+        let row = items.iter().find(|item| item["id"] == "cl:toolu_one");
+        row.is_some_and(|row| row["tool"]["explain"]["status"] == "ready")
+    });
+    assert_eq!(questions().len(), 1);
+    wait_for("the third turn to be over", || over("u-3"));
+
+    // Turned off again: the next row carries none, and nothing is asked.
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/tool-explanations/settings",
+            Some(&json!({ "enabled": false }))
+        ),
+        (200, json!({ "enabled": false, "detail_level": 2 }))
+    );
+    host.send(&agent, "look for two again", "u-4");
+    wait_for("the fourth turn to be over", || over("u-4"));
+    assert_eq!(on_the_row(&live()), Value::Null);
+    assert_eq!(questions().len(), 1);
+}
