@@ -11299,6 +11299,15 @@
   },
   {
    "data": {
+    "event_id": "<eid:agent-roster#3@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#3@390048>"
+  },
+  {
+   "data": {
     "agent_id": "<id:4>",
     "detail": {
      "session": "keeper-one"
@@ -11336,15 +11345,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@13f604>"
-  },
-  {
-   "data": {
-    "event_id": "<eid:agent-roster#3@390048>",
-    "kind": "janitor-changed",
-    "type": "agent-roster"
-   },
-   "event": null,
-   "id": "<eid:agent-roster#3@390048>"
   },
   {
    "data": {
