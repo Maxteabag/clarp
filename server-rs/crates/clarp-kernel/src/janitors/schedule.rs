@@ -27,9 +27,24 @@ const PREVIEW_MOST: i64 = 10;
 /// Why a schedule cannot be read, in the Python Host's words.
 pub const NO_ZONE: &str = "Choose a valid IANA timezone";
 
+/// Files a system keeps in the directory of its table that are no zone's name: the zone of
+/// the machine itself (some systems keep it there and some do not), the rule a clock without
+/// a rule falls back on, and the zone of a machine that was never told where it is.
+const NO_NAMES: [&str; 3] = ["localtime", "posixrules", "Factory"];
+/// Directories of that table that hold every zone once more, with and without leap seconds.
+const NO_NAMES_UNDER: [&str; 2] = ["posix/", "right/"];
+
 /// The time zone of this name, when the machine has one. A name is the zone's own, letter
 /// for letter: the table's files are named so, and the Python Host finds a zone by its file.
+/// A file of the table's directory that is no zone's name is none on any machine, whether
+/// the machine has the file or not: a schedule is read in a zone its owner can name, and
+/// means the same on every machine its janitor is moved to.
 pub fn zone(name: &str) -> Option<TimeZone> {
+    let no_name =
+        NO_NAMES.contains(&name) || NO_NAMES_UNDER.iter().any(|dir| name.starts_with(dir));
+    if no_name {
+        return None;
+    }
     let found = TimeZone::get(name).ok()?;
     (found.iana_name() == Some(name)).then_some(found)
 }

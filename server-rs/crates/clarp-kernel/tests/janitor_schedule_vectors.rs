@@ -76,35 +76,58 @@ fn a_preview_shows_the_same_runs_or_is_refused_in_the_same_words() {
     assert_eq!((rows.len(), refused), (91, 6));
 }
 
-/// Files of the machine's table that the Python Host takes as a zone because they are files of
-/// the table, and this Host does not: they are no names of zones (the rule a clock without a
-/// rule falls back on, the same zones once more with and without leap seconds, the zone of a
-/// machine that was never told where it is).
-const FILES_ONLY: [&str; 4] = [
+/// Files of the directory of a machine's table that are no names of zones: the zone of the
+/// machine itself, the rule a clock without a rule falls back on, the same zones once more with
+/// and without leap seconds, the zone of a machine that was never told where it is. The Python
+/// Host takes each where its machine has the file (the machine the vectors were made on has all
+/// but the first); this Host takes none on any machine.
+const NO_NAMES: [&str; 5] = [
+    "localtime",
     "posixrules",
     "posix/Europe/Oslo",
     "right/Europe/Oslo",
     "Factory",
 ];
 
+/// Names of zones that some systems leave out of their table (older names, kept in a package of
+/// their own): a Host has such a zone where its machine has the file.
+const SOME_TABLES: [&str; 6] = [
+    "US/Eastern",
+    "CET",
+    "EST5EDT",
+    "Zulu",
+    "GMT",
+    "Asia/Calcutta",
+];
+
+/// Whether this machine's table has a zone in a file of this name.
+fn in_this_table(name: &str) -> bool {
+    let dir = std::env::var("TZDIR").unwrap_or_else(|_| "/usr/share/zoneinfo".to_string());
+    std::fs::read(std::path::Path::new(&dir).join(name)).is_ok_and(|file| file.starts_with(b"TZif"))
+}
+
 #[test]
 fn a_name_is_a_time_zone_where_the_python_host_has_one() {
     let vectors = vectors();
     let rows = vectors["names"].as_array().unwrap();
-    let mut differ = Vec::new();
+    let (mut zones, mut no_names) = (0, 0);
     for row in rows {
         let (name, theirs) = (row[0].as_str().unwrap(), row[1].as_bool().unwrap());
         let ours = schedule::zone(name).is_some();
-        if ours != theirs {
-            differ.push((name, ours, theirs));
+        if NO_NAMES.contains(&name) {
+            assert!(!ours, "{name} is no name of a zone");
+            no_names += 1;
+        } else if SOME_TABLES.contains(&name) {
+            assert!(theirs, "{name}: the machine of the vectors has it");
+            assert_eq!(
+                ours,
+                in_this_table(name),
+                "{name}: as this machine's table has it"
+            );
+        } else {
+            assert_eq!(ours, theirs, "{name}");
+            zones += usize::from(ours);
         }
     }
-    // Every difference is one of the files that are no names, taken there and not here.
-    for (name, ours, theirs) in &differ {
-        assert!(
-            FILES_ONLY.contains(name) && !ours && *theirs,
-            "{name}: here {ours}, there {theirs}"
-        );
-    }
-    assert_eq!(rows.len(), 42);
+    assert_eq!((rows.len(), zones, no_names), (42, 9, NO_NAMES.len()));
 }
