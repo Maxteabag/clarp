@@ -1723,6 +1723,23 @@ connection relay under the name the phone is paired with. Each of these is true 
 7. **The owner has tested it himself**, after everything is implemented, voice included (his word of
    16 Nov 2026), on a name of the battle test's own (`elitebook-rust`), which takes no phone from anybody.
 
+### Known weaknesses of the Rust Host, to mend
+
+- **Which states of an agent an app is told depends on how its tool's output happens to be read**
+  (found 17 Nov 2026, conformance run 44111344344). An app is told an agent's state (`agent-state`,
+  `agent-activity`) when what there is to read of the tool has been read: the state at the end of a
+  read. A state the agent passed through within one read (using a tool, answering) is not told, and one
+  a read happens to end in is. With a real tool, which takes seconds between one thing and the next,
+  every state is told; with a tool that prints a whole turn in one breath the answer depends on whether
+  the breath is read in one piece. The stand-in of the conformance suite is such a tool: asked after a
+  moment's pause, the Host was already reading when the breath began, read it in two, and told a state
+  it had never told in that scenario before (`tool-turns`: using a tool; `live-items`: answering). The
+  suite now asks this Host without the pause, which hides it and does not mend it. To mend: what is
+  told of an agent's states is to follow from what was written down of the turn (every move the tool
+  made, in order: `Command::TurnMoved` is in the log), not from where a read ended
+  (`clarp-host` `agent.rs`, `show`, which compares the state with the one last told). Then the
+  differences from the Python Host in those two scenarios are registered once, as they then are.
+
 ## 8. Roles
 
 | Role | Session | Owns |
