@@ -9208,13 +9208,20 @@ fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
 #[test]
 fn what_the_hosts_own_turns_used_is_counted_for_an_apps_usage_screen() {
     let place = Place::new("usage");
-    // A stand-in for Claude Code that says what its turn took in and gave out.
+    // A stand-in for Claude Code that says what its turn took in and gave out, and, as the
+    // tool does, what its whole session has cost so far: an eighth of a dollar after its first
+    // turn, three eighths after its second, seven eighths after its third.
     let claude = place.root.join("claude");
-    let script = "#!/bin/sh\nread message\n\
-printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
-printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
-printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1,\"usage\":{\"input_tokens\":12,\"output_tokens\":3},\"total_cost_usd\":0.0125}'\n";
-    program(&claude, script);
+    let turns_file = place.root.join("claude-turns");
+    let script = format!(
+        "#!/bin/sh\nread message\necho x >> {turns}\n\
+case $(wc -l < {turns}) in 1) cost=0.125 ;; 2) cost=0.375 ;; *) cost=0.875 ;; esac\n\
+printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}}'\n\
+printf '%s\\n' '{{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{{\"type\":\"text\",\"text\":\"on it\"}}]}}}}'\n\
+printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1,\"usage\":{{\"input_tokens\":12,\"output_tokens\":3}},\"total_cost_usd\":'$cost'}}'\n",
+        turns = turns_file.to_str().unwrap(),
+    );
+    program(&claude, &script);
     let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
     let host = place.start_in("", &[], &world);
     let of = |host: &Host, tool: &str| -> Value {
@@ -9257,7 +9264,7 @@ printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,
         of(&host, "claude")["totals"]["five_hour"]["turns"] == 1
     });
     let one = of(&host, "claude");
-    let window = json!({ "turns": 1, "tokens_in": 12, "tokens_out": 3, "cost_usd": 0.0125,
+    let window = json!({ "turns": 1, "tokens_in": 12, "tokens_out": 3, "cost_usd": 0.125,
                          "window_minutes": 300 });
     assert_eq!(one["totals"]["five_hour"], window, "{one}");
     assert_eq!(one["totals"]["seven_day"]["window_minutes"], 10_080);
@@ -9280,8 +9287,10 @@ printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,
         (&json!(24), &json!(6)),
         "{two}"
     );
+    // What the tool says of cost is what its session has cost so far: the second turn cost
+    // what that grew by, and the two together what the session has cost.
     assert_eq!(
-        two["totals"]["seven_day"]["cost_usd"], 0.025,
+        two["totals"]["seven_day"]["cost_usd"], 0.375,
         "what the two turns cost"
     );
     // Codex ran nothing here, and how much of an account is left is not asked of anybody.
@@ -9302,10 +9311,22 @@ printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,
         of(&host, "claude")["totals"]["five_hour"],
         two["totals"]["five_hour"]
     );
+    // A turn after the Host was started again goes on in the same session of the tool, and
+    // costs what the session's total grew by since the turn before: the total is kept with
+    // the turn's end.
+    host.send(&agent, "three", "u-3");
+    wait_for("the third turn to be counted", || {
+        of(&host, "claude")["totals"]["five_hour"]["turns"] == 3
+    });
+    let three = of(&host, "claude");
+    assert_eq!(
+        three["totals"]["seven_day"]["cost_usd"], 0.875,
+        "what the three turns cost: {three}"
+    );
     // What was used belongs to the Host: an agent that is removed takes none of it along.
     let (status, _) = host.ask("DELETE", &format!("/agents/{agent}"), None);
     assert_eq!(status, 200);
-    assert_eq!(of(&host, "claude")["totals"]["seven_day"]["turns"], 2);
+    assert_eq!(of(&host, "claude")["totals"]["seven_day"]["turns"], 3);
 }
 
 #[test]

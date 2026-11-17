@@ -34,7 +34,8 @@ use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
-    Commentary, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, Total, TurnEnd,
+    Commentary, CostSoFar, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, Total,
+    TurnEnd,
 };
 use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -443,7 +444,10 @@ struct LiveTurn {
     total: Option<(u64, u64)>,
     base: Option<(u64, u64)>,
     context: Option<u64>,
+    /// What the tool said its conversation has cost so far, and what it had cost before the
+    /// turn, where that is known: nothing for a conversation that begins with the turn.
     cost: Option<u64>,
+    cost_before: Option<u64>,
     interpreter: Box<dyn Interpreter>,
     /// How far the turn's spool has been read. Never behind the position in the log.
     offset: u64,
@@ -470,6 +474,7 @@ impl LiveTurn {
             base: self.base,
             context: self.context,
             cost: self.cost,
+            cost_before: self.cost_before,
         }
     }
 }
@@ -715,6 +720,7 @@ struct Facts {
     base: Option<(u64, u64)>,
     context: Option<u64>,
     cost: Option<u64>,
+    cost_before: Option<u64>,
 }
 
 /// How the turn that has just ended in this batch ended, for the row that closed it.
@@ -741,7 +747,19 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
         });
     }
     end.context_tokens = facts.context;
-    end.cost_micros = facts.cost;
+    // What the tool tells of cost is what its whole conversation has cost so far: the turn's
+    // share is what that grew by. A total that fell is a conversation the tool began anew,
+    // and is the turn's own. Where what it stood at before is not known (a session that was
+    // taken up, or one from before totals were kept), the share is not known either, and the
+    // total is kept for the turn after.
+    if let Some(so_far) = facts.cost {
+        let share = |before: u64| so_far.checked_sub(before).unwrap_or(so_far);
+        end.cost_micros = facts.cost_before.map(share);
+        end.cost_so_far = batch.agent().backend_session().map(|session| CostSoFar {
+            session: session.to_string(),
+            micros: so_far,
+        });
+    }
     Some(Entry::TurnEnd(end))
 }
 
@@ -964,6 +982,7 @@ impl Actor {
                 base: actor.total_before(turn)?,
                 context: None,
                 cost: None,
+                cost_before: actor.cost_before(turn)?,
                 offset: 0,
                 drafts: Vec::new(),
                 tools: Vec::new(),
@@ -1287,6 +1306,23 @@ impl Actor {
             if let Some(total) = self.turn_end(earlier)?.and_then(|end| end.total) {
                 let same = total.session == session;
                 return Ok(same.then_some((total.tokens_in, total.tokens_out)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// What the tool's conversation had cost before a turn, where the tool tells what it has
+    /// cost so far: nothing where the conversation begins with the turn (the agent has no
+    /// session of its tool yet), what was told at the end of the newest turn before it that
+    /// told it, where that was the same conversation, and otherwise not known. No further
+    /// back than twenty turns.
+    fn cost_before(&self, turn: TurnId) -> Result<Option<u64>, ActorError> {
+        let Some(session) = self.recorder.agent().backend_session() else {
+            return Ok(Some(0));
+        };
+        for earlier in (turn.0.saturating_sub(20).max(1)..turn.0).rev() {
+            if let Some(told) = self.turn_end(earlier)?.and_then(|end| end.cost_so_far) {
+                return Ok((told.session == session).then_some(told.micros));
             }
         }
         Ok(None)
@@ -2391,6 +2427,10 @@ impl Actor {
             Some(before) => before.base,
             None => self.total_before(turn)?,
         };
+        let cost_before = match &before {
+            Some(before) => before.cost_before,
+            None => self.cost_before(turn)?,
+        };
         let (last_row, model, tokens, total, context) = match before {
             Some(before) => (
                 before.last_row,
@@ -2415,8 +2455,10 @@ impl Actor {
             total,
             base,
             context,
-            // What an attempt cost is the attempt's own: the next one says its own.
+            // What the conversation has cost so far is said again by the next attempt, with
+            // what this one cost in it.
             cost: None,
+            cost_before,
             interpreter,
             offset: 0,
             drafts: Vec::new(),
@@ -2585,6 +2627,7 @@ impl Actor {
             base: self.total_before(turn)?,
             context,
             cost,
+            cost_before: self.cost_before(turn)?,
             interpreter,
             offset,
             drafts,

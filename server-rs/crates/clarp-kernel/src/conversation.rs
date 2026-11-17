@@ -236,6 +236,15 @@ pub struct Total {
     pub tokens_out: u64,
 }
 
+/// What a tool said its whole conversation had cost by the end of a turn, in millionths of a
+/// dollar, with the conversation it said it of. Claude Code tells this with every result and
+/// carries it over when a conversation is continued: a turn's own cost is what it grew by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CostSoFar {
+    pub session: String,
+    pub micros: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnEnd {
     pub id: String,
@@ -264,9 +273,13 @@ pub struct TurnEnd {
     /// every step of the turn anew.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u64>,
-    /// What the tool said the turn cost, in millionths of a dollar, where it said so.
+    /// What the turn cost, in millionths of a dollar, where that is known: what the tool's
+    /// conversation cost more at the turn's end than before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_micros: Option<u64>,
+    /// What the tool said its whole conversation had cost at the turn's end, where it said so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_so_far: Option<CostSoFar>,
     /// The running total of the tool's conversation at the turn's end, where the tool told
     /// that and not the turn's own share.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -297,6 +310,7 @@ impl TurnEnd {
             tokens_out: None,
             context_tokens: None,
             cost_micros: None,
+            cost_so_far: None,
             total: None,
         })
     }
@@ -548,6 +562,7 @@ mod tests {
                 tokens_out: None,
                 context_tokens: None,
                 cost_micros: None,
+                cost_so_far: None,
                 total: None,
             }),
         ];

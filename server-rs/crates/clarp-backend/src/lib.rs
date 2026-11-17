@@ -161,7 +161,9 @@ pub enum Signal {
     Context {
         tokens: u64,
     },
-    /// What the tool says the turn cost, in millionths of a dollar.
+    /// What the tool says its conversation has cost so far, in millionths of a dollar: the
+    /// running total of its session, not the turn's share (Claude Code's `total_cost_usd`,
+    /// which it carries over when it continues a session). The actor tells the turn's share.
     Cost {
         micros: u64,
     },

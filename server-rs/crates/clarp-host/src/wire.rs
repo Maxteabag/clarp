@@ -1710,6 +1710,7 @@ mod tests {
             tokens_out: None,
             context_tokens: None,
             cost_micros: None,
+            cost_so_far: None,
             total: None,
         };
         let listed = ToolCall {
@@ -1989,6 +1990,7 @@ mod tests {
             tokens_out: Some(7),
             context_tokens: None,
             cost_micros: None,
+            cost_so_far: None,
             total: None,
         }
     }
