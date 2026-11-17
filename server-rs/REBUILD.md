@@ -988,9 +988,16 @@ a turn in the janitor's own conversation.
   `templates`, `inspect`, `runs`, `create`, `configure`, `attach`, `enable`, `pause`, `remove`, `release`,
   `reset-defaults`, `run-context`, `outcome`, with `--dry-run` and the revision read where none is named.
   What the routes do not have here yet (a label's review, the state for a move) the tool is told by them.
+- **Looked at and not spoken to.** A control of a chat that names a janitor, by its session or its id
+  (`/send`, `/stop`, `/select`, `/agent-rename`, `/agent-archive`, `/agent-llm` and the rest of the Python
+  Host's list, and the removal of a janitor as an agent), is refused in that Host's word and words (403,
+  `janitor_inspection_only`). It is one guard in front of the routes (`edge.rs`, `looked_at_only`), which reads
+  whom a request names and lets everything else through as it came, where the Python Host has the same check
+  in twenty-five handlers. A janitor's own turn uses the tools an agent has for what it left running, and a
+  message it writes to an agent is from it.
 - Not yet: a janitor made as a new agent, the jobs that are no scheduled task (the turn's end and the goal
-  keeper, the workers that answer one request, the label keeper), and the tools that keep something for an
-  agent when a janitor's own turn calls them.
+  keeper, the workers that answer one request, the label keeper), and a janitor's own goals and published
+  files.
 
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one

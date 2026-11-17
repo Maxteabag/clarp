@@ -7061,13 +7061,54 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
         !offered.contains("Goal keeper") && offered.contains("Worker"),
         "{offered}"
     );
-    // No control of a chat reaches one: it is no agent a message, a stop or a removal means.
+    // No control of a chat reaches one, by its session or by its id: a janitor is looked at
+    // and not spoken to, and whoever tries is told so in the Python Host's word and words.
+    let looked_at = (
+        403,
+        json!({
+            "error": "Janitors are inspection-only. Use their Pause or Configure controls.",
+            "code": "janitor_inspection_only",
+        }),
+    );
+    let keeper = "clarp-goal-keeper";
+    let keeper_id = row_id(&host, keeper);
     let sent = post(
         "/send",
-        json!({ "session": "clarp-goal-keeper", "text": "hello", "client_msg_id": "j1" }),
+        json!({ "session": keeper, "text": "hello", "client_msg_id": "j1" }),
     );
-    assert_ne!(sent.0, 200);
-    assert_ne!(host.ask("DELETE", "/agents/clarp-goal-keeper", None).0, 200);
+    assert_eq!(sent, looked_at);
+    for control in [
+        "/stop",
+        "/select",
+        "/agent-rename",
+        "/agent-archive",
+        "/agent-llm",
+    ] {
+        assert_eq!(
+            post(control, json!({ "session": keeper })),
+            looked_at,
+            "{control}"
+        );
+        assert_eq!(
+            post(control, json!({ "session": keeper_id })),
+            looked_at,
+            "{control}"
+        );
+    }
+    assert_eq!(
+        post("/send", json!({ "replace_sid": keeper, "text": "x" })),
+        looked_at
+    );
+    assert_eq!(
+        host.ask("DELETE", "/agents/clarp-goal-keeper", None),
+        looked_at
+    );
+    assert_eq!(
+        host.ask("DELETE", "/agents/clarp%2Dgoal-keeper/", None),
+        looked_at
+    );
+    // What names no janitor goes on as it came: an agent nobody has is not there.
+    assert_eq!(post("/stop", json!({ "session": "nobody-there" })).0, 200);
     assert_eq!(sessions(&janitors()).len(), 7);
 
     // An agent is made a janitor, paused, with the job that keeps labels and its first trigger.
@@ -7400,7 +7441,7 @@ fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
             "A built-in Janitor cannot be released"
         )
     );
-    assert_ne!(host.ask("DELETE", "/agents/worker", None).0, 200);
+    assert_eq!(host.ask("DELETE", "/agents/worker", None).0, 403);
     let (status, let_go) = post(
         "/janitors/worker/release",
         json!({ "expected_revision": 3 }),
@@ -7807,6 +7848,12 @@ fn a_janitors_scheduled_task_runs_when_its_schedule_says_and_closes_itself_with_
         (code, offered["triggers"].as_array().unwrap().len()),
         (0, 11)
     );
+    // A janitor's own turn says what it left running, with the tool every agent has for it.
+    let word = |args: &[&str]| tool(&host, &place.root, None, args);
+    let (code, _, err) = word(&["clarp-agent-bg", &keeper, "on", "counting the doors"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = word(&["clarp-agent-bg", &keeper, "off"]);
+    assert_eq!(code, 0, "{err}");
     // A change of its options by the tool, read from a file: saved, which pauses it.
     let more = r#"{"options": {"instructions": "Count the windows."}}"#;
     std::fs::write(place.root.join("more.json"), more).unwrap();

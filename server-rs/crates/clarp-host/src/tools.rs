@@ -210,15 +210,10 @@ fn could_not(error: &Unavailable) -> ToolAnswer {
 /// here, the one the tool was called for.
 async fn owner_of(app: &App, job_id: &str, session: &str) -> Option<Arc<Member>> {
     if let Ok(Some(agent_id)) = app.fleet.job_owner(job_id.to_string()).await {
-        return app
-            .fleet
-            .directory()
-            .members
-            .iter()
-            .find(|member| member.record.agent_id == agent_id)
-            .cloned();
+        return app.fleet.directory().anyone(&agent_id).cloned();
     }
-    app.member(session)
+    // The one the tool was called for: an agent, or a janitor in a turn of its own.
+    app.anyone(session)
 }
 
 /// Asks the job's owner to carry out a command. `None` when there is no agent to ask.
@@ -249,7 +244,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                     format!("usage: agent_bg.py <session> {verb} <job-id> <kind> <title> [detail]"),
                 );
             }
-            let Some(member) = app.member(session) else {
+            let Some(member) = app.anyone(session) else {
                 return ToolAnswer::said(1, format!("agent_bg: unknown session: {session}"));
             };
             let id = match argv[2].trim() {
@@ -413,7 +408,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                     ),
                 )
             };
-            let Some(member) = app.member(session) else {
+            let Some(member) = app.anyone(session) else {
                 return none();
             };
             match app.fleet.job_owner(id.clone()).await {
@@ -441,7 +436,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
             let Some(text) = argv.get(3) else {
                 return ToolAnswer::said(2, BG_USAGE);
             };
-            let Some(member) = app.member(session) else {
+            let Some(member) = app.anyone(session) else {
                 return ToolAnswer::code(1);
             };
             let command = JobCommand::Progress {
@@ -459,7 +454,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
             let Some(path) = argv.get(3) else {
                 return ToolAnswer::said(2, BG_USAGE);
             };
-            let Some(member) = app.member(session) else {
+            let Some(member) = app.anyone(session) else {
                 return ToolAnswer::code(1);
             };
             let command = JobCommand::SetLog {
@@ -477,7 +472,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
         ("on" | "off", _) => {
             // The agent's own word for what it left running: shown with it while it rests,
             // and through its turns, until it takes the word back.
-            let Some(member) = app.member(session) else {
+            let Some(member) = app.anyone(session) else {
                 return ToolAnswer::said(
                     1,
                     format!("agent_bg: no agent for session {}", quoted(session)),

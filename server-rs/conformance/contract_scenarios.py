@@ -2299,6 +2299,16 @@ SCENARIOS.append({
          'raw': {'bytes': '["idle"]', 'content_type': 'application/json'}},
         get(f'{NO_RUN}/no-such-thing', 'something of a run that there is not'),
         janitor('enabled', {'expected_revision': 3, 'enabled': False}, 'paused', session=SWEEPER),
+        # A janitor is looked at and not spoken to: a control of a chat that names one is refused in a
+        # word and in words, and so is its removal as an agent. Its conversation is read like any.
+        post('/send', {'session': SWEEPER, 'text': 'hello', 'client_msg_id': 'synthetic-to-a-janitor',
+                       'synthesize_audio': False}, 'a message to a janitor'),
+        post('/stop', {'session': SWEEPER}, 'a stop of a janitor'),
+        post('/select', {'session': SWEEPER}, 'a janitor chosen as the one that is open'),
+        post('/agent-rename', {'session': SWEEPER, 'name': 'Another Name'}, 'a janitor renamed'),
+        post('/agent-archive', {'session': SWEEPER, 'archived': True}, 'a janitor put away as an agent'),
+        gone(f'/agents/{SWEEPER}', 'a janitor removed as an agent'),
+        get(f'/log?session={SWEEPER}', "a janitor's conversation"),
         janitor('release', {'expected_revision': 4}, 'the scheduled task let go', session=SWEEPER),
         gone(f'/agents/{SWEEPER}', 'the agent of the scheduled task removed'),
     ],

@@ -387,8 +387,106 @@ pub fn router(app: App) -> Router {
         // Python Host answers it: to whoever may ask at all.
         .fallback(no_route)
         .method_not_allowed_fallback(no_route)
+        .layer(middleware::from_fn_with_state(app.clone(), looked_at_only))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .with_state(app)
+}
+
+/// The controls of a chat, by their paths: what is asked of an agent a person speaks to.
+const CHAT_CONTROLS: [&str; 18] = [
+    "/send",
+    "/stop",
+    "/select",
+    "/focus",
+    "/compact",
+    "/repair-slot",
+    "/agent-voice",
+    "/agent-llm",
+    "/agent-mcp",
+    "/agent-heartbeat",
+    "/agent-archive",
+    "/agent-dreaming",
+    "/agent-mute",
+    "/agent-rename",
+    "/agent-assign",
+    "/agent-portraits",
+    "/agent-portrait-generation",
+    "/agent-schedules",
+];
+/// How much of a control's body is read to see whom it names.
+const CONTROL_MOST: usize = 2 * 1024 * 1024;
+
+/// A janitor is looked at and not spoken to: a control of a chat that names one, by its
+/// session or its id, is refused in the Python Host's word and words, whatever it asks
+/// (`server.py`, `_reject_janitor_control`). So is the removal of a janitor as an agent.
+/// Anything else goes on as it came.
+async fn looked_at_only(State(app): State<App>, request: Request, next: Next) -> Response {
+    let refused = || {
+        let told = json!({
+            "error": "Janitors are inspection-only. Use their Pause or Configure controls.",
+            "code": "janitor_inspection_only",
+        });
+        (StatusCode::FORBIDDEN, Json(told)).into_response()
+    };
+    let is_janitor = |named: &str| {
+        let named = python::strip(named);
+        !named.is_empty() && app.fleet.directory().janitor(named).is_some()
+    };
+    let path = request.uri().path().to_string();
+    if request.method() == Method::DELETE
+        && let Some(named) = path.strip_prefix("/agents/")
+    {
+        let named = percent_decoded(named);
+        if is_janitor(named.trim_matches('/')) {
+            return refused();
+        }
+        return next.run(request).await;
+    }
+    if request.method() != Method::POST || !CHAT_CONTROLS.contains(&path.as_str()) {
+        return next.run(request).await;
+    }
+    let (parts, body) = request.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, CONTROL_MOST).await else {
+        return ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "request too large").into_response();
+    };
+    let said: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    // The agent it names: its `session`, or where it names none, the one it replaces.
+    let text = |key: &str| {
+        said.get(key)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+    };
+    if text("session")
+        .or_else(|| text("replace_sid"))
+        .is_some_and(is_janitor)
+    {
+        return refused();
+    }
+    let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+    next.run(request).await
+}
+
+/// A part of a path as it was meant: `%41` is `A`. What is no such sign stays as it is.
+fn percent_decoded(part: &str) -> String {
+    let bytes = part.as_bytes();
+    let (mut out, mut at) = (Vec::with_capacity(bytes.len()), 0);
+    while at < bytes.len() {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|hex| std::str::from_utf8(hex).ok());
+        let sign = hex.and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match (bytes[at], sign) {
+            (b'%', Some(sign)) => {
+                out.push(sign);
+                at += 3;
+            }
+            (other, _) => {
+                out.push(other);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 async fn no_route() -> ApiError {
@@ -1400,10 +1498,8 @@ fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
             .and_then(Value::as_str)?,
         _ => return None,
     };
-    let known = directory
-        .members
-        .iter()
-        .find(|member| member.record.session == name || member.record.agent_id == name);
+    // An agent of the roster, or a janitor: a janitor's own turn may write to an agent.
+    let known = directory.anyone(name);
     Some(match known {
         Some(member) => Sender {
             agent_id: member.record.agent_id.clone(),
