@@ -21067,3 +21067,297 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     wait_for("the fifth turn to be over", || over(&host, "u-5"));
     assert_eq!(starts()[4]["given"], "conv-2");
 }
+
+#[test]
+fn what_codex_wrote_of_its_accounts_limits_is_shown_and_its_limits_are_told() {
+    let place = Place::new("codex-limits");
+    let own = place.root.join("codex-own");
+    std::fs::create_dir_all(&own).unwrap();
+    // A login of a made-up account, as Codex keeps one.
+    let login = |account: &str, token: &str| {
+        let tokens = json!({ "account_id": account, "access_token": token });
+        let kept = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+        std::fs::write(own.join("auth.json"), kept.to_string()).unwrap();
+    };
+    login("an-account", "a-token");
+    // A stand-in for Codex that writes its conversation's record where Codex writes it, and
+    // in it, with a count of tokens, how much of its account's windows is used: what the
+    // test wrote down for it to say.
+    let codex = place.root.join("codex-says-its-limits");
+    let script = r#"#!/usr/bin/env python3
+import datetime, json, os, pathlib, sys
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+sys.stdin.read()
+args = sys.argv[1:]
+thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-0000000011e5"
+own = pathlib.Path(os.environ["CODEX_HOME"])
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+rollout = own / "sessions" / "2030" / "03" / "17" / f"rollout-2030-03-17T17-46-40-{thread}.jsonl"
+rollout.parent.mkdir(parents=True, exist_ok=True)
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+count = {"type": "token_count", "info": None, "rate_limits": json.loads((own / "limits.json").read_text())}
+with rollout.open("a") as out:
+    out.write(json.dumps({"timestamp": now, "ordinal": 1, "type": "event_msg", "payload": count}) + "\n")
+say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": "done"})
+say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
+"#;
+    program(&codex, script);
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CODEX_HOME", own.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let limits_told = |heard: &Arc<Mutex<Vec<Value>>>| -> Vec<Value> {
+        let all = heard.lock().unwrap();
+        let limits = all.iter().filter(|event| event["type"] == "provider-limit");
+        limits.cloned().collect()
+    };
+    // The windows as Codex writes them: the five hours begin anew in four hours, the week in
+    // four days.
+    let seconds = now_ms() / 1000;
+    let says_until = |five: f64, week: f64, five_resets: i64| {
+        let window = |used: f64, minutes: i64, resets: i64| json!({ "used_percent": used, "window_minutes": minutes, "resets_at": resets });
+        let record = json!({
+            "limit_id": "codex", "limit_name": null,
+            "primary": window(five, 300, five_resets),
+            "secondary": window(week, 10_080, seconds + 96 * 3_600),
+            "credits": { "has_credits": false, "unlimited": false, "balance": null },
+            "individual_limit": null, "spend_control_reached": null, "plan_type": "pro",
+            "rate_limit_reached_type": null,
+        });
+        std::fs::write(own.join("limits.json"), record.to_string()).unwrap();
+    };
+    let says = |five: f64, week: f64| says_until(five, week, seconds + 4 * 3_600);
+    let of_codex = |host: &Host| host.get("/backend-usage")["providers"]["codex"].clone();
+    let row = |host: &Host| -> Value {
+        let told = host.get("/backend-usage");
+        let rows = told["backends"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["backend"] == "codex");
+        row.cloned().unwrap()
+    };
+
+    // Before any turn nothing was seen of the account, and it is said so; the tool's row is
+    // what this Host counted itself.
+    let heard = host.listen();
+    let nothing = of_codex(&host);
+    let unavailable = json!({
+        "kind": "unavailable",
+        "detail": "No structured usage evidence for this provider",
+    });
+    assert_eq!(nothing["source"], unavailable);
+    assert_eq!(nothing["windows"], json!([]));
+    assert_eq!(row(&host)["source"], "clarp-turn-accounting");
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+
+    // A turn: what Codex wrote of its account meanwhile is shown, window for window.
+    says(37.5, 82.0);
+    host.send(&agent, "one", "u-1");
+    let windows = |host: &Host| of_codex(host)["windows"].as_array().cloned().unwrap();
+    wait_for("the windows to be shown", || windows(&host).len() == 2);
+    let told = host.get("/backend-usage");
+    let shown = &told["providers"]["codex"];
+    let instance = format!("{}:codex", told["computer_id"].as_str().unwrap());
+    assert_eq!(shown["provider_instance_id"], instance.as_str());
+    assert_eq!(shown["freshness"], "fresh");
+    let from = json!({ "kind": "provider_reported", "detail": "rollout/token_count" });
+    assert_eq!(shown["source"], from);
+    let (five, week) = (&shown["windows"][0], &shown["windows"][1]);
+    assert_eq!(
+        (
+            &five["kind"],
+            &five["used_percentage"],
+            &five["freshness"],
+            &five["limit"]["state"]
+        ),
+        (
+            &json!("five_hour"),
+            &json!(37.5),
+            &json!("fresh"),
+            &json!("normal")
+        ),
+        "{five}"
+    );
+    assert_eq!(
+        (
+            &week["kind"],
+            &week["used_percentage"],
+            &week["scope"],
+            &week["unit"]
+        ),
+        (
+            &json!("seven_day"),
+            &json!(82.0),
+            &json!("account"),
+            &json!("percent")
+        ),
+        "{week}"
+    );
+    let resets = five["resets_at"].as_str().unwrap();
+    assert!(resets.len() == 20 && resets.ends_with('Z'), "{resets}");
+    // The tool's row says the same, and beside it what this Host's own turns used.
+    wait_for("the turn to be counted", || {
+        row(&host)["totals"]["five_hour"]["turns"] == 1
+    });
+    let of_tool = row(&host);
+    assert_eq!(
+        (
+            &of_tool["used_percentage"],
+            &of_tool["source"],
+            &of_tool["freshness"]
+        ),
+        (&json!(37.5), &json!("codex-rollout"), &json!("fresh")),
+        "{of_tool}"
+    );
+    assert_eq!(of_tool["windows"]["secondary"]["used_percentage"], 82.0);
+    assert_eq!(limits_told(&heard), Vec::<Value>::new());
+
+    // Four fifths of the five hours are used: a warning is told, and shown with the window.
+    says(85.0, 82.5);
+    host.send(&agent, "two", "u-2");
+    wait_for("the warning to be told", || limits_told(&heard).len() == 1);
+    let warning = limits_told(&heard).remove(0);
+    assert_eq!(
+        (
+            &warning["kind"],
+            &warning["threshold_id"],
+            &warning["used_percentage"]
+        ),
+        (
+            &json!("warning"),
+            &json!("five_hour_80_percent"),
+            &json!(85.0)
+        ),
+        "{warning}"
+    );
+    assert_eq!(warning["provider_instance_id"], instance.as_str());
+    assert!(warning["event_id"].as_u64().is_some(), "{warning}");
+    let five = windows(&host).remove(0);
+    let stands = json!({
+        "state": "warning",
+        "episode_id": warning["episode_id"],
+        "provider_limit_event_id": warning["provider_limit_event_id"],
+    });
+    assert_eq!(five["limit"], stands);
+    assert_eq!(five["window_id"], warning["window_id"]);
+
+    // They are used up: a hard limit, of the same stretch.
+    says(100.0, 83.0);
+    host.send(&agent, "three", "u-3");
+    wait_for("the hard limit to be told", || {
+        limits_told(&heard).len() == 2
+    });
+    let hard = limits_told(&heard).remove(1);
+    assert_eq!(
+        (&hard["kind"], &hard["threshold_id"], &hard["episode_id"]),
+        (&json!("hard_limit"), &Value::Null, &warning["episode_id"]),
+        "{hard}"
+    );
+
+    // The Host is killed and started: what was kept is shown as it was.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    let five = windows(&host).remove(0);
+    assert_eq!(
+        (
+            &five["used_percentage"],
+            &five["limit"]["state"],
+            &five["limit"]["episode_id"]
+        ),
+        (&json!(100.0), &json!("hard_limit"), &warning["episode_id"]),
+        "{five}"
+    );
+
+    // Another account is logged in. Nothing was seen of it yet, and nothing of the account
+    // before is shown as its own.
+    login("another-account", "another-token");
+    assert_eq!(of_codex(&host)["windows"], json!([]));
+    // With its first record, what stood open of the account before is told as no longer
+    // known: and that is all that was told since the Host came back (the last turn of the
+    // agent, which a Host that starts again is told once more, told nothing again).
+    says(20.0, 5.0);
+    host.send(&agent, "four", "u-4");
+    wait_for("the other account's windows to be shown", || {
+        windows(&host)
+            .first()
+            .is_some_and(|five| five["used_percentage"] == 20.0)
+    });
+    let told = limits_told(&heard);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(
+        (
+            &told[0]["kind"],
+            &told[0]["source"]["kind"],
+            &told[0]["episode_id"]
+        ),
+        (
+            &json!("unknown"),
+            &json!("auth_generation_rotated"),
+            &warning["episode_id"]
+        ),
+        "{told:?}"
+    );
+    let five = windows(&host).remove(0);
+    assert_eq!(five["limit"]["state"], "normal");
+    assert_ne!(five["window_id"], warning["window_id"]);
+
+    // A warning whose window begins anew in a moment. The app that asks next is told in its
+    // answer that the limit is no longer known, and so are the apps that listen: once.
+    let soon = now_ms() / 1000 + 2;
+    says_until(90.0, 5.0, soon);
+    host.send(&agent, "five", "u-5");
+    wait_for("the other account's warning to be told", || {
+        limits_told(&heard).len() == 2
+    });
+    assert_eq!(limits_told(&heard)[1]["kind"], "warning");
+    wait_for("the window to begin anew", || now_ms() / 1000 > soon);
+    let asked = host.get("/backend-usage");
+    let over = asked["limit_events"].as_array().unwrap();
+    assert_eq!(over.len(), 1, "{asked}");
+    assert_eq!(
+        (
+            &over[0]["kind"],
+            &over[0]["source"]["kind"],
+            &over[0]["freshness"]
+        ),
+        (&json!("unknown"), &json!("reset_passed"), &json!("stale")),
+        "{asked}"
+    );
+    wait_for("the apps that listen to be told of it too", || {
+        limits_told(&heard).len() == 3
+    });
+    let heard_of_it = limits_told(&heard).remove(2);
+    assert_eq!(
+        heard_of_it["provider_limit_event_id"],
+        over[0]["provider_limit_event_id"]
+    );
+    assert_eq!(host.get("/backend-usage")["limit_events"], json!([]));
+    assert_eq!(limits_told(&heard).len(), 3);
+
+    // Neither the account nor the token is anywhere in what the Host keeps.
+    let mut kept = Vec::new();
+    let mut dirs = vec![place.root.join("data")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                kept.extend(std::fs::read(&path).unwrap_or_default());
+            }
+        }
+    }
+    let kept = String::from_utf8_lossy(&kept);
+    assert!(
+        kept.contains("codex-rollout") || kept.contains("five_hour"),
+        "nothing was kept"
+    );
+    for secret in ["an-account", "a-token", "another-account", "another-token"] {
+        assert!(!kept.contains(secret), "{secret} is in what the Host keeps");
+    }
+}

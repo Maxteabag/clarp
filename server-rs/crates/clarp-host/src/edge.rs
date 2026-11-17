@@ -199,6 +199,8 @@ pub struct App {
     pub keeper: Arc<crate::keeper::Desk>,
     /// The audio bookkeeper: what was seen of clips, written down or not yet.
     pub audio: Arc<crate::audio::Desk>,
+    /// What the tools said is left of their accounts.
+    pub limits: Arc<crate::quota::Desk>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to

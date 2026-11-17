@@ -139,7 +139,14 @@ async fn serve(config: Config) -> Result<(), String> {
     for pool in &pools {
         pool.attach(fleet.clone());
     }
-    tokio::spawn(clarp_host::usage::keep(fleet.clone(), used, clock.clone()));
+    let limits: Arc<clarp_host::quota::Desk> = Arc::default();
+    let counts = clarp_host::usage::Works {
+        clock: clock.clone(),
+        hub: hub.clone(),
+        limits: limits.clone(),
+        server_id: server_id.clone(),
+    };
+    tokio::spawn(clarp_host::usage::keep(fleet.clone(), used, counts));
     let desks = Arc::new(Mutex::new(Presence::new()));
     // The relay tells what paces the chip when it is asked too much, by an alert as well.
     let (limited, is_limited) = tokio::sync::mpsc::unbounded_channel();
@@ -189,6 +196,7 @@ async fn serve(config: Config) -> Result<(), String> {
         explain: Arc::default(),
         keeper: Arc::default(),
         audio: Arc::default(),
+        limits,
         models: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),

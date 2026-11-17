@@ -9,9 +9,10 @@
 //!
 //! `GET /backend-usage` answers with the sums ([`clarp_kernel::usage`], the Python Host's
 //! rule) for each tool this Host runs. That is what was spent through this Host. How much
-//! of an account is left is another thing, which a provider would have to be asked with
-//! the account's own login: this Host asks none, and says so in the part of the answer
-//! that is for it.
+//! of an account is left is another thing. This Host asks no provider for it; where a tool
+//! says it of itself (Codex, in its conversation's record, read when a turn of it ends:
+//! [`crate::quota`]), what it said is shown beside the sums, and for a tool that says
+//! nothing the answer says that nobody was asked.
 
 use std::sync::Arc;
 
@@ -25,6 +26,8 @@ use tokio::sync::mpsc;
 
 use crate::edge::App;
 use crate::fleet::FleetHandle;
+use crate::hub::Hub;
+use crate::quota;
 
 /// The kind of thing a turn's use is, among what is left with the fleet.
 const KIND: &str = "used";
@@ -36,8 +39,15 @@ const LOOKED_OVER_EVERY: u32 = 200;
 const NOT_ASKED: &str =
     "This Host counts what its own turns used and asks no provider how much of an account is left";
 
-/// What is on its way into the tally: the name a turn's use is kept under, and the use.
-type Told = (String, Used);
+/// What is on its way to whoever keeps count.
+#[derive(Debug, PartialEq)]
+pub enum Told {
+    /// What a turn used, and the name it is kept under.
+    Used(String, Used),
+    /// A turn of a tool ended, in this session of the tool's own: what the tool wrote of
+    /// its account meanwhile is to be read.
+    Over { tool: String, session: String },
+}
 
 /// The way to the tally, for an agent's thread.
 #[derive(Clone)]
@@ -56,8 +66,25 @@ impl Tally {
     pub fn ended(&self, agent_id: &str, turn: u64, used: Used) {
         // Named by when it ended first, so that the oldest are found first.
         let name = format!("{:013}-{agent_id}-{turn}", used.at_ms.max(0));
-        let _ = self.tx.send((name, used));
+        let _ = self.tx.send(Told::Used(name, used));
     }
+
+    /// A turn of a tool ended in a session of the tool's own, whatever became of the turn:
+    /// a tool that writes what is left of its account wrote it there. Does not wait.
+    pub fn over(&self, tool: &str, session: &str) {
+        let (tool, session) = (tool.to_string(), session.to_string());
+        let _ = self.tx.send(Told::Over { tool, session });
+    }
+}
+
+/// What the one that keeps count works with, beside the fleet.
+pub struct Works {
+    pub clock: Arc<dyn Clock + Send + Sync>,
+    pub hub: Arc<Hub>,
+    /// What the tools said is left of their accounts.
+    pub limits: Arc<quota::Desk>,
+    /// Which Host this is.
+    pub server_id: String,
 }
 
 /// The name under which everything is kept that ended before this moment.
@@ -66,15 +93,28 @@ fn before(at_ms: i64) -> String {
 }
 
 /// Keeps what turns used with the fleet as it is told, and now and then lets go of what
-/// ended longer ago than the longest window. Ends when no agent can tell any more.
-pub async fn keep(
-    fleet: FleetHandle,
-    mut told: mpsc::UnboundedReceiver<Told>,
-    clock: Arc<dyn Clock + Send + Sync>,
-) {
+/// ended longer ago than the longest window; and has what a tool wrote of its account read
+/// when a turn of the tool is over. Ends when no agent can tell any more.
+pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, works: Works) {
+    let clock = &works.clock;
+    let home = crate::config::home();
     // The first thing told is followed by a look for what is too old.
     let mut since_looked = LOOKED_OVER_EVERY;
-    while let Some((name, used)) = told.recv().await {
+    while let Some(told) = told.recv().await {
+        let (name, used) = match told {
+            Told::Used(name, used) => (name, used),
+            Told::Over { tool, session } => {
+                let with = quota::With {
+                    fleet: &fleet,
+                    hub: &works.hub,
+                    server_id: &works.server_id,
+                    home: &home,
+                    now_ms: clock.now_ms(),
+                };
+                works.limits.turn_ended(with, &tool, &session).await;
+                continue;
+            }
+        };
         let Ok(written) = serde_json::to_vec(&used) else {
             continue;
         };
@@ -96,9 +136,19 @@ pub async fn keep(
 }
 
 /// `GET /backend-usage`: what this Host's turns used on each tool, over the last five hours
-/// and the last seven days, in the Python Host's fields.
+/// and the last seven days, and what a tool said is left of its account, in the Python
+/// Host's fields.
 async fn told(State(app): State<App>) -> Json<Value> {
     let now = app.clock.now_ms();
+    let home = crate::config::home();
+    let with = quota::With {
+        fleet: &app.fleet,
+        hub: &app.hub,
+        server_id: &app.server_id,
+        home: &home,
+        now_ms: now,
+    };
+    let left = app.limits.asked(with, quota::CODEX).await;
     let kept = app.fleet.kept_all(KIND).await.unwrap_or_default();
     let kept: Vec<Used> = kept
         .iter()
@@ -111,18 +161,33 @@ async fn told(State(app): State<App>) -> Json<Value> {
             let ended_at = totals["last_turn_at"]
                 .as_i64()
                 .map(crate::wire::to_the_second);
-            usage::row(tool, &totals, now, ended_at)
+            let counted = usage::row(tool, &totals, now, ended_at);
+            // A tool that said what is left of its account: that is its row, with the sums
+            // of this Host's own counting beside it.
+            let said =
+                Some(&left.row).filter(|row| *tool == quota::CODEX && row["source"] != "none");
+            match said.cloned() {
+                Some(mut row) => {
+                    row["totals"] = counted["totals"].clone();
+                    row
+                }
+                None => counted,
+            }
         })
         .collect();
     let providers: Map<String, Value> = TOOLS
         .iter()
         .map(|tool| {
-            let provider = json!({
-                "freshness": "unknown", "observed_at": null, "provider_id": tool,
-                "provider_instance_id": format!("{}:{tool}", app.server_id),
-                "source": { "detail": NOT_ASKED, "kind": "unavailable" },
-                "windows": [],
-            });
+            let provider = if *tool == quota::CODEX {
+                left.provider.clone()
+            } else {
+                json!({
+                    "freshness": "unknown", "observed_at": null, "provider_id": tool,
+                    "provider_instance_id": format!("{}:{tool}", app.server_id),
+                    "source": { "detail": NOT_ASKED, "kind": "unavailable" },
+                    "windows": [],
+                })
+            };
             ((*tool).to_string(), provider)
         })
         .collect();
@@ -130,7 +195,7 @@ async fn told(State(app): State<App>) -> Json<Value> {
         "backends": backends,
         "capability_catalog_schema_version": 2,
         "computer_id": app.server_id,
-        "limit_events": [],
+        "limit_events": left.events,
         "observed_at": crate::wire::iso(now),
         "providers": providers,
         "schema_version": 1,
@@ -176,11 +241,21 @@ mod tests {
         let used = Used::said("claude", 1_800_000_000_123, Some(5), Some(7), None).unwrap();
         tally.ended("a1b2", 9, used.clone());
         tally.ended("a1b2", 9, used);
-        let (first, _) = told.try_recv().unwrap();
-        let (again, _) = told.try_recv().unwrap();
+        let mut named = || match told.try_recv().unwrap() {
+            Told::Used(name, _) => name,
+            other => panic!("{other:?}"),
+        };
+        let (first, again) = (named(), named());
         assert_eq!(first, "1800000000123-a1b2-9");
         assert_eq!(first, again, "told twice, it is one name: counted once");
         assert!(before(1_800_000_000_124) > first && before(1_800_000_000_123) < first);
         assert_eq!(before(-5), "0000000000000");
+        // And a turn that is over says in which session of its tool it was.
+        tally.over("codex", "a-thread");
+        let over = Told::Over {
+            tool: "codex".to_string(),
+            session: "a-thread".to_string(),
+        };
+        assert_eq!(told.try_recv().unwrap(), over);
     }
 }

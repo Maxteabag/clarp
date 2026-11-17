@@ -51,7 +51,7 @@ fn projects(home: &Path) -> PathBuf {
 /// Where Codex keeps what is its own: where `CODEX_HOME` says, as Codex itself reads it,
 /// and `.codex` at home otherwise. Its rollouts are under `sessions` there, and the index of
 /// its threads is `state_5.sqlite`.
-fn codex_home(home: &Path) -> PathBuf {
+pub(crate) fn codex_home(home: &Path) -> PathBuf {
     let said = std::env::var_os("CODEX_HOME").filter(|said| !said.is_empty());
     said.map_or_else(|| home.join(".codex"), PathBuf::from)
 }
