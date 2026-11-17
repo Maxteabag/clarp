@@ -11,6 +11,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Callable
 
@@ -293,17 +294,18 @@ def _record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None)
     if is_interrupted is None:
         latest = agents_db.latest_state(agent_id) or {}
         is_interrupted = latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest)
-    with _STATE_LOCK:
-        state = _state_for_locked(agent_id)
+    threshold = 0 if is_interrupted else _dormant_after_noops()
+    def failed(state):
         state.noop_streak += 1
-        if not is_interrupted:
-            dormant_after = _dormant_after_noops()
-            if dormant_after > 0 and state.noop_streak >= dormant_after:
-                state.dormant = True
-        snapshot = _state_snapshot(state)
-    _persist_state_snapshot(agent_id, snapshot)
-    log("heartbeatNoop",
-        f"agent={agent_id} streak={snapshot.noop_streak} dormant={snapshot.dormant}")
+        if threshold > 0 and state.noop_streak >= threshold:
+            state.dormant = True
+    stamp = now_ms()
+    snapshot, _changed = _change_state(
+        agent_id, lambda database: _increment_noop(database, agent_id, threshold, stamp),
+        failed=failed)
+    if snapshot is not None:
+        log("heartbeatNoop",
+            f"agent={agent_id} streak={snapshot.noop_streak} dormant={snapshot.dormant}")
 
 
 def record_heartbeat_activity(agent_id: str) -> None:
@@ -313,11 +315,9 @@ def record_heartbeat_activity(agent_id: str) -> None:
 def _record_heartbeat_activity(agent_id: str) -> None:
     if not agent_id:
         return
-    with _STATE_LOCK:
-        state = _state_for_locked(agent_id)
-        _reset_backoff_locked(state)
-        snapshot = _state_snapshot(state)
-    _persist_state_snapshot(agent_id, snapshot)
+    stamp = now_ms()
+    _change_state(agent_id, lambda database: _clear_backoff(database, agent_id, stamp),
+                  failed=_reset_backoff_locked)
 
 
 KEY_ACCOUNTING_ACTIVATION = "heartbeat.accounting_activation_ms"
@@ -373,24 +373,17 @@ def record_ended_turn(agent_id: str, trace_id: str, last_answer: str, *,
         conflict = None
         # SQLite may wait for another writer. Status readers share the cache
         # mutex, so no writer admission or transaction runs under that mutex.
-        database.execute("BEGIN IMMEDIATE")
-        try:
+        snapshot = None
+        with _state_transaction() as database:
             inserted = database.execute(
                 "INSERT OR IGNORE INTO heartbeat_accounting(accounting_key,agent_id,outcome,counted_at) "
                 "VALUES(?,?,?,?)",
                 (key, agent_id, outcome, now_ms())).rowcount == 1
             if inserted and outcome != "neither":
-                threshold = _dormant_after_noops()
-                database.execute(
-                    "INSERT INTO heartbeat_state(agent_id,last_started,noop_streak,dormant,"
-                    "last_wake_signal_ms,updated_at) VALUES(?,0,?,?,0,?) "
-                    "ON CONFLICT(agent_id) DO UPDATE SET "
-                    "noop_streak=CASE WHEN ?='noop' THEN noop_streak+1 ELSE 0 END,"
-                    "dormant=CASE WHEN ?='activity' THEN 0 WHEN ?>0 AND noop_streak+1>=? "
-                    "THEN 1 ELSE dormant END,updated_at=excluded.updated_at",
-                    (agent_id, 1 if outcome == "noop" else 0,
-                     int(outcome == "noop" and threshold == 1), now_ms(),
-                     outcome, outcome, threshold, threshold))
+                if outcome == "noop":
+                    snapshot = _increment_noop(database, agent_id, _dormant_after_noops(), now_ms())
+                else:
+                    snapshot = _clear_backoff(database, agent_id, now_ms())
             elif not inserted:
                 first = database.execute("SELECT outcome FROM heartbeat_accounting "
                                          "WHERE accounting_key=?", (key,)).fetchone()["outcome"]
@@ -401,24 +394,7 @@ def record_ended_turn(agent_id: str, trace_id: str, last_answer: str, *,
                         (f"heartbeat-conflict:{key}", agent_id, "conflict", now_ms()))
                     if logged.rowcount == 1:
                         conflict = f"agent={agent_id} turn={trace_id} first={first} later={outcome}"
-            snapshot = database.execute("SELECT noop_streak,dormant FROM heartbeat_state "
-                                        "WHERE agent_id=?", (agent_id,)).fetchone()
-            database.execute("COMMIT")
-        except BaseException:
-            if database.in_transaction:
-                database.execute("ROLLBACK")
-            raise
-        with _STATE_LOCK:
-            cached = _STATE_BY_AGENT.get(agent_id)
-            if cached is not None:
-                # Another counter can commit and publish before this one gets
-                # the mutex. Re-read the committed row instead of publishing
-                # our older transaction's snapshot over that newer cache.
-                latest = database.execute("SELECT noop_streak,dormant FROM heartbeat_state "
-                                          "WHERE agent_id=?", (agent_id,)).fetchone()
-                if latest is not None:
-                    cached.noop_streak = int(latest["noop_streak"])
-                    cached.dormant = bool(latest["dormant"])
+        _publish_state(database, agent_id)
         if inserted and outcome == "noop":
             log("heartbeatNoop", f"agent={agent_id} streak={int(snapshot['noop_streak'])} "
                 f"dormant={bool(snapshot['dormant'])}")
@@ -506,12 +482,7 @@ def _load_persisted_state(agent_id: str) -> _HeartbeatState:
         return _HeartbeatState()
     if row is None:
         return _HeartbeatState()
-    return _HeartbeatState(
-        last_started=float(row["last_started"] or 0.0),
-        noop_streak=int(row["noop_streak"] or 0),
-        dormant=bool(row["dormant"]),
-        last_wake_signal_ms=int(row["last_wake_signal_ms"] or 0),
-    )
+    return _state_from_row(row)
 
 
 def _state_snapshot(state: _HeartbeatState) -> _HeartbeatState:
@@ -524,32 +495,111 @@ def _state_snapshot(state: _HeartbeatState) -> _HeartbeatState:
     )
 
 
-def _persist_state_snapshot(agent_id: str, state: _HeartbeatState) -> None:
-    if not agent_id:
-        return
+@contextmanager
+def _state_transaction():
+    """A state mutation owns one short transaction, outside the cache mutex."""
+    database = conn()
+    if database.in_transaction:
+        raise RuntimeError("heartbeat state mutation requires its own transaction")
+    database.execute("BEGIN IMMEDIATE")
     try:
-        conn().execute(
-            """INSERT INTO heartbeat_state (
-                   agent_id, last_started, noop_streak, dormant,
-                   last_wake_signal_ms, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(agent_id) DO UPDATE SET
-                   last_started = excluded.last_started,
-                   noop_streak = excluded.noop_streak,
-                   dormant = excluded.dormant,
-                   last_wake_signal_ms = excluded.last_wake_signal_ms,
-                   updated_at = excluded.updated_at""",
-            (
-                agent_id,
-                float(state.last_started or 0.0),
-                int(state.noop_streak),
-                1 if state.dormant else 0,
-                int(state.last_wake_signal_ms or 0),
-                now_ms(),
-            ),
-        )
-    except Exception as e:  # noqa: BLE001
-        log_exception("heartbeatStatePersistFail", e, detail=agent_id)
+        yield database
+        database.execute("COMMIT")
+    except BaseException:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+
+
+def _state_from_row(row) -> _HeartbeatState:
+    return _HeartbeatState(
+        last_started=float(row["last_started"] or 0.0),
+        noop_streak=int(row["noop_streak"] or 0),
+        dormant=bool(row["dormant"]),
+        last_wake_signal_ms=int(row["last_wake_signal_ms"] or 0))
+
+
+def _publish_state(database, agent_id: str, *, memory=None) -> None:
+    """Publish only a fresh committed row; preserve all memory-only fields.
+
+    A second writer can commit and publish while the first is still flushing
+    diagnostics. Reading under the mutex makes every publication converge on
+    that latest row, rather than writing an older transaction snapshot back.
+    Run start also needs a cache entry for its memory-only flood history.
+    """
+    with _STATE_LOCK:
+        cached = _STATE_BY_AGENT.get(agent_id)
+        if cached is None and memory is None:
+            return
+        row = database.execute(
+            "SELECT last_started,noop_streak,dormant,last_wake_signal_ms "
+            "FROM heartbeat_state WHERE agent_id=?", (agent_id,)).fetchone()
+        if row is not None:
+            fresh = _state_from_row(row)
+            if cached is None:
+                cached = fresh
+                _STATE_BY_AGENT[agent_id] = cached
+            else:
+                cached.last_started = fresh.last_started
+                cached.noop_streak = fresh.noop_streak
+                cached.dormant = fresh.dormant
+                cached.last_wake_signal_ms = fresh.last_wake_signal_ms
+        if memory is not None and cached is not None:
+            memory(cached)
+
+
+def _failed_state_memory(agent_id: str, failed, memory):
+    # Main changes its cache even if persistence fails. Load a missing cache
+    # outside the mutex: even failure recovery must never admit a DB writer
+    # while holding the status readers' lock.
+    with _STATE_LOCK:
+        missing = agent_id not in _STATE_BY_AGENT
+    initial = _load_persisted_state(agent_id) if missing else None
+    with _STATE_LOCK:
+        state = _STATE_BY_AGENT.setdefault(agent_id, initial or _HeartbeatState())
+        changed = failed(state) is not False
+        if changed and memory is not None:
+            memory(state)
+        return _state_snapshot(state), changed
+
+
+def _change_state(agent_id: str, write, *, failed, memory=None):
+    try:
+        with _state_transaction() as database:
+            row = write(database)
+    except Exception as exc:  # noqa: BLE001 - retain each old path's cache effect
+        snapshot, changed = _failed_state_memory(agent_id, failed, memory)
+        log_exception("heartbeatStatePersistFail", exc, detail=agent_id)
+        return snapshot, changed
+    try:
+        _publish_state(database, agent_id, memory=memory if row is not None else None)
+    except Exception as exc:  # noqa: BLE001 - committed data stands; never replay its arithmetic
+        log_exception("heartbeatStateLoadFail", exc, detail=agent_id)
+    return (_state_from_row(row) if row is not None else None), row is not None
+
+
+def _state_update(database, sql: str, parameters):
+    # Exhaust RETURNING before COMMIT. Only our fields are ever supplied from
+    # inputs; untouched persisted columns always stay in the database.
+    rows = database.execute(sql + " RETURNING last_started,noop_streak,dormant,last_wake_signal_ms",
+                            parameters).fetchall()
+    return rows[0] if rows else None
+
+
+def _increment_noop(database, agent_id: str, threshold: int, stamp: int):
+    return _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,noop_streak,dormant,updated_at) VALUES(?,?,?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET noop_streak=noop_streak+1,"
+        "dormant=CASE WHEN ?>0 AND noop_streak+1>=? THEN 1 ELSE dormant END,"
+        "updated_at=excluded.updated_at",
+        (agent_id, 1, int(threshold == 1), stamp, threshold, threshold))
+
+
+def _clear_backoff(database, agent_id: str, stamp: int):
+    return _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,updated_at) VALUES(?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET noop_streak=0,dormant=0,updated_at=excluded.updated_at",
+        (agent_id, stamp))
 
 
 @dataclass(frozen=True)
@@ -780,33 +830,44 @@ def _flooded(state: _HeartbeatState, now: float) -> bool:
 
 
 def _record_run_start(agent_id: str, now: float) -> None:
+    if not agent_id:
+        return
     latest_signal = _latest_wake_signal_ms(agent_id)
-    with _STATE_LOCK:
-        state = _state_for_locked(agent_id)
-        state.last_started = now
-        state.last_wake_signal_ms = max(state.last_wake_signal_ms, latest_signal)
+    def memory(state):
         state.recent_starts.append(now)
         if len(state.recent_starts) > FLOOD_THRESHOLD + 1:
             state.recent_starts = state.recent_starts[-(FLOOD_THRESHOLD + 1):]
-        snapshot = _state_snapshot(state)
-    _persist_state_snapshot(agent_id, snapshot)
+    def failed(state):
+        state.last_started = now
+        state.last_wake_signal_ms = max(state.last_wake_signal_ms, latest_signal)
+    stamp = now_ms()
+    _change_state(agent_id, lambda database: _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,last_started,last_wake_signal_ms,updated_at) VALUES(?,?,?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET last_started=excluded.last_started,"
+        "last_wake_signal_ms=MAX(last_wake_signal_ms,excluded.last_wake_signal_ms),"
+        "updated_at=excluded.updated_at", (agent_id, now, latest_signal, stamp)),
+        failed=failed, memory=memory)
 
 
 def _wake_from_external_signal(agent_id: str, state: _HeartbeatState) -> None:
     latest = _latest_wake_signal_ms(agent_id)
     if latest <= 0 or latest <= state.last_wake_signal_ms:
         return
-    snapshot: _HeartbeatState | None = None
-    with _STATE_LOCK:
-        current = _STATE_BY_AGENT.setdefault(agent_id, state)
+    def failed(current):
         if latest <= current.last_wake_signal_ms:
-            return
+            return False
         current.last_wake_signal_ms = latest
         _reset_backoff_locked(current)
-        snapshot = _state_snapshot(current)
-    if snapshot is not None:
-        _persist_state_snapshot(agent_id, snapshot)
-    log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
+        return True
+    stamp = now_ms()
+    _snapshot, changed = _change_state(agent_id, lambda database: _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,last_wake_signal_ms,updated_at) VALUES(?,?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET last_wake_signal_ms=excluded.last_wake_signal_ms,"
+        "noop_streak=0,dormant=0,updated_at=excluded.updated_at "
+        "WHERE last_wake_signal_ms<excluded.last_wake_signal_ms", (agent_id, latest, stamp)),
+        failed=failed)
+    if changed:
+        log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
 
 
 def _latest_wake_signal_ms(agent_id: str) -> int:
