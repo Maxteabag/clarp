@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 
 use crate::schedules;
 
+pub mod adaptive;
 pub mod book;
 pub mod schedule;
 
