@@ -32,7 +32,8 @@ use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
 use crate::{
-    Backend, ErrorTail, Interpreter, Launch, LiveReply, SESSION_ENV, Signal, TurnSpec, shorten,
+    Backend, ErrorTail, Interpreter, Launch, LiveReply, Question, SESSION_ENV, Signal, TurnSpec,
+    shorten,
 };
 
 /// How much of what a tool gave back is kept with the call.
@@ -135,6 +136,55 @@ impl Backend for Codex {
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(CodexInterpreter::new(turn, name))
+    }
+
+    /// One `codex exec` that is not kept (`--ephemeral`), may write only where it runs, and
+    /// starts where there is no repository too: as the Python Host asks Codex one question
+    /// (`backend/codex.py`, `routing_cmd`).
+    fn once(&self, question: &Question) -> Option<Launch> {
+        let mut args: Vec<String> = [
+            "exec",
+            "--json",
+            "--sandbox",
+            "workspace-write",
+            "--ephemeral",
+            "--skip-git-repo-check",
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        if let Some(model) = given(&question.model) {
+            args.push("--model".to_string());
+            args.push(model);
+        }
+        if let Some(effort) = given(&question.effort) {
+            args.push("-c".to_string());
+            args.push(setting("model_reasoning_effort", &effort));
+        }
+        args.push("-".to_string());
+        Some(Launch {
+            program: self.program.clone(),
+            args,
+            env: Vec::new(),
+            stdin: question.prompt.clone().into_bytes(),
+        })
+    }
+
+    /// The last message of the agent among what `codex exec --json` printed.
+    fn answered(&self, printed: &str) -> Result<String, String> {
+        let events = printed
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok());
+        let mut messages = events.filter_map(|event| {
+            let item = &event["item"];
+            let is_message = event["type"] == "item.completed" && item["type"] == "agent_message";
+            let text = item["text"].as_str().filter(|text| !text.trim().is_empty());
+            text.filter(|_| is_message).map(str::to_string)
+        });
+        messages
+            .next_back()
+            .ok_or_else(|| "codex returned no agent message".to_string())
     }
 }
 
@@ -961,5 +1011,63 @@ mod tests {
             .filter(|signal| matches!(signal, Signal::Tool(_)))
             .count();
         assert_eq!(tools, 2, "started and ended, each once");
+    }
+
+    #[test]
+    fn one_question_is_asked_of_codex_outside_every_conversation() {
+        let codex = Codex::with_program("/opt/codex");
+        let question = Question {
+            prompt: "Whom is this for?".to_string(),
+            model: Some("gpt-6-sol".to_string()),
+            effort: Some("low".to_string()),
+        };
+        let launch = codex.once(&question).unwrap();
+        assert_eq!(launch.program, "/opt/codex");
+        assert_eq!(
+            launch.args,
+            [
+                "exec",
+                "--json",
+                "--sandbox",
+                "workspace-write",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--model",
+                "gpt-6-sol",
+                "-c",
+                "model_reasoning_effort=\"low\"",
+                "-"
+            ]
+        );
+        // The question is read, not passed: no command line shows it.
+        assert_eq!(launch.stdin, b"Whom is this for?");
+        assert!(launch.env.is_empty());
+        // Without a model and an effort it is Codex's own choice of both.
+        let plain = Question {
+            prompt: "x".to_string(),
+            ..Question::default()
+        };
+        assert_eq!(codex.once(&plain).unwrap().args.len(), 7);
+
+        // The answer is the agent's last message. What is no message is passed over.
+        let printed = [
+            r#"{"type":"thread.started","thread_id":"t1"}"#,
+            "not json",
+            r#"{"type":"item.completed","item":{"type":"reasoning","text":"thinking"}}"#,
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"first"}}"#,
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"  "}}"#,
+            r#"{"type":"item.started","item":{"type":"agent_message","text":"not yet"}}"#,
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"{\"action\":\"route\"}"}}"#,
+            r#"{"type":"turn.completed"}"#,
+        ]
+        .join("\n");
+        assert_eq!(
+            codex.answered(&printed),
+            Ok("{\"action\":\"route\"}".to_string())
+        );
+        assert_eq!(
+            codex.answered("nothing of the kind"),
+            Err("codex returned no agent message".to_string())
+        );
     }
 }

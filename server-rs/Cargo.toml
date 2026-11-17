@@ -35,7 +35,7 @@ clarp-store-files = { path = "crates/clarp-store-files" }
 clarp-speech = { path = "crates/clarp-speech" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "process", "io-util"] }
 # The owner's own file of settings is written in TOML, by hand and by other programs. It is
 # read by a reader of TOML: a reader of lines would misread what it did not expect, and what
 # is misread there is a key or a voice.
