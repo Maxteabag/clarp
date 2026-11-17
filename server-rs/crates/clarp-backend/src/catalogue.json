@@ -1,0 +1,369 @@
+{
+ "claude": {
+  "shown": {
+   "label": "Claude",
+   "detail": "Runs on Claude Code.",
+   "badge": "BackendClaude",
+   "symbol": "sparkles",
+   "brand": {
+    "field_top": "#e08b6a",
+    "field_bottom": "#c9603d",
+    "tint_dark": "#d97757",
+    "tint_light": "#b85433"
+   },
+   "sort_index": 0,
+   "hidden": false,
+   "supports_fork": true,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": false,
+   "supports_compact": true,
+   "supports_mcp": true,
+   "supports_routing": true,
+   "supports_auth": true,
+   "supports_usage": true,
+   "login_kind": "cli",
+   "effort_ui": "picker",
+   "effort_help": ""
+  },
+  "program": "claude",
+  "efforts": [
+   "low",
+   "medium",
+   "high",
+   "xhigh",
+   "max"
+  ],
+  "effort_scope": "model",
+  "models": [
+   {
+    "id": "fable",
+    "label": "Fable",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "opus",
+    "label": "Opus",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "sonnet",
+    "label": "Sonnet",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "haiku",
+    "label": "Haiku",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-fable-5-2",
+    "label": "Claude Fable 5.2",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-fable-5-1",
+    "label": "Claude Fable 5.1",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-opus-5-5",
+    "label": "Claude Opus 5.5",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-opus-5",
+    "label": "Claude Opus 5",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-sonnet-5-5",
+    "label": "Claude Sonnet 5.5",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-sonnet-5",
+    "label": "Claude Sonnet 5",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-haiku-4-5",
+    "label": "Claude Haiku 4.5",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-opus-4-8",
+    "label": "Claude Opus 4.8",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "claude-sonnet-4-6",
+    "label": "Claude Sonnet 4.6",
+    "default_effort": null,
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   }
+  ],
+  "asked": {
+   "how": "file",
+   "with": [],
+   "detail": "claude account model cache",
+   "source_kind": "cli_cache",
+   "known_too": true,
+   "within_s": null
+  }
+ },
+ "codex": {
+  "shown": {
+   "label": "Codex",
+   "detail": "Runs on the Codex CLI.",
+   "badge": "BackendCodex",
+   "symbol": "terminal",
+   "brand": {
+    "field_top": "#2b2f3c",
+    "field_bottom": "#14161d",
+    "tint_dark": "#c0caf5",
+    "tint_light": "#3c4257"
+   },
+   "sort_index": 1,
+   "hidden": false,
+   "supports_fork": true,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": true,
+   "supports_compact": true,
+   "supports_mcp": false,
+   "supports_routing": true,
+   "supports_auth": true,
+   "supports_usage": true,
+   "login_kind": "device_code",
+   "effort_ui": "picker",
+   "effort_help": ""
+  },
+  "program": "codex",
+  "efforts": [
+   "low",
+   "medium",
+   "high",
+   "xhigh",
+   "max",
+   "ultra"
+  ],
+  "effort_scope": "model",
+  "models": [
+   {
+    "id": "gpt-6.1-sol",
+    "label": "GPT-6.1 Sol",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-6-astra",
+    "label": "GPT-6 Astra",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-6.1-terra",
+    "label": "GPT-6.1 Terra",
+    "default_effort": "low",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-6-sol",
+    "label": "GPT-6 Sol",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-6-luna",
+    "label": "GPT-6 Luna",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "gpt-5.6-sol",
+    "label": "GPT-5.6 Sol",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-5.6-terra",
+    "label": "GPT-5.6 Terra",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-5.6-luna",
+    "label": "GPT-5.6 Luna",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max"
+    ]
+   },
+   {
+    "id": "gpt-5.5",
+    "label": "GPT-5.5",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh"
+    ]
+   }
+  ],
+  "asked": {
+   "how": "command",
+   "with": [
+    "debug",
+    "models"
+   ],
+   "detail": "codex debug models",
+   "source_kind": "cli_probe",
+   "known_too": true,
+   "within_s": 2.5
+  }
+ }
+}

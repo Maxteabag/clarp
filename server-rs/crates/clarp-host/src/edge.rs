@@ -183,6 +183,8 @@ pub struct App {
     pub janitors: Arc<crate::janitors::Desk>,
     /// The router of spoken messages: what it decided, and what it holds.
     pub router: Arc<crate::router::Desk>,
+    /// What the tools were last found to have of models, for an app's picker.
+    pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
@@ -383,6 +385,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
         .merge(crate::calendar::routes())
+        .merge(crate::models::routes())
         .merge(crate::files::routes())
         .merge(crate::screens::routes())
         .merge(crate::voice::routes())
