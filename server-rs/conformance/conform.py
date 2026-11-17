@@ -1250,6 +1250,11 @@ def caught(change: dict, found: list) -> list:
             and pattern.search(d['locator'])]
 
 
+# How many scenarios may be set aside in a proof that writes the reference's answers down
+# itself (`plants --fresh`) before it proves nothing.
+FRESH_CUT_MOST = 3
+
+
 def prove(build: Path, golden: dict, chosen, changes, run: Run, jobs: int) -> tuple:
     """Every planted change must show against what was written down.
 
@@ -1337,6 +1342,9 @@ def main(argv=None) -> int:
     parser.add_argument('--intended', default=str(HERE / 'intended.txt'))
     parser.add_argument('--scenarios', help='a comma-separated subset of the corpus')
     parser.add_argument('--plant', type=int, help='plants: only the planted change of this number, from 0')
+    parser.add_argument('--fresh', action='store_true',
+                        help='plants: the Python Host of --build is asked first, once, and the planted changes '
+                             'have to show against that, not against recordings that were kept')
     parser.add_argument('--plants-beside', type=int, metavar='N',
                         help='cross: the planted changes are tried beside this run, each in a run of its own '
                              '(conformance.yml), of which there are N: refused unless the suite has N')
@@ -1372,7 +1380,27 @@ def main(argv=None) -> int:
                 if not 0 <= args.plant < len(changes):
                     raise SystemExit(f'no planted change {args.plant}: the suite has {len(changes)}')
                 changes = [changes[args.plant]]
-            lines, ok = prove(build, load_golden(args.golden, chosen), chosen, changes, run, args.jobs)
+            if args.fresh:
+                # What a planted change has to show against is written down here and now, once.
+                # A scenario the reference did not run to its end in (a test Host that was slow
+                # to come to rest) is no ground to stand on: it is set aside and said, as a
+                # scenario that is cut short under a plant is. More than a few and nothing is
+                # proved at all.
+                harness_run.pin_static_mtimes(build)
+                golden = corpus(python_host(build), chosen, run.label('py-a'), args.jobs)
+                cut = sorted(name for name, views in golden.items() if views['full']['error'])
+                tried = [scenario for scenario in chosen if scenario['id'] not in cut]
+                lines, ok = prove(build, golden, tried, changes, run, args.jobs)
+                said = f'written down: {len(golden)} scenario(s), once'
+                if cut:
+                    said += (f'; {len(cut)} did not run to the end in the reference and are set aside: '
+                             f'{", ".join(cut)}')
+                if len(cut) > FRESH_CUT_MOST:
+                    ok = False
+                    said += f'\nTOO MANY ARE SET ASIDE (more than {FRESH_CUT_MOST}): nothing is proved'
+                lines = [said, '', *lines]
+            else:
+                lines, ok = prove(build, load_golden(args.golden, chosen), chosen, changes, run, args.jobs)
         elif args.mode == 'compare':
             recordings = [load_golden(directory, chosen) for directory in golden_dirs(args.golden)
                           if directory == args.golden or directory.is_dir()]
