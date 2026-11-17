@@ -294,6 +294,11 @@ pub enum Ask {
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
     /// on the one that is there now.
     LoginChanged,
+    /// From the explainer of the use of tools: fields to put on an item of what is shown.
+    Explained {
+        item: String,
+        fields: Value,
+    },
     /// The agent was removed: the thread ends.
     Close,
 }
@@ -647,6 +652,12 @@ impl AgentHandle {
     /// Tells the agent's thread that the login of its tool has changed. Does not wait.
     pub fn login_changed(&self) {
         let _ = self.tx.send(Ask::LoginChanged);
+    }
+
+    /// Has fields put on an item of what is shown of the agent's turn: the explanation of
+    /// a tool's use on its row. Does not wait.
+    pub fn explained(&self, item: String, fields: Value) {
+        let _ = self.tx.send(Ask::Explained { item, fields });
     }
 
     /// Ends the agent's thread. Its turn, if one runs, is not touched.
@@ -1600,6 +1611,11 @@ impl Worker {
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
+            Ask::Explained { item, fields } => {
+                // Whoever watches is told with what else is shown, after this.
+                actor.shown_patch(&item, &fields, now);
+                return Ok(());
+            }
             Ask::ShimGone { turn, attempt } => (actor.shim_gone(turn, attempt, now)?, nobody()),
             Ask::LaunchFailed {
                 turn,
@@ -2198,7 +2214,8 @@ fn refuse_for(
                 Ask::SpoolChanged
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
-                | Ask::LoginChanged,
+                | Ask::LoginChanged
+                | Ask::Explained { .. },
             ) => {}
             // Who the agent is can be changed while it cannot be opened.
             Ok(Ask::Amended { record, taken }) => {

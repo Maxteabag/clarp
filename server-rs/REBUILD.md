@@ -805,9 +805,25 @@ environment than it needs to find its login (`clarp-backend` `Backend::reads`, `
 call names are read in the agent's directory, only where they lie plainly. An app asks with
 `POST /tool-explanations` and reads how it went with `GET /tool-explanations/stats`. The owner's switch is
 off as it comes, where the Python Host has it on: a row of a tool does not carry its explanation here yet,
-and an app that is told explaining is on shows the explanation in the place of the command. Not built yet:
-that explanation on a live item (`docs/live-items.md`, section 6), and the whole command of a row whose
-name was cut off.
+and an app that is told explaining is on shows the explanation in the place of the command.
+
+And on the row itself (`docs/live-items.md`, section 6). `explain/rows.rs` is the Python Host's watcher of
+what turns show, as a book that is told the time: each new tool item (and one that is shown again with
+another command) is announced as waiting at once; the desk is asked about an agent's rows in rounds of
+eight, those it was asked about before keeping their place and the newest that wait taking the free ones;
+a row that has waited forty-five seconds, one that fell off a backlog of twenty-four and one whose turn
+ended fifteen seconds ago is settled as skipped; a new turn takes the place of the rows of the one before.
+Held to 18 scenes that were played to that Host's `LiveExplainer` with a clock of their own (91 steps, 119
+patches, 34 askings). At the Host's edge a task listens to what the hub shows (and reads none of it while
+the owner's switch is off), asks the desk as an app would, and has what the rows say put on the item by the
+agent's own thread, which tells whoever watches (`Hub::patch` of the kernel's live view, which was there and
+had no caller). The Host's test shows a turn of a stand-in tool whose command has two parts: the row is
+told to wait, then carries "Runs sleep. Then runs echo." while the turn still runs; the same command in the
+next turn is answered from what was learned, and nobody is asked. What the Python Host does for a patch
+its other process cannot take, and for what it missed while it was away, has no counterpart here: the rows
+and their explainer are one process. The switch and the janitor stay off as installed: what is asked of a
+model, on whose account, is the owner's to decide, and comes over with the owner's settings. Not built
+yet: the whole command of a row whose name an app cut off.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

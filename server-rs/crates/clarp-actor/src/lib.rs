@@ -964,6 +964,13 @@ impl Actor {
         self.shown_events.extend(events);
     }
 
+    /// Puts fields on an item of what is shown: the explanation of a tool's use on its row.
+    /// An item that is shown no longer is left alone.
+    pub fn shown_patch(&mut self, item: &str, fields: &serde_json::Value, now_ms: i64) {
+        let events = self.shown.patch(item, fields, None, now_ms);
+        self.shown_events.extend(events);
+    }
+
     /// Everything that is shown of the agent's turn, as `GET /live` answers it. An agent
     /// that has run no turn since the Host started shows an idle, empty view.
     pub fn shown_whole(&mut self, now_ms: i64) -> serde_json::Value {
