@@ -75,7 +75,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 9,
+    "latest_revision": 10,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -170,11 +170,11 @@
       "id": "live-<id:5>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 9,
+      "revision": 10,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -282,21 +282,6 @@
   {
    "data": {
     "agent_id": "<id:7>",
-    "client_msg_id": "bravo",
-    "event_id": "<eid:queue-updated#1@dfa4af>",
-    "queue_depth": 1,
-    "queue_paused": false,
-    "queue_revision": 1,
-    "queue_started": false,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#1@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
     "detail": {
      "backend_session_id": "<id:3>",
      "dispatch": "claude",
@@ -337,6 +322,51 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "client_msg_id": "bravo",
+    "event_id": "<eid:queue-updated#1@dfa4af>",
+    "queue_depth": 1,
+    "queue_paused": false,
+    "queue_revision": 1,
+    "queue_started": false,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#1@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "client_msg_id": "bravo",
+    "event_id": "<eid:queue-updated#2@dfa4af>",
+    "queue_depth": 0,
+    "queue_paused": false,
+    "queue_revision": 2,
+    "queue_started": true,
+    "session": "claire",
+    "type": "queue-updated"
+   },
+   "event": null,
+   "id": "<eid:queue-updated#2@dfa4af>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "client_msg_id": "bravo",
+    "event_id": "<eid:agent-state#2@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": true,
+    "session": "claire",
+    "trace_id": "<id:2>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#2@91d46a>"
   },
   {
    "data": {
@@ -382,58 +412,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "badge": true,
-    "cause_message_id": "u-slow",
-    "done_ts": "<time>",
-    "event_id": "<eid:user-notification#1@f5caa0>",
-    "muted": false,
-    "notification_id": "pn-<id:8>",
-    "origin": "user",
-    "persona": "Claire",
-    "preview": "Claude replay reply: [qa-slow] synthetic long task",
-    "push": true,
-    "reason": "text-reply",
-    "session": "claire",
-    "source_message_id": "live-<id:4>",
-    "type": "user-notification",
-    "unread": true
-   },
-   "event": null,
-   "id": "<eid:user-notification#1@f5caa0>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "client_msg_id": "bravo",
-    "event_id": "<eid:queue-updated#2@dfa4af>",
-    "queue_depth": 0,
-    "queue_paused": false,
-    "queue_revision": 2,
-    "queue_started": true,
-    "session": "claire",
-    "type": "queue-updated"
-   },
-   "event": null,
-   "id": "<eid:queue-updated#2@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:7>",
-    "client_msg_id": "bravo",
-    "event_id": "<eid:agent-state#2@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": true,
-    "session": "claire",
-    "trace_id": "<id:2>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#2@91d46a>"
   },
   {
    "data": {
@@ -523,6 +501,28 @@
    },
    "event": null,
    "id": "<eid:agent-activity#8@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:7>",
+    "badge": true,
+    "cause_message_id": "u-slow",
+    "done_ts": "<time>",
+    "event_id": "<eid:user-notification#1@f5caa0>",
+    "muted": false,
+    "notification_id": "pn-<id:8>",
+    "origin": "user",
+    "persona": "Claire",
+    "preview": "Claude replay reply: [qa-slow] synthetic long task",
+    "push": true,
+    "reason": "text-reply",
+    "session": "claire",
+    "source_message_id": "live-<id:4>",
+    "type": "user-notification",
+    "unread": true
+   },
+   "event": null,
+   "id": "<eid:user-notification#1@f5caa0>"
   },
   {
    "data": {

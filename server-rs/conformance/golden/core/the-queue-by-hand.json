@@ -3933,6 +3933,50 @@
   {
    "data": {
     "agent_id": "<id:6>",
+    "detail": {
+     "backend_session_id": "<id:7>",
+     "dispatch": "claude",
+     "origin": "user",
+     "source": "pwa",
+     "trace_id": "<id:1>"
+    },
+    "event_id": "<eid:agent-state#1@0952e1>",
+    "kind": "thinking",
+    "persona": "Claire",
+    "session": "claire",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@0952e1>"
+  },
+  {
+   "data": {
+    "action": "thinking",
+    "agent_id": "<id:6>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@0952e1>",
+    "file_path": "",
+    "kind": "thinking",
+    "persona": "Claire",
+    "phase": "thinking",
+    "session": "claire",
+    "started_at_ms": null,
+    "state": "thinking",
+    "status": "running",
+    "summary": "Thinking",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": "<time>",
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:6>",
     "client_msg_id": "q-first",
     "event_id": "<eid:agent-state#1@91d46a>",
     "kind": "thinking",
@@ -4004,50 +4048,6 @@
    },
    "event": null,
    "id": "<eid:queue-updated#4@dfa4af>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:6>",
-    "detail": {
-     "backend_session_id": "<id:7>",
-     "dispatch": "claude",
-     "origin": "user",
-     "source": "pwa",
-     "trace_id": "<id:1>"
-    },
-    "event_id": "<eid:agent-state#1@0952e1>",
-    "kind": "thinking",
-    "persona": "Claire",
-    "session": "claire",
-    "status_text": "",
-    "ts": "<time>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@0952e1>"
-  },
-  {
-   "data": {
-    "action": "thinking",
-    "agent_id": "<id:6>",
-    "call_id": null,
-    "event_id": "<eid:agent-activity#2@0952e1>",
-    "file_path": "",
-    "kind": "thinking",
-    "persona": "Claire",
-    "phase": "thinking",
-    "session": "claire",
-    "started_at_ms": null,
-    "state": "thinking",
-    "status": "running",
-    "summary": "Thinking",
-    "tool": "",
-    "ts": "<time>",
-    "turn_started_ms": "<time>",
-    "type": "agent-activity"
-   },
-   "event": null,
-   "id": "<eid:agent-activity#2@0952e1>"
   },
   {
    "data": {

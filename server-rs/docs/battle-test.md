@@ -172,11 +172,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 00:40 (17 Nov) | the Host updated by the installer, `22ca39e7` to `aada15c0`: the build that counts a heartbeat's turn by its last answer. The relay was on: the new Host was connected to it again 44 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 01:35 (17 Nov) | the Host updated by the installer, `aada15c0` to `d63e4c09`: the build whose tools take off the mark of another Host's hand-over before they run (the release owner's addition to issue 388). The relay was on: the new Host was connected to it again 42 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 02:13 (17 Nov) | the Host updated by the installer, `d63e4c09` to `35dd10c4`: the build in which an agent forks itself into helpers, and a message the Host sends by itself is told to the apps under no id. The relay was on: the new Host was connected to it again 119 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 03:48 (17 Nov) | the Host updated by the installer, `35dd10c4` to `2b48004c`: the build with the janitors as they are kept and set (nothing of one runs in it yet). At its first start it installed the seven janitors a Host has of its own. The relay was on: the new Host was connected to it again 40 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and sixteen turns in
-thirty-four exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-twenty-four of Codex in the eight since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and nineteen turns in
+thirty-five exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+twenty-seven of Codex in the nine since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -639,6 +640,34 @@ the word and stopped (in the two runs that looked: a row of ten signs and no cal
 has nothing to mark there, and marked nothing. That is how the report of a helper works on both Hosts: it is
 the helper that sends it. A maker that waits for a report from a child whose task was a question may wait
 for nothing; the check says so in a line of its own instead of counting it as the Host's failure.
+
+## The janitors
+
+A janitor is an agent with a job of maintenance. What is kept of one and how it is set landed with
+`2b48004c` (17 Nov, 03:47) and was tried where it is installed a minute after exercise 35 (`verify-janitors.py`,
+no turn of any model): 27 points, all as meant.
+
+| What | On the installed Host |
+|---|---|
+| The Host's own | the seven are there under the ids and session names they have on every Host, each paused, each with its triggers and the picture of its job; the snapshot shows them after the agents, as janitors, looked at and not spoken to; a message sent to one reaches nobody (404) |
+| What a Host offers | ten jobs and eleven triggers, as the Python Host's |
+| An agent made a janitor | an agent of the check's own given a scheduled task at a quarter past three by Oslo's clocks: paused, revision 1, a day between two runs |
+| Set | an option and the one agent it watches (revision 2); a change by somebody who saw another revision refused (409); a schedule in a zone there is not refused in the Python Host's words |
+| Turned on | refused in words (503): nothing started a janitor in that build |
+| A schedule previewed | half past eight on working days by Oslo's clocks: Tuesday, Wednesday, Thursday |
+| Removed, and let go | removed: listed no more, its agent put away, and not removable as an agent; let go: an agent like any other again |
+| Afterwards | the check's two agents removed; the 23 agents that were there still there |
+
+How that candidate landed is worth a line. The first one (`e9d6f20e`) passed everything on the build machine
+and failed in `Server (Rust)` (44000758560) on one test: whether a name is a time zone. The runner's system
+(Ubuntu) keeps the machine's own zone as a file named `localtime` in the directory of zones; the owner's
+machines (Arch) do not, and the library that reads zones takes any file of that directory as a zone. So the
+same Host would have taken `localtime` as a zone on one machine and refused it on another. The rule is now the
+Host's own and the same everywhere: the files of that directory that are no zone's name are no zone
+(`localtime`, `posixrules`, `Factory`, everything under `posix/` and `right/`). The candidate with it
+(`2b48004c`) was green in `Server (Rust)` (44002161507), in the repository's gates with the release, and in
+the conformance run on the same commit (44002165436: 82 differences, all registered; every planted change
+caught), as the run of the first candidate had been (44000762295).
 
 ## The soak so far
 
