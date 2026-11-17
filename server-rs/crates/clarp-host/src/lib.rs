@@ -23,6 +23,7 @@ pub mod chip;
 pub mod config;
 pub mod connector;
 pub mod edge;
+pub mod explain;
 pub mod faces;
 pub mod files;
 pub mod fleet;

@@ -7597,15 +7597,27 @@ fn a_janitors_scheduled_task_runs_when_its_schedule_says_and_closes_itself_with_
         (200, &json!(true), &json!("ready"), &json!(2)),
         "{on}"
     );
-    let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    // One whose job does not run on this Host yet is refused in words. The one that explains
+    // the use of tools runs here (its own test), and is turned on like the task above.
+    let auditor = host.get("/janitors/clarp-label-auditor")["janitor"].clone();
     let (status, refused) = post(
-        "/janitors/clarp-tool-explainer/enabled",
-        json!({ "expected_revision": explainer["revision"], "enabled": true }),
+        "/janitors/clarp-label-auditor/enabled",
+        json!({ "expected_revision": auditor["revision"], "enabled": true }),
     );
     assert_eq!(
         (status, &refused["code"]),
         (503, &json!("janitor_runtime_unavailable")),
         "{refused}"
+    );
+    let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    let (status, on) = post(
+        "/janitors/clarp-tool-explainer/enabled",
+        json!({ "expected_revision": explainer["revision"], "enabled": true }),
+    );
+    assert_eq!(
+        (status, &on["janitor"]["enabled"]),
+        (200, &json!(true)),
+        "{on}"
     );
 
     // Within a look the runner says when the task runs next: when the next minute begins.
@@ -17971,4 +17983,349 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
     let host = place.start();
     assert_eq!(waiting(&host), stands);
     assert_eq!(queue(&host)["revision"], revision);
+}
+
+/// A stand-in for Codex that explains the use of tools: it writes down how it was started,
+/// where, with what beside it and what it was given to read, and says of every request
+/// "Runs <program>.", or, where the call has a path, a sentence with a place for it. Asked
+/// about a program called `broken` it ends badly. Answers where it is, and where what it
+/// was asked is written.
+fn explaining_model(place: &Place) -> (PathBuf, PathBuf) {
+    let (codex, asked) = (
+        place.root.join("codex-explains"),
+        place.root.join("explained"),
+    );
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+read = sys.stdin.read()
+requests = json.loads(read[read.index('{{"requests"'):])["requests"]
+here = os.getcwd()
+shown = {{"args": sys.argv[1:], "cwd": here, "files": sorted(os.listdir(here)), "env": sorted(os.environ),
+         "schema": json.load(open(os.path.join(here, "schema.json"))),
+         "instructions": open(os.path.join(here, "instructions.txt")).read(), "read": read, "requests": requests}}
+with open({asked}, "a") as out:
+    out.write(json.dumps(shown) + "\n")
+said = []
+for request in requests:
+    activity = request["activity"]
+    command = activity.get("command") or activity.get("name") or ""
+    name = command.split()[0] if command.split() else "nothing"
+    if name == "broken":
+        sys.stderr.write("the model is not logged in\n")
+        sys.exit(3)
+    slots = request.get("slots") or {{}}
+    if "path1" in slots:
+        said.append({{"id": request["id"], "text": "Frobs " + slots["path1"] + ".", "template": "Frobs {{path1}}."}})
+    else:
+        said.append({{"id": request["id"], "text": "Runs " + name + ".", "template": ""}})
+answer = {{"type": "agent_message", "text": json.dumps({{"explanations": said}})}}
+print(json.dumps({{"type": "item.completed", "item": answer}}))
+"#,
+        asked = serde_json::to_string(asked.to_str().unwrap()).unwrap(),
+    );
+    program(&codex, &script);
+    (codex, asked)
+}
+
+#[test]
+fn an_app_asks_for_the_use_of_tools_to_be_explained() {
+    let place = Place::new("explained");
+    let (codex, asked) = explaining_model(&place);
+    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let agent = host.new_agent("Mike");
+    let post = |host: &Host, path: &str, body: Value| host.ask("POST", path, Some(&body));
+    let explain = |host: &Host, level: Value, items: Value| {
+        let body = json!({ "session": agent, "detail_level": level, "items": items });
+        post(host, "/tool-explanations", body)
+    };
+    let bash = |id: &str, command: &str| json!({ "id": id, "activity": { "name": "Bash", "command": command } });
+    // What the model was asked so far: one line for each time.
+    let questions = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&asked).unwrap_or_default();
+        let lines = written.lines();
+        lines
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+
+    // As it comes nothing is explained: its owner has not turned it on.
+    let (status, off) = explain(&host, json!(2), json!([bash("list", "ls -la src")]));
+    assert_eq!(
+        (status, &off["items"]),
+        (200, &json!([{ "id": "list", "status": "disabled" }]))
+    );
+    // Turned on, and its janitor still paused: nothing is explained either, and the answer
+    // names the model that would be asked.
+    assert_eq!(
+        post(
+            &host,
+            "/tool-explanations/settings",
+            json!({ "enabled": true })
+        ),
+        (200, json!({ "enabled": true, "detail_level": 2 }))
+    );
+    let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    let model = explainer["model"].clone();
+    let (_, paused) = explain(&host, json!(2), json!([bash("list", "ls -la src")]));
+    assert_eq!(
+        paused,
+        json!({ "model": model, "detail_level": 2, "items": [{ "id": "list", "status": "disabled" }] }),
+        "{explainer}"
+    );
+    let (status, on) = post(
+        &host,
+        "/janitors/clarp-tool-explainer/enabled",
+        json!({ "expected_revision": explainer["revision"], "enabled": true }),
+    );
+    assert_eq!(
+        (status, &on["janitor"]["enabled"]),
+        (200, &json!(true)),
+        "{on}"
+    );
+
+    // A template answers at once. What no template fits waits for the model.
+    let items = json!([
+        bash("list", "ls -la src"),
+        bash("frob", "frobnicate x.cfg"),
+        bash("several", "cd /srv && cat a.txt && frobnicate y.cfg"),
+    ]);
+    let (status, first) = explain(&host, json!(2), items.clone());
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(
+        first,
+        json!({ "model": model, "detail_level": 2, "items": [
+            { "id": "list", "status": "ready", "text": "Looks at the files and folders inside src.",
+              "source": "scripted", "cached": false },
+            { "id": "frob", "status": "pending" },
+            { "id": "several", "status": "pending" },
+        ] }),
+        "{on}"
+    );
+    // An app asks again until it is settled.
+    let mut settled = Value::Null;
+    wait_for("the model's answer", || {
+        settled = explain(&host, json!(2), items.clone()).1;
+        settled["items"][1]["status"] != "pending" && settled["items"][2]["status"] != "pending"
+    });
+    assert_eq!(
+        settled["items"],
+        json!([
+            { "id": "list", "status": "ready", "text": "Looks at the files and folders inside src.",
+              "source": "scripted", "cached": false },
+            { "id": "frob", "status": "ready", "text": "Frobs x.cfg.", "source": "llm", "cached": true },
+            { "id": "several", "status": "ready",
+              "text": "Reads a.txt to see what it contains. Then frobs y.cfg.", "source": "llm",
+              "cached": true },
+        ])
+    );
+
+    // The model was asked once, about the two parts no template fits. It was started to read
+    // and nothing else: in a directory of its own that held what it needs and is gone, with
+    // no shell and no tools, and with nothing of the Host's own in its environment.
+    let asked_of = questions();
+    assert_eq!(asked_of.len(), 1, "{asked_of:?}");
+    let shown = &asked_of[0];
+    let args: Vec<&str> = shown["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|arg| arg.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        &args[..11],
+        [
+            "exec",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--json",
+            "--color",
+            "never",
+            "--output-schema",
+        ]
+    );
+    let there = shown["cwd"].as_str().unwrap();
+    assert_eq!(args[11], format!("{there}/schema.json"));
+    assert!(
+        args.contains(&"shell_tool") && args.contains(&"unified_exec"),
+        "{args:?}"
+    );
+    assert_eq!(args.last(), Some(&"-"));
+    assert_eq!(shown["files"], json!(["instructions.txt", "schema.json"]));
+    assert!(
+        !std::path::Path::new(there).exists(),
+        "{there} is still there"
+    );
+    let env: Vec<&str> = shown["env"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|name| name.as_str().unwrap())
+        .collect();
+    assert!(
+        env.contains(&"PATH") && env.iter().all(|name| !name.starts_with("CLARP")),
+        "{env:?}"
+    );
+    assert!(
+        shown["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("160 characters")
+    );
+    assert!(shown["read"].as_str().unwrap().contains("untrusted data"));
+    let about: Vec<(&Value, &Value)> = shown["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|request| (&request["activity"]["command"], &request["slots"]))
+        .collect();
+    assert_eq!(
+        about,
+        [
+            (&json!("frobnicate x.cfg"), &json!({ "path1": "x.cfg" })),
+            (&json!("frobnicate y.cfg"), &json!({ "path1": "y.cfg" })),
+        ]
+    );
+    assert_eq!(
+        shown["schema"]["properties"]["explanations"]["items"]["properties"]["id"]["enum"],
+        json!(["1", "2"])
+    );
+
+    // What it said is learned: the same shape with another value is answered at once, and
+    // nobody is asked. For another reader it is asked anew.
+    let (_, learned) = explain(
+        &host,
+        json!(2),
+        json!([bash("other", "frobnicate z/w.cfg")]),
+    );
+    assert_eq!(
+        learned["items"],
+        json!([{ "id": "other", "status": "ready", "text": "Frobs z/w.cfg.", "source": "llm", "cached": true }])
+    );
+    assert_eq!(questions().len(), 1);
+
+    // A model that ends badly: the thing is failed, and is not asked about again right away.
+    let broken = json!([bash("bad", "broken thing")]);
+    assert_eq!(
+        explain(&host, json!(2), broken.clone()).1["items"][0]["status"],
+        "pending"
+    );
+    let mut failed = Value::Null;
+    wait_for("the model's failure", || {
+        failed = explain(&host, json!(2), broken.clone()).1;
+        failed["items"][0]["status"] != "pending"
+    });
+    assert_eq!(
+        failed["items"],
+        json!([{ "id": "bad", "status": "failed", "reason": "translator_failed" }])
+    );
+    assert_eq!(
+        explain(&host, json!(2), broken.clone()).1["items"],
+        failed["items"]
+    );
+    assert_eq!(questions().len(), 2);
+
+    // What is no request is refused in the Python Host's words; nobody's tools are nobody's.
+    for (level, items, why) in [
+        (
+            json!(9),
+            json!([]),
+            "detail_level must be an integer from 0 to 4",
+        ),
+        (
+            json!("2"),
+            json!([]),
+            "detail_level must be an integer from 0 to 4",
+        ),
+        (
+            json!(2),
+            json!({}),
+            "items must contain at most 8 activities",
+        ),
+        (
+            json!(2),
+            json!([{ "id": "a" }]),
+            "activity must be an object",
+        ),
+        (
+            json!(2),
+            json!([bash("a", "ls"), bash("a", "pwd")]),
+            "items need unique short string IDs",
+        ),
+    ] {
+        assert_eq!(
+            explain(&host, level, items),
+            (400, json!({ "error": why })),
+            "{why}"
+        );
+    }
+    let nobody = json!({ "session": "nobody", "detail_level": 2, "items": [] });
+    assert_eq!(
+        post(&host, "/tool-explanations", nobody),
+        (404, json!({ "error": "agent not found" }))
+    );
+
+    // The janitor's runs show the two times its model was asked, and how each ended.
+    let runs = host.get("/janitors/clarp-tool-explainer/runs?limit=5");
+    let ended: Vec<&Value> = runs["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| &run["status"])
+        .collect();
+    assert_eq!(ended.len(), 2, "{runs}");
+    assert!(
+        ended.contains(&&json!("completed")) && ended.contains(&&json!("failed")),
+        "{runs}"
+    );
+
+    // How it went, as an app is told: a template three times (the first request and the two
+    // askings while the model worked may be more), what was learned, and the model twice.
+    let (status, went) = host.ask("GET", "/tool-explanations/stats", None);
+    assert_eq!(status, 200, "{went}");
+    let counts = &went["totals"]["counts"];
+    assert!(counts["template"].as_u64().unwrap() >= 2, "{went}");
+    assert_eq!(
+        (&counts["learned"], &counts["failed"]),
+        (&json!(1), &json!(1)),
+        "{went}"
+    );
+    assert_eq!(counts["llm"], json!(2), "{went}");
+    assert_eq!(
+        (
+            &went["totals"]["learned_entries"],
+            &went["totals"]["learned_parameterised"]
+        ),
+        (&json!(1), &json!(1)),
+        "{went}"
+    );
+    assert_eq!(
+        host.ask("GET", "/tool-explanations/stats?window=1h", None),
+        (
+            400,
+            json!({ "error": "window must be one of 24h, 7d, 30d" })
+        )
+    );
+
+    // A Host that is killed and comes back has what was learned, and what it counted.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    let (_, again) = explain(
+        &host,
+        json!(2),
+        json!([bash("after", "frobnicate later.cfg")]),
+    );
+    assert_eq!(
+        again["items"],
+        json!([{ "id": "after", "status": "ready", "text": "Frobs later.cfg.", "source": "llm", "cached": true }])
+    );
+    assert_eq!(questions().len(), 2);
+    let went = host.get("/tool-explanations/stats?window=7d&bucket=day");
+    assert_eq!(went["totals"]["counts"]["learned"], json!(2), "{went}");
+    assert_eq!(went["totals"]["learned_hits"], json!(2), "{went}");
 }

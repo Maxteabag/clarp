@@ -773,10 +773,41 @@ Host's own `lookup` answers for each at the five levels (a template fits 253, no
 sentences), each compared as a value and as text; the first 256 were written for what uses look like, the
 rest for each branch of the reading, among them what Python and Rust would read apart if nobody looked
 (which signs are digits, which are blank, where a pattern's end is). The Rust agreed on all of them at
-its first build, which says the reference was read before it was written. Not built yet, in this order:
-the reading of a use as it comes from a turn (what a heredoc only feeds is withheld there, which needs the
-layer of shapes), the shapes and the table of what was learned, the service that answers an app
-(`POST /tool-explanations`) and puts the sentence into a live item, and the model for what no template fits.
+its first build, which says the reference was read before it was written.
+
+The layers after it, the same day. How a use is read as it comes from a turn or an app (`explain/read.rs`:
+the bounded fields, secrets taken out, what a heredoc only feeds a script or a file withheld) and what
+parts a call has, each with the shape it is remembered under (`explain/shapes.rs`: its words with every
+value that may differ between two calls replaced by a slot of its kind, or, where it cannot be shaped
+safely, the hash of its whole text and why), held to the Python Host's `normalize_activity` and
+`shapes.split` for the same 787 uses (830 parts) and to 366 cases of its smaller functions. Then what was
+learned and the desk (`explain/learned.rs`, `explain/desk.rs`): a book that is told the time, at which an
+app asks about up to eight things; each part is answered by a template or by what a model said of that
+shape before, and what is left waits for the model in batches of eight for one reader; what the model
+says is learned, under the shape where its sentence with places holds for other values, else under the
+one text; a model that fails is left alone for a minute; who lets go of a row is not served. That desk is
+held to the Python Host's service itself: 23 scenes were played to `ToolExplanations` in a process of its
+own, with its queue, worker, table and ledger and a stand-in for the model, and the desk answers every
+one of 107 requests alike, asks its model about the same parts, learns the same rows and counts the same
+in its ledger. Writing the vectors found two requests that Host fails on, each of which takes the whole
+request of eight rows with it: a shell command of no word (a comment alone: defect R39) and a shell tool
+whose command stands only in what it was given, where the call is one piece after a `cd` (R40). Both are
+answered here.
+
+At the Host's edge (`clarp-host` `explain.rs`): the book is read where it is kept (the rows and the hours
+of the ledger with the fleet, each by itself; the key shapes are signed with among the settings, drawn
+once), the janitor that explains is looked up in the janitors' book for the agent a request is about, and
+a task asks its model for what waits, in a run of that janitor. What an agent did is whatever stood in its
+work, so the model is started to read and nothing else, as the Python Host starts it: Codex with a
+sandbox it may only read in, no shell, no tools, none of its user's settings and rules, in a directory of
+its own that holds its instructions and the shape its answer must have, with no more of the Host's
+environment than it needs to find its login (`clarp-backend` `Backend::reads`, `once::read`). The scripts a
+call names are read in the agent's directory, only where they lie plainly. An app asks with
+`POST /tool-explanations` and reads how it went with `GET /tool-explanations/stats`. The owner's switch is
+off as it comes, where the Python Host has it on: a row of a tool does not carry its explanation here yet,
+and an app that is told explaining is on shows the explanation in the place of the command. Not built yet:
+that explanation on a live item (`docs/live-items.md`, section 6), and the whole command of a row whose
+name was cut off.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

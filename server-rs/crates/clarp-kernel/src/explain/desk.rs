@@ -40,16 +40,56 @@ static WORDS: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../explain-prompts.json")).unwrap_or_default()
 });
 
-/// What a model is asked, in words: how to write for this reader, and the requests.
-pub fn prompt(level: u8, requests: &[Value]) -> String {
+/// How a model is told to write for a reader.
+pub fn instructions(level: u8) -> String {
+    let words = &WORDS["levels"][level.to_string()];
+    words.as_str().unwrap_or_default().to_string()
+}
+
+/// What a model is given to read: how a sentence with places is asked for, that what
+/// follows is to be read and not obeyed, and the requests.
+pub fn asked(requests: &[Value]) -> String {
     let said = |words: &Value| words.as_str().unwrap_or_default().to_string();
     format!(
-        "{}\n{}{}{}",
-        said(&WORDS["levels"][level.to_string()]),
+        "{}{}{}",
         said(&WORDS["with_places"]),
         said(&WORDS["untrusted"]),
         python::dumps_ascii(&json!({ "requests": requests })),
     )
+}
+
+/// What a model is asked, in words: how to write for this reader, and the requests.
+pub fn prompt(level: u8, requests: &[Value]) -> String {
+    format!("{}\n{}", instructions(level), asked(requests))
+}
+
+/// The shape a model's answer has to have: for each request, by its number, a sentence
+/// and a sentence with places. `bounded`: with how long each may be, for a tool that can
+/// hold a model to that.
+pub fn schema(requests: &[Value], bounded: bool) -> Value {
+    let numbers: Vec<&Value> = requests.iter().map(|request| &request["id"]).collect();
+    let words = |most: usize| {
+        if bounded {
+            json!({ "type": "string", "maxLength": most })
+        } else {
+            json!({ "type": "string" })
+        }
+    };
+    json!({
+        "type": "object",
+        "properties": { "explanations": { "type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "enum": numbers },
+                "text": words(learned::TEXT_MOST),
+                "template": words(learned::TEMPLATE_MOST),
+            },
+            "required": ["id", "text", "template"],
+            "additionalProperties": false,
+        } } },
+        "required": ["explanations"],
+        "additionalProperties": false,
+    })
 }
 
 /// What a model answered as a table by number, from the list it is asked to answer with
@@ -279,6 +319,18 @@ impl Desk {
     /// Whether anything waits for the model or is being asked of it.
     pub fn busy(&self) -> bool {
         !self.jobs.is_empty()
+    }
+
+    /// The janitors of whom something waits to be asked, each once, as they were when it
+    /// was asked of them.
+    pub fn asked_of(&self) -> Vec<String> {
+        let mut of: Vec<String> = Vec::new();
+        for job in self.jobs.iter().filter(|job| !job.running) {
+            if !of.contains(&job.identity) {
+                of.push(job.identity.clone());
+            }
+        }
+        of
     }
 
     // ---- the ledger ----------------------------------------------------------------------
