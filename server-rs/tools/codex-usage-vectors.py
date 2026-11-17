@@ -27,6 +27,12 @@ depends on the login the Host is on when it asks (`_active_codex_identity`, whic
 story's word for it here, since no login is ever read): `active` on an asking, or nothing where
 the Host has no login.
 
+With every asking is written whether the Python Host takes the tool's account for used up
+(`backend_usage.exhausted_backends`: what an agent's row says of its tool, `backend_quota`). That
+depends on the turns that completed since a window was last heard of, so a story also says where
+a turn of an agent ended (`ended`: of which tool, and how; a row of the Host's own log of states,
+written here as that Host writes one).
+
 It runs in processes of its own, one for each story, whose every home, data, config and cache
 directory is a new empty directory (the replay harness's own isolation,
 `tests/replay/host.py`), with no way out to any network.
@@ -84,6 +90,11 @@ def record(five=None, week=None, on=None, **more):
 
 def advance(seconds):
     return {'advance': seconds}
+
+
+def ended(tool, how='done'):
+    """A turn of an agent of this tool ended now, this way."""
+    return {'ended': {'tool': tool, 'kind': how}}
 
 
 ASKED = {'asked': True}
@@ -184,6 +195,39 @@ STORIES = [
     ('only-a-week-and-it-is-used-up', 'The only window is the week, and it is used up',
      [{'record': {'limit_id': 'codex', 'primary': window(100.0, 10_080, WEEK_ON), 'secondary': None,
                   'plan_type': 'pro'}}, ASKED]),
+    ('used-up-and-a-turn-completed-since', 'Used up, and a turn of the tool completed after that was said',
+     [record(100.0, 50.0), ASKED, advance(30), ended('codex'), ASKED]),
+    ('used-up-and-a-turn-completed-in-the-same-moment', 'A turn that completed in the moment it was said proves nothing',
+     [record(100.0, 50.0), ended('codex'), ASKED, advance(1), ASKED]),
+    ('used-up-and-a-turn-of-another-tool-completed', 'A turn of another tool says nothing of this account',
+     [record(100.0, 50.0), advance(30), ended('claude'), ASKED]),
+    ('used-up-and-a-turn-ended-otherwise', 'A turn that was cut off or failed says nothing of it either',
+     [record(100.0, 50.0), advance(30), ended('codex', 'interrupted'), ended('codex', 'error'), ASKED]),
+    ('used-up-again-after-a-turn-completed', 'Used up, a turn completed, and it is said to be used up again',
+     [record(100.0, 50.0), advance(30), ended('codex'), ASKED, advance(30), record(100.0, 50.0), ASKED]),
+    ('both-used-up', 'The five hours and the week are both used up: the later reset counts',
+     [record(100.0, 100.0), ASKED]),
+    ('both-used-up-and-one-said-again-after-a-turn', 'Both used up, a turn completed, and only the week is said again',
+     [record(100.0, 100.0), advance(30), ended('codex'), ASKED, advance(30), record(None, 100.0), ASKED]),
+    ('used-up-and-grown-old', 'Used up, and nobody has heard of it for a quarter of an hour',
+     [record(100.0, 50.0), advance(15 * 60), ASKED, advance(1), ASKED]),
+    ('used-up-until-its-reset', 'Used up until the window begins anew',
+     [record(100.0, 50.0, five_resets=BEGAN // 1000 + 300), advance(299), ASKED, advance(1), ASKED]),
+    ('used-up-and-another-account-logged-in', 'Used up, and the Host is on another account',
+     [record(100.0, 10.0), asked(OTHER), asked(IDENTITY), asked(RENEWED), asked(NO_LOGIN)]),
+    ('over-all-of-it', 'More than all of a window is said to be used',
+     [record(104.5, 50.0), ASKED]),
+    ('used-up-and-said-again-in-the-moment-a-turn-completed', 'What is said in the moment a turn completed still counts',
+     [record(100.0, 50.0), advance(30), ended('codex'), record(100.0, 50.0), ASKED]),
+    ('both-used-up-and-one-said-again-in-the-moment-a-turn-completed',
+     'Both used up, a turn completed, and the week is said again in that very moment: the week still counts',
+     [record(100.0, 100.0), advance(30), ended('codex'), record(None, 100.0), ASKED]),
+    ('used-up-twice-and-a-turn-completed-after-each', 'Used up, a turn completed, used up again, and a turn completed again',
+     [record(100.0, 50.0), advance(30), ended('codex'), advance(30), record(100.0, 50.0), ASKED, advance(30),
+      ended('codex'), ASKED]),
+    ('used-up-with-one-reset-unknown', 'Both used up, and one does not say when it begins anew',
+     [{'record': {'primary': {'used_percent': 100.0, 'window_minutes': 300},
+                  'secondary': window(100.0, 10_080, WEEK_ON)}}, ASKED]),
 ]
 
 
@@ -201,7 +245,12 @@ def told(story):
     from lib import backend_usage_codex as codex
     from lib import backend_usage_store as store
     from lib import db
-    db.conn()
+    store_of_all = db.conn()
+    # An agent of each tool, for the turns a story says ended.
+    for tool in ('codex', 'claude'):
+        store_of_all.execute(
+            'INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, backend) VALUES (?,?,?,?,?,?,?)',
+            (f'agent-{tool}', f'Of {tool}', '', '/', f'of-{tool}', BEGAN, tool))
     clock = [BEGAN]
     # The login the Host is on, as the story says it: no login is read.
     active = [tuple(IDENTITY)]
@@ -216,6 +265,12 @@ def told(story):
         at = {'at': (clock[0] - BEGAN) // 1000}
         if 'advance' in step:
             clock[0] += step['advance'] * 1000
+            continue
+        if 'ended' in step:
+            how = step['ended']
+            store_of_all.execute('INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail) VALUES (?,?,?,?,?)',
+                                 (f"agent-{how['tool']}", None, clock[0], how['kind'], '{}'))
+            done.append({**at, 'ended': how})
             continue
         if 'record' in step:
             seen = step['record']
@@ -242,7 +297,8 @@ def told(story):
         done.append({**at, 'asked': True, 'active': None if active[0] is None else list(active[0]),
                      'limit_events': closed,
                      'provider': usage._structured_provider('codex', now),
-                     'row': store._response_row('codex', now)})
+                     'row': store._response_row('codex', now),
+                     'used_up': usage.exhausted_backends(now)})
     return {'name': name, 'what': what, 'steps': done}
 
 

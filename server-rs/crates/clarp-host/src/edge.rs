@@ -886,6 +886,7 @@ pub(crate) fn agent_row(
     families: &Families,
     member: &Member,
     faces: &crate::faces::Faces,
+    used_up: &crate::quota::UsedUp,
 ) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
@@ -897,6 +898,8 @@ pub(crate) fn agent_row(
         view.ended.as_ref(),
         focused,
     );
+    // Whether its tool's account is used up: advice for whoever is about to write to it.
+    row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
     // The face it is shown with: the picture it has of its own; else, unless it has a
     // symbol, the picture this Host ships for its name, or the one for its tool. And the
     // picture drawn for its name on its model, where there is one and the agent wears no
@@ -963,11 +966,12 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let without_archived = query.include_archived.as_deref() == Some("0");
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
     let families = Families::of(&directory);
+    let used_up = crate::quota::used_up(&app).await;
     let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
-        .map(|member| agent_row(&directory, &families, member, &app.faces))
+        .map(|member| agent_row(&directory, &families, member, &app.faces, &used_up))
         .collect();
     // And the janitors, after them: members of the fleet that are no agents to chat with.
     // An app tells them by `is_janitor` and lists them apart; each is shown with the
@@ -977,7 +981,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         if without_archived && put_away(member) {
             continue;
         }
-        let mut row = agent_row(&directory, &families, member, &app.faces);
+        let mut row = agent_row(&directory, &families, member, &app.faces, &used_up);
         let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
         row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
         row["model_avatar_url"] = json!("");
@@ -1279,7 +1283,11 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
     let directory = app.fleet.directory();
     let row = directory
         .named(&record.agent_id)
-        .map(|member| agent_row(&directory, &Families::of(&directory), member, &app.faces))
+        .map(|member| {
+            // Whether its tool's account is used up is none of the fields of this answer.
+            let (families, unasked) = (Families::of(&directory), crate::quota::UsedUp::new());
+            agent_row(&directory, &families, member, &app.faces, &unasked)
+        })
         .unwrap_or_default();
     // Three of them the Python Host answers as it stores them: a number, 0 or 1.
     let stored = ["muted", "heartbeat_enabled", "dreaming_enabled"];

@@ -147,6 +147,13 @@ async fn serve(config: Config) -> Result<(), String> {
         server_id: server_id.clone(),
     };
     tokio::spawn(clarp_host::usage::keep(fleet.clone(), used, counts));
+    tokio::spawn(clarp_host::quota::watch(
+        limits.clone(),
+        fleet.clone(),
+        hub.clone(),
+        clock.clone(),
+        server_id.clone(),
+    ));
     let desks = Arc::new(Mutex::new(Presence::new()));
     // The relay tells what paces the chip when it is asked too much, by an alert as well.
     let (limited, is_limited) = tokio::sync::mpsc::unbounded_channel();

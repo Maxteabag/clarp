@@ -2154,10 +2154,14 @@ impl Worker {
             }
             // And what the tool wrote of its account's limits meanwhile is read, whatever
             // became of the turn: Codex writes it into its conversation's own record.
-            if let Some(session) = status.backend_session.as_deref()
-                && backend == crate::quota::CODEX
-            {
-                self.setup.tally.over(backend, session);
+            if backend == crate::quota::CODEX {
+                let session = status.backend_session.as_deref().unwrap_or("");
+                // When it completed, where it did: by the turn's own end, which is the same
+                // when a Host that starts again tells the turn once more.
+                let completed = |last: &&Settled| last.outcome == Outcome::Completed;
+                let done_at = status.last.as_ref().filter(completed);
+                let done_at = done_at.map(|last| last.ended_at_ms);
+                self.setup.tally.over(backend, session, done_at);
             }
         }
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());

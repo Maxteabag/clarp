@@ -880,9 +880,29 @@ more than one record it was said differently along the way; 4,516 of the 6,662 s
 less), so that most records are of another window; the Python Host on elitebook holds 755 rows of the week's
 window from 48 days. That table also says what the owner's accounts have today: a week's window and no
 five-hour one, and no limit was ever told there. So the warning and the hard limit are held by vectors and by
-stand-ins, and by nothing live. Left of this: what Claude Code says of its limits as it runs, an agent's row
-saying that its tool's account is used up (`backend_quota`, which is `null` here), a turn that fails for a
-usage limit told as a limit, and asking a provider, which stays off unless the owner turns it on.
+stand-ins, and by nothing live. Shown live on the installed Host the same evening
+(`docs/battle-test.md`): after one turn of Codex its usage screen shows the account's week.
+
+An agent's row then says of its tool that its account is used up (`backend_quota`): advice for whoever is
+about to write to the agent, and no refusal. It says so while a window that was said to be all used, or that
+stands at its hard limit, is fresh, and no turn of the tool completed since that was said: an account that
+served a turn to its end was not used up. That is the Python Host's rule (`backend_usage.exhausted_backends`),
+and its own answers were written down at each of the 108 askings of the stories (48 by now), with turns that
+ended written into that Host's log of states: which window is named, the last reset where several are used
+up, none where one of them does not say its own, and that a turn of another tool, or one that was cut off or
+failed, proves nothing. The keeper is told when a turn of Codex completed, by the turn's own end, and keeps
+it. The apps are told to read their agents' rows again when what they would show of it changes
+(`agent-roster` of the kind `backend-quota`), never at the first look; and since what was said grows old
+without anything happening, it is looked at every five minutes, as on the Python Host. Through the Host: a
+turn that fails after Codex said that all is used marks every agent of Codex and none of Claude; a turn that
+completes takes the mark away though Codex says the same in it; and a Host that is killed and started has
+not forgotten that the turn completed. It matched at its first run again, kernel and Host. Of 17 wrong rules
+planted, 15 were caught; one of the two others changes nothing by construction (a turn that completed in the
+very moment the first of it was said), and the other showed a story that was missing (a window said again in
+the moment a turn completed while an older one stands), which was written, after which it was caught. The
+look every five minutes is held by no test. Left of this: what Claude Code says of its limits as it runs, a
+turn that fails for a usage limit told as a limit (until then the feature `backend_quota` is not listed), and
+asking a provider, which stays off unless the owner turns it on.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what

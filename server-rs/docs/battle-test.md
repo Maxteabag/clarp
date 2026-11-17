@@ -1097,6 +1097,25 @@ the stream gives a client that has nothing: what was told lately, of an agent of
 this one too. The second run, with the check corrected in the first two, held every point; the third
 is corrected in the script and was not run again.
 
+## What is left of a Codex account, after a real turn
+
+17 Nov 2026, 21:08, the installed Host on the build `0b4edc2009ac` (installed at 21:07:52 by the
+installer; its relay was back after 92 ms). One check (`verify-limits.py`) and one turn of Codex: an
+agent of the check's own on Codex is asked for a single word, and the usage screen's answer
+(`GET /backend-usage`) is read before the turn and after it.
+
+| What was read | What the installed Host answered |
+|---|---|
+| Before the turn | of Codex nothing was seen (`unavailable`, "No structured usage evidence for this provider"), no window; the row of Codex is what this Host counted itself (`clarp-turn-accounting`) |
+| After the turn (its state `done`, the word answered) | of Codex: `fresh`, from `rollout/token_count`; one window, the week's (`seven_day`), with how much of it is used, when it begins anew, an id, and its limit `normal`; the row of Codex is `codex-rollout`, `fresh`, with the same figure, the window under the name Codex gives it (`primary`), and this Host's own counting beside it |
+| Limits told meanwhile | none (`provider-limit` on the stream: 0; `limit_events` in the answer: 0): the account has a week's window and no five-hour one |
+| Afterwards | the agent removed; the Host has its 23 agents |
+
+The figure and the moment of the reset are the owner's account's and are not written here. Every point
+of the check held at its first run. What it does not show: a warning or a hard limit of a real account
+(this one has no five-hour window), and what an agent's row says of an account that is used up, which
+is not in this build.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

@@ -102,6 +102,7 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
     let began = vectors["began_ms"].as_i64().unwrap();
     let seen_in = vectors["seen_in"].as_str().unwrap();
     let (mut steps, mut askings, mut events, mut logins) = (0, 0, 0, BTreeMap::new());
+    let (mut ended, mut used_up) = (0, 0);
     let stories = vectors["stories"].as_array().unwrap();
     for story in stories {
         let name = story["name"].as_str().unwrap();
@@ -128,7 +129,14 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
             let what = format!("{name}, step {at}");
             let now = began + step["at"].as_i64().unwrap() * 1000;
             let told = step["limit_events"].as_array().cloned().unwrap_or_default();
-            if step.get("record").is_some() {
+            if let Some(how) = step.get("ended") {
+                // A turn of an agent ended. The keeper is told of those of its own tool that
+                // completed, and of no other: that is all a Host tells it.
+                if how["tool"] == "codex" && how["kind"] == "done" {
+                    kept.completed(now);
+                }
+                ended += 1;
+            } else if step.get("record").is_some() {
                 let on = login(&step["identity"]).unwrap();
                 *logins.entry(step["identity"].to_string()).or_insert(0) += 1;
                 let did = match &step["snapshot"] {
@@ -148,7 +156,8 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
                     "{what}: what is told"
                 );
             } else {
-                let shown = kept.asked(tool, login(&step["active"]), now, &mut new_id);
+                let active = login(&step["active"]);
+                let shown = kept.asked(tool, active, now, &mut new_id);
                 keys.check(&shown.events, None, &what);
                 keys.check(&told, None, &what);
                 let at_the_asking = ours.of(&json!(shown.events));
@@ -174,6 +183,12 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
                     }
                 }
                 assert_eq!(row, their_row, "{what}: the tool's row");
+                // Whether the account is used up, as an agent's row says it of its tool.
+                let of_all = step["used_up"].as_object().unwrap();
+                assert!(of_all.keys().all(|of| of == "codex"), "{what}: {of_all:?}");
+                let theirs = of_all.get("codex").cloned();
+                assert_eq!(kept.used_up(tool, active, now), theirs, "{what}: used up");
+                used_up += usize::from(theirs.is_some());
                 askings += 1;
             }
             events += told.len();
@@ -181,7 +196,8 @@ fn what_is_kept_and_shown_of_an_accounts_limits_is_what_the_python_host_keeps_an
         }
     }
     // Counted by the script that wrote the vectors.
-    assert_eq!((stories.len(), steps, askings, events), (33, 146, 83, 39));
+    assert_eq!((stories.len(), steps, askings, events), (48, 202, 108, 55));
+    assert_eq!((ended, used_up), (11, 29));
     // And told on more than one login: four of them, one with no account known.
     assert_eq!(logins.len(), 4);
 }
