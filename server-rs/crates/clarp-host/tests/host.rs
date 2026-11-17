@@ -9837,7 +9837,9 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         ),
         "{of_codex}"
     );
-    assert_eq!(ids(of_codex).len(), 9);
+    // As many as the Python Host's table has of Codex (`backend_catalogue.py`), from which
+    // this Host's own is written.
+    assert_eq!(ids(of_codex).len(), 11);
     assert_eq!(told["providers"]["claude"]["installed"], true);
 }
 

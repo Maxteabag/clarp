@@ -241,6 +241,32 @@
   "effort_scope": "model",
   "models": [
    {
+    "id": "gpt-6.2-sol",
+    "label": "GPT-6.2-Sol",
+    "default_effort": "medium",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
+    "id": "gpt-6.2-astra",
+    "label": "GPT-6.2-Astra",
+    "default_effort": "low",
+    "supported_efforts": [
+     "low",
+     "medium",
+     "high",
+     "xhigh",
+     "max",
+     "ultra"
+    ]
+   },
+   {
     "id": "gpt-6.1-sol",
     "label": "GPT-6.1 Sol",
     "default_effort": "medium",
