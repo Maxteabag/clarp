@@ -148,6 +148,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("snapshot_without_archived", 82),
     // `DELETE /devices` and `GET /devices/push-tokens`.
     ("push_unregister", 93),
+    // An agent's row says that its tool's account is used up (`backend_quota`), and the apps
+    // are told to read the rows again when that changes (`agent-roster`, `backend-quota`):
+    // for Codex by what Codex writes of its account and by a turn that failed for a usage
+    // limit, for Claude by what Claude Code says as it runs. No provider is asked.
+    ("backend_quota", 3),
 ];
 
 /// The most a conversation that arrives from another Host may weigh, as JSON.

@@ -48,6 +48,7 @@ pub mod router;
 pub mod said;
 pub mod schedules;
 pub mod spoken;
+pub mod standing;
 pub mod told;
 pub mod tools;
 pub mod trust;

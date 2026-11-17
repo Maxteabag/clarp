@@ -1721,6 +1721,7 @@ mod tests {
             cost_micros: None,
             cost_so_far: None,
             total: None,
+            limits: None,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -2001,6 +2002,7 @@ mod tests {
             cost_micros: None,
             cost_so_far: None,
             total: None,
+            limits: None,
         }
     }
 

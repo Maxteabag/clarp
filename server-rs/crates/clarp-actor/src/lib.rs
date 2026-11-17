@@ -34,8 +34,8 @@ use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
 use clarp_kernel::agent::{Command, Effect, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::conversation::{
-    Commentary, CostSoFar, Entry, Imported, Message, Notice, Reply, ToolCall, ToolStatus, Total,
-    TurnEnd,
+    Commentary, CostSoFar, Entry, Imported, LimitsSaid, Message, Notice, Reply, ToolCall,
+    ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -456,6 +456,8 @@ struct LiveTurn {
     total: Option<(u64, u64)>,
     base: Option<(u64, u64)>,
     context: Option<u64>,
+    /// What the tool last said of its account's windows, and when.
+    limits: Option<(i64, serde_json::Value)>,
     /// What the tool said its conversation has cost so far, and what it had cost before the
     /// turn, where that is known: nothing for a conversation that begins with the turn.
     cost: Option<u64>,
@@ -489,6 +491,7 @@ impl LiveTurn {
             total: self.total,
             base: self.base,
             context: self.context,
+            limits: self.limits.clone(),
             cost: self.cost,
             cost_before: self.cost_before,
         }
@@ -768,6 +771,7 @@ struct Facts {
     total: Option<(u64, u64)>,
     base: Option<(u64, u64)>,
     context: Option<u64>,
+    limits: Option<(i64, serde_json::Value)>,
     cost: Option<u64>,
     cost_before: Option<u64>,
 }
@@ -796,6 +800,7 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
         });
     }
     end.context_tokens = facts.context;
+    end.limits = facts.limits.map(|(at_ms, said)| LimitsSaid { at_ms, said });
     // What the tool tells of cost is what its whole conversation has cost so far: the turn's
     // share is what that grew by. A total that fell is a conversation the tool began anew,
     // and is the turn's own. Where what it stood at before is not known (a session that was
@@ -1034,6 +1039,7 @@ impl Actor {
                 total: None,
                 base: actor.total_before(turn)?,
                 context: None,
+                limits: None,
                 cost: None,
                 cost_before: actor.cost_before(turn)?,
                 offset: 0,
@@ -2531,6 +2537,9 @@ impl Actor {
             Some(before) => before.cost_before,
             None => self.cost_before(turn)?,
         };
+        // What the tool said of its account in an attempt before this one stands until it
+        // says it anew.
+        let limits = before.as_ref().and_then(|before| before.limits.clone());
         let (last_row, model, tokens, total, context) = match before {
             Some(before) => (
                 before.last_row,
@@ -2555,6 +2564,7 @@ impl Actor {
             total,
             base,
             context,
+            limits,
             // What the conversation has cost so far is said again by the next attempt, with
             // what this one cost in it.
             cost: None,
@@ -2631,7 +2641,7 @@ impl Actor {
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
-        let mut total = None;
+        let (mut total, mut limits) = (None, None);
         let mut interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
@@ -2691,6 +2701,7 @@ impl Actor {
                             tokens_out,
                         } => total = Some((tokens_in, tokens_out)),
                         Signal::Context { tokens: held } => context = Some(held),
+                        Signal::Limits(said) => limits = Some((record.t, said)),
                         Signal::Cost { micros } => cost = Some(micros),
                         Signal::Glimpse(glimpse) => {
                             let _ = self.shown.show(&glimpse, Some(&name), record.t);
@@ -2727,6 +2738,7 @@ impl Actor {
             total,
             base: self.total_before(turn)?,
             context,
+            limits,
             cost,
             cost_before: self.cost_before(turn)?,
             interpreter,
@@ -3194,6 +3206,10 @@ impl Actor {
                         }
                         Signal::Context { tokens } => {
                             live.context = Some(tokens);
+                            continue;
+                        }
+                        Signal::Limits(said) => {
+                            live.limits = Some((t, said));
                             continue;
                         }
                         Signal::Cost { micros } => {

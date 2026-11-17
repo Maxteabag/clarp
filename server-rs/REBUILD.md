@@ -921,8 +921,29 @@ it is shown as that account's; a turn that completes ends it, told as recovered,
 The kernel matched that Host's answers at its first run; the test through the Host failed twice for reasons
 of its own (its stand-in failed by what it was asked, and a turn after turns that failed is given what they
 were asked too; and a moment is told to the second), and then held. 17 wrong rules planted, each caught.
-Left of this: what Claude Code says of its limits as it runs (until then the feature `backend_quota` is not
-listed), and asking a provider, which stays off unless the owner turns it on.
+
+Claude Code says of its account as it runs: with each `rate_limit_event` of its stream it prints the five
+hours and the week, each with how much of it is used and the second it begins anew (read off four raw
+recordings of this machine: what is used is a part of the whole there, never a percentage, which is what the
+provider's own endpoint answers the Python Host). The adapter tells it on (`Signal::Limits`), the actor keeps
+the newest of a turn with when it was said and writes it with the turn's end, and when the turn ends the Host
+reads it (`limits::claude`: in percent, to four places) and keeps it as the one word there is of that
+account, in the place of the word before (`clarp-kernel` `standing.rs`). What is shown and what counts as
+used up is the Python Host's rule for Claude, by that Host's own answers: its own function for asking the
+provider was run with a made-up answer in the provider's place, and then asked as an app asks (26 stories, 46
+askings): fresh for an hour, no warnings and no stretches, not shown to a Host on another account, used up
+while a window of a fresh word is all used and no turn of Claude completed after it was said. Since a word
+here comes out of a turn, a turn that completes after saying that all is used unmarks the account by the
+same rule: it was served. Whose account it is, is who Claude Code's own files say is logged in, as that Host
+finds it, kept as a keyed digest. Through the Host, with a stand-in for Claude Code: the windows are shown
+after a turn; a turn that says all of the five hours is used and does not complete marks every agent of
+Claude and none of Codex; one that completes unmarks them; a Host that is killed and started has kept both;
+another account's login shows nothing of it; and nothing of who is logged in is in what the Host keeps. The
+keeper matched at its first run; the test through the Host failed once for a reason of its own (its agent
+was not an agent of Claude). 25 wrong rules planted into the keeper, the reader, the adapter, the actor and
+the Host, each caught. With this the feature `backend_quota` is listed. Left: that an account's
+credits are used up (the provider's own word), and asking a provider at all, which stays off unless the
+owner turns it on.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what

@@ -245,6 +245,13 @@ pub struct CostSoFar {
     pub micros: u64,
 }
 
+/// What a tool said of its account's windows as it ran, in its own words, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LimitsSaid {
+    pub at_ms: i64,
+    pub said: Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnEnd {
     pub id: String,
@@ -284,6 +291,10 @@ pub struct TurnEnd {
     /// that and not the turn's own share.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total: Option<Total>,
+    /// What the tool said of its account's windows during the turn, where it said so: the
+    /// newest it said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<LimitsSaid>,
 }
 
 impl TurnEnd {
@@ -312,6 +323,7 @@ impl TurnEnd {
             cost_micros: None,
             cost_so_far: None,
             total: None,
+            limits: None,
         })
     }
 }
@@ -564,6 +576,7 @@ mod tests {
                 cost_micros: None,
                 cost_so_far: None,
                 total: None,
+                limits: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

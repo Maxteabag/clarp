@@ -2154,7 +2154,7 @@ impl Worker {
             }
             // And what the tool wrote of its account's limits meanwhile is read, whatever
             // became of the turn: Codex writes it into its conversation's own record.
-            if backend == crate::quota::CODEX {
+            if backend == crate::quota::CODEX || backend == crate::quota::CLAUDE {
                 let session = status.backend_session.as_deref().unwrap_or("");
                 // How it ended: where it completed, by the turn's own end, which is the same
                 // when a Host that starts again tells the turn once more.
@@ -2165,7 +2165,9 @@ impl Worker {
                     Some((Outcome::Failed { kind, .. }, _)) if kind == refused => Ending::Refused,
                     _ => Ending::Otherwise,
                 };
-                self.setup.tally.over(backend, session, how);
+                // And what the tool itself said of its account in the turn, where it did.
+                let said = self.ended.as_ref().and_then(|end| end.limits.clone());
+                self.setup.tally.over(backend, session, how, said);
             }
         }
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
