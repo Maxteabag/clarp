@@ -49,7 +49,7 @@ def _turn(backend, ordinal, kind=None):
             .replace(f"synthetic answer {ordinal}".encode(), _escaped(reply), 1))
 
 
-def _sent(databases, kind, number, *, at_ordinal):
+def _sent(databases, kind, number, *, at_ordinal, activation_ms=harness.BASE_MS - 1):
     """The automation's /send row and the turn it opens, just before the
     provider writes turn ``at_ordinal``."""
     prompt, _reply = AUTOMATIONS[kind]
@@ -58,11 +58,10 @@ def _sent(databases, kind, number, *, at_ordinal):
              .isoformat(timespec="milliseconds").replace("+00:00", "Z"))
     for database in databases:
         with sqlite3.connect(database) as other:
-            # These synthetic Host turns start after this fixture Host activated.
+            # Set activation on the same clock as the synthetic Host turns.
             # The worker's real startup clock is unrelated to the corpus clock.
             other.execute("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
-                          ("heartbeat.accounting_activation_ms", str(harness.BASE_MS - 1),
-                           harness.BASE_MS - 1))
+                          ("heartbeat.accounting_activation_ms", str(activation_ms), activation_ms))
             revision = other.execute(
                 "UPDATE message_clock SET revision=revision+1 WHERE singleton=0 RETURNING revision"
             ).fetchone()[0]
