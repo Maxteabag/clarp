@@ -2,7 +2,8 @@
 //!
 //! The fixtures are two turns recorded from Claude Code 2.1.321 on 15 Nov 2026, with the same
 //! flags the Host starts it with: one that only answers, one that calls a tool and then
-//! answers. Everything about the machine and the account was taken out; the events, their
+//! answers; and, recorded on 17 Nov 2026, a conversation made shorter (`/compact` for a
+//! message). Everything about the machine and the account was taken out; the events, their
 //! order and their fields are as they came. When a newer Claude Code changes its stream, record
 //! it again, add it beside these, and keep the old ones: agents run on old versions for a while.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -234,6 +235,41 @@ fn a_recorded_turn_reads_the_same_however_often_it_is_read() {
         read("claude-2.1.321-tool.jsonl"),
         read("claude-2.1.321-tool.jsonl")
     );
+}
+
+#[test]
+fn a_real_conversation_made_shorter_moves_the_agent_and_says_nothing() {
+    // Recorded on 17 Nov 2026 with Claude Code 2.1.321 on Sonnet, started as the Host starts a
+    // turn (print mode, a session continued by its name), with `/compact` for its message,
+    // after two short turns in that session. It says that it is making the conversation
+    // shorter, then how much shorter (30,729 tokens before, 8,957 after), and ends well
+    // without a word of its own: its summary of the conversation and the echo of the command
+    // come as messages of the user's, and are nobody's words. The session keeps its name.
+    let signals = read("claude-2.1.321-compact.jsonl");
+    let stored = stored(&signals);
+    assert_eq!(
+        stored,
+        [
+            &Signal::Moved(Activity::Compacting),
+            &Signal::Bound {
+                backend_session: SESSION.to_string()
+            },
+            &Signal::Moved(Activity::Thinking),
+            &Signal::Ended(RunOutcome::Completed),
+        ],
+        "{stored:#?}"
+    );
+    let said =
+        |signal: &Signal| matches!(signal, Signal::Reply(_) | Signal::Live(_) | Signal::Tool(_));
+    assert!(!signals.iter().any(said), "nothing was said: {signals:#?}");
+    assert!(signals.contains(&Signal::Model("claude-sonnet-5-5".to_string())));
+    // It tells no tokens of its own for the work, and what its session has cost so far: the
+    // two turns before it and its own summary together.
+    assert!(signals.contains(&Signal::Usage {
+        tokens_in: 0,
+        tokens_out: 0
+    }));
+    assert!(signals.contains(&Signal::Cost { micros: 143_641 }));
 }
 
 #[test]
