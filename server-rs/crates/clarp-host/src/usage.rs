@@ -44,12 +44,12 @@ const NOT_ASKED: &str =
 pub enum Told {
     /// What a turn used, and the name it is kept under.
     Used(String, Used),
-    /// A turn of a tool ended, in this session of the tool's own: what the tool wrote of
-    /// its account meanwhile is to be read. `done_at_ms`: when it completed, where it did.
+    /// A turn of a tool ended this way, in this session of the tool's own: what the tool
+    /// wrote of its account meanwhile is to be read.
     Over {
         tool: String,
         session: String,
-        done_at_ms: Option<i64>,
+        how: quota::Ending,
     },
 }
 
@@ -73,16 +73,11 @@ impl Tally {
         let _ = self.tx.send(Told::Used(name, used));
     }
 
-    /// A turn of a tool ended in a session of the tool's own, whatever became of the turn
-    /// (`done_at_ms`: when it completed, where it did): a tool that writes what is left of
-    /// its account wrote it there. Does not wait.
-    pub fn over(&self, tool: &str, session: &str, done_at_ms: Option<i64>) {
+    /// A turn of a tool ended in a session of the tool's own, whatever became of the turn:
+    /// a tool that writes what is left of its account wrote it there. Does not wait.
+    pub fn over(&self, tool: &str, session: &str, how: quota::Ending) {
         let (tool, session) = (tool.to_string(), session.to_string());
-        let _ = self.tx.send(Told::Over {
-            tool,
-            session,
-            done_at_ms,
-        });
+        let _ = self.tx.send(Told::Over { tool, session, how });
     }
 }
 
@@ -112,11 +107,7 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
     while let Some(told) = told.recv().await {
         let (name, used) = match told {
             Told::Used(name, used) => (name, used),
-            Told::Over {
-                tool,
-                session,
-                done_at_ms,
-            } => {
+            Told::Over { tool, session, how } => {
                 let with = quota::With {
                     fleet: &fleet,
                     hub: &works.hub,
@@ -124,8 +115,7 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
                     home: &home,
                     now_ms: clock.now_ms(),
                 };
-                let ended = works.limits.turn_ended(with, &tool, &session, done_at_ms);
-                ended.await;
+                works.limits.turn_ended(with, &tool, &session, how).await;
                 continue;
             }
         };
@@ -265,11 +255,11 @@ mod tests {
         assert!(before(1_800_000_000_124) > first && before(1_800_000_000_123) < first);
         assert_eq!(before(-5), "0000000000000");
         // And a turn that is over says in which session of its tool it was.
-        tally.over("codex", "a-thread", Some(7));
+        tally.over("codex", "a-thread", quota::Ending::Completed(7));
         let over = Told::Over {
             tool: "codex".to_string(),
             session: "a-thread".to_string(),
-            done_at_ms: Some(7),
+            how: quota::Ending::Completed(7),
         };
         assert_eq!(told.try_recv().unwrap(), over);
     }

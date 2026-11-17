@@ -13,6 +13,9 @@
 //! window that was said to be all used is fresh and no turn of the tool completed since:
 //! advice for whoever is about to write to the agent, and no refusal.
 //!
+//! A turn that fails for a usage limit is a limit too, of which nothing more is known: it is
+//! told as a hard limit and stands until a turn of the tool completes.
+//!
 //! Whose account a record is of is told by the login the tool is on when the record is
 //! read. The file the tool keeps its login in is read for the account and the token, and of
 //! both only a keyed digest is kept (the key is this Host's own, drawn once), so that
@@ -74,6 +77,17 @@ impl<'a> With<'a> {
     }
 }
 
+/// How a turn ended, as far as it says something of its tool's account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    /// It completed, then: the account served it.
+    Completed(i64),
+    /// It failed for a usage limit: the account did not serve it.
+    Refused,
+    /// Cut off, stopped, or failed for something else: it says nothing of the account.
+    Otherwise,
+}
+
 /// Which tools' accounts are used up, by the tool's name, with what an agent's row says of
 /// its tool then (`backend_quota`). A tool that is not named is not known to be.
 pub type UsedUp = BTreeMap<String, Value>;
@@ -90,17 +104,11 @@ pub struct Desk {
 }
 
 impl Desk {
-    /// A turn of a tool ended, in the tool's own session (`done_at_ms`: when it completed,
-    /// where it did): what the tool wrote of its account's limits is read, kept, and what
-    /// follows from it told. A tool that writes no such record, and a turn that wrote none,
-    /// leave the windows as they are.
-    pub async fn turn_ended(
-        &self,
-        with: With<'_>,
-        tool: &str,
-        session: &str,
-        done_at_ms: Option<i64>,
-    ) {
+    /// A turn of a tool ended, in the tool's own session: what the tool wrote of its
+    /// account's limits is read, kept, and what follows from it told, and so is what
+    /// follows from how the turn ended. A tool that writes no such record, and a turn that
+    /// wrote none, leave the windows as they are.
+    pub async fn turn_ended(&self, with: With<'_>, tool: &str, session: &str, how: Ending) {
         if tool != CODEX {
             return;
         }
@@ -110,8 +118,10 @@ impl Desk {
             return;
         };
         let mut kept = before.clone();
-        // The key that logins are named with is drawn with the first record there is.
-        let on = known.login(with, tool, read.is_some()).await;
+        // The key that logins are named with is drawn with the first thing there is to keep.
+        let to_keep = read.is_some() || how == Ending::Refused;
+        let on = known.login(with, tool, to_keep).await;
+        let login = on.as_ref().map(Named::login);
         let instance = format!("{}:{tool}", with.server_id);
         let of = Tool {
             instance: &instance,
@@ -123,9 +133,16 @@ impl Desk {
         {
             events = kept.seen(of, on.login(), snapshot, SEEN_IN, at_ms, &mut drawn);
         }
-        // An account that served a turn to its end was not used up when it did.
-        if let Some(done_at_ms) = done_at_ms {
-            kept.completed(done_at_ms.min(with.now_ms));
+        match how {
+            // An account that served a turn to its end was not used up when it did, and a
+            // limit of which nothing more was known is over.
+            Ending::Completed(at_ms) => {
+                let at_ms = at_ms.min(with.now_ms);
+                events.extend(kept.completed(of, login, at_ms, &mut drawn));
+            }
+            // A turn that failed for a usage limit is a limit, whatever else is known of it.
+            Ending::Refused => events.extend(kept.refused(of, login, with.now_ms, &mut drawn)),
+            Ending::Otherwise => {}
         }
         if kept != before {
             known.keep(with.fleet, tool, kept.clone()).await;

@@ -44,6 +44,11 @@ pub const WARNING_AT: f64 = 80.0;
 pub const WARNING_ID: &str = "five_hour_80_percent";
 /// What an app is told where nothing was seen of a tool's account.
 pub const NOTHING_SEEN: &str = "No structured usage evidence for this provider";
+/// The login a limit is kept under where no login could be read.
+pub const NO_LOGIN: &str = "auth-unknown";
+/// Where a limit is from of which nothing is known but that a turn failed for it.
+pub const REFUSED: &str = "classified_terminal";
+const REFUSED_DETAIL: &str = "classified quota terminal";
 /// For how long after its window began anew a limit that is over is still kept.
 pub const KEPT_AFTER_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 
@@ -95,12 +100,30 @@ struct Window {
     window_id: String,
     generation: String,
     account: Option<String>,
-    /// `five_hour` or `seven_day`.
+    /// `five_hour` or `seven_day`; `unknown` for the window of a limit of which nothing is
+    /// known but that a turn failed for it.
     kind: String,
     used: Option<f64>,
     resets_at: Option<String>,
     observed_at_ms: i64,
+    /// Who says so: the tool itself (`provider_reported`), or a turn that failed.
+    #[serde(default = "by_the_tool")]
+    source_kind: String,
     source_detail: String,
+}
+
+fn by_the_tool() -> String {
+    "provider_reported".to_string()
+}
+
+/// What is said of a window: its kind and length, how it stands, and who says so.
+struct Said<'a> {
+    kind: &'a str,
+    minutes: Option<i64>,
+    used: Option<f64>,
+    resets_at: Option<String>,
+    source_kind: &'a str,
+    detail: &'a str,
 }
 
 /// A stretch in which the five-hour window of an account was near its end or at it.
@@ -182,24 +205,7 @@ impl Kept {
         new_id: &mut dyn FnMut(&str) -> String,
     ) -> Vec<Value> {
         let whose = Whose { tool, login };
-        let mut events = Vec::new();
-        // Another login: what stood open under the one before is no longer known.
-        for at in 0..self.episodes.len() {
-            let episode = &self.episodes[at];
-            if episode.generation == login.generation || episode.status != "open" {
-                continue;
-            }
-            let told = Told {
-                kind: "unknown",
-                threshold_id: None,
-                used: None,
-                resets_at: None,
-                freshness: "unknown",
-                source_kind: "auth_generation_rotated",
-            };
-            events.extend(self.tell(tool, at, &told, now_ms, new_id));
-            self.episodes[at].status = "invalidated".to_string();
-        }
+        let mut events = self.another_login(tool, login, now_ms, new_id);
         let none = Map::new();
         let seen = snapshot["windows"].as_object().unwrap_or(&none);
         // The tool's row: what was seen before of this login's windows stays beside what is
@@ -243,26 +249,27 @@ impl Kept {
         if let Some(window) = five_hours {
             let used = window["used_percentage"].as_f64();
             let resets_at = text(&window["resets_at"]);
-            let id = self.keep(
-                whose,
-                "five_hour",
-                300,
-                (used, resets_at.clone()),
+            let said = Said {
+                kind: "five_hour",
+                minutes: Some(300),
+                used,
+                resets_at: resets_at.clone(),
+                source_kind: "provider_reported",
                 detail,
-                now_ms,
-            );
+            };
+            let id = self.keep(whose, said, now_ms);
             events.extend(self.five_hours(whose, &id, used, resets_at.as_deref(), now_ms, new_id));
         }
         if let Some(window) = week {
-            let used = window["used_percentage"].as_f64();
-            self.keep(
-                whose,
-                "seven_day",
-                10_080,
-                (used, text(&window["resets_at"])),
+            let said = Said {
+                kind: "seven_day",
+                minutes: Some(10_080),
+                used: window["used_percentage"].as_f64(),
+                resets_at: text(&window["resets_at"]),
+                source_kind: "provider_reported",
                 detail,
-                now_ms,
-            );
+            };
+            self.keep(whose, said, now_ms);
         }
         self.forget(now_ms);
         events
@@ -303,18 +310,114 @@ impl Kept {
         self.windows.retain(|_| staying.pop().unwrap_or(true));
     }
 
+    /// Another login than the one limits stand open under: what stood open under the one
+    /// before is no longer known (`_invalidate_rotated_auth`).
+    fn another_login(
+        &mut self,
+        tool: Tool<'_>,
+        login: Login<'_>,
+        now_ms: i64,
+        new_id: &mut dyn FnMut(&str) -> String,
+    ) -> Vec<Value> {
+        let mut events = Vec::new();
+        for at in 0..self.episodes.len() {
+            let episode = &self.episodes[at];
+            if episode.generation == login.generation || episode.status != "open" {
+                continue;
+            }
+            let told = Told {
+                kind: "unknown",
+                threshold_id: None,
+                used: None,
+                resets_at: None,
+                freshness: "unknown",
+                source_kind: "auth_generation_rotated",
+            };
+            events.extend(self.tell(tool, at, &told, now_ms, new_id));
+            self.episodes[at].status = "invalidated".to_string();
+        }
+        events
+    }
+
+    /// A turn of the tool failed for a usage limit, on this login (or on none that could be
+    /// read): a hard limit of which nothing more is known, neither which window nor until
+    /// when (`record_classified_usage_limit`). Told once for as long as it stands; a turn
+    /// that fails the same way meanwhile says only that it still does. Answers the events to
+    /// tell.
+    pub fn refused(
+        &mut self,
+        tool: Tool<'_>,
+        login: Option<Login<'_>>,
+        now_ms: i64,
+        new_id: &mut dyn FnMut(&str) -> String,
+    ) -> Vec<Value> {
+        let mut events = match login {
+            Some(login) => self.another_login(tool, login, now_ms, new_id),
+            None => Vec::new(),
+        };
+        let login = login.unwrap_or(Login {
+            generation: NO_LOGIN,
+            account: None,
+        });
+        let said = Said {
+            kind: "unknown",
+            minutes: None,
+            used: None,
+            resets_at: None,
+            source_kind: REFUSED,
+            detail: REFUSED_DETAIL,
+        };
+        let window_id = self.keep(Whose { tool, login }, said, now_ms);
+        // The stretch of this window that stands open, the newest where there are several;
+        // a new one where there is none.
+        let stands = |episode: &Episode| {
+            episode.generation == login.generation
+                && episode.status == "open"
+                && episode.window_id == window_id
+        };
+        let open = (0..self.episodes.len())
+            .filter(|at| stands(&self.episodes[*at]))
+            .max_by_key(|at| (self.episodes[*at].opened_at_ms, std::cmp::Reverse(*at)));
+        let at = match open {
+            Some(at) => at,
+            None => {
+                self.episodes.push(Episode {
+                    episode_id: new_id("plp-"),
+                    generation: login.generation.to_string(),
+                    window_id,
+                    status: "open".to_string(),
+                    current_kind: "unknown".to_string(),
+                    threshold_id: None,
+                    opened_at_ms: now_ms,
+                    current_event_id: None,
+                });
+                self.episodes.len() - 1
+            }
+        };
+        let told = Told {
+            kind: "hard_limit",
+            threshold_id: None,
+            used: None,
+            resets_at: None,
+            freshness: "fresh",
+            source_kind: REFUSED,
+        };
+        events.extend(self.tell(tool, at, &told, now_ms, new_id));
+        events
+    }
+
     /// Keeps how a window stands; answers its id. A window is known by whose it is, what
     /// kind and how long it is, and when it begins anew: one that began anew is another.
-    fn keep(
-        &mut self,
-        whose: Whose<'_>,
-        kind: &str,
-        minutes: i64,
-        (used, resets_at): (Option<f64>, Option<String>),
-        detail: &str,
-        now_ms: i64,
-    ) -> String {
+    fn keep(&mut self, whose: Whose<'_>, said: Said<'_>, now_ms: i64) -> String {
         let Whose { tool, login } = whose;
+        let Said {
+            kind,
+            minutes,
+            used,
+            resets_at,
+            source_kind,
+            detail,
+        } = said;
         let window_id = canonical_id(
             "puw-",
             &json!({
@@ -338,6 +441,7 @@ impl Kept {
             used,
             resets_at,
             observed_at_ms: now_ms,
+            source_kind: source_kind.to_string(),
             source_detail: detail.to_string(),
         };
         let known = |kept: &&mut Window| {
@@ -542,7 +646,7 @@ impl Kept {
             return Vec::new();
         };
         let mut shown = Vec::new();
-        for kind in ["five_hour", "seven_day"] {
+        for kind in ["five_hour", "seven_day", "unknown"] {
             let of_kind = |window: &&Window| window.generation == generation && window.kind == kind;
             // The newest word of a window of this kind; of two as new, the one kept first.
             let mut latest: Option<&Window> = None;
@@ -567,7 +671,7 @@ impl Kept {
                     episode = Some(candidate);
                 }
             }
-            let episode = episode.filter(|_| kind == "five_hour");
+            let episode = episode.filter(|_| kind != "seven_day");
             let state = match episode.map(|episode| episode.current_kind.as_str()) {
                 None if fresh && window.used.is_some() => "normal",
                 None => "unknown",
@@ -620,7 +724,7 @@ impl Kept {
                     "resets_at": window.resets_at,
                     "observed_at": moment(window.observed_at_ms),
                     "freshness": if one.fresh { "fresh" } else { "stale" },
-                    "source": { "kind": "provider_reported", "detail": window.source_detail },
+                    "source": { "kind": window.source_kind, "detail": window.source_detail },
                     "limit": {
                         "state": one.state,
                         "episode_id": one.episode.map(|episode| &episode.episode_id),
@@ -635,15 +739,59 @@ impl Kept {
             "provider_instance_id": tool.instance,
             "freshness": if all_fresh { "fresh" } else { "stale" },
             "observed_at": moment(newest.observed_at_ms),
-            "source": { "kind": "provider_reported", "detail": newest.source_detail },
+            "source": { "kind": newest.source_kind, "detail": newest.source_detail },
             "windows": windows,
         })
     }
 
-    /// A turn of the tool completed, whatever agent's: an account that served a turn was not
-    /// used up when it did.
-    pub fn completed(&mut self, at_ms: i64) {
+    /// A turn of the tool completed on this login (or on none that could be read), whatever
+    /// agent's: an account that served a turn was not used up when it did. A limit of which
+    /// nothing was known but that a turn failed for it is over with that: told as recovered,
+    /// and its window is no more. (The Python Host ends such a limit when it asks the
+    /// provider and is told that all is well, `_resolve_unknown_terminals`: the same ending,
+    /// for a Host that asks nobody.) Answers the events to tell.
+    pub fn completed(
+        &mut self,
+        tool: Tool<'_>,
+        login: Option<Login<'_>>,
+        at_ms: i64,
+        new_id: &mut dyn FnMut(&str) -> String,
+    ) -> Vec<Value> {
         self.done_ms = Some(self.done_ms.map_or(at_ms, |done| done.max(at_ms)));
+        // Whose such limits: this login's, those kept under no login, and those of this
+        // login's account under whichever login.
+        let generation = login.map_or(NO_LOGIN, |login| login.generation);
+        let account = login.and_then(|login| login.account);
+        let over = |window: &Window| {
+            let of_the_login = window.generation == generation || window.generation == NO_LOGIN;
+            let of_the_account = account.is_some() && window.account.as_deref() == account;
+            window.kind == "unknown" && (of_the_login || of_the_account)
+        };
+        if !self.windows.iter().any(over) {
+            return Vec::new();
+        }
+        let mut events = Vec::new();
+        for at in 0..self.episodes.len() {
+            let episode = &self.episodes[at];
+            let its_window = self.windows.iter().find(|window| {
+                window.window_id == episode.window_id && window.generation == episode.generation
+            });
+            if episode.status != "open" || !its_window.is_some_and(over) {
+                continue;
+            }
+            let told = Told {
+                kind: "recovered",
+                threshold_id: None,
+                used: None,
+                resets_at: None,
+                freshness: "fresh",
+                source_kind: "provider_reported",
+            };
+            events.extend(self.tell(tool, at, &told, at_ms, new_id));
+        }
+        self.windows.retain(|window| !over(window));
+        self.forget(at_ms);
+        events
     }
 
     /// Whether the account the Host is on is used up, as far as what was said of it stands,

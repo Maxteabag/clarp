@@ -2156,12 +2156,16 @@ impl Worker {
             // became of the turn: Codex writes it into its conversation's own record.
             if backend == crate::quota::CODEX {
                 let session = status.backend_session.as_deref().unwrap_or("");
-                // When it completed, where it did: by the turn's own end, which is the same
+                // How it ended: where it completed, by the turn's own end, which is the same
                 // when a Host that starts again tells the turn once more.
-                let completed = |last: &&Settled| last.outcome == Outcome::Completed;
-                let done_at = status.last.as_ref().filter(completed);
-                let done_at = done_at.map(|last| last.ended_at_ms);
-                self.setup.tally.over(backend, session, done_at);
+                use crate::quota::Ending;
+                let refused = clarp_kernel::failures::USAGE_LIMIT;
+                let how = match status.last.as_ref().map(|last| (&last.outcome, last)) {
+                    Some((Outcome::Completed, last)) => Ending::Completed(last.ended_at_ms),
+                    Some((Outcome::Failed { kind, .. }, _)) if kind == refused => Ending::Refused,
+                    _ => Ending::Otherwise,
+                };
+                self.setup.tally.over(backend, session, how);
             }
         }
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());

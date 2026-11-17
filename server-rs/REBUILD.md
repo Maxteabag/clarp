@@ -900,9 +900,29 @@ not forgotten that the turn completed. It matched at its first run again, kernel
 planted, 15 were caught; one of the two others changes nothing by construction (a turn that completed in the
 very moment the first of it was said), and the other showed a story that was missing (a window said again in
 the moment a turn completed while an older one stands), which was written, after which it was caught. The
-look every five minutes is held by no test. Left of this: what Claude Code says of its limits as it runs, a
-turn that fails for a usage limit told as a limit (until then the feature `backend_quota` is not listed), and
-asking a provider, which stays off unless the owner turns it on.
+look every five minutes is held by no test.
+
+A turn that fails for a usage limit is a limit too, whatever else is known: the Python Host records it as a
+hard limit of which nothing more is known, neither which window nor until when
+(`record_classified_usage_limit`), tells it once for as long as it stands, shows it as a window of the kind
+`unknown`, and takes the account for used up while that is fresh. Here the same, by that function's own
+answers (the stories are 59 now, 13 of their steps such failures): told once; kept under the login the Host
+is on, or under none where no login can be read; ended as no longer known when another login comes. Where
+the two Hosts part is how such a limit ends. The Python Host ends it when it asks the provider and is told
+that all is well; this Host asks nobody, and ends it when a turn of Codex completes on the account, which
+says the same. What ends then, and how it is told, is the Python Host's own ending
+(`_resolve_unknown_terminals`), called in the stories where a turn completed: the limits of the login, of no
+login, and of the login's account under an earlier login, and none of another account. The failed turn's own
+state does not carry the limit's id, which the Python Host's recovery of goals reads; nothing here reads it.
+Through the Host, with a stand-in for Codex that fails as Codex does when its account is used up: the limit is
+told once and shown as a window of no known kind, the agent's row says used up, until nobody knows when; a
+second such failure a second later is seen and not told again; while another account is logged in nothing of
+it is shown as that account's; a turn that completes ends it, told as recovered, and its window is no more.
+The kernel matched that Host's answers at its first run; the test through the Host failed twice for reasons
+of its own (its stand-in failed by what it was asked, and a turn after turns that failed is given what they
+were asked too; and a moment is told to the second), and then held. 17 wrong rules planted, each caught.
+Left of this: what Claude Code says of its limits as it runs (until then the feature `backend_quota` is not
+listed), and asking a provider, which stays off unless the owner turns it on.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
