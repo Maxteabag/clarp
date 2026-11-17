@@ -399,7 +399,7 @@ def finalize_live_assistant_message(*, agent_id: str, backend_session_id: str,
     database.execute("BEGIN IMMEDIATE")
     try:
         turn = database.execute(
-            """SELECT turn_id, trace_id FROM turns
+            """SELECT turn_id, trace_id, started_at, settled_at, outcome FROM turns
                  WHERE agent_id=? AND ended_at IS NULL
                  ORDER BY turn_id DESC LIMIT 1""", (agent_id,),
         ).fetchone()
@@ -434,11 +434,7 @@ def finalize_live_assistant_message(*, agent_id: str, backend_session_id: str,
         conn(), agent_id, backend_session_id)
     final_text = str(row.get("text") or "")
     if origin == "heartbeat":
-        skip, _clean = heartbeat.strip_heartbeat_ack(text)
-        if skip:
-            heartbeat.record_heartbeat_noop_once(agent_id, user_key)
-        elif not heartbeat.is_neutral_heartbeat_status(final_text):
-            heartbeat.record_heartbeat_activity_once(agent_id, user_key)
+        heartbeat.record_ended_turn(agent_id, trace_id, text, origin=origin, turn=dict(turn))
     dreaming.process_assistant_text(agent_id, text, live=False, origin=origin)
     team_store.capture_assistant_message(
         agent_id=agent_id, source_message_id=str(row["id"]),
@@ -656,7 +652,7 @@ def commit_agy_assistant_turn(*, agent_id: str, backend_session_id: str,
         clean_text = strip_hidden_blocks(str(text or ""))
         if terminal_status == "success" and clean_text.strip():
             turn = database.execute(
-                """SELECT turn_id FROM turns
+                """SELECT turn_id, started_at, settled_at, outcome FROM turns
                      WHERE agent_id=? AND trace_id=? AND ended_at IS NULL
                      ORDER BY turn_id DESC LIMIT 1""",
                 (agent_id, trace_id),).fetchone()
@@ -698,6 +694,8 @@ def commit_agy_assistant_turn(*, agent_id: str, backend_session_id: str,
                 "sender_agent_id": sender_agent_id,
                 "revision": revision, "changed": True,
             }
+            if origin == "heartbeat":
+                row["_heartbeat_turn"] = dict(turn)
         database.execute(
             """UPDATE agy_turn_authority
                   SET terminal_status=?,authoritative_message_id=?,updated_at=?
@@ -720,11 +718,8 @@ def apply_final_assistant_side_effects(*, agent_id: str,
         conn(), agent_id, backend_session_id)
     final_text = str(row.get("text") or "")
     if origin == "heartbeat":
-        skip, _clean = heartbeat.strip_heartbeat_ack(final_text)
-        if skip:
-            heartbeat.record_heartbeat_noop_once(agent_id, user_key)
-        elif not heartbeat.is_neutral_heartbeat_status(final_text):
-            heartbeat.record_heartbeat_activity_once(agent_id, user_key)
+        heartbeat.record_ended_turn(agent_id, trace_id, final_text,
+                                    origin=origin, turn=row.get("_heartbeat_turn"))
     dreaming.process_assistant_text(agent_id, final_text, live=False, origin=origin)
     team_store.capture_assistant_message(
         agent_id=agent_id, source_message_id=str(row["id"]),

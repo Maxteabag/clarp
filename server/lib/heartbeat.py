@@ -6,11 +6,13 @@ when something useful needs attention.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Callable
 
@@ -269,10 +271,13 @@ def pending_heartbeat_agents(*, now: float | None = None,
             continue
         state = _state_for(agent_id)
         _wake_from_external_signal(agent_id, state)
-        reason = _skip_reason(snapshot=_gather_snapshot(agent, now), state=state, now=now)
-        if reason == "dormant":
-            with _STATE_LOCK:
-                state.dormant = True
+        snapshot = _gather_snapshot(agent, now)
+        decision = None
+        if not state.dormant and _interrupted_retry_expired(snapshot.latest, now):
+            decision = _observe_dormancy_decision(agent_id, snapshot.latest, now=now)
+        reason = _skip_reason(snapshot=snapshot, state=state, now=now)
+        if reason == "dormant" and not state.dormant and decision is not None:
+            _record_policy_dormancy(agent_id, decision)
         if reason:
             log("heartbeatSkip", f"agent={agent_id} session={session} reason={reason}")
             continue
@@ -287,85 +292,120 @@ def record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None) 
         _record_heartbeat_noop(agent_id)
 
 
-def record_heartbeat_noop_once(
-    agent_id: str,
-    accounting_key: str,
-    *,
-    is_interrupted: bool | None = None,
-) -> None:
-    if not _claim_accounting_key(agent_id, accounting_key, "noop"):
-        return
-    if is_interrupted is not None:
-        _record_heartbeat_noop(agent_id, is_interrupted=is_interrupted)
-    else:
-        _record_heartbeat_noop(agent_id)
-
-
 def _record_heartbeat_noop(agent_id: str, *, is_interrupted: bool | None = None) -> None:
     if not agent_id:
         return
     if is_interrupted is None:
         latest = agents_db.latest_state(agent_id) or {}
         is_interrupted = latest.get("kind") == AgentState.INTERRUPTED and not _is_user_stopped(latest)
-    with _STATE_LOCK:
-        state = _state_for_locked(agent_id)
+    threshold = 0 if is_interrupted else _dormant_after_noops()
+    def failed(state):
         state.noop_streak += 1
-        if not is_interrupted:
-            dormant_after = _dormant_after_noops()
-            if dormant_after > 0 and state.noop_streak >= dormant_after:
-                state.dormant = True
-        snapshot = _state_snapshot(state)
-    _persist_state_snapshot(agent_id, snapshot)
-    log("heartbeatNoop",
-        f"agent={agent_id} streak={snapshot.noop_streak} dormant={snapshot.dormant}")
+        if threshold > 0 and state.noop_streak >= threshold:
+            state.dormant = True
+    stamp = now_ms()
+    snapshot, _changed = _change_state(
+        agent_id, lambda database: _increment_noop(database, agent_id, threshold, stamp),
+        failed=failed)
+    if snapshot is not None:
+        log("heartbeatNoop",
+            f"agent={agent_id} streak={snapshot.noop_streak} dormant={snapshot.dormant}")
 
 
 def record_heartbeat_activity(agent_id: str) -> None:
     _record_heartbeat_activity(agent_id)
 
 
-def record_heartbeat_activity_once(agent_id: str, accounting_key: str) -> None:
-    if not _claim_accounting_key(agent_id, accounting_key, "activity"):
-        return
-    _record_heartbeat_activity(agent_id)
-
-
 def _record_heartbeat_activity(agent_id: str) -> None:
     if not agent_id:
         return
-    with _STATE_LOCK:
-        state = _state_for_locked(agent_id)
-        _reset_backoff_locked(state)
-        snapshot = _state_snapshot(state)
-    _persist_state_snapshot(agent_id, snapshot)
+    stamp = now_ms()
+    _change_state(agent_id, lambda database: _clear_backoff(database, agent_id, stamp),
+                  failed=_reset_backoff_locked)
 
 
-def _claim_accounting_key(agent_id: str, accounting_key: str,
-                          outcome: str) -> bool:
-    key = str(accounting_key or "").strip()
-    if not agent_id or not key:
-        return True
+KEY_ACCOUNTING_ACTIVATION = "heartbeat.accounting_activation_ms"
+
+
+def activate_accounting() -> int:
+    """One persistent boundary: imports never account turns predating this code.
+
+    INSERT OR IGNORE also fences simultaneous Host starts. An in-flight turn
+    at the first start is deliberately excluded, including after later restarts.
+    """
+    database = conn()
+    row = database.execute("SELECT value FROM settings WHERE key=?",
+                           (KEY_ACCOUNTING_ACTIVATION,)).fetchone()
+    if row is None:
+        stamp = now_ms()
+        database.execute("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                         (KEY_ACCOUNTING_ACTIVATION, str(stamp), stamp))
+        row = database.execute("SELECT value FROM settings WHERE key=?",
+                               (KEY_ACCOUNTING_ACTIVATION,)).fetchone()
+    return int(row["value"])
+
+
+def record_ended_turn(agent_id: str, trace_id: str, last_answer: str, *,
+                      origin: str, turn: dict | None) -> None:
+    """First authoritative reading wins, with claim and counter in one commit.
+
+    Both writers call AFTER their message transaction commits. Only Host-owned,
+    successfully settled heartbeat turns qualify; the interrupted-failure retry
+    path has its own existing accounting. The writers pass the provenance and
+    immutable Host turn snapshot they already read; accounting never searches
+    message or turn history. Neither outcome also seals the turn. Conflict
+    receipts use a separate key prefix and outcome, never a turn lookup key.
+    """
+    if (origin != "heartbeat" or not agent_id or not trace_id or turn is None
+            or turn["settled_at"] is None or turn["outcome"] != "completed"):
+        return
     try:
-        cur = conn().execute(
-            """INSERT OR IGNORE INTO heartbeat_accounting (
-                   accounting_key, agent_id, outcome, counted_at
-               ) VALUES (?, ?, ?, ?)""",
-            (key, agent_id, outcome, now_ms()),
-        )
-        if cur.rowcount == 1:
-            return True
-        if outcome != "activity":
-            return False
-        cur = conn().execute(
-            """UPDATE heartbeat_accounting
-                  SET outcome = ?, counted_at = ?
-                WHERE accounting_key = ? AND outcome = 'noop'""",
-            (outcome, now_ms(), key),
-        )
-        return cur.rowcount == 1
-    except Exception as e:  # noqa: BLE001
-        log_exception("heartbeatAccountingFail", e, detail=agent_id)
-        return True
+        database = conn()
+        if database.in_transaction:
+            raise RuntimeError("heartbeat accounting requires committed messages")
+        activation = activate_accounting()
+        if int(turn["started_at"]) < activation:
+            return
+        skip, clean = strip_heartbeat_ack(last_answer)
+        outcome = "noop" if skip else (
+            "neither" if is_neutral_heartbeat_status(clean) else "activity")
+        key = f"heartbeat-turn:{agent_id}:{trace_id}"
+        existing = database.execute("SELECT outcome FROM heartbeat_accounting WHERE accounting_key=?",
+                                    (key,)).fetchone()
+        if existing is not None and existing["outcome"] == outcome:
+            return
+        conflict = None
+        # SQLite may wait for another writer. Status readers share the cache
+        # mutex, so no writer admission or transaction runs under that mutex.
+        snapshot = None
+        with _state_transaction() as database:
+            inserted = database.execute(
+                "INSERT OR IGNORE INTO heartbeat_accounting(accounting_key,agent_id,outcome,counted_at) "
+                "VALUES(?,?,?,?)",
+                (key, agent_id, outcome, now_ms())).rowcount == 1
+            if inserted and outcome != "neither":
+                if outcome == "noop":
+                    snapshot = _increment_noop(database, agent_id, _dormant_after_noops(), now_ms())
+                else:
+                    snapshot = _clear_backoff(database, agent_id, now_ms())
+            elif not inserted:
+                first = database.execute("SELECT outcome FROM heartbeat_accounting "
+                                         "WHERE accounting_key=?", (key,)).fetchone()["outcome"]
+                if first != outcome:
+                    logged = database.execute(
+                        "INSERT OR IGNORE INTO heartbeat_accounting "
+                        "(accounting_key,agent_id,outcome,counted_at) VALUES(?,?,?,?)",
+                        (f"heartbeat-conflict:{key}", agent_id, "conflict", now_ms()))
+                    if logged.rowcount == 1:
+                        conflict = f"agent={agent_id} turn={trace_id} first={first} later={outcome}"
+        _publish_state(database, agent_id)
+        if inserted and outcome == "noop":
+            log("heartbeatNoop", f"agent={agent_id} streak={int(snapshot['noop_streak'])} "
+                f"dormant={bool(snapshot['dormant'])}")
+        if conflict is not None:
+            log("heartbeatAccountingConflict", conflict)
+    except Exception as exc:  # noqa: BLE001 - a derived count cannot break message delivery
+        log_exception("heartbeatAccountingFail", exc, detail=agent_id)
 
 
 def _reset_backoff_locked(state: _HeartbeatState) -> None:
@@ -446,12 +486,7 @@ def _load_persisted_state(agent_id: str) -> _HeartbeatState:
         return _HeartbeatState()
     if row is None:
         return _HeartbeatState()
-    return _HeartbeatState(
-        last_started=float(row["last_started"] or 0.0),
-        noop_streak=int(row["noop_streak"] or 0),
-        dormant=bool(row["dormant"]),
-        last_wake_signal_ms=int(row["last_wake_signal_ms"] or 0),
-    )
+    return _state_from_row(row)
 
 
 def _state_snapshot(state: _HeartbeatState) -> _HeartbeatState:
@@ -464,32 +499,111 @@ def _state_snapshot(state: _HeartbeatState) -> _HeartbeatState:
     )
 
 
-def _persist_state_snapshot(agent_id: str, state: _HeartbeatState) -> None:
-    if not agent_id:
-        return
+@contextmanager
+def _state_transaction():
+    """A state mutation owns one short transaction, outside the cache mutex."""
+    database = conn()
+    if database.in_transaction:
+        raise RuntimeError("heartbeat state mutation requires its own transaction")
+    database.execute("BEGIN IMMEDIATE")
     try:
-        conn().execute(
-            """INSERT INTO heartbeat_state (
-                   agent_id, last_started, noop_streak, dormant,
-                   last_wake_signal_ms, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(agent_id) DO UPDATE SET
-                   last_started = excluded.last_started,
-                   noop_streak = excluded.noop_streak,
-                   dormant = excluded.dormant,
-                   last_wake_signal_ms = excluded.last_wake_signal_ms,
-                   updated_at = excluded.updated_at""",
-            (
-                agent_id,
-                float(state.last_started or 0.0),
-                int(state.noop_streak),
-                1 if state.dormant else 0,
-                int(state.last_wake_signal_ms or 0),
-                now_ms(),
-            ),
-        )
-    except Exception as e:  # noqa: BLE001
-        log_exception("heartbeatStatePersistFail", e, detail=agent_id)
+        yield database
+        database.execute("COMMIT")
+    except BaseException:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+
+
+def _state_from_row(row) -> _HeartbeatState:
+    return _HeartbeatState(
+        last_started=float(row["last_started"] or 0.0),
+        noop_streak=int(row["noop_streak"] or 0),
+        dormant=bool(row["dormant"]),
+        last_wake_signal_ms=int(row["last_wake_signal_ms"] or 0))
+
+
+def _publish_state(database, agent_id: str, *, memory=None) -> None:
+    """Publish only a fresh committed row; preserve all memory-only fields.
+
+    A second writer can commit and publish while the first is still flushing
+    diagnostics. Reading under the mutex makes every publication converge on
+    that latest row, rather than writing an older transaction snapshot back.
+    Run start also needs a cache entry for its memory-only flood history.
+    """
+    with _STATE_LOCK:
+        cached = _STATE_BY_AGENT.get(agent_id)
+        if cached is None and memory is None:
+            return
+        row = database.execute(
+            "SELECT last_started,noop_streak,dormant,last_wake_signal_ms "
+            "FROM heartbeat_state WHERE agent_id=?", (agent_id,)).fetchone()
+        if row is not None:
+            fresh = _state_from_row(row)
+            if cached is None:
+                cached = fresh
+                _STATE_BY_AGENT[agent_id] = cached
+            else:
+                cached.last_started = fresh.last_started
+                cached.noop_streak = fresh.noop_streak
+                cached.dormant = fresh.dormant
+                cached.last_wake_signal_ms = fresh.last_wake_signal_ms
+        if memory is not None and cached is not None:
+            memory(cached)
+
+
+def _failed_state_memory(agent_id: str, failed, memory):
+    # Main changes its cache even if persistence fails. Load a missing cache
+    # outside the mutex: even failure recovery must never admit a DB writer
+    # while holding the status readers' lock.
+    with _STATE_LOCK:
+        missing = agent_id not in _STATE_BY_AGENT
+    initial = _load_persisted_state(agent_id) if missing else None
+    with _STATE_LOCK:
+        state = _STATE_BY_AGENT.setdefault(agent_id, initial or _HeartbeatState())
+        changed = failed(state) is not False
+        if changed and memory is not None:
+            memory(state)
+        return _state_snapshot(state), changed
+
+
+def _change_state(agent_id: str, write, *, failed, memory=None):
+    try:
+        with _state_transaction() as database:
+            row = write(database)
+    except Exception as exc:  # noqa: BLE001 - retain each old path's cache effect
+        snapshot, changed = _failed_state_memory(agent_id, failed, memory)
+        log_exception("heartbeatStatePersistFail", exc, detail=agent_id)
+        return snapshot, changed
+    try:
+        _publish_state(database, agent_id, memory=memory if row is not None else None)
+    except Exception as exc:  # noqa: BLE001 - committed data stands; never replay its arithmetic
+        log_exception("heartbeatStateLoadFail", exc, detail=agent_id)
+    return (_state_from_row(row) if row is not None else None), row is not None
+
+
+def _state_update(database, sql: str, parameters):
+    # Exhaust RETURNING before COMMIT. Only our fields are ever supplied from
+    # inputs; untouched persisted columns always stay in the database.
+    rows = database.execute(sql + " RETURNING last_started,noop_streak,dormant,last_wake_signal_ms",
+                            parameters).fetchall()
+    return rows[0] if rows else None
+
+
+def _increment_noop(database, agent_id: str, threshold: int, stamp: int):
+    return _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,noop_streak,dormant,updated_at) VALUES(?,?,?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET noop_streak=noop_streak+1,"
+        "dormant=CASE WHEN ?>0 AND noop_streak+1>=? THEN 1 ELSE dormant END,"
+        "updated_at=excluded.updated_at",
+        (agent_id, 1, int(threshold == 1), stamp, threshold, threshold))
+
+
+def _clear_backoff(database, agent_id: str, stamp: int):
+    return _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,updated_at) VALUES(?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET noop_streak=0,dormant=0,updated_at=excluded.updated_at",
+        (agent_id, stamp))
 
 
 @dataclass(frozen=True)
@@ -518,8 +632,8 @@ def _gather_snapshot(agent: dict, now: float) -> _AgentSnapshot:
 def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float) -> str:
     """Why this agent gets no heartbeat now, or "" when it is due.
 
-    Pure over the snapshot and the in-memory schedule state. A "dormant"
-    answer for a long-interrupted agent is recorded on ``state`` by the caller.
+    Pure over the snapshot and the in-memory schedule state. Selection owns
+    persistence of the long-interrupted agent's dormancy decision.
     """
     latest = snapshot.latest
     latest_kind = latest.get("kind")
@@ -543,7 +657,7 @@ def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float
         else 0.0
     )
     is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
-    if is_interrupted and interrupted_at and (now - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
+    if _interrupted_retry_expired(latest, now):
         return "dormant"
     last_event = max(state.last_started, interrupted_at)
     if last_event and now - last_event < MIN_WAKE_SPACING_SEC:
@@ -610,12 +724,18 @@ def keeper_owns_heartbeat(agent: dict) -> bool:
 
 
 def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
-    """Authoritative profile projection for cadence, backoff, and dormancy."""
+    """Read-only cadence/backoff projection; selection owns durable policy."""
     current = time.time() if now is None else now
     agent_id = agent["agent_id"]
-    current_state = _state_for(agent_id)
-    _wake_from_external_signal(agent_id, current_state)
-    state = _state_snapshot(_state_for(agent_id))
+    with _STATE_LOCK:
+        cached = _STATE_BY_AGENT.get(agent_id)
+        state = _state_snapshot(cached) if cached is not None else None
+    if state is None:
+        state = _load_persisted_state(agent_id)
+    latest_signal = _latest_wake_signal_ms(agent_id)
+    if latest_signal > 0 and latest_signal > state.last_wake_signal_ms:
+        state.last_wake_signal_ms = latest_signal
+        _reset_backoff_locked(state)  # only our private snapshot is changed
     latest = agents_db.latest_state(agent_id) or {}
     latest_kind = latest.get("kind")
     is_interrupted = latest_kind == AgentState.INTERRUPTED and not _is_user_stopped(latest)
@@ -625,8 +745,6 @@ def agent_schedule(agent: dict, *, now: float | None = None) -> dict:
         else 0.0
     )
     if is_interrupted and interrupted_at and (current - interrupted_at) >= MAX_INTERRUPTED_RETRY_SEC:
-        with _STATE_LOCK:
-            current_state.dormant = True
         state.dormant = True
     interval = int(_effective_interval_sec(state, is_interrupted=is_interrupted))
     next_at = None
@@ -720,33 +838,116 @@ def _flooded(state: _HeartbeatState, now: float) -> bool:
 
 
 def _record_run_start(agent_id: str, now: float) -> None:
+    if not agent_id:
+        return
     latest_signal = _latest_wake_signal_ms(agent_id)
-    with _STATE_LOCK:
-        state = _state_for_locked(agent_id)
-        state.last_started = now
-        state.last_wake_signal_ms = max(state.last_wake_signal_ms, latest_signal)
+    def memory(state):
         state.recent_starts.append(now)
         if len(state.recent_starts) > FLOOD_THRESHOLD + 1:
             state.recent_starts = state.recent_starts[-(FLOOD_THRESHOLD + 1):]
-        snapshot = _state_snapshot(state)
-    _persist_state_snapshot(agent_id, snapshot)
+    def failed(state):
+        state.last_started = now
+        state.last_wake_signal_ms = max(state.last_wake_signal_ms, latest_signal)
+    stamp = now_ms()
+    _change_state(agent_id, lambda database: _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,last_started,last_wake_signal_ms,updated_at) VALUES(?,?,?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET last_started=excluded.last_started,"
+        "last_wake_signal_ms=MAX(last_wake_signal_ms,excluded.last_wake_signal_ms),"
+        "updated_at=excluded.updated_at", (agent_id, now, latest_signal, stamp)),
+        failed=failed, memory=memory)
 
 
 def _wake_from_external_signal(agent_id: str, state: _HeartbeatState) -> None:
     latest = _latest_wake_signal_ms(agent_id)
     if latest <= 0 or latest <= state.last_wake_signal_ms:
         return
-    snapshot: _HeartbeatState | None = None
-    with _STATE_LOCK:
-        current = _STATE_BY_AGENT.setdefault(agent_id, state)
+    def failed(current):
         if latest <= current.last_wake_signal_ms:
-            return
+            return False
         current.last_wake_signal_ms = latest
         _reset_backoff_locked(current)
-        snapshot = _state_snapshot(current)
-    if snapshot is not None:
-        _persist_state_snapshot(agent_id, snapshot)
-    log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
+        return True
+    stamp = now_ms()
+    _snapshot, changed = _change_state(agent_id, lambda database: _state_update(database,
+        "INSERT INTO heartbeat_state(agent_id,last_wake_signal_ms,updated_at) VALUES(?,?,?) "
+        "ON CONFLICT(agent_id) DO UPDATE SET last_wake_signal_ms=excluded.last_wake_signal_ms,"
+        "noop_streak=0,dormant=0,updated_at=excluded.updated_at "
+        "WHERE last_wake_signal_ms<excluded.last_wake_signal_ms", (agent_id, latest, stamp)),
+        failed=failed)
+    if changed:
+        log("heartbeatWake", f"agent={agent_id} signal_ms={latest}")
+
+
+def _interrupted_retry_expired(latest: dict, now: float) -> bool:
+    if latest.get("kind") != AgentState.INTERRUPTED or _is_user_stopped(latest):
+        return False
+    interrupted_at = float(latest.get("ts") or 0.0) / 1000.0
+    return bool(interrupted_at and now - interrupted_at >= MAX_INTERRUPTED_RETRY_SEC)
+
+
+@dataclass(frozen=True)
+class _DormancyDecision:
+    state_key: tuple
+    row_version: tuple | None
+    latest: dict
+    at: float
+
+
+def _observe_dormancy_decision(agent_id: str, observed: dict, *, now: float) -> _DormancyDecision | None:
+    # One read observes both identities before the decision. Absence is None,
+    # never a row of defaults that a subsequent reset could also produce.
+    row = conn().execute(
+        "SELECT s.state_id,s.kind,s.ts,s.detail,h.rowid AS heartbeat_rowid,"
+        "h.last_started,h.noop_streak,h.dormant,h.last_wake_signal_ms,h.updated_at "
+        "FROM (SELECT state_id,agent_id,kind,ts,detail FROM state_log WHERE agent_id=? "
+        "ORDER BY ts DESC,state_id DESC LIMIT 1) s "
+        "LEFT JOIN heartbeat_state h ON h.agent_id=s.agent_id", (agent_id,)).fetchone()
+    if row is None:
+        return None
+    latest = {name: row[name] for name in ("kind", "ts", "detail")}
+    if latest["detail"]:
+        try:
+            latest["detail"] = json.loads(latest["detail"])
+        except json.JSONDecodeError as exc:
+            log_exception("heartbeatPolicyStateDetailFail", exc, detail=agent_id)
+            latest["detail"] = {}  # preserve latest_state's malformed-detail fallback
+    if latest != {name: observed.get(name) for name in ("kind", "ts", "detail")}:
+        return None  # the gather's facts already moved; do not revise that decision in place
+    version = None if row["heartbeat_rowid"] is None else tuple(row[name] for name in (
+        "heartbeat_rowid", "last_started", "noop_streak", "dormant", "last_wake_signal_ms", "updated_at"))
+    return _DormancyDecision(tuple(row[name] for name in ("state_id", "kind", "ts", "detail")),
+                             version, latest, now)
+
+
+def _record_policy_dormancy(agent_id: str, decision: _DormancyDecision) -> None:
+    stamp = now_ms()
+    def write(database):
+        # This read must follow BEGIN IMMEDIATE, including after a writer wait.
+        current = database.execute(
+            "SELECT state_id,kind,ts,detail FROM state_log WHERE agent_id=? "
+            "ORDER BY ts DESC,state_id DESC LIMIT 1", (agent_id,)).fetchone()
+        if (current is None or tuple(current) != decision.state_key
+                or not _interrupted_retry_expired(decision.latest, decision.at)):
+            return None
+        if decision.row_version is None:
+            if database.execute("SELECT 1 FROM heartbeat_state WHERE agent_id=?", (agent_id,)).fetchone():
+                return None
+            # Writer admission makes the absence check and insert atomic. No
+            # conflict UPDATE can turn a later created/reset row dormant.
+            return _state_update(database,
+                "INSERT INTO heartbeat_state(agent_id,dormant,updated_at) VALUES(?,1,?)",
+                (agent_id, stamp))
+        return _state_update(database,
+            "UPDATE heartbeat_state SET dormant=1,updated_at=? WHERE agent_id=? "
+            "AND rowid=? AND last_started IS ? AND noop_streak IS ? AND dormant IS ? "
+            "AND last_wake_signal_ms IS ? AND updated_at IS ? AND dormant=0",
+            (stamp, agent_id, *decision.row_version))
+    _snapshot, changed = _change_state(agent_id, write,
+        # A failed policy write is logged by the protocol and retried by the
+        # next selection. A projection still applies the age gate meanwhile.
+        failed=lambda state: False)
+    if changed:
+        log("heartbeatDormant", f"agent={agent_id} reason=interrupted-age")
 
 
 def _latest_wake_signal_ms(agent_id: str) -> int:
@@ -851,6 +1052,7 @@ class HeartbeatScheduler:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
+        activate_accounting()
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
