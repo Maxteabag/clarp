@@ -1456,6 +1456,73 @@ SCENARIOS.append({
     ],
 })
 
+ROUTER = '/orchestrator/settings'
+ASK_ROUTER = '/orchestrator/route-delegation'
+
+
+def spoken(text, msg_id, **extra):
+    """A message dictated hands-free and said to the scenario's agent, for the router to place."""
+    return {**send(text, msg_id, hands_free=True, **extra), 'name': f'dictated {msg_id}'}
+
+
+def given(msg_id, to):
+    """The wait for the answer to a message, where the router gave it."""
+    return [{'op': 'wait_reply', 'after': f'u-{msg_id}', 'session': to}, {'op': 'quiesce', 'session': to}]
+
+
+SCENARIOS.append({
+    'id': 'router',
+    'what': 'the router of spoken messages, turned on and set to the tool of the scenario: a message said to one '
+            'agent and given to another, the same message again, the same id for other words, a message that is '
+            'held while its user is asked and given when the answer comes, a question about an agent, what is '
+            'meant for nobody, a model that fails, what an app asks that could place a message by no name, and '
+            'the router turned off again',
+    'sessions': (AGENT, NOVA),
+    'steps': [
+        post('/agents', {**MAKE_TOLD, 'name': 'Nova', 'session': NOVA}, 'make a second agent'),
+        post('/select', {'session': AGENT}, 'the first agent is open'),
+        post(ROUTER, {'volume': 11}, 'a setting the router has not'),
+        post(ROUTER, {'enabled': 'yes'}, 'on that is neither yes nor no'),
+        post(ROUTER, {'provider': 'abacus'}, 'a provider there is not'),
+        post(ROUTER, {'enabled': True, 'provider': 'claude', 'fallback_only': False},
+             'the router is turned on, for every dictated message, and asks the tool of the scenario'),
+        # Said to the first agent, and for the second: the second is given it, and is the open one.
+        spoken('synthetic word alfa [qa-route:nova]', 'routealfa'),
+        *given('routealfa', NOVA),
+        SNAPSHOT,
+        {**spoken('synthetic word alfa [qa-route:nova]', 'routealfa'), 'name': 'the same message again'},
+        {**spoken('synthetic word other [qa-route:nova]', 'routealfa'), 'name': 'the same id for other words'},
+        # Not surely enough: held, and its user is asked. The answer gives what was held.
+        spoken('synthetic word bravo [qa-unsure:nova]', 'routebravo'),
+        spoken('synthetic yes [qa-yes:nova]', 'routecharlie'),
+        *given('routebravo', NOVA),
+        # A question about an agent, and what is meant for nobody: no agent is given either.
+        spoken('synthetic question [qa-status:nova]', 'routedelta'),
+        spoken('synthetic noise', 'routeecho'),
+        # The model fails: the message goes on as any other, to the agent that is open.
+        spoken('synthetic word foxtrot [qa-router-fails]', 'routefoxtrot'),
+        *given('routefoxtrot', NOVA),
+        # What an app asks that could place a message by no name.
+        post(ASK_ROUTER, {'session': NOVA, 'text': 'synthetic word golf [qa-route:claire]', 'client_msg_id': 'routegolf',
+                          'synthesize_audio': False, 'hands_free': True, 'force_session': False,
+                          'orchestrator_fallback': True}, 'an app asks whom a message is for'),
+        *given('routegolf', AGENT),
+        post(ASK_ROUTER, {'session': NOVA, 'text': 'synthetic word hotel [qa-unsure:claire]', 'client_msg_id': 'routehotel',
+                          'synthesize_audio': False, 'hands_free': True, 'force_session': False,
+                          'orchestrator_fallback': True}, 'an app asks, and the model is not sure'),
+        post(ASK_ROUTER, {'session': NOVA, 'text': 'synthetic question [qa-status:claire]', 'client_msg_id': 'routeindia',
+                          'synthesize_audio': False, 'hands_free': True, 'force_session': False,
+                          'orchestrator_fallback': True}, 'an app asks, and the model answers what was not asked'),
+        post(ROUTER, {'enabled': False}, 'the router is turned off'),
+        # Off, a dictated message is a message like any other.
+        spoken('synthetic word juliett [qa-route:nova]', 'routejuliett'),
+        *given('routejuliett', AGENT),
+        get(f'/log?session={NOVA}', 'the conversation of the second agent'),
+        LOG,
+        SNAPSHOT,
+    ],
+})
+
 PLACE = '/location'
 
 SCENARIOS.append({
