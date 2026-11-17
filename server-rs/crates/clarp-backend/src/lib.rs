@@ -111,6 +111,10 @@ pub enum Signal {
     Context {
         tokens: u64,
     },
+    /// What the tool says the turn cost, in millionths of a dollar.
+    Cost {
+        micros: u64,
+    },
     /// The tool process is gone, and this is how the turn went.
     Ended(RunOutcome),
 }

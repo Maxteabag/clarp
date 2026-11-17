@@ -1679,6 +1679,7 @@ mod tests {
             tokens_in: None,
             tokens_out: None,
             context_tokens: None,
+            cost_micros: None,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -1916,6 +1917,7 @@ mod tests {
             tokens_in: Some(5),
             tokens_out: Some(7),
             context_tokens: None,
+            cost_micros: None,
         }
     }
 
