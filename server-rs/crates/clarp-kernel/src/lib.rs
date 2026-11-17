@@ -16,6 +16,7 @@ pub mod connector;
 pub mod conversation;
 pub mod devices;
 pub mod difflib;
+pub mod explain;
 pub mod failures;
 pub mod fork;
 pub mod goals;

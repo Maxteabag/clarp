@@ -157,7 +157,7 @@ fn quoted_wrapper_words(command: &str) -> Option<Vec<String>> {
 
 /// The words of a command line as a POSIX shell splits it, without expanding anything.
 /// `None` when a quotation is not closed or the line ends on a backslash.
-fn shell_split(command: &str) -> Option<Vec<String>> {
+pub(crate) fn shell_split(command: &str) -> Option<Vec<String>> {
     #[derive(Clone, Copy, PartialEq)]
     enum In {
         Between,
