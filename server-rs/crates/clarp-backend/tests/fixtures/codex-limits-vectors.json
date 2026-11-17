@@ -1184,6 +1184,77 @@
   },
   {
    "given": {
+    "resets_at": "1900000000000",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "1900000000000",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "nan",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "nan",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "-inf",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "breaks": "OverflowError",
+   "given": {
+    "resets_at": "inf",
+    "used_percent": 12.25
+   }
+  },
+  {
+   "breaks": "OverflowError",
+   "given": {
+    "resets_at": "1e400",
+    "used_percent": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": 253402300799,
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "9999-12-31T23:59:59Z",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "breaks": "ValueError",
+   "given": {
+    "resets_at": 253402300800,
+    "used_percent": 12.25
+   }
+  },
+  {
+   "given": {
+    "resets_at": "253402300800",
+    "used_percent": 12.25
+   },
+   "window": {
+    "resets_at": "253402300800",
+    "used_percentage": 12.25
+   }
+  },
+  {
+   "given": {
     "resets_at": true,
     "used_percent": 12.25
    },

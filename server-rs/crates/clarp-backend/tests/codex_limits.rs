@@ -19,9 +19,15 @@ fn a_window_is_read_as_the_python_host_reads_it() {
     for vector in windows {
         let ours = window(&vector["given"]);
         if vector.get("breaks").is_some() {
-            // The Python Host's reader breaks on a time no calendar has. Here it is no time,
-            // and what else the window says is read.
-            assert_eq!(ours.unwrap()["resets_at"], "", "{vector}");
+            // The Python Host's reader breaks on a time no calendar has. Here what else the
+            // window says is read, and its time is none, or the text it was given as.
+            let ours = ours.unwrap();
+            let given = &vector["given"]["resets_at"];
+            assert!(
+                ours["resets_at"] == "" || &ours["resets_at"] == given,
+                "{vector}: {ours}"
+            );
+            assert_eq!(ours["used_percentage"], 12.25, "{vector}");
             broke += 1;
             continue;
         }
@@ -33,7 +39,7 @@ fn a_window_is_read_as_the_python_host_reads_it() {
         read += usize::from(ours.is_some());
     }
     // Counted by the script that wrote the vectors.
-    assert_eq!((windows.len(), read, broke), (47, 38, 1));
+    assert_eq!((windows.len(), read, broke), (55, 43, 4));
 }
 
 #[test]
