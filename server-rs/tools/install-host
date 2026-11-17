@@ -3,7 +3,7 @@
 # (server-rs/tools/build release): the Host and its shim, a token of its own, and a systemd user
 # unit. Nothing here compiles.
 #
-#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH]
+#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
 #                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
 #                                [--start] [--files-only]
@@ -13,7 +13,7 @@
 #                  whatever the phone reaches in front of it: the Host's own token is only taken
 #                  from the loopback
 #   --name         what the apps call this Host (default: "<hostname> Rust")
-#   --claude, --codex   the programs to run for a turn. Default: the ones the Python Host on this
+#   --claude, --codex, --agy   the programs to run for a turn. Default: the ones the Python Host on this
 #                  machine runs (read from its unit, clarp-runtime.service), so that an agent
 #                  that moves is run by the same tool it was run by; without a Python Host, the
 #                  ones on the path. Run this again after the Python Host changed its tools
@@ -84,10 +84,10 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--push-relay URL|off] [--accounts follow|none] [--relay on|off] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none] [--relay on|off] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -102,7 +102,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|push-relay|accounts|whisper|speech-keys|transcription-engine|relay|relay-config) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|agy|push-relay|accounts|whisper|speech-keys|transcription-engine|relay|relay-config) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -110,7 +110,7 @@ for key in "${!said[@]}"; do
     if [ "${said[$key]}" = default ]; then unset "chosen[$key]"; else chosen[$key]="${said[$key]}"; fi
 done
 listen="${chosen[listen]:-127.0.0.1:7690}"; name="${chosen[name]:-$(hostname) Rust}"
-claude="${chosen[claude]:-}"; codex="${chosen[codex]:-}"
+claude="${chosen[claude]:-}"; codex="${chosen[codex]:-}"; agy="${chosen[agy]:-}"
 push_relay="${chosen[push-relay]:-https://clarp-audio-central.peter-w-adams96.workers.dev}"
 [ "$push_relay" = off ] && push_relay=""
 port="${listen##*:}"; address="${listen%:*}"
@@ -126,6 +126,7 @@ python_share="$(systemctl --user show clarp-runtime.service -p Environment --val
 python_share="${python_share:-$HOME/.local/share/clarp}"
 claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
+agy="${agy:-$(PATH="$tools_path" command -v agy || true)}"
 # What a turn inherits from its Host's unit besides the path, as the Python Host's unit has it:
 # how many files a process may hold open, and how glibc keeps its memory. Without a Python Host,
 # the Python Host's own answers.
@@ -463,6 +464,7 @@ Environment="PATH=$tools_path"
 Environment="BASH_ENV=$share/libexec/tools-first.sh"
 ${claude:+Environment="CLARP_CLAUDE_PROGRAM=$claude"}
 ${codex:+Environment="CLARP_CODEX_PROGRAM=$codex"}
+${agy:+Environment="CLARP_AGY_PROGRAM=$agy"}
 # The fence: what a Clarp tool reads to find its Host names this Host, never a Python Host's files.
 # (The Python Host's own tools do not read it. They are off the path above.)
 Environment="CLARP_CONFIG_DIR=$config"
@@ -510,7 +512,7 @@ else
     echo "the connection relay: none (this Host is told of no file that could turn it on)"
 fi
 [ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
-echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}"
+echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}, agy = ${agy:-not found}"
 echo "the agents' own tools: $tools names in $share/tools"
 [ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
 systemctl --user daemon-reload

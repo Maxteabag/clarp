@@ -200,6 +200,12 @@ impl Backend for Agy {
         Some(OWN_HOME)
     }
 
+    /// Antigravity takes its message as the value of a flag and in no other way: 60 KiB, as
+    /// the Python Host allows it (`ARGV_TEXT_LIMIT`).
+    fn message_most(&self) -> Option<usize> {
+        Some(60 * 1024)
+    }
+
     /// One `agy --print` whose answer is printed as one JSON object with how it ended
     /// ([`Self::answered`]): as the Python Host asks Antigravity one question
     /// (`backend/agy.py`, `routing_cmd`), which reads the answer as plain text.
@@ -346,6 +352,43 @@ fn tool_input(name: &str, given: &Value) -> Value {
         }),
         _ => json!({}),
     }
+}
+
+/// What a tool gave back, without what Antigravity writes around it (agy 1.5.10: when the
+/// command was made and done, how it ended, and after `Output:` what it printed), and the
+/// code the command ended with where that is said. As the Python Host reads it in
+/// Antigravity's own record of a conversation (`agy_transcript._settle`).
+fn came_back(output: &str) -> (String, Option<i64>) {
+    let mut body = output;
+    while let Some(rest) = body
+        .strip_prefix("Created At:")
+        .or_else(|| body.strip_prefix("Completed At:"))
+    {
+        match rest.split_once('\n') {
+            Some((_, after)) => body = after,
+            None => break,
+        }
+    }
+    body = body.strip_prefix('\n').unwrap_or(body);
+    let head: String = body.chars().take(300).collect();
+    let code = head.split_once("exited with code ").and_then(|(_, after)| {
+        let signs = after.strip_prefix('-').unwrap_or(after);
+        let digits = signs.chars().take_while(char::is_ascii_digit).count();
+        after[..after.len() - signs.len() + digits]
+            .parse::<i64>()
+            .ok()
+    });
+    // What it printed comes after a line that says so: `Command output:` in what agy 1.5.10
+    // writes of a step, `Output:` in its own record of a conversation.
+    let marks = ["Command output:\n", "Output:\n"];
+    let found = marks.iter().filter_map(|mark| {
+        let at = body.find(mark)?;
+        Some((at, at + mark.len()))
+    });
+    if let Some((_, after)) = found.min() {
+        body = &body[after..];
+    }
+    (clarp_kernel::python::strip(body).to_string(), code)
 }
 
 pub struct AgyInterpreter {
@@ -545,16 +588,18 @@ impl AgyInterpreter {
         if call.status != ToolStatus::Running {
             return; // told twice
         }
-        let failed = match &info["error"] {
+        let said_wrong = match &info["error"] {
             Value::Null | Value::Bool(false) => false,
             Value::String(said) => !said.is_empty(),
             _ => true,
         };
-        let came_back = match (&info["output"], &info["error"]) {
-            (Value::String(output), _) if !output.is_empty() => output.clone(),
-            (_, Value::String(error)) => error.clone(),
-            _ => String::new(),
+        let (came_back, exit_code) = match (&info["output"], &info["error"]) {
+            (Value::String(output), _) if !output.is_empty() => came_back(output),
+            (_, Value::String(error)) => (error.clone(), None),
+            _ => (String::new(), None),
         };
+        // A command that ended with another code than nought went wrong, whatever else is said.
+        let failed = said_wrong || exit_code.is_some_and(|code| code != 0);
         call.status = if failed {
             ToolStatus::Error
         } else {
@@ -566,7 +611,7 @@ impl AgyInterpreter {
             id: shown,
             content: Value::String(came_back),
             failed,
-            exit_code: None,
+            exit_code,
         }));
         out.push(Signal::Tool(call.clone()));
         self.moved(Activity::Thinking, out);
@@ -809,6 +854,28 @@ mod tests {
             agy.answered(r#"{"status":"SUCCESS","response":""}"#),
             Err("agy returned no answer".to_string())
         );
+    }
+
+    #[test]
+    fn what_a_command_gave_back_is_read_without_what_is_written_around_it() {
+        let wrapped = "Created At: 2026-11-17T14:01:27+01:00\nCompleted At: 2026-11-17T14:01:27+01:00\n\
+                       Command exited with code 0.\n\nCommand output:\nAGY_OK";
+        assert_eq!(came_back(wrapped), ("AGY_OK".to_string(), Some(0)));
+        let failed =
+            "Created At: x\nCommand exited with code -2.\n\nCommand output:\n  no such file\n";
+        assert_eq!(came_back(failed), ("no such file".to_string(), Some(-2)));
+        // As older versions gave it: what the command printed, and nothing around it.
+        assert_eq!(came_back("AGY_TOOL_OK"), ("AGY_TOOL_OK".to_string(), None));
+        // As its own record of a conversation words it.
+        let recorded = "Completed At: x\nThe command exited with code 1\nOutput:\nboom\n";
+        assert_eq!(came_back(recorded), ("boom".to_string(), Some(1)));
+        assert_eq!(came_back("a\r\n"), ("a".to_string(), None));
+        // A first line with no end is no line written around it.
+        assert_eq!(
+            came_back("Created At: now"),
+            ("Created At: now".to_string(), None)
+        );
+        assert_eq!(came_back(""), (String::new(), None));
     }
 
     #[test]

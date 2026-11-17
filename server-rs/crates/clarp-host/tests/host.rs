@@ -2317,7 +2317,7 @@ fn a_message_dictated_hands_free_goes_to_the_agent_it_names_at_its_beginning() {
         .iter()
         .map(|tool| tool["id"].as_str().unwrap())
         .collect();
-    assert_eq!(tools, ["claude", "codex"]);
+    assert_eq!(tools, ["claude", "codex", "agy"]);
     assert_eq!(settings["recent_decisions"], json!([]));
     assert_eq!(
         host.get("/orchestrator/decisions"),
@@ -9311,7 +9311,14 @@ printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,
 #[test]
 fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     let place = Place::new("model-options");
-    // Stand-ins for the two tools: each says its version, and Codex lists its models.
+    // Stand-ins for the tools: each says its version, and Codex and Antigravity list their
+    // models.
+    let agy = place.root.join("agy");
+    program(
+        &agy,
+        "#!/bin/sh\n[ \"$1\" = --version ] && echo '1.9.9' && exit 0\n\
+         [ \"$1\" = models ] && printf 'Fetching available models...\\ngemini-stand-in-low\\tGemini Stand-in (Low)\\n' && exit 0\nexit 2\n",
+    );
     let claude = place.root.join("claude");
     program(
         &claude,
@@ -9345,6 +9352,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
         ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
     let told = host.get("/agent-model-options");
@@ -9356,7 +9364,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     let tools: Vec<&String> = told["providers"].as_object().unwrap().keys().collect();
     assert_eq!(
         tools,
-        ["claude", "codex"],
+        ["claude", "codex", "agy"],
         "the tools this Host runs, and no other"
     );
     let ids = |row: &Value| -> Vec<String> {
@@ -9407,8 +9415,37 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         of_codex["models"][0]["supported_efforts"],
         json!(["low", "medium"])
     );
+    // Antigravity: the models it lists, each by its name and what it is called, and none
+    // of those it is only known to have: a model's name carries its effort.
+    let of_agy = &told["providers"]["agy"];
+    assert_eq!(
+        (
+            &of_agy["label"],
+            &of_agy["cli_version"],
+            &of_agy["availability"],
+            &of_agy["source"]["kind"],
+            &of_agy["models"],
+        ),
+        (
+            &json!("Antigravity"),
+            &json!("1.9.9"),
+            &json!("available"),
+            &json!("cli_probe"),
+            &json!([{
+                "id": "gemini-stand-in-low", "label": "Gemini Stand-in (Low)",
+                "default_effort": null, "supported_efforts": null,
+                "source": of_agy["source"],
+            }]),
+        ),
+        "{of_agy}"
+    );
     // What this Host cannot do with a tool yet, it does not say it can.
     for (tool, cannot, can) in [
+        (
+            "agy",
+            vec!["supports_compact", "resumable", "supports_resume"],
+            vec!["supports_routing"],
+        ),
         (
             "claude",
             vec![
@@ -12322,7 +12359,7 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     let models = host.get("/agent-model-options");
     assert_eq!(models["schema_version"], 2);
     let tools: Vec<&String> = models["providers"].as_object().unwrap().keys().collect();
-    assert_eq!(tools, ["claude", "codex"]);
+    assert_eq!(tools, ["claude", "codex", "agy"]);
     assert!(models["observed_at"].is_string() && models["freshness"].is_string());
 
     // On a Host that asks for no token, nobody is known to be a person.
@@ -18868,22 +18905,51 @@ fn a_tools_row_carries_its_explanation_while_its_turn_is_shown() {
     assert_eq!(questions().len(), 1);
 }
 
-/// A stand-in for Codex that keeps a goal's books: it writes down how it was started and
-/// what it was given to read, and answers in the shape it was given: the step `probe` done
-/// with what shows it, `build` done with nothing shown, every other step pending, and a
+/// A stand-in for the model that keeps a goal's books, as Antigravity (`agy`: the tool the
+/// keeper's job recommends) or as Codex. It writes down how it was started, where, and what
+/// it was given to read, and answers in the shape it was given: the step `probe` done with
+/// what shows it, `build` done with nothing shown, every other step pending, and a
 /// checkpoint. While a file `keeper-fails` lies beside it, it ends badly instead. Answers
 /// where it is, and where what it was asked is written.
-fn keeping_model(place: &Place) -> (PathBuf, PathBuf) {
-    let (codex, asked) = (place.root.join("codex-keeps"), place.root.join("kept"));
+fn keeping_model(place: &Place, tool: &str) -> (PathBuf, PathBuf) {
+    let (model, asked) = (
+        place.root.join(format!("{tool}-keeps")),
+        place.root.join("kept"),
+    );
     let quoted = |path: PathBuf| serde_json::to_string(path.to_str().unwrap()).unwrap();
+    // How each tool is given what it reads, and how it prints its answer.
+    let (given, printed) = match tool {
+        "agy" => (
+            r#"args = sys.argv[1:]
+read = next(arg[len("--print="):] for arg in args if arg.startswith("--print="))
+schema = json.load(open(args[args.index("--json-schema") + 1]))
+here, home = os.getcwd(), os.environ.get("HOME", "")
+place = os.path.dirname(here)
+login = os.path.join(home, ".gemini", "oauth_creds.json")
+settings = os.path.join(home, ".gemini", "antigravity-cli", "settings.json")
+shown = {"args": [arg for arg in args if not arg.startswith("--print=")], "read": read, "schema": schema,
+         "works_in": os.path.basename(here), "in_work": os.listdir(here), "beside": sorted(os.listdir(place)),
+         "home": os.path.relpath(home, place), "login_linked": os.path.islink(login),
+         "login": open(login).read() if os.path.exists(login) else None,
+         "settings_copied": os.path.isfile(settings) and not os.path.islink(settings),
+         "env": sorted(name for name in os.environ if name.startswith("CLARP_") or name in ("HOME", "PATH"))}"#,
+            r#"print("Warming up...")
+print(json.dumps({"conversation_id": "c-keeps", "status": "SUCCESS", "response": json.dumps(said)}))"#,
+        ),
+        _ => (
+            r#"read = sys.stdin.read()
+here = os.getcwd()
+schema = json.load(open(os.path.join(here, "schema.json")))
+shown = {"args": sys.argv[1:], "files": sorted(os.listdir(here)), "schema": schema,
+         "instructions": open(os.path.join(here, "instructions.txt")).read(), "read": read}"#,
+            r#"answer = {"type": "agent_message", "text": json.dumps(said)}
+print(json.dumps({"type": "item.completed", "item": answer}))"#,
+        ),
+    };
     let script = format!(
         r#"#!/usr/bin/env python3
 import json, os, sys
-read = sys.stdin.read()
-here = os.getcwd()
-schema = json.load(open(os.path.join(here, "schema.json")))
-shown = {{"args": sys.argv[1:], "files": sorted(os.listdir(here)), "schema": schema,
-         "instructions": open(os.path.join(here, "instructions.txt")).read(), "read": read}}
+{given}
 with open({asked}, "a") as out:
     out.write(json.dumps(shown) + "\n")
 if os.path.exists({fails}):
@@ -18896,21 +18962,125 @@ if "build" in steps:
     steps["build"] = {{"status": "completed", "evidence": "", "note": "said so"}}
 checkpoint = {{"progress": "Probe done; the build is said to be done.", "next_work": "Show the build."}}
 said = {{"steps": steps, "checkpoint": checkpoint, "changed": True}}
-answer = {{"type": "agent_message", "text": json.dumps(said)}}
-print(json.dumps({{"type": "item.completed", "item": answer}}))
+{printed}
 "#,
         asked = quoted(asked.clone()),
         fails = quoted(place.root.join("keeper-fails")),
     );
-    program(&codex, &script);
-    (codex, asked)
+    program(&model, &script);
+    (model, asked)
+}
+
+/// The keeper's triggers as a request sets them, with what happens around a goal folded for
+/// no time at all (it folds for five minutes as it comes).
+fn folding_nothing(keeper: &Value) -> Vec<Value> {
+    let kept = keeper["attachments"].as_array().unwrap().iter();
+    kept.map(|kept| {
+        let mut config = kept["config"].clone();
+        if kept["trigger_id"] == "agent-work-completed" {
+            config["coalesce_seconds"] = json!(0);
+        }
+        json!({
+            "attachment_id": kept["attachment_id"], "trigger_id": kept["trigger_id"],
+            "config": config,
+        })
+    })
+    .collect()
+}
+
+/// The keeper of a Host can be set to another tool the Host has: asked of Codex, it is
+/// Codex that is started to read and nothing else, with the shape in a file beside it.
+#[test]
+fn the_goal_keeper_asks_the_tool_it_is_set_to() {
+    let place = Place::new("goal-keeper-codex");
+    let (codex, asked) = keeping_model(&place, "codex");
+    // A tool nobody set it to is never started: Antigravity is not there at all.
+    let nowhere = place.root.join("no-agy");
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", nowhere.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &["--goals-kept-every-ms", "100"], &world);
+    let session = host.new_agent("Planner");
+    let dir = place.root.clone();
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    let items = json!([{ "id": "probe", "title": "Probe the behaviour" }]).to_string();
+    let commitment =
+        json!({ "outcome": "It is probed", "criteria": ["It runs"], "limits": "None" }).to_string();
+    let made = goal(
+        &host,
+        &dir,
+        &["create", &session, "probe", "Probe it", &items, &commitment],
+    );
+    let plan_id = made["plan_id"].as_str().unwrap().to_string();
+    host.send(&session, "The probe is done: it behaves.", "u-1");
+
+    // As it comes its tool is Antigravity, with the model its job names for it.
+    let keeper = host.get("/janitors/clarp-goal-keeper")["janitor"].clone();
+    assert_eq!(
+        (&keeper["backend"], &keeper["model"]),
+        (&json!("agy"), &json!("gemini-4-hydrogen-low")),
+        "{keeper}"
+    );
+    let (status, set) = post(
+        "/janitors/clarp-goal-keeper/configure",
+        json!({
+            "expected_revision": keeper["revision"], "attachments": folding_nothing(&keeper),
+            "backend": "codex", "model": "",
+            "execution": { "executor": "ephemeral", "provider": "codex" },
+        }),
+    );
+    assert_eq!(status, 200, "{set}");
+    assert_eq!(set["janitor"]["backend"], "codex", "{set}");
+    let (status, on) = post(
+        "/janitors/clarp-goal-keeper/enabled",
+        json!({ "expected_revision": set["janitor"]["revision"], "enabled": true }),
+    );
+    assert_eq!(status, 200, "{on}");
+    wait_for("the keeper's checkpoint", || {
+        goal(&host, &dir, &["get", &plan_id])["goal"]["updater"].is_object()
+    });
+    let written = std::fs::read_to_string(&asked).unwrap();
+    let first: Value = serde_json::from_str(written.lines().next().unwrap()).unwrap();
+    assert!(
+        first["instructions"]
+            .as_str()
+            .unwrap()
+            .starts_with("You keep a goal's books"),
+        "{first}"
+    );
+    assert!(
+        first["read"]
+            .as_str()
+            .unwrap()
+            .starts_with("GOAL AS RECORDED:")
+    );
+    assert_eq!(first["files"], json!(["instructions.txt", "schema.json"]));
+    let args = first["args"].as_array().unwrap();
+    assert!(args.contains(&json!("read-only")), "{args:?}");
+    let plan = goal(&host, &dir, &["get", &plan_id]);
+    assert_eq!(plan["updater"]["last_receipt"]["outcome"], "updated");
+    assert_eq!(plan["items"][0]["status"], "completed");
 }
 
 #[test]
 fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     let place = Place::new("goal-keeper");
-    let (codex, asked) = keeping_model(&place);
-    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let (agy, asked) = keeping_model(&place, "agy");
+    // The Host's user has a home of their own, with what Antigravity keeps there of its
+    // login and its settings.
+    let theirs = place.root.join(".gemini/antigravity-cli");
+    std::fs::create_dir_all(&theirs).unwrap();
+    std::fs::write(
+        place.root.join(".gemini/oauth_creds.json"),
+        "stand-in login",
+    )
+    .unwrap();
+    std::fs::write(theirs.join("settings.json"), "{}").unwrap();
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
     let host = place.start_in("", &["--goals-kept-every-ms", "100"], &world);
     let session = host.new_agent("Planner");
     let dir = place.root.clone();
@@ -18995,21 +19165,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     // It folds what happens for five minutes as it comes. Set to fold nothing and to keep
     // for every agent but one, and turned on. (On the Python Host a keeper with a scope
     // never runs again: its defect R42.)
-    let attachments: Vec<Value> = keeper["attachments"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|kept| {
-            let mut config = kept["config"].clone();
-            if kept["trigger_id"] == "agent-work-completed" {
-                config["coalesce_seconds"] = json!(0);
-            }
-            json!({
-                "attachment_id": kept["attachment_id"], "trigger_id": kept["trigger_id"],
-                "config": config,
-            })
-        })
-        .collect();
+    let attachments = folding_nothing(&keeper);
     let (status, set) = post(
         "/janitors/clarp-goal-keeper/configure",
         json!({
@@ -19069,15 +19225,9 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     // What the model was given: the rules for it apart from what it reads, the goal as it
     // is recorded and what was said since, the shape to answer in, and nothing to act with.
     let first = questions().remove(0);
-    assert!(
-        first["instructions"]
-            .as_str()
-            .unwrap()
-            .starts_with("You keep a goal's books"),
-        "{first}"
-    );
     let read = first["read"].as_str().unwrap();
-    assert!(read.starts_with("GOAL AS RECORDED:"), "{read}");
+    assert!(read.starts_with("You keep a goal's books"), "{read}");
+    assert!(read.contains("\n\nGOAL AS RECORDED:"), "{read}");
     assert!(read.contains("NEW ACTIVITY SINCE LAST UPDATE (untrusted):"));
     assert!(read.contains("[owner Planner user] (from user) The probe is done: it behaves."));
     assert!(read.contains("[owner Planner assistant] The probe is done: it behaves."));
@@ -19085,14 +19235,54 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
         first["schema"]["properties"]["steps"]["required"],
         json!(["probe", "build", "ship"])
     );
-    assert_eq!(first["files"], json!(["instructions.txt", "schema.json"]));
+    // Antigravity was asked in its sandbox, with its commands off, as the model the keeper's
+    // job names, and held to the shape by a file.
     let args: Vec<&str> = first["args"]
         .as_array()
         .unwrap()
         .iter()
         .map(|arg| arg.as_str().unwrap())
         .collect();
-    assert!(args.contains(&"read-only"), "{args:?}");
+    for word in [
+        "--sandbox",
+        "--disable-slash-commands",
+        "--json-schema",
+        "gemini-4-hydrogen-low",
+    ] {
+        assert!(args.contains(&word), "{word}: {args:?}");
+    }
+    // Where it ran: in an empty directory, beside a home of its own that has its user's
+    // login, linked, and its settings, copied, and nothing of the Host's own environment.
+    assert_eq!(
+        (
+            &first["works_in"],
+            &first["in_work"],
+            &first["beside"],
+            &first["home"]
+        ),
+        (
+            &json!("work"),
+            &json!([]),
+            &json!(["home", "schema.json", "work"]),
+            &json!("home")
+        ),
+        "{first}"
+    );
+    assert_eq!(
+        (
+            &first["login_linked"],
+            &first["login"],
+            &first["settings_copied"],
+            &first["env"]
+        ),
+        (
+            &json!(true),
+            &json!("stand-in login"),
+            &json!(true),
+            &json!(["HOME", "PATH"])
+        ),
+        "{first}"
+    );
 
     // A receipt says what was done with the goal: on the goal, on the keeper's run, and to
     // whoever asks the tool.
@@ -19463,4 +19653,214 @@ fn the_audio_bookkeeper_writes_down_what_becomes_of_a_clip() {
     });
     let keeper = host.get("/janitors/clarp-audio-bookkeeper")["janitor"].clone();
     assert_eq!(keeper["enabled"], true);
+}
+
+#[test]
+fn an_agent_on_antigravity_runs_its_turns_and_continues_its_conversation() {
+    let place = Place::new("agy-turns");
+    let (agy, started) = (place.root.join("agy-works"), place.root.join("started"));
+    // A stand-in for Antigravity at work. It writes down how it was started, and prints a
+    // turn as agy prints one: its conversation and its model, a command where it is asked to
+    // list, its answer in two pieces, and what the turn took. Asked to fail, it says its
+    // provider refused, and ends badly.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
+kept = "11111111-2222-3333-4444-555555555555"
+conversation = args[args.index("--conversation") + 1] if "--conversation" in args else kept
+with open({started}, "a") as out:
+    shown = {{"args": [a for a in args if not a.startswith("--print=")], "prompt": prompt,
+             "managed": os.environ.get("CLARP_AGY_MANAGED_TURN")}}
+    out.write(json.dumps(shown) + "\n")
+def say(event, **body):
+    print(json.dumps({{"event": event, **body}}), flush=True)
+def step(index, state, kind, **more):
+    update = {{"conversation_id": conversation, "step_index": index, "state": state, "step_type": kind, **more}}
+    say("step_update", step_update=update)
+say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": ["run_command"]}})
+step(0, "DONE", "user_input")
+if "fail" in prompt:
+    say("result", result={{"conversation_id": conversation, "status": "ERROR", "error": "quota exhausted", "response": ""}})
+    sys.exit(1)
+at = 1
+if "list" in prompt:
+    step(1, "DONE", "agent_response", usage={{"input_tokens": 100, "output_tokens": 5, "thinking_tokens": 0}})
+    info = {{"name": "run_command", "parameters": {{"CommandLine": "ls -la"}}}}
+    step(2, "ACTIVE", "tool", tool_name="run_command", tool_info=info)
+    step(2, "DONE", "tool", tool_name="run_command", tool_info={{**info, "output": "a.txt\n"}})
+    at = 3
+step(at, "ACTIVE", "agent_response", text_delta="Seen: ")
+step(at, "DONE", "agent_response", text_delta="one file.", usage={{"input_tokens": 40, "output_tokens": 4, "thinking_tokens": 3}})
+usage = {{"input_tokens": 140, "output_tokens": 9, "thinking_tokens": 3}}
+say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": "Seen: one file.", "usage": usage}})
+"#,
+        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
+    );
+    program(&agy, &script);
+    let world = [("CLARP_AGY_PROGRAM", agy.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Gemma", "backend": "agy" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let over = |id: &str| {
+        let turns = host.turns(&agent);
+        let asked = turns.iter().position(|row| row["id"] == id);
+        asked.is_some_and(|at| turns[at..].iter().any(|row| row["turn"].is_object()))
+    };
+    let starts = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&started).unwrap_or_default();
+        let lines = written.lines();
+        lines
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let row_of = |host: &Host| {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap();
+        rows.iter()
+            .find(|row| row["session"] == agent.as_str())
+            .unwrap()
+            .clone()
+    };
+
+    // A first turn. Antigravity is started with the message bound to its flag and names its
+    // conversation itself; what it did and said is in the agent's conversation: the command
+    // under the name the conversation knows such a tool by, and its answer as one message.
+    host.send(&agent, "list what is here", "u-1");
+    wait_for("the first turn to be over", || over("u-1"));
+    let first = starts().remove(0);
+    assert_eq!(
+        first["args"],
+        json!([
+            "--dangerously-skip-permissions",
+            "--output-format",
+            "stream-json",
+            "--print-timeout",
+            "24h"
+        ]),
+        "{first}"
+    );
+    assert_eq!(first["managed"], "1");
+    assert!(
+        first["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("list what is here"),
+        "{first}"
+    );
+    let rows = host.turns(&agent);
+    let call = rows.iter().find(|row| row["kind"] == "tool").unwrap();
+    assert_eq!(
+        (
+            &call["tool_name"],
+            &call["tools"][0]["name"],
+            &call["tools"][0]["status"]
+        ),
+        (&json!("Bash"), &json!("Bash"), &json!("ok")),
+        "{call}"
+    );
+    assert!(call["tools"][0].to_string().contains("ls -la"), "{call}");
+    let said: Vec<&Value> = rows
+        .iter()
+        .filter(|row| row["role"] == "assistant" && row["kind"].is_null())
+        .collect();
+    assert_eq!(said.len(), 1, "{rows:?}");
+    assert_eq!(
+        (
+            &said[0]["text"],
+            &said[0]["phase"],
+            &said[0]["turn"]["status"]
+        ),
+        (
+            &json!("Seen: one file."),
+            &json!("final"),
+            &json!("completed")
+        ),
+        "{said:?}"
+    );
+    let row = row_of(&host);
+    assert_eq!(
+        (
+            &row["backend"],
+            &row["backend_session_id"],
+            &row["latest_state"]
+        ),
+        (
+            &json!("agy"),
+            &json!("11111111-2222-3333-4444-555555555555"),
+            &json!("done")
+        ),
+        "{row}"
+    );
+    // What the turn took is the result's own count; what the model thought counts as what
+    // it wrote.
+    let counted = || -> Value {
+        let told = host.get("/backend-usage");
+        let rows = told["backends"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["backend"] == "agy").unwrap();
+        row["totals"]["five_hour"].clone()
+    };
+    wait_for("the first turn to be counted", || counted()["turns"] == 1);
+    assert_eq!(
+        (&counted()["tokens_in"], &counted()["tokens_out"]),
+        (&json!(140), &json!(12))
+    );
+
+    // The next turn continues that conversation, by its name.
+    host.send(&agent, "and again", "u-2");
+    wait_for("the second turn to be over", || over("u-2"));
+    let second = starts().remove(1);
+    assert_eq!(
+        second["args"].as_array().unwrap()[5..],
+        [
+            json!("--conversation"),
+            json!("11111111-2222-3333-4444-555555555555")
+        ],
+        "{second}"
+    );
+    assert_eq!(
+        row_of(&host)["backend_session_id"],
+        row["backend_session_id"]
+    );
+
+    // A turn its provider refuses fails, and the agent's conversation says why in the
+    // tool's own word.
+    host.send(&agent, "fail now", "u-3");
+    wait_for("the third turn to fail", || {
+        host.state(&agent) == "interrupted"
+    });
+    let rows = host.turns(&agent);
+    let why = rows
+        .iter()
+        .any(|row| row.to_string().contains("status=ERROR: quota exhausted"));
+    let state = host.get("/agents/snapshot").to_string();
+    assert!(
+        why || state.contains("status=ERROR: quota exhausted"),
+        "{rows:?}"
+    );
+
+    // A message longer than a command line takes is refused before anything is kept, in
+    // the Python Host's words, and nothing is started.
+    let begun = starts().len();
+    let long = "x".repeat(61 * 1024);
+    let body = json!({ "session": agent, "text": long, "client_msg_id": "u-4" }).to_string();
+    let refused = fetch(
+        &host,
+        "",
+        "POST",
+        "/send",
+        &[("Content-Type", "application/json")],
+        body.as_bytes(),
+    );
+    assert_eq!(
+        (refused.status, refused.text().as_str()),
+        (
+            413,
+            "This message is 61 KiB, more than the 60 KiB this agent can take in one message. \
+             Shorten it or split it into several messages."
+        )
+    );
+    assert_eq!(starts().len(), begun);
+    assert!(!host.turns(&agent).iter().any(|row| row["id"] == "u-4"));
 }
