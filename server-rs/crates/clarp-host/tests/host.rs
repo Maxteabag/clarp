@@ -11205,6 +11205,137 @@ fn a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turn
 }
 
 #[test]
+fn a_selector_that_serves_one_model_takes_those_turns_up_and_the_others_say_what_they_wait_for() {
+    let place = Place::new("select-model");
+    let at = |name: &str| place.root.join(name);
+    let (out_of_usage, running, asked) = (at("out"), at("running"), at("asked"));
+    std::fs::create_dir_all(&running).unwrap();
+    // A stand-in for Claude Code: its account is out, for a message that says `limited`,
+    // for as long as a file says so; a message that says `slow` is worked on for a long
+    // time; a turn that is taken up answers at once.
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\n",
+        &format!("here=\"{}/$$\"\n: > \"$here\"\n", running.display()),
+        "trap 'rm -f \"$here\"; kill $waits 2>/dev/null; exit 143' TERM INT\n",
+        "case \"$message\" in\n*clarp-account-recovery*) ;;\n*)\n",
+        &format!("if [ -e \"{}\" ]; then case \"$message\" in *limited*)\n", out_of_usage.display()),
+        init,
+        "printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
+        "rm -f \"$here\"\nexit 1\n;; esac; fi\n",
+        "case \"$message\" in *slow*)\n",
+        init,
+        "sleep 60 &\nwaits=$!\nwait $waits\n;; esac\n",
+        ";;\nesac\n",
+        init,
+        "printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_'$$'\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n",
+        "rm -f \"$here\"\n",
+    ]
+    .concat();
+    let claude = at("claude");
+    program(&claude, &script);
+    // The owner's selector: the account it puts in place serves one of the two models.
+    let selector = at("selector");
+    let script = [
+        "#!/bin/sh\n",
+        &format!(
+            "cat >> \"{}\"\necho >> \"{}\"\n",
+            asked.display(),
+            asked.display()
+        ),
+        "printf '%s' '{\"available\": true, \"models\": [\"alpha\"]}'\n",
+    ]
+    .concat();
+    program(&selector, &script);
+    let owners = at("owner.toml");
+    let named = format!(
+        "[agents]\nclaude_account_switch_command = [\"{}\"]\n",
+        selector.display()
+    );
+    std::fs::write(&owners, named).unwrap();
+    let host = place.start_in(
+        "",
+        &[
+            "--accounts",
+            "select",
+            "--speech-keys",
+            owners.to_str().unwrap(),
+        ],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let made = |name: &str, model: &str| -> String {
+        let asked = json!({ "name": name, "backend": "claude", "model": model });
+        let made = host.post("/agents", asked);
+        made["session"].as_str().unwrap().to_string()
+    };
+    let (first, second, third) = (
+        made("First", "alpha"),
+        made("Second", "beta"),
+        made("Third", "beta"),
+    );
+    let row = |agent: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == agent)
+            .cloned()
+            .unwrap()
+    };
+    let runs = || std::fs::read_dir(&running).unwrap().count();
+
+    // The first agent's turn takes long. The second agent's turn meets the limit.
+    host.send(&first, "slow work", "alpha");
+    wait_for("the slow turn to run", || runs() == 1);
+    std::fs::write(&out_of_usage, "").unwrap();
+    host.send(&second, "limited work", "bravo");
+
+    // The selector is asked for both models, and the account it puts in place serves one:
+    // that turn is taken up and answers; the other waits, and says for what, while the pool
+    // works.
+    wait_for("the first agent's answer", || host.state(&first) == "done");
+    let lines = std::fs::read_to_string(&asked).unwrap();
+    assert_eq!(
+        lines.lines().collect::<Vec<_>>(),
+        vec![r#"{"models": ["alpha", "beta"]}"#]
+    );
+    let waits_for_its_model =
+        "Waiting for a claude account that serves beta; the active one does not right now";
+    wait_for("the second agent to say what it waits for", || {
+        row(&second)["live_activity"]["headline"] == waits_for_its_model
+    });
+    let shown = row(&second);
+    assert_eq!(
+        (
+            &shown["busy"],
+            &shown["latest_state"],
+            &shown["live_activity"]["state"]
+        ),
+        (&json!(true), &json!("thinking"), &json!("limited"))
+    );
+    // A turn of that model that is to start waits with it, and says the same; a turn of
+    // the model that is served runs.
+    host.send(&third, "plain work", "charlie");
+    wait_for("the third agent to say what it waits for", || {
+        row(&third)["live_activity"]["headline"] == waits_for_its_model
+    });
+    host.send(&first, "more work", "delta");
+    wait_for("the first agent's second answer", || {
+        host.state(&first) == "done" && host.turns(&first).len() == 4
+    });
+    assert_eq!((runs(), host.turns(&third).len()), (0, 1));
+    assert_eq!(std::fs::read_to_string(&asked).unwrap().lines().count(), 1);
+    // Their users stop the two that wait: they end there.
+    for agent in [&second, &third] {
+        let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": agent })));
+        assert_eq!(status, 200);
+        wait_for("the stop", || host.state(agent) == "interrupted");
+    }
+}
+
+#[test]
 fn a_plan_that_lacks_the_model_is_asked_of_the_selector_only_when_nothing_else_runs() {
     let place = Place::new("select-plan");
     let at = |name: &str| place.root.join(name);
