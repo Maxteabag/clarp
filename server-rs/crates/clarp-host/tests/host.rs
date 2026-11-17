@@ -16645,8 +16645,8 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
             "{of_one}"
         );
     }
-    // The account seats of the machine: nothing was read of them, and this Host says when
-    // it said so. It changes none.
+    // The account seats of the machine: a Host that was told no tool for them has read
+    // nothing of them, and says when it said so. It changes none.
     let asked_at = now_ms();
     let seats = read("/hotseat/status");
     assert_eq!(
@@ -21902,4 +21902,466 @@ say(type="result", subtype="success", is_error=False, session_id="stand-in", res
     ] {
         assert!(!kept.contains(secret), "{secret} is in what the Host keeps");
     }
+}
+
+/// A stand-in for the owner's tool that knows the seats of the machine's accounts. For each
+/// of its three askings (`tui`, `list`, `bridge`) it prints what the test left for that
+/// asking, after waiting or ending badly where the test says so; and it writes down that it
+/// was asked, whether it was told to renew no login, and whether it was given the Host's
+/// token.
+fn seat_tool(place: &Place) -> PathBuf {
+    let tool = place.root.join("seat-tool");
+    let script = r#"#!/bin/sh
+here="$(dirname "$0")"
+printf '%s renew=%s token=%s\n' "$1" "${HOTSEAT_NO_REFRESH:-yes}" "${CLARP_HOST_TOKEN:-none}" >> "$here/seat-tool.asked"
+[ -f "$here/$1.slow" ] && sleep "$(cat "$here/$1.slow")"
+[ -f "$here/$1.exit" ] && exit "$(cat "$here/$1.exit")"
+cat "$here/$1.said"
+"#;
+    program(&tool, script);
+    tool
+}
+
+/// What the stand-in answers to its askings: a desk of three accounts, a list that knows one
+/// of them and says of a Host's agents and stopped work what is another Host's, and one
+/// piece of work.
+fn seats_said(place: &Place) {
+    let seconds = now_ms() / 1000;
+    let window = |label: &str, used: f64| json!({ "label": label, "used": used, "reset": seconds + 4 * 3_600 });
+    let seat = |tool: &str, alias: &str, active: bool, windows: Value| {
+        json!({
+            "provider": tool, "alias": alias, "display_alias": alias, "aliases": [alias],
+            "email": "someone@example.org", "plan": "", "active": active, "saved": true,
+            "can_switch": true, "can_launch": true, "windows": windows, "checked_at": seconds,
+        })
+    };
+    let desk = json!({ "generated_at": seconds, "sessions": 2, "errors": [], "accounts": [
+        seat("claude", "work", true, json!([window("All models · 5-hour", 0.25), window("Fable · weekly", 1.0)])),
+        seat("claude", "spare", false, json!([window("All models · 5-hour", 1.0)])),
+        seat("codex", "main", true, json!([window("codex primary weekly", 0.1)])),
+    ]});
+    let usage = json!({
+        "status": "allowed", "limited": false, "used_5h": 0.25, "reset_5h": seconds + 4 * 3_600,
+        "used_7d": 0.5, "reset_7d": seconds + 4 * 3_600, "scoped": [],
+    });
+    let list = json!({
+        "accounts": [{
+            "alias": "work", "email": "someone@example.org", "org": "An Org", "plan": "max",
+            "plan_label": "Max 5×", "is_active": true, "signin_days_left": 20.04, "usage": usage,
+        }],
+        "codex": { "accounts": [] },
+        "extensions": { "clarp": {
+            "agents": { "total": 37, "live": 5, "claude_backed": 30, "live_by_account": { "work": 5 } },
+            "stopped": [
+                { "kind": "clarp", "id": "another-hosts-agent", "backend": "claude", "cause": "usage_limit" },
+                { "kind": "native", "id": "a-session-of-nobody", "backend": "claude", "cause": "usage_limit" },
+                { "kind": "native", "id": "stand-in", "backend": "claude", "cause": "usage_limit" },
+            ],
+        }},
+    });
+    let work = json!({ "items": [
+        { "id": "a-thread", "provider": "codex", "title": "Fix it", "state": "failed", "can_resume": true },
+    ]});
+    for (asking, said) in [("tui", desk), ("list", list), ("bridge", work)] {
+        std::fs::write(place.root.join(format!("{asking}.said")), said.to_string()).unwrap();
+    }
+}
+
+/// What the stand-in wrote down of its askings, in the order of their names.
+fn seats_asked(place: &Place) -> Vec<String> {
+    let written = std::fs::read_to_string(place.root.join("seat-tool.asked")).unwrap_or_default();
+    let mut asked: Vec<String> = written.lines().map(str::to_string).collect();
+    asked.sort();
+    asked
+}
+
+#[test]
+fn the_desk_of_the_seats_is_read_with_the_owners_tool_when_an_app_asks_and_is_kept() {
+    let place = Place::new("seats");
+    let tool = seat_tool(&place);
+    seats_said(&place);
+    // A stand-in for Claude Code, whose own session is called `stand-in`, in a home of its own.
+    let claude = place.root.join("claude-stand-in");
+    program(
+        &claude,
+        &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
+    );
+    let own = place.root.join("claude-own");
+    std::fs::create_dir_all(&own).unwrap();
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLAUDE_CONFIG_DIR", own.to_str().unwrap()),
+    ];
+    let told = ["--seats-tool", tool.to_str().unwrap()];
+    let host = place.start_in("the-administrators-token", &told, &world);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["hotseat_desk"],
+        84
+    );
+    // Four agents: one on Claude that has run a turn, so that its tool's own session is the
+    // one the tool lists as a session that stopped; one on Codex; one that works while the
+    // desk is read; and one that was put away.
+    let made = host.post("/agents", json!({ "name": "Alpha", "backend": "claude" }));
+    let alpha = made["session"].as_str().unwrap().to_string();
+    host.post("/agents", json!({ "name": "Beta", "backend": "codex" }));
+    let gamma = host.new_agent("Gamma");
+    let delta = host.new_agent("Delta");
+    host.post(
+        "/agent-archive",
+        json!({ "session": delta, "archived": true }),
+    );
+    host.send(&alpha, "hello", "a1");
+    wait_for("the agent on Claude to be done", || {
+        host.state(&alpha) == "done"
+    });
+    host.send(&gamma, "sleep 20", "g1");
+    wait_for("an agent to work", || host.state(&gamma) == "thinking");
+    // Before anything was read: the tool is there, there are no accounts, and nothing was
+    // asked of it; nor is anything asked for the strict answer.
+    let desk = host.get("/hotseat/desk");
+    assert_eq!(
+        (
+            &desk["installed"],
+            &desk["accounts"],
+            &desk["live_read_at"],
+            &desk["stale"]
+        ),
+        (&json!(true), &json!([]), &Value::Null, &json!(true))
+    );
+    assert_eq!(
+        host.get("/hotseat/status")["providers"][0]["read_state"],
+        "never"
+    );
+    assert_eq!(seats_asked(&place), Vec::<String>::new());
+
+    // An app asks for a reading: the tool is asked its three askings, once each, is told to
+    // renew no login (this Host does not keep the logins), and is not given the Host's token.
+    let asked_at = now_ms();
+    let desk = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(
+        seats_asked(&place),
+        [
+            "bridge renew=1 token=none",
+            "list renew=1 token=none",
+            "tui renew=1 token=none"
+        ]
+    );
+    assert_eq!(
+        (
+            &desk["refreshed"],
+            &desk["partial"],
+            &desk["error"],
+            &desk["stale"],
+            &desk["sessions"]
+        ),
+        (
+            &json!(true),
+            &json!(false),
+            &Value::Null,
+            &json!(false),
+            &json!(2)
+        )
+    );
+    assert_eq!(
+        desk["sources"],
+        json!({ "tui": "ok", "list": "ok", "work": "ok" })
+    );
+    let read_at = desk["live_read_at"].as_i64().unwrap();
+    assert!(read_at >= asked_at, "{desk}");
+    assert_eq!(desk["next_refresh_at"], read_at + 60_000);
+    let accounts = desk["accounts"].as_array().unwrap();
+    let of = |account: &Value| {
+        let said = |field: &str| account[field].as_str().unwrap().to_string();
+        (said("provider"), said("alias"), said("state"))
+    };
+    let stand = |tool: &str, alias: &str, state: &str| {
+        (tool.to_string(), alias.to_string(), state.to_string())
+    };
+    assert_eq!(
+        accounts.iter().map(of).collect::<Vec<_>>(),
+        [
+            stand("claude", "work", "ok"),
+            stand("claude", "spare", "exhausted"),
+            stand("codex", "main", "ok")
+        ]
+    );
+    // An account's own window and a model's are told apart, and what the list adds is there.
+    let work = &accounts[0];
+    assert_eq!(
+        (
+            &work["windows"][0]["kind"],
+            &work["windows"][0]["used_ratio"],
+            &work["windows"][1]["kind"]
+        ),
+        (&json!("5h"), &json!(0.25), &json!("model:fable"))
+    );
+    assert_eq!(
+        (
+            &work["plan"],
+            &work["plan_code"],
+            &work["workspace"],
+            &work["signin_days_left"]
+        ),
+        (
+            &json!("Max 5×"),
+            &json!("max"),
+            &json!("An Org"),
+            &json!(20.0)
+        )
+    );
+    // Of agents this Host says its own word: its three that are not put away, the one that
+    // works, and the account each would use; what the tool has from another Host is not
+    // said. The session of its own agent is no session of nobody's to take up in a terminal.
+    assert_eq!(
+        desk["clarp_agents"],
+        json!({
+            "total": 3, "live": 1, "claude_backed": 1,
+            "by_backend": { "claude": 1, "codex": 1, "scripted": 1 },
+            "live_by_account": {}, "would_use_by_account": { "work": 1, "main": 1 },
+        })
+    );
+    assert_eq!(
+        (&work["live_sessions"], &work["would_use_sessions"]),
+        (&json!(0), &json!(1))
+    );
+    let stopped = desk["stopped_work"].as_array().unwrap();
+    assert_eq!(stopped.len(), 1, "{stopped:?}");
+    assert_eq!(
+        (
+            &stopped[0]["id"],
+            &stopped[0]["kind"],
+            &stopped[0]["resume_command"]
+        ),
+        (
+            &json!("a-session-of-nobody"),
+            &json!("native"),
+            &json!("claude --resume a-session-of-nobody")
+        )
+    );
+    assert_eq!(
+        desk["recent_work"][0]["resume_command"],
+        "codex resume a-thread"
+    );
+
+    // The strict answer is made of the list the read handed over: the account by its alias,
+    // nothing of whose it is; no switcher is on here.
+    let status = host.get("/hotseat/status");
+    let claude = &status["providers"][0];
+    assert_eq!(
+        (
+            &claude["provider"],
+            &claude["read_state"],
+            &claude["accounts"][0]["alias"]
+        ),
+        (&json!("claude"), &json!("ok"), &json!("work"))
+    );
+    assert_eq!(status["switcher"]["enabled"], false);
+    assert!(!status.to_string().contains("example.org"), "{status}");
+
+    // A reading asked for right after is held off: the tool is not asked, and the desk is
+    // the one that was read.
+    let again = host.get("/hotseat/desk?refresh=true");
+    assert_eq!(
+        (
+            &again["refresh_throttled"],
+            &again["refreshed"],
+            &again["live_read_at"]
+        ),
+        (&json!(true), &json!(false), &json!(read_at))
+    );
+    assert_eq!(again["accounts"], desk["accounts"]);
+    assert_eq!(seats_asked(&place).len(), 3);
+
+    // A device of limited scope is not shown the desk; the strict answer it may read.
+    let (limited, _) = pair(&host, "Watch", "limited");
+    assert_eq!(host.ask_as(&limited, "GET", "/hotseat/desk", None).0, 403);
+    assert_eq!(host.ask_as(&limited, "GET", "/hotseat/status", None).0, 200);
+
+    // A Host that is killed and started has kept the desk and the strict answer, and still
+    // holds a reading off for as long as it would have.
+    host.kill();
+    let host = place.start_in("the-administrators-token", &told, &world);
+    let kept = host.get("/hotseat/desk?refresh=YES");
+    assert_eq!(
+        (
+            &kept["refresh_throttled"],
+            &kept["live_read_at"],
+            &kept["next_refresh_at"]
+        ),
+        (&json!(true), &json!(read_at), &json!(read_at + 60_000))
+    );
+    assert_eq!(kept["accounts"], desk["accounts"]);
+    assert_eq!(kept["clarp_agents"], desk["clarp_agents"]);
+    assert_eq!(
+        host.get("/hotseat/status")["providers"][0]["accounts"][0]["alias"],
+        "work"
+    );
+    assert_eq!(seats_asked(&place).len(), 3);
+    // It reads the seats and moves none.
+    for change in ["/hotseat/switch", "/hotseat/resume"] {
+        let asked = json!({ "provider": "claude", "alias": "spare" });
+        assert_eq!(host.ask("POST", change, Some(&asked)).0, 501, "{change}");
+    }
+}
+
+#[test]
+fn whoever_asks_for_a_reading_of_the_seats_while_one_is_made_waits_for_that_one() {
+    let place = Place::new("seats-at-once");
+    let tool = seat_tool(&place);
+    seats_said(&place);
+    // The tool takes its time over its desk.
+    std::fs::write(place.root.join("tui.slow"), "2").unwrap();
+    let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
+    let (first, meanwhile, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| host.get("/hotseat/desk?refresh=1"));
+        wait_for("the tool to be asked", || seats_asked(&place).len() == 3);
+        // While the read is under way the desk is served as it is kept, and says so.
+        let meanwhile = host.get("/hotseat/desk");
+        let second = scope.spawn(|| host.get("/hotseat/desk?refresh=1"));
+        (first.join().unwrap(), meanwhile, second.join().unwrap())
+    });
+    assert_eq!(
+        (
+            &meanwhile["refreshing"],
+            &meanwhile["accounts"],
+            &meanwhile["refreshed"]
+        ),
+        (&json!(true), &json!([]), &json!(false))
+    );
+    for answer in [&first, &second] {
+        assert_eq!(
+            (
+                &answer["refreshed"],
+                &answer["refreshing"],
+                answer["accounts"].as_array().unwrap().len()
+            ),
+            (&json!(true), &json!(false), 3)
+        );
+    }
+    assert_eq!(first["live_read_at"], second["live_read_at"]);
+    // One read was made: the tool was asked its three askings once.
+    assert_eq!(seats_asked(&place).len(), 3);
+}
+
+#[test]
+fn a_reading_of_the_seats_that_fails_says_how_and_one_of_which_a_part_fails_says_which() {
+    // The tool's own desk ends badly: no desk is made, and the read may be tried again soon.
+    let place = Place::new("seats-fail");
+    let tool = seat_tool(&place);
+    seats_said(&place);
+    std::fs::write(place.root.join("tui.exit"), "1").unwrap();
+    let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
+    let asked_at = now_ms();
+    let desk = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(
+        (
+            &desk["error"],
+            &desk["refreshed"],
+            &desk["refresh_throttled"],
+            &desk["installed"],
+            &desk["accounts"]
+        ),
+        (
+            &json!("cli_failed"),
+            &json!(false),
+            &json!(false),
+            &json!(true),
+            &json!([])
+        )
+    );
+    let next = desk["next_refresh_at"].as_i64().unwrap();
+    assert!(
+        (asked_at + 10_000..=now_ms() + 10_000).contains(&next),
+        "{desk}"
+    );
+    // The list was not handed to the strict answer either: nothing was read.
+    assert_eq!(
+        host.get("/hotseat/status")["providers"][0]["read_state"],
+        "never"
+    );
+    let held = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(
+        (&held["refresh_throttled"], &held["error"]),
+        (&json!(true), &json!("cli_failed"))
+    );
+    assert_eq!(seats_asked(&place).len(), 3);
+    drop(host);
+
+    // What it prints for its desk cannot be read.
+    let place = Place::new("seats-unreadable");
+    let tool = seat_tool(&place);
+    seats_said(&place);
+    std::fs::write(place.root.join("tui.said"), "Reading account quotas\n").unwrap();
+    let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
+    assert_eq!(host.get("/hotseat/desk?refresh=1")["error"], "parse_failed");
+    drop(host);
+
+    // The list ends badly and the work prints nothing that can be read: a desk is made of
+    // what answered, and says what did not. This Host's own word of its agents needs no list.
+    let place = Place::new("seats-partial");
+    let tool = seat_tool(&place);
+    seats_said(&place);
+    std::fs::write(place.root.join("list.exit"), "3").unwrap();
+    std::fs::write(place.root.join("bridge.said"), "[]").unwrap();
+    let host = place.start_with("", &["--seats-tool", tool.to_str().unwrap()]);
+    host.post("/agents", json!({ "name": "Alpha", "backend": "claude" }));
+    let desk = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(
+        (
+            &desk["refreshed"],
+            &desk["partial"],
+            &desk["error"],
+            desk["accounts"].as_array().unwrap().len()
+        ),
+        (&json!(false), &json!(true), &Value::Null, 3)
+    );
+    assert_eq!(
+        desk["sources"],
+        json!({ "tui": "ok", "list": "failed", "work": "failed" })
+    );
+    assert_eq!(
+        (
+            &desk["clarp_agents"]["total"],
+            &desk["clarp_agents"]["would_use_by_account"]
+        ),
+        (&json!(1), &json!({ "work": 1 }))
+    );
+    assert_eq!(
+        (&desk["stopped_work"], &desk["recent_work"]),
+        (&json!([]), &json!([]))
+    );
+    // Without the list an account has no plan's code, and the strict answer has nothing.
+    assert_eq!(desk["accounts"][0]["plan_code"], Value::Null);
+    assert_eq!(
+        host.get("/hotseat/status")["providers"][0]["read_state"],
+        "never"
+    );
+    drop(host);
+
+    // A Host that was told a tool that is not there says so, and so does one that was told
+    // none: it lists no desk among what it has, and runs nothing.
+    let place = Place::new("seats-absent");
+    let absent = place.root.join("no-such-tool");
+    let host = place.start_with("", &["--seats-tool", absent.to_str().unwrap()]);
+    let desk = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(
+        (&desk["installed"], &desk["error"]),
+        (&json!(false), &json!("cli_failed"))
+    );
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["hotseat_desk"],
+        84
+    );
+    drop(host);
+    let place = Place::new("seats-untold");
+    let host = place.start();
+    let desk = host.get("/hotseat/desk?refresh=1");
+    assert_eq!(
+        (&desk["installed"], &desk["error"], &desk["refreshed"]),
+        (&json!(false), &json!("cli_failed"), &json!(false))
+    );
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["hotseat_desk"],
+        Value::Null
+    );
 }

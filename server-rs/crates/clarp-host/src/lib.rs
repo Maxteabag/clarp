@@ -63,6 +63,7 @@ pub mod roster;
 pub mod router;
 pub mod schedules;
 pub mod screens;
+pub mod seats;
 pub mod telling;
 pub mod tools;
 pub mod usage;

@@ -6,7 +6,7 @@
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
 #                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
-#                                [--start] [--files-only]
+#                                [--seats-tool PATH|off] [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
 #   --listen       where the Host listens (default 127.0.0.1:7690). Keep it on the loopback and put
@@ -33,6 +33,13 @@
 #                  Host: never chosen by itself, and refused while the Python Host of this
 #                  machine runs with a selector of its own, since the logins are the machine's
 #                  and two Hosts must not both change them
+#   --seats-tool   the owner's tool that knows the seats of the machine's accounts (Hotseat), which
+#                  the Host runs when an app asks for a reading of the desk of seats, and at no
+#                  other time. Default: `hotseat` where it is found on the path the agents' tools
+#                  are found on or on the path of whoever runs this; `off`: the Host is told none
+#                  and shows no desk. The Host reads
+#                  with it and moves no seat; unless it keeps the logins itself (--accounts
+#                  select) it tells the tool to renew none as it reads
 #   --whisper      the Python that runs the Host's own engine that listens (speech to text): one
 #                  that has faster-whisper. Default: the Python Host's own on this machine, when it
 #                  has the library; it is run where it is, with the model that Host is set to and
@@ -66,7 +73,7 @@
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
 # What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
-# --speech-keys, --transcription-engine, --relay, --relay-config) is kept with
+# --speech-keys, --transcription-engine, --relay, --relay-config, --seats-tool) is kept with
 # it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
 # --start: a relay that was turned off stays off. What is said now replaces what was kept, and
 # `default` forgets it (--push-relay default).
@@ -89,10 +96,10 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config|--seats-tool) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -107,7 +114,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|agy|push-relay|accounts|whisper|speech-keys|transcription-engine|relay|relay-config) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|agy|push-relay|accounts|whisper|speech-keys|transcription-engine|relay|relay-config|seats-tool) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -132,6 +139,11 @@ python_share="${python_share:-$HOME/.local/share/clarp}"
 claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
 agy="${agy:-$(PATH="$tools_path" command -v agy || true)}"
+# The owner's tool that knows the seats of the machine's accounts, where there is one: on the
+# path the agents' tools are found on, or on the path of whoever installs.
+seats_tool="${chosen[seats-tool]:-$(PATH="$tools_path:$PATH" command -v hotseat || true)}"
+[ "$seats_tool" = off ] && seats_tool=""
+if [ -n "$seats_tool" ] && [ ! -x "$seats_tool" ]; then echo "install-host: --seats-tool $seats_tool: not a program" >&2; exit 2; fi
 # What a turn inherits from its Host's unit besides the path, as the Python Host's unit has it:
 # how many files a process may hold open, and how glibc keeps its memory. Without a Python Host,
 # the Python Host's own answers.
@@ -489,7 +501,7 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts${seats_tool:+ --seats-tool "$seats_tool"}${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
 Restart=on-failure
 RestartSec=2
 

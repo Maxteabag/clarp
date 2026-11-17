@@ -35,6 +35,10 @@ pub struct Config {
     /// Whether a turn whose account is out waits for one: `none`, or `follow` beside a Host
     /// that puts another login in place.
     pub accounts: clarp_kernel::recovery::Accounts,
+    /// The owner's tool that knows the seats of the machine's accounts (Hotseat): a
+    /// program's name or its path. Empty: this Host was told none, reads no seat, and says
+    /// that the tool is not installed.
+    pub seats_tool: String,
     /// How often the logins of the agents' tools are looked at, where turns wait for an
     /// account.
     pub logins_checked_every_ms: u64,
@@ -117,7 +121,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow|select] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--seats-tool PROGRAM] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
@@ -253,6 +257,7 @@ impl Config {
         let mut default_cwd = home();
         let mut keep_spools = false;
         let mut accounts = clarp_kernel::recovery::Accounts::None;
+        let mut seats_tool = String::new();
         let mut logins_checked_every_ms = 5_000;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
@@ -292,6 +297,7 @@ impl Config {
                     accounts = clarp_kernel::recovery::Accounts::by_name(&named)
                         .ok_or(format!("--accounts {named}: none, follow or select"))?;
                 }
+                "--seats-tool" => seats_tool = value("a program")?,
                 "--push-relay" => {
                     push_relay = value("an address")?.trim_end_matches('/').to_string();
                     // What a phone is told goes over TLS, or stays on this machine.
@@ -433,6 +439,7 @@ impl Config {
             default_cwd,
             keep_spools,
             accounts,
+            seats_tool,
             logins_checked_every_ms,
             jobs_checked_every_ms,
             schedules_checked_every_ms,
