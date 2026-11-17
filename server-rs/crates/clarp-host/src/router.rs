@@ -668,6 +668,18 @@ async fn set(State(app): State<App>, body: Bytes) -> Response {
         Ok(None) => return bad("The message delegator Janitor is unavailable"),
         Err(why) => return unavailable(why),
     };
+    // Another tool for the janitor: only while it has no conversation with the one it has,
+    // which a janitor that answers one request at a time never has.
+    let tool_now = app
+        .fleet
+        .directory()
+        .janitor(&session)
+        .map(|member| member.record.backend.clone());
+    let another = provider.is_some() && provider != tool_now;
+    if another && !crate::janitors::tool_can_change(&app, &session) {
+        let why = "The message delegator has a conversation with its tool: its tool is not changed";
+        return refusal(StatusCode::CONFLICT, why);
+    }
     let changed = app.janitors.change(&app, &session, |book, world, now_ms| {
         let gone = || Refused::new(404, "janitor_not_found", "Janitor not found");
         let own = book.builtins.iter().find(|(_, role)| role.as_str() == JOB);
