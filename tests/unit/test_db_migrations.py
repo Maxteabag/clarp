@@ -162,7 +162,7 @@ def test_v62_drops_pre_release_shapes_and_normalizes_rows(tmp_path):
     assert rows["a3"]["mcp_servers"] == "[]"
 
     keys = {r[0] for r in upgraded.execute("SELECT key FROM settings")}
-    assert keys == {"transcription.guidance.glossary"}
+    assert keys == {"transcription.guidance.glossary", "usage.claude_cost_activation_ms"}
 
 
 def test_v63_adds_durable_oracle_delegations(tmp_path):
