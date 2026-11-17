@@ -99,8 +99,8 @@ def test_an_empty_conversation_that_said_a_replace_is_not_one_that_did_not():
     assert ordered(_view([], head=4, replace=4)) == ordered(_view([], head=9, replace=7))
 
 
-def test_the_hosts_configuration_is_the_seven_switches_under_a_tests_own(monkeypatch):
-    """What both Hosts run with (16 Nov 2026). Every one is a switch the
+def test_the_hosts_configuration_is_the_nine_switches_under_a_tests_own(monkeypatch):
+    """What both Hosts run with (17 Nov 2026). Every one is a switch the
     importer has and leaves off by default."""
     from lib import transcript_incremental as inc
     monkeypatch.delenv("RM_N14_CONFIGURATION", raising=False)
@@ -109,7 +109,8 @@ def test_the_hosts_configuration_is_the_seven_switches_under_a_tests_own(monkeyp
     assert harness.configured() == dict.fromkeys(
         ("carry_live_rows", "tail_yield_after_first_write", "carry_settled_turns",
          "boundary_skips_dropped_records", "tail_keeps_frontier_when_grown",
-         "audit_grown_by_digest", "full_digest_while_parsing"), True)
+         "audit_grown_by_digest", "full_digest_while_parsing",
+         "carry_live_rows_by_words", "tail_hashes_while_parsing"), True)
     assert all(inc._DEFAULTS[switch] is False for switch in harness.HOSTS_SWITCHES)
     assert harness.configured(carry_live_rows=False)["carry_live_rows"] is False
     assert not harness.tail_yields_before_it_writes()

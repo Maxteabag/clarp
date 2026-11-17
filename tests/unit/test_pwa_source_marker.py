@@ -403,7 +403,8 @@ def test_narration_failure_writes_one_private_line_with_capture_off(
     from lib.paths import RuntimePaths
 
     diagnostics_settings.update({"enabled": False, "categories": []})
-    (main, _), (actual, _) = narration_hook_pair(stored=2, unavailable=True, real_storage=True)
+    (main, _), (actual, reports) = narration_hook_pair(stored=2, unavailable=True, real_storage=True)
+    assert reports == []
     assert main.returncode == actual.returncode == 0
     assert actual.stdout == main.stdout
     assert actual.stderr == main.stderr == b""

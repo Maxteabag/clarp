@@ -40,7 +40,7 @@ from tests.readmodel.test_rm_n14_carry import (  # noqa: F401 - frontier_state i
 from tests.readmodel.test_rm_n14_equivalence import _clones
 
 BACKENDS = pytest.mark.parametrize("backend", harness.BACKENDS)
-LIVE = {"carry_live_rows": True}
+LIVE = {"carry_live_rows": True, "carry_live_rows_by_words": False}
 WORDS = {"carry_live_rows": True, "carry_live_rows_by_words": True}
 BY_WORDS = pytest.mark.parametrize("by_words", [True, False], ids=["by words", "by the trace alone"])
 OLD = "an old reply that nothing else resembles"
