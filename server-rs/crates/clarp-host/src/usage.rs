@@ -29,7 +29,7 @@ use crate::fleet::FleetHandle;
 /// The kind of thing a turn's use is, among what is left with the fleet.
 const KIND: &str = "used";
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 2] = ["claude", "codex"];
+const TOOLS: [&str; 3] = ["claude", "codex", "agy"];
 /// After how many turns what is too old to count is looked for and let go.
 const LOOKED_OVER_EVERY: u32 = 200;
 /// What is said where an app looks for how much of an account is left.

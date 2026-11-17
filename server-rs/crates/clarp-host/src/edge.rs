@@ -1850,6 +1850,20 @@ async fn send_as(app: &App, request: SendRequest, own: bool) -> Result<SendRespo
         };
         (member, target.text, target.by_name)
     };
+    // A tool that takes its message on its command line takes no more than fits there:
+    // refused before anything is kept, in the Python Host's words.
+    let tool = clarp_backend::by_id(&member.record.backend);
+    if let Some(most) = tool.and_then(|tool| tool.message_most())
+        && text.len() > most
+    {
+        let why = format!(
+            "This message is {} KiB, more than the {} KiB this agent can take in one \
+             message. Shorten it or split it into several messages.",
+            text.len() / 1024,
+            most / 1024
+        );
+        return Err(ApiError::plain(StatusCode::PAYLOAD_TOO_LARGE, why));
+    }
     // Who it comes from. A message that names its sender is that agent's, whatever else it
     // says of itself: on the Python Host a client that names a sender may still say the
     // message is the user's, and the focus and the queue then treat an agent as a person

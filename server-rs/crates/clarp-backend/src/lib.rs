@@ -194,6 +194,13 @@ pub trait Backend: Send + Sync {
         None
     }
 
+    /// How long a message this tool takes may be, in bytes, where it takes its message on
+    /// its command line: a machine takes no word of a command longer than 128 KiB, and what
+    /// the Host says with the message comes on top. `None`: as long as it likes.
+    fn message_most(&self) -> Option<usize> {
+        None
+    }
+
     /// How hard this tool can be told to think: the efforts an agent of it may be set to.
     /// Empty for a tool that takes none.
     fn efforts(&self) -> &'static [&'static str] {
@@ -237,6 +244,8 @@ pub trait Backend: Send + Sync {
 pub const CLAUDE_PROGRAM_ENV: &str = "CLARP_CLAUDE_PROGRAM";
 /// The same for Codex.
 pub const CODEX_PROGRAM_ENV: &str = "CLARP_CODEX_PROGRAM";
+/// The same for Antigravity.
+pub const AGY_PROGRAM_ENV: &str = "CLARP_AGY_PROGRAM";
 
 /// The program an environment variable names, when it names one.
 fn named(variable: &str) -> Option<String> {
@@ -251,6 +260,7 @@ pub fn program(id: &str) -> Option<String> {
     match id {
         "claude" => Some(named(CLAUDE_PROGRAM_ENV).unwrap_or_else(|| "claude".to_string())),
         "codex" => Some(named(CODEX_PROGRAM_ENV).unwrap_or_else(|| "codex".to_string())),
+        "agy" => Some(named(AGY_PROGRAM_ENV).unwrap_or_else(|| "agy".to_string())),
         _ => None,
     }
 }
@@ -265,6 +275,10 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "codex" => Some(Arc::new(match named(CODEX_PROGRAM_ENV) {
             Some(program) => codex::Codex::with_program(program),
             None => codex::Codex::new(),
+        })),
+        "agy" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
+            Some(program) => agy::Agy::with_program(program),
+            None => agy::Agy::new(),
         })),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
@@ -332,6 +346,8 @@ mod tests {
             (Some(1_000_000), None),
             "Codex compacts on its own: there is no gauge to show"
         );
+        assert_eq!(by_id("agy").unwrap().id(), "agy");
+        assert_eq!(efforts("agy"), ["low", "medium", "high"]);
         assert_eq!(by_id("scripted").unwrap().id(), "scripted");
         assert!(by_id("nobody").is_none());
     }

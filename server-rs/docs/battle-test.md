@@ -1011,6 +1011,23 @@ The check is corrected and was not run again: a run is a turn of Codex. Not show
 Codex call did reaches the keeper's model (held by a test of the Host's reading), a goal that has stalled,
 and a goal read from its start, which need days to pass (the rules for both are held by the vectors).
 
+## Antigravity, the real tool, outside a Host
+
+Not a test of an installed Host: what the port of Antigravity assumes of the tool, asked of the tool itself
+before the port was landed. agy 1.5.10 on elitebook, 17 Nov at 14:01, two calls on its cheapest model
+(`gemini-3.8-flash-low`), each started as the Host starts it and in a home made for the two (its login
+linked, its settings copied), so that nothing was added to its user's own conversations.
+
+| What was asked | What the tool did |
+|---|---|
+| One question to read, as a janitor's is asked: in its sandbox, its commands off, two minutes at most, its answer as JSON and held to a schema in a file | ended well after 2.6 s with one JSON object: `status` `SUCCESS`, and as `response` the answer in the shape of the schema (also given parsed, as `structured_output`). 9,661 tokens went in for a question of nine words |
+| One turn, as an agent's is started: its stream as JSON lines, one harmless command to run | the stream the Python Host's recordings of 1.1.21 and 1.2.16 have: the conversation and the model in the first line, each step when it begins and when it is done, the answer in pieces, the result with what the turn took (13,712 tokens in). New: what a command gave back comes with when it ran and how it ended written around it |
+| The home made for them | Antigravity made its own store in it (its conversations, its logs); it was removed afterwards |
+
+The turn is kept as a recording beside the older ones (`agy-1.5.10-tool.jsonl`, its conversation's name and
+its directory replaced), and the reader takes what a command printed out of what is written around it. Not
+done yet: a turn of Antigravity through an installed Host.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

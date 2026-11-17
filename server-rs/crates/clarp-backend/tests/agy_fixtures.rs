@@ -195,10 +195,7 @@ fn a_real_turn_that_searches_reads_and_writes_its_answer_in_pieces() {
         )
     );
     assert_eq!(ended[2].0, "Bash");
-    assert_eq!(
-        calls[5].output.as_deref(),
-        Some("\"version\":\"0.28.1\"\r\n")
-    );
+    assert_eq!(calls[5].output.as_deref(), Some("\"version\":\"0.28.1\""));
     // The answer grows while it is written, and is one message when its step is done: the
     // one the result names.
     let growing: Vec<&str> = all
@@ -217,6 +214,64 @@ fn a_real_turn_that_searches_reads_and_writes_its_answer_in_pieces() {
     assert!(all.contains(&Signal::Usage {
         tokens_in: 31_764,
         tokens_out: 688
+    }));
+    assert_eq!(all.last(), Some(&Signal::Ended(RunOutcome::Completed)));
+}
+
+/// A turn of agy 1.5.10, recorded on 17 Nov 2026 as the Host starts one (stream-json, one
+/// harmless command; the conversation's id and the directory replaced). The stream is the
+/// one the older recordings have; what a command gave back now comes with when it ran and
+/// how it ended written around it.
+#[test]
+fn a_real_turn_of_a_newer_antigravity() {
+    let recorded_turn = recorded("agy-1.5.10-tool.jsonl");
+    let lines: Vec<&str> = recorded_turn.lines().collect();
+    let all = read_lines(&lines, &[], (Some(0), None));
+    assert_eq!(
+        all[..2],
+        [
+            Signal::Bound {
+                backend_session: "77777777-8888-9999-aaaa-bbbbbbbbbbbb".to_string()
+            },
+            Signal::Model("gemini-3.8-flash-low".to_string()),
+        ]
+    );
+    let calls = calls(&all);
+    assert_eq!(calls.len(), 2);
+    assert_eq!(
+        (
+            calls[1].name.as_str(),
+            &calls[1].input,
+            calls[1].status,
+            calls[1].output.as_deref()
+        ),
+        (
+            "Bash",
+            &json!({ "command": "printf AGY_OK", "description": "" }),
+            ToolStatus::Ok,
+            Some("AGY_OK")
+        ),
+        "what the command printed, without what is written around it"
+    );
+    let ended_with: Vec<Option<i64>> = all
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Glimpse(clarp_kernel::live::Glimpse::Returned { exit_code, .. }) => {
+                Some(*exit_code)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ended_with, [Some(0)]);
+    let said = replies(&all);
+    assert_eq!(said.len(), 1);
+    assert_eq!(
+        (said[0].id.as_str(), said[0].text.as_str()),
+        ("r-m1-3", "AGY_OK\n")
+    );
+    assert!(all.contains(&Signal::Usage {
+        tokens_in: 13_712,
+        tokens_out: 46
     }));
     assert_eq!(all.last(), Some(&Signal::Ended(RunOutcome::Completed)));
 }

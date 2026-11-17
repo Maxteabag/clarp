@@ -30,8 +30,9 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 2] = ["claude", "codex"];
-/// How long a tool has to answer one question about itself.
+const TOOLS: [&str; 3] = ["claude", "codex", "agy"];
+/// How long a tool has to answer one question about itself, where nothing else is declared
+/// of the question (Antigravity fetches its list of models, and is given longer).
 const WITHIN: Duration = Duration::from_millis(2_500);
 /// How long what was found is told again without asking.
 const KEPT_FOR: Duration = Duration::from_secs(300);
@@ -39,8 +40,10 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// What is declared of a tool and this Host cannot do with it yet. Claude Code: a turn is
 /// not steered while it runs, a conversation is not made shorter from an app, a tool is
 /// given no servers of its own, nobody signs in from an app, and what an account has used
-/// is not read. Codex, beside those: a past session of it is not forked.
-const NOT_YET: [(&str, &[&str]); 2] = [
+/// is not read. Codex, beside those: a past session of it is not forked. Antigravity: a
+/// conversation is not made shorter from an app, and the sessions it kept are not listed
+/// or taken up yet.
+const NOT_YET: [(&str, &[&str]); 3] = [
     (
         "claude",
         &[
@@ -62,6 +65,7 @@ const NOT_YET: [(&str, &[&str]); 2] = [
             "supports_usage",
         ],
     ),
+    ("agy", &["supports_compact", "resumable", "supports_resume"]),
 ];
 
 /// What was found, with when, and under which logins.
@@ -124,7 +128,7 @@ fn logins(home: &Path) -> [u8; 32] {
 
 /// Starts a tool for one answer about itself: how it ended and what it printed. What it
 /// writes aside is not read. `None`: it could not be started, or did not answer in time.
-async fn asked(program: &Path, args: &[String]) -> Option<(i32, String)> {
+async fn asked(program: &Path, args: &[String], within: Duration) -> Option<(i32, String)> {
     let mut command = tokio::process::Command::new(program);
     command
         .args(args)
@@ -137,7 +141,7 @@ async fn asked(program: &Path, args: &[String]) -> Option<(i32, String)> {
         command.env_remove(name);
     }
     let child = command.spawn().ok()?;
-    let done = tokio::time::timeout(WITHIN, child.wait_with_output()).await;
+    let done = tokio::time::timeout(within, child.wait_with_output()).await;
     let done = done.ok()?.ok()?;
     let printed = String::from_utf8_lossy(&done.stdout).into_owned();
     Some((done.status.code().unwrap_or(-1), printed))
@@ -151,7 +155,10 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
     let (version, models) = match &program {
         None => (None, None),
         Some(program) => {
-            let version = asked(program, &for_its_version);
+            let version = asked(program, &for_its_version, WITHIN);
+            // How long the tool is given for its models, where that is declared of it.
+            let declared = how["within_s"].as_f64().filter(|seconds| *seconds > 0.0);
+            let within = declared.map_or(WITHIN, Duration::from_secs_f64);
             let models = async {
                 match how["how"].as_str() {
                     // Asked by a command: its answer counts where it ended well.
@@ -162,7 +169,7 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
                             .flatten()
                             .filter_map(|word| word.as_str().map(str::to_string))
                             .collect();
-                        let said = asked(program, &with).await;
+                        let said = asked(program, &with, within).await;
                         said.filter(|(exit, _)| *exit == 0).map(|(_, out)| out)
                     }
                     // Kept in a file of the tool's own.
@@ -212,12 +219,10 @@ impl Shelf {
             return kept.told.clone();
         }
         let observed_at = crate::wire::to_the_second(now_ms);
-        let [first, second] = TOOLS;
-        let (one, other) = tokio::join!(
-            row_of(first, &home, &observed_at),
-            row_of(second, &home, &observed_at)
-        );
-        let rows = vec![(first.to_string(), one), (second.to_string(), other)];
+        let asked = TOOLS.map(|tool| row_of(tool, &home, &observed_at));
+        let found = futures_util::future::join_all(asked).await;
+        let named = TOOLS.iter().map(|tool| (*tool).to_string());
+        let rows: Vec<(String, Value)> = named.zip(found).collect();
         let told = catalogue::whole(rows, &observed_at);
         *kept = Some(Kept {
             at: Instant::now(),

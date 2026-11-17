@@ -916,8 +916,9 @@ update and when it is tried again, the newest receipt), on the routes and in wha
 receipt is kept of everything the keeper did with a goal in a run, also where it wrote nothing, the newest
 two hundred of a goal: on the goal, on the keeper's runs (`receipts`), and from `clarp-goal receipts`. The
 features `goal_updater`, `goal_keeper_receipts` and `goal_keeper_stalled` are listed. It is installed
-paused, as on the Python Host, and on Codex until this Host has Antigravity, which is the tool its job
-recommends; every update is one call of that tool, so whoever turns it on spends that account. Held
+paused, as on the Python Host, on the tool its job recommends, Antigravity (a Host installed before that
+tool was built here keeps its keeper on Codex until it is set otherwise); every update is one call of
+that tool, so whoever turns it on spends that account. Held
 through the Host by a goal, three turns and a stand-in model: paused it asks nobody; on, it writes what was
 shown and holds what was only said; it reads only what is new the second time; a model that fails leaves
 the goal untouched and says when it is tried again; and what it kept is there after the Host was killed.
@@ -940,6 +941,46 @@ a clip is kept. Installed paused, where the Python Host has it on from the first
 by two clips of a stand-in engine: nothing is written while it is paused, what waited is written when it is
 turned on (the six stages of a clip that was played, each once), a second playing adds nothing, a play that
 failed is told as that, and after the Host was killed the books are as they were.
+
+**Antigravity** (17 Nov 2026). The third tool of the owner's agents (35 of his 191 ran on it when this was
+counted), and the one the Goal keeper's job recommends. `clarp-backend` `agy.rs`, by the Python Host's
+`backend/agy.py`:
+
+- *A turn.* One process a turn: `agy --dangerously-skip-permissions --output-format stream-json
+  --print-timeout 24h [--model M | --effort E] [--conversation ID] --print=<message>`. The message is
+  bound to its flag with `=`, which takes the next word whatever it is. Antigravity names a new
+  conversation itself, in its first line; the Host learns it there and names it from then on. The stream
+  is read step by step: each step in which the agent says something is a message of its own that grows
+  while it is written; a tool is told under the name the conversation knows tools by, with what it was
+  given under that tool's own keys; the result says how the turn ended, what the answer is where no step
+  said it, and what the turn took (what the model thought counts as what it wrote). A turn its provider
+  refuses fails in the tool's own word (`status=ERROR: ...`). A message longer than 60 KiB is refused
+  before it is kept, in the Python Host's words: a command line takes no more.
+- *One question* (`once`, `reads`). Antigravity keeps every conversation under its user's home and lets
+  go of all but the newest few hundred, so what a Host asks it all day would push its agents'
+  conversations out. A backend says what it needs of its user's home for one question (`own_home`: the
+  login, linked; the settings, copied), and the Host makes that home for the question, beside an empty
+  directory to work in, and takes both away afterwards. To read and nothing else Antigravity runs in
+  its sandbox with its commands off, for two minutes at most, and is held to the answer's shape by a
+  schema (`--json-schema`).
+- *Its models* (`catalogue.rs`): `agy models` is read as the Python Host reads it, and what that Host
+  declares of the tool is in the catalogue's table.
+- *In the Host*: listed for the picker, the usage screen and the router; the Goal keeper of a new Host is
+  installed on it, as on the Python Host (one installed before keeps Codex until it is set otherwise);
+  the installer pins its program beside the other two (`--agy`).
+
+Held by the Python Host's three recordings of agy 1.1.21 and 1.2.16, by one of 1.5.10 made for this
+(below), by nine recorded answers of `agy models` and six stories of the tool on a machine from that
+Host's own functions, and through the Host with stand-ins: an agent's turn with a command and a streamed
+answer, the next turn in the same conversation, a turn that fails, a message that is too long, and the
+keeper asking it in a home of its own. Tried with the real tool, agy 1.5.10, on 17 Nov at 14:01, outside
+any Host and on its cheapest model, in a home made for it: one question to read (it answered one JSON
+object with `status` and `response`, held to the schema it was given; 9,661 tokens went in for a
+question of nine words, which is what such a question costs) and one turn with a command (the stream has
+the shape of the older recordings; what a command gave back now comes with when it ran and how it ended
+written around it, which is read off). Not there yet: the conversations Antigravity kept (listed, taken
+up), a conversation it let go of continued from the Host's own record, and making a conversation shorter.
+No agent has run on it through an installed Host yet.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
