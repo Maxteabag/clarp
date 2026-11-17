@@ -347,22 +347,24 @@ def narration_hook_pair(tmp_path):
 
 
 @pytest.mark.parametrize("level", [0, 2])
-def test_narration_import_failure_keeps_main_output_and_reports_privately(narration_hook_pair, level):
+def test_narration_import_failure_keeps_main_output_and_reports_privately(narration_hook_pair, tmp_path, level):
     (main, _), (actual, reports) = narration_hook_pair(stored=level, unavailable=True)
     assert main.returncode == actual.returncode == 0
     assert main.stdout == actual.stdout
     assert main.stderr == actual.stderr == b""
     assert reports == [{"source": "userprompt_hook", "event": "narrationFail", "level": "error",
                         "detail": {"error": "ImportError"}}]
+    _assert_private_narration_line(tmp_path, "ImportError")
 
 
-def test_narration_infinity_keeps_main_output_and_reports_privately(narration_hook_pair):
+def test_narration_infinity_keeps_main_output_and_reports_privately(narration_hook_pair, tmp_path):
     (main, _), (actual, reports) = narration_hook_pair(stored=float("inf"))
     assert main.returncode == actual.returncode == 0
     assert main.stdout == actual.stdout
     assert main.stderr == actual.stderr == b""
     assert reports == [{"source": "userprompt_hook", "event": "narrationFail", "level": "error",
                         "detail": {"error": "OverflowError"}}]
+    _assert_private_narration_line(tmp_path, "OverflowError")
 
 
 @pytest.mark.parametrize("case", [{"stored": 0}, {"resolved_level": None},
@@ -411,4 +413,14 @@ def test_narration_failure_writes_one_private_line_with_capture_off(
     assert "test: narration unavailable" not in lines[0]
     assert telemetry.conn().execute(
         "SELECT COUNT(*) FROM diagnostic_events WHERE event='narrationFail'").fetchone()[0] == 0
+    diagnostics_settings.reset_for_tests()  # Read persisted policy, not the parent's cached value.
     assert diagnostics_settings.get().enabled is False
+
+
+def _assert_private_narration_line(tmp_path, error_class):
+    from lib.paths import RuntimePaths
+
+    lines = RuntimePaths.from_home(tmp_path).hook_log.read_text().splitlines()
+    assert len(lines) == 1
+    assert "userprompt_hook" in lines[0] and f"narrationFail {error_class}" in lines[0]
+    assert "test: narration unavailable" not in lines[0]
