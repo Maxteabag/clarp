@@ -1,0 +1,627 @@
+//! Antigravity, run for one turn as `agy --output-format stream-json --print=<message>`.
+//!
+//! One process per turn. The message is the value of `--print`, bound to it with `=`: the
+//! flag takes the next word as its value, whatever that word is. A turn that continues a
+//! conversation names it (`--conversation <id>`); Antigravity names a new one itself, in its
+//! first line, and the Host learns it there and continues it from then on.
+//!
+//! The stream, as agy 1.1.21 and 1.2.16 print it (the fixtures in `tests/fixtures` are the
+//! Python Host's own recordings):
+//!
+//! ```text
+//! {"event":"init","conversation_id":"…","init":{"model":"…","cwd":"…","tools":[…]}}
+//! {"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"…"}}
+//! {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{…}}}
+//! {"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"…","parameters":{…}}}}
+//! {"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_info":{"name":"…","parameters":{…},"output":"…"}}}
+//! {"event":"result","result":{"conversation_id":"…","status":"SUCCESS","response":"…","usage":{…}}}
+//! ```
+//!
+//! A step is told when it begins and when it is done; what the agent says in a step comes
+//! in pieces (`text_delta`), the last of them with the step's end. Each step in which the
+//! agent says something is a message of its own in the conversation, as with every tool. A
+//! tool is named as the conversation names tools everywhere (`run_command` is `Bash`,
+//! `view_file` is `Read`), with what it was given under the names those tools have: so the
+//! Python Host tells them (`backend/agy.py`, `_canonical_tool_input`).
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
+use clarp_kernel::live::Glimpse;
+use clarp_kernel::told;
+use clarp_kernel::turn::{Activity, RunOutcome};
+use clarp_spool::{Entry, Record, ShimEvent};
+use serde_json::{Map, Value, json};
+
+use crate::{
+    Backend, ErrorTail, Interpreter, Launch, LiveReply, SESSION_ENV, Signal, TurnSpec, shorten,
+};
+
+/// How much of what a tool gave back is kept with the call.
+const MAX_TOOL_OUTPUT: usize = 4_000;
+/// Antigravity ends a turn by itself after five minutes unless it is told otherwise, and
+/// the turn then looks as if the agent fell silent. The Host has no clock of its own on a
+/// turn: the tool's is put out of the way.
+const PRINT_TIMEOUT: &str = "24h";
+/// What tells the tool's own hooks that this turn is the Host's, and not one somebody ran
+/// in a terminal.
+const MANAGED: &str = "CLARP_AGY_MANAGED_TURN";
+/// What the ids of Antigravity's live items begin with.
+const SHOWN: &str = "ag";
+/// The tools of Antigravity under the names the conversation knows tools by.
+const TOOL_NAMES: [(&str, &str); 10] = [
+    ("run_command", "Bash"),
+    ("view_file", "Read"),
+    ("write_to_file", "Write"),
+    ("replace_file_content", "Edit"),
+    ("multi_replace_file_content", "Edit"),
+    ("grep_search", "Grep"),
+    ("find_by_name", "Glob"),
+    ("list_dir", "LS"),
+    ("search_web", "WebSearch"),
+    ("read_url_content", "WebFetch"),
+];
+
+pub struct Agy {
+    program: String,
+}
+
+impl Agy {
+    pub fn new() -> Self {
+        Self::with_program("agy")
+    }
+
+    /// Antigravity under another name or path.
+    pub fn with_program(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+        }
+    }
+}
+
+impl Default for Agy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Backend for Agy {
+    fn id(&self) -> &'static str {
+        "agy"
+    }
+
+    fn efforts(&self) -> &'static [&'static str] {
+        &["low", "medium", "high"]
+    }
+
+    fn launch(&self, spec: &TurnSpec) -> Launch {
+        let mut args: Vec<String> = [
+            "--dangerously-skip-permissions",
+            "--output-format",
+            "stream-json",
+            "--print-timeout",
+            PRINT_TIMEOUT,
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect();
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        // A model's name carries its effort (`gemini-3.7-flash-low`): an effort is said only
+        // where no model is named.
+        match (given(&spec.model), given(&spec.effort)) {
+            (Some(model), _) => {
+                args.push("--model".to_string());
+                args.push(model);
+            }
+            (None, Some(effort)) => {
+                args.push("--effort".to_string());
+                args.push(effort.trim().to_lowercase());
+            }
+            (None, None) => {}
+        }
+        // A conversation it has: continue it. Antigravity names a new one itself.
+        if let Some(conversation) = given(&spec.backend_session) {
+            args.push("--conversation".to_string());
+            args.push(conversation);
+        }
+        // What the Host says with the prompt comes before it, as for Codex: the Python Host
+        // gives both the same words.
+        let prompt = match &spec.told {
+            Some(told) => {
+                let head = told::at_head(&told.persona, &spec.session, told.spoken);
+                let head = told::in_call(head, told.call.as_deref());
+                told::headed(&head, None, &spec.prompt)
+            }
+            None => spec.prompt.clone(),
+        };
+        // Bound to its flag: a message that begins with a dash is no flag.
+        args.push(format!("--print={prompt}"));
+        Launch {
+            program: self.program.clone(),
+            args,
+            env: vec![
+                (SESSION_ENV.to_string(), spec.session.clone()),
+                (MANAGED.to_string(), "1".to_string()),
+            ],
+            stdin: Vec::new(),
+        }
+    }
+
+    fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
+        Box::new(AgyInterpreter::new(turn, name))
+    }
+}
+
+fn text_of(value: &Value) -> &str {
+    value.as_str().unwrap_or("")
+}
+
+/// What a tool is called in the conversation.
+fn tool_name(raw: &str) -> String {
+    let known = TOOL_NAMES.iter().find(|(theirs, _)| *theirs == raw);
+    match known {
+        Some((_, ours)) => (*ours).to_string(),
+        None if raw.is_empty() => "tool".to_string(),
+        None => raw.to_string(),
+    }
+}
+
+/// What a tool was given, under the names the conversation's tools have. Antigravity
+/// spells its own otherwise (`CommandLine`, `AbsolutePath`, `TargetFile`, `Query`).
+fn tool_input(name: &str, given: &Value) -> Value {
+    let none = Map::new();
+    let given = given.as_object().unwrap_or(&none);
+    let first = |keys: &[&str]| {
+        let said = keys.iter().filter_map(|key| given.get(*key));
+        let mut said = said.filter(|value| match value {
+            Value::Null | Value::Bool(false) => false,
+            Value::String(text) => !text.is_empty(),
+            _ => true,
+        });
+        match said.next() {
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+            None => String::new(),
+        }
+    };
+    match name {
+        "Bash" => json!({
+            "command": first(&["command", "CommandLine"]),
+            "description": first(&["description"]),
+        }),
+        "Read" | "Write" | "Edit" => json!({
+            "file_path": first(&["file_path", "FilePath", "AbsolutePath", "TargetFile", "path"]),
+        }),
+        "Grep" | "Glob" => json!({
+            "pattern": first(&["pattern", "Query"]),
+            "path": first(&["path", "SearchPath"]),
+        }),
+        "LS" => json!({ "path": first(&["path", "DirectoryPath"]) }),
+        "WebSearch" | "WebFetch" => json!({
+            "query": first(&["query", "Query"]),
+            "url": first(&["url", "Url"]),
+        }),
+        _ => json!({}),
+    }
+}
+
+pub struct AgyInterpreter {
+    turn: u64,
+    /// The turn's own name: what the ids of its pieces are built from.
+    name: String,
+    /// The conversation was named to the Host.
+    bound: bool,
+    /// What the agent said in each step in which it answered, by the step's number.
+    said: BTreeMap<u64, String>,
+    /// The steps whose message is in the conversation, and the last thing so written.
+    written: BTreeSet<u64>,
+    last_written: String,
+    /// The tool calls of this turn, by the id Antigravity or their step gives them.
+    tools: BTreeMap<String, ToolCall>,
+    activity: Option<Activity>,
+    /// What the steps said they took, added up: what went in, and what came out (what the
+    /// model thought is billed as what it wrote).
+    took: (u64, u64),
+    /// Antigravity said how the turn ended: well, or with what went wrong.
+    result: Option<Result<(), String>>,
+    stderr: ErrorTail,
+    ended: bool,
+}
+
+impl AgyInterpreter {
+    pub fn new(turn: u64, name: &str) -> Self {
+        Self {
+            turn,
+            name: name.to_string(),
+            bound: false,
+            said: BTreeMap::new(),
+            written: BTreeSet::new(),
+            last_written: String::new(),
+            tools: BTreeMap::new(),
+            activity: None,
+            took: (0, 0),
+            result: None,
+            stderr: ErrorTail::default(),
+            ended: false,
+        }
+    }
+
+    fn moved(&mut self, activity: Activity, out: &mut Vec<Signal>) {
+        if self.activity.as_ref() != Some(&activity) {
+            self.activity = Some(activity.clone());
+            out.push(Signal::Moved(activity));
+        }
+    }
+
+    /// The conversation's name, the first time it is said: on the first line, on a step,
+    /// or with the result.
+    fn bind(&mut self, named: &Value, out: &mut Vec<Signal>) {
+        let conversation = text_of(named).trim();
+        if !self.bound && !conversation.is_empty() {
+            self.bound = true;
+            out.push(Signal::Bound {
+                backend_session: conversation.to_string(),
+            });
+        }
+    }
+
+    fn on_line(&mut self, line: &str, t: i64, out: &mut Vec<Signal>) {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            return; // not one of its events: a line some tool of its printed
+        };
+        if self.result.is_some() {
+            return; // nothing after the result is of the turn
+        }
+        match text_of(&event["event"]) {
+            "init" => {
+                self.bind(&event["conversation_id"], out);
+                let model = text_of(&event["init"]["model"]).trim();
+                if !model.is_empty() {
+                    out.push(Signal::Model(model.to_string()));
+                }
+                self.moved(Activity::Thinking, out);
+            }
+            "step_update" => {
+                let update = &event["step_update"];
+                match &update["conversation_id"] {
+                    Value::Null => self.bind(&event["conversation_id"], out),
+                    named => self.bind(named, out),
+                }
+                self.on_step(update, t, out);
+            }
+            "result" => self.on_result(&event["result"], out),
+            _ => {}
+        }
+    }
+
+    fn on_step(&mut self, update: &Value, t: i64, out: &mut Vec<Signal>) {
+        let done = text_of(&update["state"]).eq_ignore_ascii_case("DONE");
+        if done {
+            let count = |field: &str| update["usage"][field].as_u64().unwrap_or(0);
+            self.took.0 += count("input_tokens");
+            self.took.1 += count("output_tokens") + count("thinking_tokens");
+        }
+        let step = update["step_index"].as_u64();
+        match text_of(&update["step_type"]) {
+            "agent_response" => {
+                let Some(step) = step else {
+                    return;
+                };
+                let piece = text_of(&update["text_delta"]);
+                let said = self.said.entry(step).or_default();
+                said.push_str(piece);
+                let said = said.clone();
+                let reply = format!("r-{}-{step}", self.name);
+                let shown = format!("{SHOWN}:{step}");
+                if !said.trim().is_empty() && !piece.is_empty() {
+                    out.push(Signal::Glimpse(Glimpse::Message {
+                        id: shown.clone(),
+                        text: said.clone(),
+                        row: Some(reply.clone()),
+                    }));
+                }
+                if !done {
+                    if !piece.is_empty() {
+                        self.moved(Activity::Responding, out);
+                        out.push(Signal::Live(LiveReply {
+                            id: reply,
+                            text: said,
+                        }));
+                    }
+                    return;
+                }
+                // The step is over: what was said in it is a message of the conversation.
+                if !said.trim().is_empty() && self.written.insert(step) {
+                    out.push(Signal::Glimpse(Glimpse::Done { id: shown }));
+                    self.last_written.clone_from(&said);
+                    out.push(Signal::Reply(Reply {
+                        origin: clarp_kernel::turn::Origin::User,
+                        id: reply,
+                        turn: self.turn,
+                        text: said,
+                        trace_id: None,
+                        ..Reply::default()
+                    }));
+                }
+                self.moved(Activity::Thinking, out);
+            }
+            "tool" => self.on_tool(update, done, t, out),
+            "checkpoint" => self.moved(Activity::Thinking, out),
+            _ => {}
+        }
+    }
+
+    fn on_tool(&mut self, update: &Value, done: bool, t: i64, out: &mut Vec<Signal>) {
+        let info = &update["tool_info"];
+        // The call's own id where it has one, else its step: a step is one call.
+        let raw = match (text_of(&info["id"]), text_of(&update["tool_call_id"])) {
+            ("", "") => match update["step_index"].as_u64() {
+                Some(step) => format!("step-{step}"),
+                None => return,
+            },
+            ("", id) | (id, _) => id.to_string(),
+        };
+        let theirs = match text_of(&update["tool_name"]) {
+            "" => text_of(&info["name"]),
+            name => name,
+        };
+        let name = tool_name(theirs);
+        let input = tool_input(&name, &info["parameters"]);
+        let call_id = format!("c-{}-{raw}", self.name);
+        let shown = format!("{SHOWN}:{raw}");
+        if !self.tools.contains_key(&raw) {
+            let call = ToolCall {
+                origin: clarp_kernel::turn::Origin::User,
+                id: call_id.clone(),
+                turn: self.turn,
+                name: name.clone(),
+                input: input.clone(),
+                status: ToolStatus::Running,
+                output: None,
+                started_at_ms: t,
+                ended_at_ms: None,
+                ..ToolCall::default()
+            };
+            self.tools.insert(raw.clone(), call.clone());
+            out.push(Signal::Glimpse(Glimpse::Tool {
+                id: shown.clone(),
+                call_id,
+                name: name.clone(),
+                input,
+                whole: true,
+            }));
+            out.push(Signal::Tool(call));
+            self.moved(Activity::Tool { name }, out);
+        }
+        if !done {
+            return;
+        }
+        let Some(call) = self.tools.get_mut(&raw) else {
+            return;
+        };
+        if call.status != ToolStatus::Running {
+            return; // told twice
+        }
+        let failed = match &info["error"] {
+            Value::Null | Value::Bool(false) => false,
+            Value::String(said) => !said.is_empty(),
+            _ => true,
+        };
+        let came_back = match (&info["output"], &info["error"]) {
+            (Value::String(output), _) if !output.is_empty() => output.clone(),
+            (_, Value::String(error)) => error.clone(),
+            _ => String::new(),
+        };
+        call.status = if failed {
+            ToolStatus::Error
+        } else {
+            ToolStatus::Ok
+        };
+        call.output = Some(shorten(&came_back, MAX_TOOL_OUTPUT));
+        call.ended_at_ms = Some(t);
+        out.push(Signal::Glimpse(Glimpse::Returned {
+            id: shown,
+            content: Value::String(came_back),
+            failed,
+            exit_code: None,
+        }));
+        out.push(Signal::Tool(call.clone()));
+        self.moved(Activity::Thinking, out);
+    }
+
+    /// The turn's last line: how it ended, what the agent's answer is, and what it took.
+    /// A turn Antigravity refuses before it opens a conversation (a login it does not
+    /// take) says so here too, with no conversation named.
+    fn on_result(&mut self, result: &Value, out: &mut Vec<Signal>) {
+        self.bind(&result["conversation_id"], out);
+        let status = text_of(&result["status"]);
+        let wrong = text_of(&result["error"]).trim();
+        if !status.eq_ignore_ascii_case("SUCCESS") || !wrong.is_empty() {
+            let why = if wrong.is_empty() {
+                "provider turn failed"
+            } else {
+                wrong
+            };
+            let status = if status.is_empty() { "unknown" } else { status };
+            self.result = Some(Err(shorten(&format!("status={status}: {why}"), 600)));
+            return;
+        }
+        // The answer as the result says it stands, where no step's message is that already.
+        let response = text_of(&result["response"]);
+        if !response.trim().is_empty() && response.trim() != self.last_written.trim() {
+            out.push(Signal::Reply(Reply {
+                origin: clarp_kernel::turn::Origin::User,
+                id: format!("r-{}-result", self.name),
+                turn: self.turn,
+                text: response.to_string(),
+                trace_id: None,
+                ..Reply::default()
+            }));
+        }
+        // What the whole turn took: the result's own count (the sum of its steps), and the
+        // steps' sum where it gives none.
+        let count = |field: &str| result["usage"][field].as_u64();
+        let took = match (count("input_tokens"), count("output_tokens")) {
+            (Some(tokens_in), Some(tokens_out)) => (
+                tokens_in,
+                tokens_out + count("thinking_tokens").unwrap_or(0),
+            ),
+            _ => self.took,
+        };
+        if took != (0, 0) {
+            out.push(Signal::Usage {
+                tokens_in: took.0,
+                tokens_out: took.1,
+            });
+        }
+        self.result = Some(Ok(()));
+    }
+
+    fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, out: &mut Vec<Signal>) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        let said = |fallback: String| self.stderr.text().unwrap_or(fallback);
+        let outcome = if let Some(signal) = signal {
+            RunOutcome::Interrupted {
+                reason: format!("agy was ended by signal {signal}"),
+            }
+        } else if let Some(Err(reason)) = &self.result {
+            RunOutcome::Failed {
+                reason: reason.clone(),
+            }
+        } else if code != Some(0) {
+            RunOutcome::Failed {
+                reason: said(format!("agy exited with code {}", code.unwrap_or(-1))),
+            }
+        } else if self.result.is_none() {
+            RunOutcome::Failed {
+                reason: said("agy ended without saying how its turn ended".to_string()),
+            }
+        } else {
+            RunOutcome::Completed
+        };
+        out.push(Signal::Ended(outcome));
+    }
+}
+
+impl Interpreter for AgyInterpreter {
+    fn on_record(&mut self, record: &Record, out: &mut Vec<Signal>) {
+        match &record.entry {
+            Entry::Out(line) => self.on_line(line, record.t, out),
+            Entry::Err(line) => self.stderr.push(line),
+            Entry::Shim(ShimEvent::Exited { code, signal }) => {
+                self.on_exit(*code, *signal, out);
+            }
+            Entry::Shim(_) | Entry::Hook { .. } => {}
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn spec() -> TurnSpec {
+        TurnSpec {
+            agent_id: "a1".to_string(),
+            session: "rachel".to_string(),
+            turn: 3,
+            cwd: PathBuf::from("/work"),
+            prompt: "-what is in here?".to_string(),
+            backend_session: None,
+            new_session: Some("conv-1".to_string()),
+            model: None,
+            effort: None,
+            identity: None,
+            told: None,
+        }
+    }
+
+    #[test]
+    fn a_turn_is_started_with_the_message_bound_to_its_flag() {
+        let agy = Agy::new();
+        let fresh = agy.launch(&spec());
+        assert_eq!(fresh.program, "agy");
+        assert_eq!(
+            fresh.args,
+            vec![
+                "--dangerously-skip-permissions",
+                "--output-format",
+                "stream-json",
+                "--print-timeout",
+                "24h",
+                "--print=-what is in here?",
+            ],
+            "a new conversation: Antigravity names it, the Host cannot"
+        );
+        assert!(fresh.stdin.is_empty());
+        assert!(
+            fresh
+                .env
+                .contains(&("CLARP_AGY_MANAGED_TURN".to_string(), "1".to_string()))
+        );
+        // A conversation it has is continued; a model is named, and then no effort is, since
+        // the model's name carries one.
+        let next = agy.launch(&TurnSpec {
+            backend_session: Some("66666666-7777-8888-9999-aaaaaaaaaaaa".to_string()),
+            model: Some("gemini-3.7-flash-low".to_string()),
+            effort: Some("high".to_string()),
+            ..spec()
+        });
+        assert_eq!(
+            next.args[5..],
+            [
+                "--model",
+                "gemini-3.7-flash-low",
+                "--conversation",
+                "66666666-7777-8888-9999-aaaaaaaaaaaa",
+                "--print=-what is in here?",
+            ]
+        );
+        let effort = agy.launch(&TurnSpec {
+            effort: Some(" High ".to_string()),
+            ..spec()
+        });
+        assert_eq!(effort.args[5..7], ["--effort", "high"]);
+    }
+
+    #[test]
+    fn its_tools_are_named_and_given_as_the_conversation_names_tools() {
+        assert_eq!(tool_name("run_command"), "Bash");
+        assert_eq!(tool_name("multi_replace_file_content"), "Edit");
+        assert_eq!(tool_name("browser_subagent"), "browser_subagent");
+        assert_eq!(tool_name(""), "tool");
+        assert_eq!(
+            tool_input("Bash", &json!({ "CommandLine": "ls -la", "Cwd": "/work" })),
+            json!({ "command": "ls -la", "description": "" })
+        );
+        assert_eq!(
+            tool_input("Read", &json!({ "AbsolutePath": "/work/a.txt" })),
+            json!({ "file_path": "/work/a.txt" })
+        );
+        assert_eq!(
+            tool_input(
+                "Grep",
+                &json!({ "Query": "fn main", "SearchPath": "/work" })
+            ),
+            json!({ "pattern": "fn main", "path": "/work" })
+        );
+        assert_eq!(
+            tool_input("WebFetch", &json!({ "Url": "https://example.org" })),
+            json!({ "query": "", "url": "https://example.org" })
+        );
+        assert_eq!(
+            tool_input("browser_subagent", &json!({ "Task": "x" })),
+            json!({})
+        );
+        assert_eq!(
+            tool_input("LS", &json!("not an object")),
+            json!({ "path": "" })
+        );
+    }
+}

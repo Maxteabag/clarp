@@ -16,6 +16,7 @@ use clarp_kernel::live::Glimpse;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::Record;
 
+pub mod agy;
 pub mod catalogue;
 pub mod claude;
 pub mod codex;
