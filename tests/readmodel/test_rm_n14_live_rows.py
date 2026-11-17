@@ -27,7 +27,7 @@ from tests.readmodel import rm_n14_harness as harness
 from tests.readmodel.test_rm_n14_carry import (  # noqa: F401 - frontier_state is a fixture
     FAR, OTHER_SESSION, World, _history, _turn, frontier_state)
 
-ON = {"carry_live_rows": True}
+ON = {"carry_live_rows": True, "carry_live_rows_by_words": False}
 # Off is said, not left to the default: the lane also runs with the Hosts'
 # switches (RM_N14_CONFIGURATION=hosts), where this rule is on.
 OFF = {"carry_live_rows": False}
