@@ -717,6 +717,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         tx: tx.clone(),
         view: view_tx,
         told: None,
+        passed: Vec::new(),
         let_go_by_hand: false,
         reworded: false,
         newest: None,
@@ -749,6 +750,9 @@ struct Worker {
     view: watch::Sender<Arc<View>>,
     /// What the clients were last told, so that only a change is told.
     told: Option<Status>,
+    /// How the agent stood at each point where its live turn moved on to something else
+    /// since the clients were last told, in order: told before the state it is in now.
+    passed: Vec<Status>,
     /// Its user let the mailbox go a moment ago: the clients are told so in a word of its
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
@@ -1660,6 +1664,9 @@ impl Worker {
 
     /// Does what the actor decided, and tells the clients what changed.
     fn after(&mut self, mut out: Outputs) {
+        // What the agent passed through while its tool's output was read is told before the
+        // state at the end.
+        self.passed = std::mem::take(&mut out.passed);
         // The agent's conversation with its tool was carried over into a new one: its goals
         // are bound to that conversation and follow it, each with the artifact it is shown as.
         for (from, to) in std::mem::take(&mut out.carried) {
@@ -1913,6 +1920,7 @@ impl Worker {
     fn show(&mut self, changed: Changed) {
         let by_hand = std::mem::take(&mut self.let_go_by_hand);
         let reworded = std::mem::take(&mut self.reworded);
+        let passed = std::mem::take(&mut self.passed);
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
@@ -2013,8 +2021,24 @@ impl Worker {
         if (held_or_let_go && !told_with_its_turn) || taken_back || reworded {
             hub.publish(wire::queue_updated(&record, &status, None, false), now);
         }
+        // What the agent passed through on the way: each state in its turn, as it stood. A
+        // tool that prints a whole turn in one breath is told as one that took its time.
+        let mut last_told = before.as_ref().map(told_state);
+        let live_now = status.live.as_ref().map(|live| live.turn);
+        for stood in &passed {
+            // Of the turn that holds the agent, or of the one that ended with nothing begun
+            // after it: what a turn passed through that another has followed in the same
+            // breath is not told after that one began.
+            let of = stood.live.as_ref().map(|live| live.turn);
+            let in_order = of.is_some() && (live_now.is_none() || live_now == of);
+            if in_order && last_told != Some(told_state(stood)) {
+                hub.publish(wire::state(&record, stood, backend, None), now);
+                hub.publish(wire::activity(&record, stood), now);
+                last_told = Some(told_state(stood));
+            }
+        }
         // What the agent is doing changed: its state, and the line that describes it.
-        if before.as_ref().map(told_state) != Some(told_state(&status)) {
+        if last_told != Some(told_state(&status)) {
             if turn_ended {
                 // The agent as it stood when the turn had ended and the next had not begun.
                 let rested = Status {
