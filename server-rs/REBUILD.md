@@ -1066,9 +1066,42 @@ turns it on.
   words (409), a message held and then given in its own words when its user says yes, a question about an
   agent, a command that opens an agent, a model that fails (the message goes where it was said to), what is
   kept through a restart, and the router turned off again.
-- Not yet: starting an agent again in place by voice (it is said as what failed, and comes with starting an
-  agent again in place at all); phrases kept ready-spoken; a model's fallbacks; the two providers that are no
-  tool. In a call, only those of the call who can take speech are shown, as there.
+- Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,
+  only those of the call who can take speech are shown, as there.
+
+**An agent started again in place** (17 Nov 2026). What an app's Restart does (`POST /agents` with
+`replace_sid`), and what the router does when it is told to restart an agent: the same agent, under the same
+session name and id, begins a new conversation with its tool, and whoever reads its conversation finds it
+empty until its next turn. The Python Host was asked first what it does (run 44018613566, a scenario of 34
+steps made for the question, reproducible); this is built to its answers.
+
+- **In the kernel** it is one more thing that happens to an agent (`Command::StartAgain`, `AgentEvent::StartedAgain`):
+  the tool's session the agent had is no longer continued, and where the event stands in the agent's log is
+  where its conversation begins from then on (the recorder's `floor`). Nothing is taken out of the log: what
+  was written before is of a conversation that ended, and the reader of conversations does not go below the
+  floor (`clarp-actor` `conversation.rs`, `Span`). It happens only while no turn runs. What waits its turn
+  and was said already is written anew above the floor, in its own words and under its own id, so that it is
+  part of the new conversation and is answered there; what was left for later enters it when its turn starts,
+  as always.
+- **What an app sees**, as on the Python Host: the answer of a new agent (`ok`, `session`, `name`, its row);
+  `agent-roster` with `relaunched`; a conversation that is `missing`, with no name and revision 0, until the
+  next turn, and then one of a new name that holds only what was said since; a reader that asks with a
+  revision of the conversation that ended is told to replace what it has (`replace_required`); in the
+  snapshot no conversation, no session of the tool, no gauge of how full it is and no model that answered,
+  while what the agent last said and how its last turn ended stay as they were. What the request leaves out
+  stays as the agent has it (its tool, where it works, its voice, its model and effort); a name another agent
+  has, an effort its tool has not, an agent the Host has not and a janitor are refused in the Python Host's
+  words.
+- **A turn that runs is stopped first.** The Python Host lets it run on: its answer then stands in the
+  conversation that ended, which nobody reads, and the user is notified of it all the same (the same run:
+  `relaunched` between `thinking` and `done`, then a notification). Here the turn is stopped, the mailbox is
+  held for that moment and let go again, and what waited goes on in the new conversation.
+- **With another tool** the agent's thread is opened again on it (`Amend::Tool`, as for a janitor that has
+  no conversation with its tool): after the event there is none. The model it had was the old tool's and is
+  not kept; an effort the new tool has not is not kept either.
+- Held by the kernel's own tests (the agent's state; the recorder's floor with a message moved, through a
+  restart), by `an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew` on a Host, and by
+  the scenario `started-again`.
 
 The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
 differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one

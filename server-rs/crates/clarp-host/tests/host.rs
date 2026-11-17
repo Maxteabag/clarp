@@ -8989,6 +8989,208 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
     assert_eq!(questions().len(), before);
 }
 
+#[test]
+fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
+    let place = Place::new("started-again");
+    let host = place.start();
+    let (claire, nova) = (host.new_agent("Claire"), host.new_agent("Nova"));
+    let heard = host.listen();
+    let row = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let agents = snapshot["agents"].as_array().unwrap();
+        let found = agents.iter().find(|agent| agent["session"] == session);
+        found.cloned().unwrap_or(Value::Null)
+    };
+    let log = |more: &str| host.get(&format!("/log?session={nova}&limit=100{more}"));
+    let again = |body: Value| host.ask("POST", "/agents", Some(&body));
+    let relaunched = || {
+        let heard = heard.lock().unwrap();
+        let told = heard
+            .iter()
+            .filter(|event| event["type"] == "agent-roster" && event["kind"] == "relaunched");
+        told.cloned().collect::<Vec<Value>>()
+    };
+    // A message, and its answer: the conversation the agent is started again out of.
+    host.send(&nova, "the first conversation", "a-1");
+    wait_for("the first answer", || {
+        host.conversation(&nova)
+            .contains(&said("assistant", "the first conversation"))
+    });
+    wait_for("the agent at rest", || row(&nova)["busy"] == false);
+    let before = log("");
+    let first_conversation = before["conversation_id"].as_str().unwrap().to_string();
+    let first_revision = before["latest_revision"].as_u64().unwrap();
+    assert!(
+        !first_conversation.is_empty() && first_revision > 0,
+        "{before}"
+    );
+    assert_eq!(before["turns"].as_array().unwrap().len(), 2);
+    let agent_id = row(&nova)["agent_id"].clone();
+
+    // What is refused, in the Python Host's words, and changes nothing.
+    let (status, why) = again(json!({ "replace_sid": "nobody-there", "name": "Nobody" }));
+    assert_eq!(
+        (status, &why["error"], &why["message"]),
+        (
+            404,
+            &json!("no such agent to replace"),
+            &json!("no such agent to replace")
+        )
+    );
+    let (status, why) = again(json!({ "replace_sid": nova }));
+    assert_eq!((status, &why["error"]), (400, &json!("name required")));
+    let (status, why) = again(json!({ "replace_sid": nova, "name": "Claire" }));
+    assert_eq!(
+        (status, &why["error"], &why["owner"], &why["session"]),
+        (
+            409,
+            &json!("contact_occupied"),
+            &json!("Claire"),
+            &json!(claire)
+        ),
+        "{why}"
+    );
+    let (status, why) = again(json!({ "replace_sid": nova, "name": "Nova", "effort": "enormous" }));
+    assert_eq!(
+        (status, &why["error"]),
+        (400, &json!("invalid effort for backend"))
+    );
+    let (status, why) = again(json!({ "replace_sid": nova, "name": "Nova", "backend": "abacus" }));
+    assert_eq!(status, 400, "{why}");
+    let janitor = json!({ "replace_sid": "clarp-goal-keeper", "name": "Goal keeper" });
+    let (status, why) = again(janitor);
+    assert_eq!(
+        (status, &why["error"]),
+        (409, &json!("janitor_managed")),
+        "{why}"
+    );
+    assert_eq!(log("")["turns"].as_array().unwrap().len(), 2);
+    assert!(relaunched().is_empty());
+
+    // Started again in place: the same agent under the same name, and the apps are told.
+    let (status, started) = again(json!({ "replace_sid": nova, "name": "Nova" }));
+    assert_eq!(status, 200, "{started}");
+    assert_eq!(
+        (
+            &started["ok"],
+            &started["session"],
+            &started["name"],
+            &started["agent"]["agent_id"]
+        ),
+        (&json!(true), &json!(nova), &json!("Nova"), &agent_id),
+        "{started}"
+    );
+    wait_for("the apps to be told", || relaunched().len() == 1);
+    let told = relaunched()[0].clone();
+    assert_eq!(
+        (&told["session"], &told["persona"], &told["backend"]),
+        (&json!(nova), &json!("Nova"), &json!("scripted"))
+    );
+    // Its conversation is empty, as that of an agent nobody wrote to; a reader that kept
+    // the one that ended is told to drop it. What it last said is still what a list of
+    // chats shows of it.
+    let empty = log("");
+    assert_eq!(
+        (
+            &empty["turns"],
+            &empty["missing"],
+            &empty["conversation_id"],
+            &empty["latest_revision"]
+        ),
+        (&json!([]), &json!(true), &json!(""), &json!(0)),
+        "{empty}"
+    );
+    let caught_up = log(&format!("&after_revision={first_revision}"));
+    assert_eq!(
+        (&caught_up["turns"], &caught_up["replace_required"]),
+        (&json!([]), &json!(true)),
+        "{caught_up}"
+    );
+    let as_row = row(&nova);
+    assert_eq!(
+        (
+            &as_row["conversation_id"],
+            &as_row["head_revision"],
+            &as_row["busy"]
+        ),
+        (&json!(""), &json!(0), &json!(false)),
+        "{as_row}"
+    );
+    assert_eq!(as_row["last_message"], "the first conversation");
+
+    // A message after it begins the new conversation: nothing of the old one is in it, and
+    // it goes by another name.
+    host.send(&nova, "the second conversation", "a-2");
+    wait_for("the answer in the new conversation", || {
+        host.conversation(&nova)
+            .contains(&said("assistant", "the second conversation"))
+    });
+    wait_for("the agent at rest", || row(&nova)["busy"] == false);
+    let after = log("");
+    let texts: Vec<&str> = after["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|turn| turn["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        texts,
+        ["the second conversation", "the second conversation"]
+    );
+    let second_conversation = after["conversation_id"].as_str().unwrap();
+    assert!(!second_conversation.is_empty() && second_conversation != first_conversation);
+    assert!(after["latest_revision"].as_u64().unwrap() > first_revision);
+    // A reader that still holds the old conversation is given all of the new one, and
+    // told to drop what it has.
+    let caught_up = log(&format!("&after_revision={first_revision}"));
+    assert_eq!(caught_up["replace_required"], true, "{caught_up}");
+    assert_eq!(caught_up["turns"].as_array().unwrap().len(), 2);
+    // One that holds the new one is not.
+    let newest = after["latest_revision"].as_u64().unwrap();
+    assert_eq!(
+        log(&format!("&after_revision={newest}"))["replace_required"],
+        false
+    );
+
+    // Started again while its turn runs: the turn is stopped first, and what waited its
+    // turn and was said already is part of the new conversation and is answered there.
+    host.send(&nova, "sleep 30", "a-3");
+    wait_for("the turn to run", || row(&nova)["busy"] == true);
+    host.send(&nova, "said while it ran", "a-4");
+    let (status, started) = again(json!({ "replace_sid": nova, "name": "Nova Two" }));
+    assert_eq!(
+        (status, &started["name"]),
+        (200, &json!("Nova Two")),
+        "{started}"
+    );
+    wait_for("the message that waited to be answered", || {
+        host.conversation(&nova)
+            .contains(&said("assistant", "said while it ran"))
+    });
+    let third = host.conversation(&nova);
+    assert_eq!(
+        third,
+        vec![
+            said("user", "said while it ran"),
+            said("assistant", "said while it ran")
+        ],
+        "the turn that was stopped is no part of it"
+    );
+    assert_eq!(row(&nova)["persona"], "Nova Two");
+    assert_eq!(relaunched().len(), 2);
+
+    // All of it is what a Host that is started again reads back.
+    drop(host);
+    let host = place.start();
+    assert_eq!(host.conversation(&nova), third);
+    let snapshot = host.get("/agents/snapshot");
+    let agents = snapshot["agents"].as_array().unwrap();
+    let as_row = agents
+        .iter()
+        .find(|agent| agent["session"] == nova.as_str());
+    assert_eq!(as_row.unwrap()["persona"], "Nova Two");
+}
+
 /// Writes a program a test runs in place of a real one.
 fn program(path: &std::path::Path, text: &str) {
     use std::os::unix::fs::PermissionsExt;
@@ -14566,19 +14768,8 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     };
     host.new_agent("Echo");
 
-    // Starting an agent again in place, and taking up or forking a past session of a tool.
-    let (status, why) = made(json!({ "name": "Echo", "session": "echo", "replace_sid": "echo" }));
-    assert_eq!(
-        (status, why["error"].as_str()),
-        (400, Some("relaunch_unsupported")),
-        "{why}"
-    );
-    assert!(
-        why["message"]
-            .as_str()
-            .unwrap()
-            .contains("not built on this Host yet")
-    );
+    // Taking up or forking a past session of a tool. (An agent is started again in place:
+    // that has a test of its own.)
     for key in ["resume_session_id", "fork_session_id"] {
         let (status, why) = made(json!({ "name": "Zed", key: "0b6b2f4e-synthetic" }));
         assert_eq!(

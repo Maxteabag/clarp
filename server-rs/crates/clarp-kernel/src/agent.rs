@@ -88,6 +88,10 @@ pub enum Command {
         from: String,
         backend_session: Option<String>,
     },
+    /// The agent is started again: its next turn begins a conversation with its tool
+    /// instead of continuing the one it has. Only when no turn runs: a turn that runs is
+    /// stopped first.
+    StartAgain,
 }
 
 /// What happened to an agent. These, in order, are its history.
@@ -134,6 +138,11 @@ pub enum AgentEvent {
     Adopted {
         from: String,
         backend_session: Option<String>,
+        at_ms: i64,
+    },
+    /// The agent was started again. The tool's session it had is no longer continued, and
+    /// its conversation, as it is read, begins anew after this.
+    StartedAgain {
         at_ms: i64,
     },
 }
@@ -442,6 +451,12 @@ impl Agent {
                     at_ms: now_ms,
                 });
             }
+            Command::StartAgain => {
+                if work.agent.live.is_some() {
+                    return Err(Refusal::AtWork);
+                }
+                work.record(AgentEvent::StartedAgain { at_ms: now_ms });
+            }
             Command::TurnStarted { turn } => {
                 work.must_have_process(turn)?;
                 if matches!(work.agent.live, Some(Turn::Starting(_))) {
@@ -629,6 +644,7 @@ impl Agent {
             AgentEvent::Adopted {
                 backend_session, ..
             } => self.backend_session.clone_from(backend_session),
+            AgentEvent::StartedAgain { .. } => self.backend_session = None,
             AgentEvent::Labelled { text, .. } => {
                 self.resting = Some(if text.is_empty() {
                     Rest::Idle
@@ -1509,6 +1525,57 @@ mod tests {
             vec![TurnId(1), TurnId(3), TurnId(4), TurnId(2)],
             "every message ran exactly once"
         );
+    }
+
+    #[test]
+    fn an_agent_started_again_no_longer_continues_its_tools_session() {
+        let bound = |turn: u64, session: &str| Command::TurnBound {
+            turn: TurnId(turn),
+            backend_session: session.to_string(),
+        };
+        let mut a = Driven::new();
+        // Never at work, it is started again all the same: there is nothing to forget.
+        assert_eq!(a.send(Command::StartAgain).unwrap(), vec![]);
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.send(bound(1, "sess-1")).unwrap();
+        assert_eq!(a.agent.backend_session(), Some("sess-1"));
+        a.user(11);
+        // While a turn of it runs it is not started again: that turn is stopped first.
+        assert_eq!(a.send(Command::StartAgain), Err(Refusal::AtWork));
+        a.send(Command::Stop {
+            by: "relaunch".to_string(),
+        })
+        .unwrap();
+        a.finish(1);
+        assert_eq!((a.live(), a.waiting()), (None, vec![2]));
+        assert_eq!(a.send(Command::StartAgain).unwrap(), vec![]);
+        assert!(matches!(
+            a.history.last(),
+            Some(AgentEvent::StartedAgain { .. })
+        ));
+        assert_eq!(
+            a.agent.backend_session(),
+            None,
+            "its next turn begins a conversation with its tool"
+        );
+        // What waits still waits, and how the last turn ended is still known.
+        assert_eq!(a.waiting(), vec![2]);
+        assert!(a.agent.last().is_some());
+        // Let go, the waiting message runs, and the session its tool names is the agent's.
+        let resumed = a.send(Command::Resume {
+            by: "relaunch".to_string(),
+        });
+        assert_eq!(
+            resumed.unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
+        a.send(bound(2, "sess-2")).unwrap();
+        assert_eq!(a.agent.backend_session(), Some("sess-2"));
     }
 
     #[test]

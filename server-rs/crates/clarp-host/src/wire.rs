@@ -899,6 +899,19 @@ pub fn roster_created(record: &AgentRecord) -> Value {
     })
 }
 
+/// An agent was started again in place: the apps read the list again, and drop what they
+/// kept of its conversation.
+pub fn roster_started_again(record: &AgentRecord) -> Value {
+    json!({
+        "type": "agent-roster",
+        "kind": "relaunched",
+        "session": record.session,
+        "persona": record.persona,
+        "voice_id": record.voice_id,
+        "backend": record.backend,
+    })
+}
+
 /// An agent has another name: the apps read the list again.
 pub fn roster_renamed(session: &str, name: &str) -> Value {
     json!({ "type": "agent-roster", "kind": "agent-renamed", "session": session, "name": name })
@@ -1709,6 +1722,7 @@ mod tests {
             latest_revision: 7 << 20,
             has_more: true,
             head_revision: 7 << 20,
+            begins_after: 0,
         }
     }
 

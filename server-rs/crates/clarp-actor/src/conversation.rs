@@ -101,6 +101,9 @@ pub struct Page {
     pub has_more: bool,
     /// The newest revision the conversation has at all.
     pub head_revision: u64,
+    /// The revision the conversation begins after: 0, or where the agent was last started
+    /// again. A reader that holds a revision up to this one holds a conversation that ended.
+    pub begins_after: u64,
 }
 
 /// A reply that is being written.
@@ -285,27 +288,37 @@ pub(crate) fn one(log: &dyn AgentLog, id: &str) -> Result<Option<Versioned>, Act
     Reader::new(log).stored(id, Which::All)
 }
 
+/// Where a conversation begins and how far it has got: what was written up to `floor` is
+/// of a conversation that ended when the agent was started again, and is no part of what a
+/// chat shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Span {
+    pub floor: Seq,
+    pub head_revision: u64,
+}
+
 /// The newest `limit` things, in the order a chat shows them, with the replies being written.
 pub(crate) fn tail(
     log: &dyn AgentLog,
     drafts: &[Draft],
-    head_revision: u64,
+    span: Span,
     limit: usize,
     which: Which,
 ) -> Result<Page, ActorError> {
-    older(log, Seq::MAX, drafts, head_revision, limit, which)
+    older(log, Seq::MAX, drafts, span, limit, which)
 }
 
-/// The newest `limit` items of rows before `before` that this reader gets, oldest first, and
-/// whether there are more before them.
+/// The newest `limit` items of rows before `before` and after `floor` that this reader
+/// gets, oldest first, and whether there are more before them.
 fn items_before(
     log: &dyn AgentLog,
-    before: Seq,
+    (before, floor): (Seq, Seq),
     limit: usize,
     which: Which,
 ) -> Result<(Vec<Item>, bool), ActorError> {
     if which == Which::All {
         let mut items = log.read_before(before, kind::ROWS, limit.saturating_add(1))?;
+        items.retain(|item| item.seq > floor);
         let has_more = items.len() > limit;
         if has_more {
             items.remove(0);
@@ -321,9 +334,10 @@ fn items_before(
             break;
         };
         cursor = oldest.seq;
-        let whole = chunk.len() == CHUNK;
+        // The conversation begins after the floor: nothing older is read.
+        let whole = chunk.len() == CHUNK && oldest.seq > floor;
         for item in chunk.into_iter().rev() {
-            if kept.len() <= limit && which.keeps_item(&item)? {
+            if kept.len() <= limit && item.seq > floor && which.keeps_item(&item)? {
                 kept.push(item);
             }
         }
@@ -342,12 +356,13 @@ pub(crate) fn older(
     log: &dyn AgentLog,
     before: Seq,
     drafts: &[Draft],
-    head_revision: u64,
+    span: Span,
     limit: usize,
     which: Which,
 ) -> Result<Page, ActorError> {
+    let head_revision = span.head_revision;
     // A page is counted in rows. How the turns ended is looked up for the rows that are in it.
-    let (items, has_more) = items_before(log, before, limit, which)?;
+    let (items, has_more) = items_before(log, (before, span.floor), limit, which)?;
     let mut entries = rows(log, &items, Place::First, which)?;
     // A reply being written is shown where its finished version will be: at the end.
     for draft in drafts {
@@ -361,6 +376,7 @@ pub(crate) fn older(
         latest_revision: head_revision,
         has_more,
         head_revision,
+        begins_after: span.floor * REVISION_STEP,
     })
 }
 
@@ -369,14 +385,16 @@ pub(crate) fn after(
     log: &dyn AgentLog,
     revision: u64,
     drafts: &[Draft],
-    head_revision: u64,
+    span: Span,
     limit: usize,
     which: Which,
 ) -> Result<Page, ActorError> {
+    let head_revision = span.head_revision;
     // Read on until the page is full or the log ends. What this reader does not get is
-    // passed over, and the cursor passes over it too: it is not read again.
+    // passed over, and the cursor passes over it too: it is not read again. A reader that
+    // was last told of a conversation that has ended since is told all of the one there is.
     let mut items: Vec<Item> = Vec::new();
-    let mut from = revision / REVISION_STEP;
+    let mut from = (revision / REVISION_STEP).max(span.floor);
     let mut cursor = None;
     let mut has_more = false;
     let at_a_time = if which == Which::All {
@@ -422,5 +440,6 @@ pub(crate) fn after(
         latest_revision,
         has_more,
         head_revision,
+        begins_after: span.floor * REVISION_STEP,
     })
 }

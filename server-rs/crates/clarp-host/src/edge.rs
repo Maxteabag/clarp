@@ -1027,9 +1027,88 @@ const MADE_FIELDS: [&str; 21] = [
     "avatar_generation_status",
 ];
 
+/// Why an agent was not made, or not started again, as an app is told.
+fn not_made(why: NotMade) -> (StatusCode, Value) {
+    match why {
+        NotMade::Refused(why) => (StatusCode::BAD_REQUEST, json!({ "error": why })),
+        NotMade::Occupied { owner, session } => {
+            (StatusCode::CONFLICT, roster::occupied(&owner, &session))
+        }
+        NotMade::Told(told) => {
+            let status = StatusCode::from_u16(told.status).unwrap_or(StatusCode::BAD_REQUEST);
+            (
+                status,
+                json!({ "error": told.code, "message": told.message }),
+            )
+        }
+    }
+}
+
+/// How long an agent's turn is given to end when its agent is started again, and how often
+/// that is looked at.
+const ENDS_WITHIN: Duration = Duration::from_secs(8);
+const LOOKED_EVERY: Duration = Duration::from_millis(100);
+
+/// Starts an agent again in place (`POST /agents` with `replace_sid`): the same agent under
+/// the same session name, as the request says it is to be, with a new conversation with its
+/// tool and an empty one for those who read it. What the request asks for is checked before
+/// anything of the agent is touched. A turn that runs is stopped first: the Python Host
+/// lets it run on, and its answer is then in no conversation anybody reads.
+async fn started_again(
+    app: &App,
+    replaces: String,
+    request: CreateAgentRequest,
+) -> Result<Result<AgentRecord, NotMade>, (StatusCode, Value)> {
+    let unavailable =
+        |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
+    let checked = app
+        .fleet
+        .start_again(replaces.clone(), request.clone(), true);
+    if let Err(refused) = checked.await.map_err(unavailable)? {
+        return Ok(Err(refused));
+    }
+    let Some(member) = app.fleet.directory().by_session(&replaces).cloned() else {
+        let why = "no such agent to replace";
+        return Ok(Err(crate::fleet::Told::new(404, why, why).into()));
+    };
+    // Its log is told first: from there on its conversation is a new one. While a turn of
+    // it runs it cannot be: the turn is stopped, its mailbox held meanwhile, and let go
+    // again when the agent is started.
+    let was_held = member.agent.view().status.paused;
+    let mut held = false;
+    let mut started = member.agent.start_again().await.map_err(unavailable)?;
+    let give_up = tokio::time::Instant::now() + ENDS_WITHIN;
+    while !started && tokio::time::Instant::now() < give_up {
+        if !held {
+            member.agent.hold().await.map_err(unavailable)?;
+            held = true;
+        }
+        tokio::time::sleep(LOOKED_EVERY).await;
+        started = member.agent.start_again().await.map_err(unavailable)?;
+    }
+    let let_go = || async {
+        if held && !was_held {
+            let _ = member.agent.resume("relaunch".to_string()).await;
+        }
+    };
+    if !started {
+        let_go().await;
+        let why = "The agent's turn did not end: the agent was not started again.";
+        return Err((
+            StatusCode::CONFLICT,
+            json!({ "error": "agent_busy", "message": why }),
+        ));
+    }
+    let done = app.fleet.start_again(replaces, request, false);
+    let done = done.await.map_err(unavailable);
+    let_go().await;
+    done
+}
+
 /// Makes an agent from what a request said: `POST /agents`, and `clarp-admin agent create`.
 /// Answers what the Python Host answers: the new agent's session, its name and its row, or
-/// why it was not made.
+/// why it was not made. With `replace_sid` the agent of that session is started again in
+/// place.
 pub(crate) async fn make_agent(
     app: &App,
     asked: &serde_json::Map<String, Value>,
@@ -1046,19 +1125,8 @@ pub(crate) async fn make_agent(
     };
     let plain = |key: &str| asked.get(key).and_then(Value::as_str).map(str::to_string);
     // What this Host cannot do with a new agent yet is refused in words. Passed over, a
-    // request to start an agent again in place would be answered as a name that is taken,
-    // and one to take up a past session would start an agent that knows nothing of it.
+    // request to take up a past session would start an agent that knows nothing of it.
     let named = |key: &str| plain(key).is_some_and(|said| !said.trim().is_empty());
-    if named("replace_sid") {
-        let why = "Starting an agent again in place is not built on this Host yet. Its \
-                   model and effort are changed in its settings; anything else takes a \
-                   new agent.";
-        return Err(refused(
-            StatusCode::BAD_REQUEST,
-            "relaunch_unsupported",
-            why,
-        ));
-    }
     if named("resume_session_id") || named("fork_session_id") {
         let why = "Taking up or forking a past session of a tool is not built on this Host yet.";
         return Err(refused(StatusCode::BAD_REQUEST, "resume_unsupported", why));
@@ -1095,21 +1163,17 @@ pub(crate) async fn make_agent(
         avatar_symbol: plain("avatar_symbol"),
         avatar_base64: plain("avatar_base64"),
     };
-    let unavailable =
-        |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
-    let record = match app.fleet.create(request).await.map_err(unavailable)? {
-        Ok(record) => record,
-        Err(NotMade::Refused(why)) => {
-            return Err((StatusCode::BAD_REQUEST, json!({ "error": why })));
-        }
-        Err(NotMade::Occupied { owner, session }) => {
-            return Err((StatusCode::CONFLICT, roster::occupied(&owner, &session)));
-        }
-        Err(NotMade::Told(told)) => {
-            let status = StatusCode::from_u16(told.status).unwrap_or(StatusCode::BAD_REQUEST);
-            return Err(refused(status, told.code, &told.message));
+    // The agent it names is started again in place; with none named a new agent is made.
+    let replaces = plain("replace_sid").map(|said| said.trim().to_string());
+    let made = match replaces.filter(|said| !said.is_empty()) {
+        Some(replaces) => started_again(app, replaces, request).await?,
+        None => {
+            let unavailable =
+                |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
+            app.fleet.create(request).await.map_err(unavailable)?
         }
     };
+    let record = made.map_err(not_made)?;
     let directory = app.fleet.directory();
     let row = directory
         .named(&record.agent_id)
@@ -1425,7 +1489,7 @@ async fn log(
         let page = member.agent.after(revision, limit, which).await?;
         // A client that holds a revision this conversation never reached holds another
         // conversation: it must drop what it has.
-        let replace = revision > page.head_revision;
+        let replace = revision > page.head_revision || revision <= page.begins_after;
         (page, replace)
     } else if let Some(id) = query.before {
         let older = member.agent.before(id, limit, which).await?;
