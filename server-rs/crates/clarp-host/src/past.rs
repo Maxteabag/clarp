@@ -7,9 +7,11 @@
 //! conversation shows what was said in it: the turns of the tool's own transcript
 //! ([`clarp_backend::history`]), as rows that came from elsewhere.
 //!
-//! This Host reads the sessions of Claude Code (`<home>/.claude/projects`,
-//! [`clarp_backend::past`]). Those of Codex are not offered and not taken up yet, which is
-//! said in words to whoever asks for one.
+//! This Host reads the sessions of Claude Code (`<home>/.claude/projects`) and those of
+//! Codex (`<home>/.codex/sessions`, with Codex's own index of its threads beside them):
+//! [`clarp_backend::past`]. A session of Codex is taken up wherever it ran, since Codex
+//! finds a thread by its name alone; a copy of one is not made, which is said in the Python
+//! Host's own words for a tool that cannot fork.
 //!
 //! The rules are the Python Host's (`policies/agent_spec.py`, `agent_lifecycle.py`,
 //! `fork.py`, `routes/settings.py`): a session another agent has is not taken up a second
@@ -30,8 +32,9 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 use crate::{ids, wire};
 
-/// The tool whose sessions this Host reads.
+/// The tools whose sessions this Host reads.
 const CLAUDE: &str = "claude";
+const CODEX: &str = "codex";
 /// How many sessions of a directory are offered, and how many of every directory.
 const OF_A_DIRECTORY: usize = 20;
 const OF_EVERY_DIRECTORY: usize = 100;
@@ -39,6 +42,14 @@ const OF_EVERY_DIRECTORY: usize = 100;
 /// Where Claude Code keeps its sessions, for a user whose home is `home`.
 fn projects(home: &Path) -> PathBuf {
     home.join(".claude").join("projects")
+}
+
+/// Where Codex keeps what is its own: where `CODEX_HOME` says, as Codex itself reads it,
+/// and `.codex` at home otherwise. Its rollouts are under `sessions` there, and the index of
+/// its threads is `state_5.sqlite`.
+fn codex_home(home: &Path) -> PathBuf {
+    let said = std::env::var_os("CODEX_HOME").filter(|said| !said.is_empty());
+    said.map_or_else(|| home.join(".codex"), PathBuf::from)
 }
 
 /// `GET /past-sessions?cwd=&backend=&scope=`: the sessions a tool kept in a directory
@@ -58,10 +69,13 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
     } else {
         OF_A_DIRECTORY
     };
-    let (root, of) = (projects(&home), cwd.clone());
+    let (root, codex, of) = (projects(&home), codex_home(&home), cwd.clone());
     let read = move || match of_claude {
         true => past::claude_sessions(&root, &of, all, limit),
-        false => Vec::new(),
+        false => {
+            let index = codex.join("state_5.sqlite");
+            past::codex_sessions(&codex.join("sessions"), Some(&index), &of, all, limit)
+        }
     };
     let sessions = tokio::task::spawn_blocking(read).await.unwrap_or_default();
     Json(json!({
@@ -147,7 +161,9 @@ pub(crate) fn rows_of(agent_id: &str, session: &str, turns: &[Value]) -> Vec<Imp
             "id": id, "role": turn["role"], "text": turn["text"], "timestamp": wire::iso(at_ms),
             "kind": null, "phase": phase,
             "origin": "user", "trace_id": "", "tool_name": null, "tools": turn["tools"],
-            "display_cells": [], "automated": false, "automation_kind": "",
+            // What the agent did, where its tool's reader shows that as cells (Codex).
+            "display_cells": turn.get("display_cells").cloned().unwrap_or_else(|| json!([])),
+            "automated": false, "automation_kind": "",
             "sender_agent_id": "", "sender_name": "", "sender_session": "",
             "reply_to_agent_id": "", "reply_to_name": "", "reply_to_session": "",
         });
@@ -158,6 +174,52 @@ pub(crate) fn rows_of(agent_id: &str, session: &str, turns: &[Value]) -> Vec<Imp
         });
     }
     rows
+}
+
+/// What an agent on Codex begins with. A session is taken up wherever it ran: Codex finds a
+/// thread by its name. What was said and done in it is read from its rollout
+/// ([`history::codex`]), the newest file under Codex's sessions that is named after it.
+async fn begins_with_codex(
+    app: &App,
+    asked: &Map<String, Value>,
+    resume: Option<String>,
+    forks: bool,
+) -> Result<Begins, Refused> {
+    let owner = resume.as_deref().and_then(|session| owner_of(app, session));
+    if let Some((_, owner)) = &owner
+        && asked.get("open_existing") == Some(&json!(true))
+    {
+        return Ok(Begins::Open(owner.clone()));
+    }
+    if forks {
+        // The Python Host's own answer for a tool that cannot fork a session.
+        let why = "Codex does not support session forks.";
+        return Err(refused(StatusCode::BAD_REQUEST, "fork_unsupported", why));
+    }
+    let Some(session) = resume else {
+        return Ok(Begins::Afresh);
+    };
+    if let Some((_, owner)) = owner {
+        let why = format!("Codex session '{session}' is already used by {owner}.");
+        let told = json!({ "error": "session_in_use", "message": why, "owner": owner });
+        return Err((StatusCode::CONFLICT, told));
+    }
+    let sessions = codex_home(&crate::config::home()).join("sessions");
+    let named = session.clone();
+    let read = move || -> Option<(Vec<Value>, String)> {
+        let rollout = std::fs::read_to_string(past::codex_rollout(&sessions, &named)?).ok()?;
+        Some((history::codex(&rollout), history::model(&rollout)))
+    };
+    let Some((turns, model)) = tokio::task::spawn_blocking(read).await.ok().flatten() else {
+        let why = "Session is no longer available in this directory";
+        return Err(refused(StatusCode::NOT_FOUND, why, why));
+    };
+    Ok(Begins::With {
+        session,
+        turns,
+        parent: None,
+        model,
+    })
 }
 
 /// What the agent a request asks for begins with: nothing of the past, an agent that is
@@ -177,9 +239,12 @@ pub(crate) async fn begins(
         return Ok(Begins::Afresh);
     }
     let tool = said("backend").unwrap_or_else(|| CLAUDE.to_string());
+    if tool.eq_ignore_ascii_case(CODEX) {
+        return begins_with_codex(app, asked, resume, fork.is_some()).await;
+    }
     if !tool.eq_ignore_ascii_case(CLAUDE) {
-        let why = "Taking up or forking a past session is built for Claude Code on this \
-                   Host, and for no other tool yet.";
+        let why = "Taking up or forking a past session is built for Claude Code and Codex \
+                   on this Host, and for no other tool yet.";
         return Err(refused(StatusCode::BAD_REQUEST, "resume_unsupported", why));
     }
     let root = projects(&crate::config::home());

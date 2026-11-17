@@ -9421,14 +9421,8 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         ),
         (
             "codex",
-            vec![
-                "supports_fork",
-                "supports_resume",
-                "resumable",
-                "supports_steer",
-                "supports_compact",
-            ],
-            vec!["supports_routing"],
+            vec!["supports_fork", "supports_steer", "supports_compact"],
+            vec!["supports_routing", "supports_resume", "resumable"],
         ),
     ] {
         let row = &told["providers"][tool];
@@ -9805,12 +9799,16 @@ printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
         json!([])
     );
 
-    // What cannot be taken up is refused in words, and makes no agent.
+    // What cannot be taken up is refused in words, and makes no agent. A session of Claude
+    // Code is no session of Codex.
     let (status, why) =
         made(json!({ "name": "Zed", "backend": "codex", "resume_session_id": kept }));
     assert_eq!(
         (status, &why["error"]),
-        (400, &json!("resume_unsupported")),
+        (
+            404,
+            &json!("Session is no longer available in this directory")
+        ),
         "{why}"
     );
     let (status, why) = made(json!({ "name": "Zed", "resume_session_id": "no-such-session" }));
@@ -15608,18 +15606,28 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     };
     host.new_agent("Echo");
 
-    // Taking up or forking a past session of a tool whose sessions this Host does not
-    // read. (Claude Code's are read, and an agent is started again in place: each has a
-    // test of its own.)
-    for key in ["resume_session_id", "fork_session_id"] {
-        let asked = json!({ "name": "Zed", "backend": "codex", key: "0b6b2f4e-synthetic" });
-        let (status, why) = made(asked);
-        assert_eq!(
-            (status, why["error"].as_str()),
-            (400, Some("resume_unsupported")),
-            "{why}"
-        );
-    }
+    // A past session of Codex that is not there, and a copy of one, which Codex is not
+    // asked for here: said in the Python Host's own words for a tool that cannot fork.
+    // (Sessions that are there are taken up: each tool has a test of its own.)
+    let of_codex =
+        |key: &str| json!({ "name": "Zed", "backend": "codex", key: "0b6b2f4e-synthetic" });
+    let (status, why) = made(of_codex("resume_session_id"));
+    assert_eq!(
+        (status, why["error"].as_str()),
+        (
+            404,
+            Some("Session is no longer available in this directory")
+        ),
+        "{why}"
+    );
+    let (status, why) = made(of_codex("fork_session_id"));
+    assert_eq!(
+        (status, why),
+        (
+            400,
+            json!({ "error": "fork_unsupported", "message": "Codex does not support session forks." })
+        )
+    );
     // A tool is given no servers of its own here: none is known.
     let (status, why) =
         made(json!({ "name": "Zed", "mcp_servers": [" teams ", "outlook", "teams", ""] }));
@@ -17985,6 +17993,197 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
     let host = place.start();
     assert_eq!(waiting(&host), stands);
     assert_eq!(queue(&host)["revision"], revision);
+}
+
+#[test]
+fn an_agent_takes_up_a_session_codex_kept() {
+    let place = Place::new("codex-past");
+    let started = place.root.join("started");
+    let codex = place.root.join("codex-answers");
+    // A stand-in for Codex that answers one line in the thread it was started in, and
+    // writes down how it was started.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, sys
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+sys.stdin.read()
+args = sys.argv[1:]
+with open({started}, "a") as out:
+    out.write(" ".join(args) + "\n")
+thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-00000000beef"
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+say(type="item.completed", item={{"id": "item_0", "type": "agent_message", "text": "Picked up."}})
+say(type="turn.completed", usage={{"input_tokens": 5, "cached_input_tokens": 0, "output_tokens": 2}})
+"#,
+        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
+    );
+    program(&codex, &script);
+    // The Host's user has a home of their own, in which Codex kept one session.
+    let work = place.root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let kept = "0199c0de-1111-7222-8333-444455556666";
+    let at = |second: u32| format!("2027-02-03T10:00:{second:02}.000Z");
+    let record = |second: u32, kind: &str, payload: Value| {
+        let mut payload = payload;
+        payload["type"] = json!(kind);
+        let envelope = if kind == "message" {
+            "response_item"
+        } else {
+            "event_msg"
+        };
+        json!({ "timestamp": at(second), "type": envelope, "payload": payload })
+    };
+    let lines = [
+        json!({ "timestamp": at(0), "type": "session_meta", "payload": { "id": kept, "cwd": work } }),
+        json!({ "timestamp": at(0), "type": "turn_context", "payload": { "cwd": work, "model": "gpt-kept-1" } }),
+        record(
+            1,
+            "message",
+            json!({ "role": "user", "content": [
+            { "type": "input_text", "text": "<environment_context>\n  <cwd>/srv</cwd>\n</environment_context>" }] }),
+        ),
+        record(
+            2,
+            "user_message",
+            json!({ "message": "do the tests pass?" }),
+        ),
+        record(
+            3,
+            "agent_message",
+            json!({ "message": "I will run them.", "phase": "commentary" }),
+        ),
+        record(
+            4,
+            "item_completed",
+            json!({ "turn_id": "t1", "item": {
+            "type": "CommandExecution", "id": "call_1", "command": "/usr/bin/bash -lc 'cargo test'",
+            "aggregatedOutput": "test result: ok. 7 passed\n", "exitCode": 0 } }),
+        ),
+        record(
+            5,
+            "agent_message",
+            json!({ "message": "They pass.", "phase": "final_answer" }),
+        ),
+    ];
+    let written: Vec<String> = lines.iter().map(Value::to_string).collect();
+    let day = place.root.join(".codex/sessions/2027/02/03");
+    std::fs::create_dir_all(&day).unwrap();
+    let rollout = day.join(format!("rollout-2027-02-03T10-00-00-{kept}.jsonl"));
+    std::fs::write(&rollout, written.join("\n") + "\n").unwrap();
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = |body: Value| host.ask("POST", "/agents", Some(&body));
+    let cwd = work.to_str().unwrap();
+
+    // The session is offered to whoever makes an agent of Codex in that directory, and in
+    // no other; Codex has no index of its threads here, so its rollout says what it is.
+    let offered = host.get(&format!("/past-sessions?cwd={cwd}&backend=codex"));
+    let sessions = offered["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 1, "{offered}");
+    assert_eq!(
+        (
+            &sessions[0]["id"],
+            &sessions[0]["preview"],
+            &sessions[0]["cwd"]
+        ),
+        (&json!(kept), &json!("do the tests pass?"), &json!(cwd))
+    );
+    let nowhere = host.get("/past-sessions?cwd=/nowhere&backend=codex");
+    assert_eq!(nowhere["sessions"], json!([]));
+    let everywhere = host.get("/past-sessions?scope=all&backend=codex");
+    assert_eq!(everywhere["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        host.get(&format!("/past-sessions?cwd={cwd}"))["sessions"],
+        json!([])
+    );
+
+    // An agent begins with it: its conversation shows what was said and done in it, the
+    // command as the cell Codex's reader makes of it, and what Codex was told of the
+    // machine is no message of the user's.
+    let (status, cody) =
+        made(json!({ "name": "Cody", "backend": "codex", "cwd": cwd, "resume_session_id": kept }));
+    assert_eq!(status, 200, "{cody}");
+    let session = cody["session"].as_str().unwrap().to_string();
+    let turns = host.turns(&session);
+    let shown: Vec<(&str, &str, &Value)> = turns
+        .iter()
+        .map(|turn| {
+            (
+                turn["role"].as_str().unwrap(),
+                turn["text"].as_str().unwrap(),
+                &turn["phase"],
+            )
+        })
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("user", "do the tests pass?", &Value::Null),
+            ("assistant", "I will run them.", &json!("commentary")),
+            ("assistant", "They pass.", &json!("final")),
+        ]
+    );
+    assert_eq!(
+        turns[1]["display_cells"],
+        json!([{
+            "id": "call_1", "kind": "command", "title": "Ran", "summary": "cargo test", "status": "ok",
+            "lines": [{ "label": "", "text": "test result: ok. 7 passed", "kind": "output" }],
+        }])
+    );
+    // It runs on the model the session last ran on.
+    let row = host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["session"] == session.as_str())
+        .cloned()
+        .unwrap();
+    assert_eq!(row["model"], "gpt-kept-1", "{row}");
+
+    // Its next turn continues Codex's own thread.
+    host.send(&session, "and now?", "u-1");
+    wait_for("the turn to be over", || host.state(&session) == "done");
+    let started_with = std::fs::read_to_string(&started).unwrap();
+    assert!(
+        started_with.contains(&format!("resume {kept}")),
+        "the thread is continued: {started_with}"
+    );
+    let said = host.conversation(&session);
+    assert_eq!(
+        said.last().unwrap(),
+        &("assistant".to_string(), "Picked up.".to_string())
+    );
+
+    // The session is that agent's now: it is opened, or it is in use.
+    let again =
+        json!({ "name": "Dora", "backend": "codex", "cwd": cwd, "resume_session_id": kept });
+    let (status, why) = made(again.clone());
+    assert_eq!(
+        (status, &why["error"], &why["owner"]),
+        (409, &json!("session_in_use"), &json!(session)),
+        "{why}"
+    );
+    assert_eq!(
+        why["message"],
+        json!(format!(
+            "Codex session '{kept}' is already used by {session}."
+        ))
+    );
+    let mut open = again;
+    open["open_existing"] = json!(true);
+    let (status, opened) = made(open);
+    assert_eq!(
+        (status, &opened["session"]),
+        (200, &json!(session)),
+        "{opened}"
+    );
 }
 
 /// A stand-in for Codex that works: a turn in which it says what it will do, runs a

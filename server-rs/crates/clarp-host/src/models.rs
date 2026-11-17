@@ -39,7 +39,7 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// What is declared of a tool and this Host cannot do with it yet. Claude Code: a turn is
 /// not steered while it runs, a conversation is not made shorter from an app, a tool is
 /// given no servers of its own, nobody signs in from an app, and what an account has used
-/// is not read. Codex, beside those: its past sessions are not taken up or forked.
+/// is not read. Codex, beside those: a past session of it is not forked.
 const NOT_YET: [(&str, &[&str]); 2] = [
     (
         "claude",
@@ -55,8 +55,6 @@ const NOT_YET: [(&str, &[&str]); 2] = [
         "codex",
         &[
             "supports_fork",
-            "resumable",
-            "supports_resume",
             "supports_steer",
             "supports_compact",
             "supports_mcp",
