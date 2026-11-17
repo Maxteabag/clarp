@@ -279,10 +279,8 @@ impl Control {
                     Err(_) => Reply::failed("the spool is closed"),
                 }
             }
-            Request::Stop { grace_ms } => {
-                self.stop(grace_ms);
-                Reply::ok(Some(self.pid))
-            }
+            // Carried out by whoever answers, after the answer is written (`serve`).
+            Request::Stop { .. } => Reply::ok(Some(self.pid)),
         }
     }
 
@@ -325,15 +323,27 @@ fn serve(connection: UnixStream, control: &Control) {
         }
         let request = serde_json::from_str::<Request>(&line);
         let follow = matches!(request, Ok(Request::Follow));
+        // A stop is answered before it is carried out. A tool that is told to end may be gone
+        // at once, and the shim with it: an answer written afterwards may never leave, and
+        // whoever asked would read that nobody answered (seen once in a hundred runs of the
+        // shim's own test, 17 Nov 2026).
+        let stop = match &request {
+            Ok(Request::Stop { grace_ms }) => Some(*grace_ms),
+            _ => None,
+        };
         let reply = match request {
             Ok(request) => control.handle(request),
             Err(error) => Reply::failed(format!("not a request: {error}")),
         };
-        let Ok(mut text) = serde_json::to_string(&reply) else {
-            break;
-        };
-        text.push('\n');
-        if write_half.write_all(text.as_bytes()).is_err() {
+        let text = serde_json::to_string(&reply).map(|text| text + "\n");
+        let written = text
+            .as_ref()
+            .is_ok_and(|text| write_half.write_all(text.as_bytes()).is_ok());
+        // Whether or not the answer could be given, what was asked is done.
+        if let Some(grace_ms) = stop {
+            control.stop(grace_ms);
+        }
+        if !written {
             break;
         }
         if follow {
