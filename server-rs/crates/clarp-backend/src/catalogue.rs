@@ -194,6 +194,42 @@ pub fn claude_models(kept: &str, efforts: &Value, observed_at: &str) -> Vec<Valu
     out
 }
 
+/// Whether a text is a model's name as Antigravity writes them: small letters and digits,
+/// in parts joined by a point or a dash, the first beginning with a letter.
+fn agy_names(id: &str) -> bool {
+    let plain = |part: &str| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|sign| sign.is_ascii_lowercase() || sign.is_ascii_digit())
+    };
+    let mut parts = id.split(['.', '-']);
+    let first = parts.next().unwrap_or_default();
+    first.starts_with(|sign: char| sign.is_ascii_lowercase()) && plain(first) && parts.all(plain)
+}
+
+/// The models Antigravity lists (`agy models`): a name and, after a tab, what the model is
+/// called; a name alone is called by itself. What is no name of a model is passed over:
+/// the words it writes before its list, an empty line. A model's name carries its effort,
+/// so none is told beside it.
+pub fn agy_models(said: &str, observed_at: &str) -> Vec<Value> {
+    let from = source("cli_probe", "agy models", observed_at, "fresh");
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut models = Vec::new();
+    for line in python::splitlines(said) {
+        let (id, label) = match line.split_once('\t') {
+            Some((id, label)) => (python::strip(id), python::strip(label)),
+            None => (python::strip(line), ""),
+        };
+        if !agy_names(id) || !seen.insert(id) {
+            continue;
+        }
+        let label = if label.is_empty() { id } else { label };
+        models.push(model(id, label, Value::Null, Value::Null, &from));
+    }
+    models
+}
+
 /// What a tool said when it was started for one answer: how it ended and what it printed.
 #[derive(Debug, Clone, Copy)]
 pub struct Said<'a> {
@@ -221,6 +257,7 @@ fn seen_models(tool: &str, declared: &Value, said: Option<&str>, observed_at: &s
     match (tool, said) {
         ("codex", Some(said)) => codex_models(said, observed_at),
         ("claude", Some(kept)) => claude_models(kept, &declared["efforts"], observed_at),
+        ("agy", Some(said)) => agy_models(said, observed_at),
         _ => Vec::new(),
     }
 }

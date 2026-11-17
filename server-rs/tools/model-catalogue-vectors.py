@@ -28,7 +28,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-backend' / 'tests' / 'fixtures' / 'model-catalogue-vectors.json'
 TABLE = HERE.parent / 'crates' / 'clarp-backend' / 'src' / 'catalogue.json'
-TOOLS = ('claude', 'codex')
+TOOLS = ('claude', 'codex', 'agy')
 AT = '2027-01-15T08:00:00Z'
 
 
@@ -108,6 +108,25 @@ CLAUDE_KEPT = [
                                                                                   option('opus', 'Opus by its option')]})),
 ]
 
+AGY_LIST = ('Fetching available models...\n'
+            'gemini-synthetic-1-low\tGemini Synthetic 1 (Low)\n'
+            'gemini-synthetic-1-high\tGemini Synthetic 1 (High)\n'
+            'claude-synthetic-9-9-medium\tClaude Synthetic 9.9 (Medium)\n')
+
+# What Antigravity may print when it is asked for its models (`agy models`): a name, and the text.
+AGY_SAID = [
+    ('a list as Antigravity writes one', AGY_LIST),
+    ('nothing', ''),
+    ('only words', 'error: not signed in\nPlease sign in first.\n'),
+    ('names alone', 'gemini-synthetic-2\n   gemini-synthetic-3   \n\n'),
+    ('a model called nothing', 'gemini-synthetic-4\t   \ngemini-synthetic-5\t\n'),
+    ('the same model twice', 'gemini-twice\tFirst\n gemini-twice \tSecond\ngemini-twice\n'),
+    ('what is no model', 'Gemini-Upper\tUpper\n-leading\tx\ntrailing-\tx\ndouble..dot\tx\n9-starts-with-a-digit\tx\n'
+                         'with space\tx\n\tno name\nunder_score\tx\ngemini-\u00e9\tx\nok.1-2\tFine\na\tShortest\n'),
+    ('more than one tab', 'gemini-tabs\tLabel\twith\ttabs\n'),
+    ('other ends of a line', 'gemini-cr\tCR\r\ngemini-ff\tFF\x0cgemini-after\tAfter\rgemini-last\tLast'),
+]
+
 # A tool on a machine: (a name, the tool, whether it is there, what it says of its version, what is
 # asked of it for its models). The version: (exit code, what it printed, what it wrote aside) or
 # None where starting it fails. The models: for Codex the same of `debug models`; for Claude Code
@@ -134,6 +153,13 @@ STORIES = [
     ('claude, there, a model the Host knows under another name', 'claude', True, VERSION,
      json.dumps({'additionalModelOptionsCache': [option('sonnet', 'Sonnet as the account calls it'),
                                                  option('claude-brand-new-1', 'Brand new')]})),
+    ('agy, there and answering', 'agy', True, VERSION, (0, AGY_LIST, '')),
+    ('agy, not there', 'agy', False, None, None),
+    ('agy, there, its models asked in vain', 'agy', True, VERSION, (1, AGY_LIST, 'failed')),
+    ('agy, there, it cannot be started for its models', 'agy', True, VERSION, None),
+    ('agy, there, it lists nothing', 'agy', True, VERSION, (0, 'Fetching available models...\n', '')),
+    ('agy, there, a model the Host knows and one it does not', 'agy', True, VERSION,
+     (0, 'gemini-4-hydrogen-low\tHydrogen as Antigravity calls it\ngemini-brand-new-low\tBrand new\n', '')),
 ]
 
 
@@ -172,6 +198,8 @@ def run() -> dict:
              for name, said in CODEX_SAID]
     claude = [{'name': name, 'kept': kept, 'models': found.parse_claude_models(kept, observed_at=AT)}
               for name, kept in CLAUDE_KEPT]
+    agy = [{'name': name, 'said': said, 'models': found.parse_agy_models(said, observed_at=AT)}
+           for name, said in AGY_SAID]
 
     stories = []
     for name, tool, there, version, models in STORIES:
@@ -181,7 +209,7 @@ def run() -> dict:
         found.claude_model_cache_path = lambda kept=kept: kept
 
         def answered(argv, timeout=None, version=version, models=models, tool=tool):
-            what = version if argv[1:] == ['--version'] else (models if tool == 'codex' else None)
+            what = version if argv[1:] == ['--version'] else (models if tool in ('codex', 'agy') else None)
             if what is None:
                 raise OSError('synthetic: it cannot be started')
             return subprocess.CompletedProcess(argv, what[0], stdout=what[1], stderr=what[2])
@@ -190,7 +218,8 @@ def run() -> dict:
                                        run=answered)
         stories.append({'name': name, 'tool': tool, 'there': there,
                         'version': None if version is None else {'exit': version[0], 'out': version[1], 'err': version[2]},
-                        'models': (None if models is None else {'exit': models[0], 'out': models[1]}) if tool == 'codex' else models,
+                        'models': ((None if models is None else {'exit': models[0], 'out': models[1]})
+                                   if tool in ('codex', 'agy') else models),
                         'row': row})
     whole = found._build_catalog(wall_time=1_800_000_000.0, which=lambda _tool: None,
                                  run=lambda argv, timeout=None: (_ for _ in ()).throw(OSError('never asked')))
@@ -199,7 +228,7 @@ def run() -> dict:
     around = {key: value for key, value in whole.items() if key != 'providers'}
     around['observed_at_of'] = 1_800_000_000
     around['providers'] = list(whole['providers'])
-    return {'table': table, 'codex': codex, 'claude': claude, 'stories': stories, 'whole': around,
+    return {'table': table, 'codex': codex, 'claude': claude, 'agy': agy, 'stories': stories, 'whole': around,
             'note': {'freshness_scope': 'response_observation',
                      'freshness_note': ('Top-level freshness describes cache age only; inspect each '
                                         'provider and model source for evidence freshness.')}}
@@ -217,7 +246,7 @@ def main() -> int:
     said = json.loads(ran.stdout.splitlines()[-1])
     TABLE.write_text(json.dumps(said['table'], indent=1, ensure_ascii=True) + '\n')
     out = ['{']
-    for key in ('codex', 'claude', 'stories'):
+    for key in ('codex', 'claude', 'agy', 'stories'):
         rows = said[key]
         out.append(f' "{key}": [')
         out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(rows) - 1 else '') for n, row in enumerate(rows))
@@ -231,6 +260,7 @@ def main() -> int:
                                                      for tool, row in said['table'].items()))
     print(f'{OUT.relative_to(REPO)}: {len(said["codex"])} answers of Codex ({sum(len(r["models"]) for r in said["codex"])} models), '
           f'{len(said["claude"])} files of Claude Code ({sum(len(r["models"]) for r in said["claude"])} models), '
+          f'{len(said["agy"])} answers of Antigravity ({sum(len(r["models"]) for r in said["agy"])} models), '
           f'{len(said["stories"])} stories')
     for row in said['stories']:
         r = row['row']

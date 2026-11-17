@@ -365,5 +365,220 @@
    "known_too": true,
    "within_s": 2.5
   }
+ },
+ "agy": {
+  "shown": {
+   "label": "Antigravity",
+   "detail": "Runs on Antigravity.",
+   "badge": "BackendAntigravity",
+   "symbol": "circle.hexagongrid",
+   "brand": {
+    "field_top": "#1d2742",
+    "field_bottom": "#0e1424",
+    "tint_dark": "#4c8ef7",
+    "tint_light": "#2b6ed6"
+   },
+   "sort_index": 2,
+   "hidden": false,
+   "supports_fork": false,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": false,
+   "supports_compact": true,
+   "supports_mcp": false,
+   "supports_routing": true,
+   "supports_auth": false,
+   "supports_usage": false,
+   "login_kind": "none",
+   "effort_ui": "folded_into_model",
+   "effort_help": "Included in model choice"
+  },
+  "program": "agy",
+  "efforts": [
+   "low",
+   "medium",
+   "high"
+  ],
+  "effort_scope": "provider_flag",
+  "models": [
+   {
+    "id": "gemini-4-carbon-high",
+    "label": "Gemini 4 Carbon (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-carbon-medium",
+    "label": "Gemini 4 Carbon (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-carbon-low",
+    "label": "Gemini 4 Carbon (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-hydrogen-xhigh",
+    "label": "Gemini 4 Hydrogen (XHigh)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-hydrogen-high",
+    "label": "Gemini 4 Hydrogen (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-hydrogen-medium",
+    "label": "Gemini 4 Hydrogen (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-hydrogen-low",
+    "label": "Gemini 4 Hydrogen (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-argon-high",
+    "label": "Gemini 4 Argon (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-argon-medium",
+    "label": "Gemini 4 Argon (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-4-argon-low",
+    "label": "Gemini 4 Argon (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.8-flash-high",
+    "label": "Gemini 3.8 Flash (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.8-flash-medium",
+    "label": "Gemini 3.8 Flash (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.8-flash-low",
+    "label": "Gemini 3.8 Flash (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.7-flash-high",
+    "label": "Gemini 3.7 Flash (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.7-flash-medium",
+    "label": "Gemini 3.7 Flash (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.7-flash-low",
+    "label": "Gemini 3.7 Flash (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.6-flash-high",
+    "label": "Gemini 3.6 Flash (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.6-flash-medium",
+    "label": "Gemini 3.6 Flash (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.6-flash-low",
+    "label": "Gemini 3.6 Flash (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.1-pro-high",
+    "label": "Gemini 3.1 Pro (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gemini-3.1-pro-low",
+    "label": "Gemini 3.1 Pro (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "claude-opus-5-5-low",
+    "label": "Claude Opus 5.5 (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "claude-opus-5-5-medium",
+    "label": "Claude Opus 5.5 (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "claude-opus-5-5-high",
+    "label": "Claude Opus 5.5 (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "claude-sonnet-5-5-low",
+    "label": "Claude Sonnet 5.5 (Low)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "claude-sonnet-5-5-medium",
+    "label": "Claude Sonnet 5.5 (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "claude-sonnet-5-5-high",
+    "label": "Claude Sonnet 5.5 (High)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "gpt-oss-120b-medium",
+    "label": "GPT-OSS 120B (Medium)",
+    "default_effort": null,
+    "supported_efforts": null
+   }
+  ],
+  "asked": {
+   "how": "command",
+   "with": [
+    "models"
+   ],
+   "detail": "agy models",
+   "source_kind": "cli_probe",
+   "known_too": false,
+   "within_s": 5.0
+  }
  }
 }
