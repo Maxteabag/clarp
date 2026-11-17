@@ -198,6 +198,21 @@
   },
   {
    "data": {
+    "agent_id": "<id:6>",
+    "client_msg_id": "charlie",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
+  },
+  {
+   "data": {
     "action": "thinking",
     "agent_id": "<id:6>",
     "call_id": null,
@@ -218,21 +233,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:6>",
-    "client_msg_id": "charlie",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {

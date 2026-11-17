@@ -177,11 +177,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 04:56 (17 Nov) | the Host updated by the installer, `34641890` to `c7332730`: the build in which a janitor is looked at and not spoken to, a janitor is made as a new agent, and the rules of a run that answers one request are in. The relay was on: the new Host was connected to it again 66 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 06:11 (17 Nov) | the Host updated by the installer, `c7332730` to `1473b6c7`: the build with the router of spoken messages. The relay was on: the new Host was connected to it again 74 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 06:27 (17 Nov) | the Host updated by the installer, `1473b6c7` to `bebd58a7`: the build in which an agent is started again in place. The relay was on: the new Host was connected to it again 177 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 07:48 (17 Nov) | the Host updated by the installer, `bebd58a7` to `e46cbf51`: the build in which a new agent begins with a session its tool kept, an agent asks for an event in its user's calendar, and an app's picker is told the models. The relay was on: the new Host was connected to it again 93 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and thirty-one turns in
-thirty-nine exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-thirty-nine of Codex in the thirteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and thirty-four turns in
+forty exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+forty-two of Codex in the fourteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -749,6 +750,43 @@ points, three turns of Codex).
 | Its conversation then | holds only what was said since, goes by another name, and its revisions go on after the old ones |
 | Started again while a turn runs, under another name | 200 after 0.1 seconds; the turn was stopped first (`interrupted`), the conversation is empty again and the stopped turn is no part of it; the row has the new name |
 | Afterwards | the check's agent removed; the 23 agents that were there still there |
+
+## A new agent begins with a session its tool kept
+
+Past sessions landed with `e46cbf51` (17 Nov, 07:47, installed by exercise 40 a minute later) and were tried
+where they are installed with real Claude Code (`verify-past-sessions.py`, 31 points). The agents of the
+check ran on Sonnet, since Claude Code's own sessions are what is tried; three turns, in a directory of the
+check's own, which it removed with the sessions Claude Code had kept for it.
+
+| What | On the installed Host |
+|---|---|
+| A session to offer | an agent of the check's answers one message; its session is then offered for its directory: one, under its name, with what was asked first, and among those of every directory (100 are listed); of Codex none |
+| A session an agent has | taken up: 409, in use, with the agent that has it; opened: 200, that agent; a session nobody kept: 404, and no agent made |
+| A fork | 200: a new agent (`spawned`), the first agent's, on the model the session ran on as its transcript names it; its conversation shows what was said; its tool goes on in a copy under a name of its own, and the conversation goes by that name |
+| The fork is asked what was said before it was made | it knows: Claude Code took the copy up as a session; and it stays in the copy afterwards |
+| The agent removed, its session taken up | 200: a new agent, on the session's model; its conversation shows what was said, under a name of its own, and its tool goes on in the session |
+| That agent is asked what was said in the session | it knows; and Claude Code went on in that same session: the session it names afterwards is the one taken up |
+| Taken up a second time | 409, in use by the agent that took it up |
+| Afterwards | the check's agents, directory and sessions removed; the 23 agents that were there still there |
+
+The first run of the check failed in two of its points, which were its own: it expected the new agents'
+model to be the short name the first agent was made under (`sonnet`), where the session's transcript names
+the model in full, and that is what an agent that takes the session up runs on, as on the Python Host. The
+check was corrected and run again whole.
+
+## The models an app's picker offers, and a calendar request
+
+The same build, the same minute (`verify-model-options.py`, 14 points), with the tools of this machine and
+no stand-in.
+
+| What | On the installed Host |
+|---|---|
+| The catalogue | told in 0.06 seconds: Claude Code and Codex, and no other tool |
+| Claude Code | on the machine, version as it says it (2.1.321); one model seen in what its account may run, thirteen known beside; no model twice |
+| Codex | on the machine, version as it says it (0.167.1); eight models as it lists them, each with the efforts it takes, and one known beside |
+| What this Host cannot do with a tool yet | not said to be possible; taking up and forking Claude Code's sessions is |
+| Asked again | told as it was found, in a millisecond: the tools are not asked again |
+| A calendar request | given an id (no device is paired with this Host, so no app was told and nobody was asked); one that leaves out when it begins: 400, `start required` |
 
 ## The soak so far
 

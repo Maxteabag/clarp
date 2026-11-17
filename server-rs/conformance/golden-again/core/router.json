@@ -2203,15 +2203,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:3>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:3>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:3>"
      },
      {
       "automated": false,
@@ -4206,6 +4198,16 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "event_id": "<eid:transcript-updated#1@e2940b>",
+    "session": "nova",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@e2940b>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "session": "nova"
     },
@@ -4242,16 +4244,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@95ff8e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "event_id": "<eid:transcript-updated#1@e2940b>",
-    "session": "nova",
-    "type": "transcript-updated"
-   },
-   "event": null,
-   "id": "<eid:transcript-updated#1@e2940b>"
   },
   {
    "data": {
@@ -4387,7 +4379,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "nova",
-    "source_message_id": "<row:1>",
+    "source_message_id": "<a row the conversation does not have>",
     "type": "user-notification",
     "unread": true
    },

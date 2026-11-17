@@ -53,7 +53,7 @@
     "file": "<id:3>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 5,
+    "latest_revision": 6,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -93,14 +93,14 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "live-<id:4>",
+      "id": "msg-<id:4>",
       "kind": null,
       "origin": "user",
       "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 5,
+      "revision": 2,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -109,15 +109,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:1>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:1>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:1>"
      }
     ]
    },
@@ -294,7 +286,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "live-<id:4>",
+    "source_message_id": "live-<id:8>",
     "type": "user-notification",
     "unread": true
    },
