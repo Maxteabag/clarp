@@ -994,9 +994,16 @@ the shape of the older recordings; what a command gave back now comes with when 
 written around it, which is read off). The conversation it let go of is held through the Host with a
 stand-in that keeps its conversations as the tool does: a turn in a conversation it has, the file taken
 away, the next turn without a name and with the record before its message, the goal bound to the new
-conversation, the turn after that by the new name, and the same after the Host was killed. Not there
-yet: the conversations Antigravity kept (listed, taken up), and making a conversation shorter. No agent
-has run on it through an installed Host yet.
+conversation, the turn after that by the new name, and the same after the Host was killed. What a
+conversation Antigravity kept holds is read as the Python Host reads it (`history::agy`, the Python
+Host's `agy_transcript.parse_turns`: the steps by their numbers, the tools of a step answered by the
+steps after it, a command in the background ended by a later message of the tool, what the model
+thought, looking around folded into one cell; held by 13 made-up transcripts of 169 lines in the shapes
+agy 1.1 wrote and agy 1.5 writes, in every value and in the order of every key), with two things mended
+that the vectors define (the names agy gives its file tools today, and the word it writes before what a
+command printed: defects R44 and R45 of the reference, counted in the owner's own store). Not there yet:
+those conversations listed and taken up, and making a conversation shorter. No agent has run on it
+through an installed Host yet.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

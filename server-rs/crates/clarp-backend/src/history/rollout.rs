@@ -611,7 +611,7 @@ impl Reader {
 }
 
 /// A user's words without what the Python Host wrote before them.
-fn without_preamble(text: &str) -> &str {
+pub(super) fn without_preamble(text: &str) -> &str {
     let inside = text
         .strip_prefix('"')
         .and_then(|rest| rest.strip_suffix('"'));

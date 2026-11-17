@@ -49,8 +49,11 @@ const PRINT_TIMEOUT: &str = "24h";
 const MANAGED: &str = "CLARP_AGY_MANAGED_TURN";
 /// What the ids of Antigravity's live items begin with.
 const SHOWN: &str = "ag";
-/// The tools of Antigravity under the names the conversation knows tools by.
-const TOOL_NAMES: [(&str, &str); 10] = [
+/// The tools of Antigravity under the names the conversation knows tools by: the ten the
+/// Python Host knows (`_TOOL_NAMES`), and the three names agy gives its file tools today
+/// (`read_file`, `write_file`, `edit_file`, with the file under `Path`), which that Host
+/// shows as tools nobody knows.
+const TOOL_NAMES: [(&str, &str); 13] = [
     ("run_command", "Bash"),
     ("view_file", "Read"),
     ("write_to_file", "Write"),
@@ -61,6 +64,9 @@ const TOOL_NAMES: [(&str, &str); 10] = [
     ("list_dir", "LS"),
     ("search_web", "WebSearch"),
     ("read_url_content", "WebFetch"),
+    ("read_file", "Read"),
+    ("write_file", "Write"),
+    ("edit_file", "Edit"),
 ];
 
 /// Antigravity keeps every conversation under its user's home and lets go of all but the
@@ -324,7 +330,7 @@ fn text_of(value: &Value) -> &str {
 }
 
 /// What a tool is called in the conversation.
-fn tool_name(raw: &str) -> String {
+pub(crate) fn tool_name(raw: &str) -> String {
     let known = TOOL_NAMES.iter().find(|(theirs, _)| *theirs == raw);
     match known {
         Some((_, ours)) => (*ours).to_string(),
@@ -357,7 +363,14 @@ fn tool_input(name: &str, given: &Value) -> Value {
             "description": first(&["description"]),
         }),
         "Read" | "Write" | "Edit" => json!({
-            "file_path": first(&["file_path", "FilePath", "AbsolutePath", "TargetFile", "path"]),
+            "file_path": first(&[
+                "file_path",
+                "FilePath",
+                "AbsolutePath",
+                "TargetFile",
+                "path",
+                "Path",
+            ]),
         }),
         "Grep" | "Glob" => json!({
             "pattern": first(&["pattern", "Query"]),
