@@ -171,11 +171,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 00:07 (17 Nov) | the Host updated by the installer, `a60c7839` to `22ca39e7`: the build with the heartbeat, a message filed under the id its app gave it, the queue by its user's hand, and the portraits an agent keeps. The relay was on: the new Host was connected to it again 95 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 00:40 (17 Nov) | the Host updated by the installer, `22ca39e7` to `aada15c0`: the build that counts a heartbeat's turn by its last answer. The relay was on: the new Host was connected to it again 44 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 01:35 (17 Nov) | the Host updated by the installer, `aada15c0` to `d63e4c09`: the build whose tools take off the mark of another Host's hand-over before they run (the release owner's addition to issue 388). The relay was on: the new Host was connected to it again 42 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 02:13 (17 Nov) | the Host updated by the installer, `d63e4c09` to `35dd10c4`: the build in which an agent forks itself into helpers, and a message the Host sends by itself is told to the apps under no id. The relay was on: the new Host was connected to it again 119 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and thirteen turns in
-thirty-three exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-twenty-one of Codex in the seven since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and sixteen turns in
+thirty-four exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+twenty-four of Codex in the eight since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -613,6 +614,31 @@ the agent its heartbeat 8 seconds after it asked; the agent again said three thi
 counted as what its last answer says: nothing found, once (asked again, still once), and the next heartbeat
 was due two intervals after this one was started instead of one. Everything else as before, and the
 settings were put back.
+
+## A fork
+
+An agent forks itself into helpers that start from its conversation (`POST /agents/<session>/fork`, landed with
+`35dd10c4`). Tried on the installed Host on 17 Nov, 02:13 to 02:30, five times, each time with three Codex
+agents of the check's own and a scratch git repository (`verify-fork.py`): an agent is told a word; before
+it has said anything a fork of it is refused (409, `no_conversation`); a child without a task is refused in
+words; then it forks into two, one where it works and one in a git worktree of its own.
+
+| What | In all five runs |
+|---|---|
+| The answer | both children made, each from the conversation as words (`fork: seed`), each with its task delivered |
+| Where they work | the first where its maker works; the second in `repo-worktrees/check-fork-tree`, which was made for it and is on the branch `check/fork-tree` |
+| Who they are | helpers of the agent that forked: the maker's id is theirs to answer to |
+| The first message | from the maker, 1,049 to 1,060 signs: what the child is, its maker's conversation, its task, and the command to report with |
+| What a child knows | the first child answered with the word its maker had been told, which it could only have from the conversation it was given; the second answered with the branch of its own worktree |
+| Afterwards | the two children, the maker and the repository removed; every agent that was there before still there |
+
+What varied is the model's. Each child is told to send its report with `clarp-admin prompt`, in the Python
+Host's own words. Of the ten children, six ran the command: each was marked as reported, and its maker had
+the report from the child that wrote it. Four did not: the child whose task needs no tool answered with
+the word and stopped (in the two runs that looked: a row of ten signs and no call of any tool). The Host
+has nothing to mark there, and marked nothing. That is how the report of a helper works on both Hosts: it is
+the helper that sends it. A maker that waits for a report from a child whose task was a question may wait
+for nothing; the check says so in a line of its own instead of counting it as the Host's failure.
 
 ## The soak so far
 

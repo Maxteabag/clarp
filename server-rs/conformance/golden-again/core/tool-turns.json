@@ -2464,14 +2464,14 @@
       "trace_id": "<id:10>"
      },
      {
-      "activity_count": 0,
+      "activity_count": 1,
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
       "id": "<row:7>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "commentary",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -2482,13 +2482,21 @@
       "sender_session": "",
       "text": "Claude replay looks first.",
       "timestamp": "<time>",
-      "tool_details_available": false,
+      "tool_details_available": true,
       "tool_name": null,
-      "tools": [],
+      "tools": [
+       {
+        "action": "running command",
+        "id": "toolu_<id:11>",
+        "name": "Bash",
+        "status": "ok",
+        "summary": "Print a synthetic line"
+       }
+      ],
       "trace_id": "<id:10>"
      },
      {
-      "activity_count": 0,
+      "activity_count": 2,
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
@@ -2504,11 +2512,115 @@
       "sender_agent_id": "",
       "sender_name": "",
       "sender_session": "",
+      "text": "",
+      "timestamp": "<time>",
+      "tool_details_available": true,
+      "tool_name": null,
+      "tools": [
+       {
+        "action": "reading file",
+        "id": "toolu_<id:12>",
+        "name": "Read",
+        "status": "ok",
+        "summary": "synthetic/notes.md"
+       }
+      ],
+      "trace_id": "<id:10>"
+     },
+     {
+      "activity_count": 1,
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:9>",
+      "kind": null,
+      "origin": "user",
+      "phase": "commentary",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
       "text": "Claude replay changes a line.",
       "timestamp": "<time>",
-      "tool_details_available": false,
+      "tool_details_available": true,
       "tool_name": null,
-      "tools": [],
+      "tools": [
+       {
+        "action": "editing file",
+        "id": "toolu_<id:13>",
+        "name": "Edit",
+        "status": "ok",
+        "summary": "synthetic/notes.md"
+       }
+      ],
+      "trace_id": "<id:10>"
+     },
+     {
+      "activity_count": 1,
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:10>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "",
+      "timestamp": "<time>",
+      "tool_details_available": true,
+      "tool_name": null,
+      "tools": [
+       {
+        "action": "running command",
+        "id": "toolu_<id:14>",
+        "name": "Bash",
+        "status": "error",
+        "summary": "A command that fails"
+       }
+      ],
+      "trace_id": "<id:10>"
+     },
+     {
+      "activity_count": 1,
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:11>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "",
+      "timestamp": "<time>",
+      "tool_details_available": true,
+      "tool_name": null,
+      "tools": [
+       {
+        "action": "mcp__synthetic__lookup",
+        "id": "toolu_<id:15>",
+        "name": "mcp__synthetic__lookup",
+        "status": "ok",
+        "summary": "synthetic"
+       }
+      ],
       "trace_id": "<id:10>"
      },
      {
@@ -2516,10 +2628,10 @@
       "automated": false,
       "automation_kind": "",
       "display_cells": [],
-      "id": "<row:9>",
+      "id": "<row:12>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -2538,7 +2650,7 @@
        "ended_at_ms": "<time>",
        "started_at_ms": "<time>",
        "status": "completed",
-       "tool_count": 0,
+       "tool_count": 6,
        "turn_id": "<id:10>",
        "worked_ms": "<duration>"
       }
@@ -2833,7 +2945,7 @@
       "id": "<row:7>",
       "kind": null,
       "origin": "user",
-      "phase": null,
+      "phase": "commentary",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -2845,7 +2957,19 @@
       "text": "Claude replay looks first.",
       "timestamp": "<time>",
       "tool_name": null,
-      "tools": [],
+      "tools": [
+       {
+        "action": "running command",
+        "command": "echo synthetic",
+        "description": "Print a synthetic line",
+        "file_path": "",
+        "id": "toolu_<id:11>",
+        "name": "Bash",
+        "result": "synthetic\n",
+        "status": "ok",
+        "summary": "Print a synthetic line"
+       }
+      ],
       "trace_id": "<id:10>"
      },
      {
@@ -2864,10 +2988,35 @@
       "sender_agent_id": "",
       "sender_name": "",
       "sender_session": "",
-      "text": "Claude replay changes a line.",
+      "text": "",
       "timestamp": "<time>",
       "tool_name": null,
-      "tools": [],
+      "tools": [
+       {
+        "action": "reading file",
+        "file_path": "/synthetic/notes.md",
+        "id": "toolu_<id:12>",
+        "limit": 20,
+        "name": "Read",
+        "offset": null,
+        "result": "     1\t# Synthetic notes\n     2\tA line.\n",
+        "status": "ok",
+        "summary": "synthetic/notes.md"
+       },
+       {
+        "action": "searching code",
+        "file_path": "/synthetic",
+        "glob": null,
+        "id": "toolu_<id:16>",
+        "name": "Grep",
+        "output_mode": "files_with_matches",
+        "path": "/synthetic",
+        "pattern": "synthetic",
+        "result": "Found 1 file\n/synthetic/notes.md",
+        "status": "ok",
+        "summary": "synthetic in synthetic"
+       }
+      ],
       "trace_id": "<id:10>"
      },
      {
@@ -2877,7 +3026,112 @@
       "id": "<row:9>",
       "kind": null,
       "origin": "user",
+      "phase": "commentary",
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "Claude replay changes a line.",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [
+       {
+        "action": "editing file",
+        "file_path": "/synthetic/notes.md",
+        "id": "toolu_<id:13>",
+        "name": "Edit",
+        "new": "Another line.",
+        "old": "A line.",
+        "replace_all": false,
+        "result": "The file /synthetic/notes.md has been updated successfully.",
+        "status": "ok",
+        "summary": "synthetic/notes.md"
+       }
+      ],
+      "trace_id": "<id:10>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:10>",
+      "kind": null,
+      "origin": "user",
       "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [
+       {
+        "action": "running command",
+        "command": "false",
+        "description": "A command that fails",
+        "file_path": "",
+        "id": "toolu_<id:14>",
+        "name": "Bash",
+        "result": "Exit code 1\nsynthetic failure",
+        "status": "error",
+        "summary": "A command that fails"
+       }
+      ],
+      "trace_id": "<id:10>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:11>",
+      "kind": null,
+      "origin": "user",
+      "phase": null,
+      "reply_to_agent_id": "",
+      "reply_to_name": "",
+      "reply_to_session": "",
+      "revision": 1,
+      "role": "assistant",
+      "sender_agent_id": "",
+      "sender_name": "",
+      "sender_session": "",
+      "text": "",
+      "timestamp": "<time>",
+      "tool_name": null,
+      "tools": [
+       {
+        "action": "mcp__synthetic__lookup",
+        "file_path": "",
+        "id": "toolu_<id:15>",
+        "input": {
+         "limit": "3",
+         "query": "synthetic"
+        },
+        "name": "mcp__synthetic__lookup",
+        "result": "one synthetic result",
+        "status": "ok",
+        "summary": "synthetic"
+       }
+      ],
+      "trace_id": "<id:10>"
+     },
+     {
+      "automated": false,
+      "automation_kind": "",
+      "display_cells": [],
+      "id": "<row:12>",
+      "kind": null,
+      "origin": "user",
+      "phase": "final",
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -2895,7 +3149,7 @@
        "ended_at_ms": "<time>",
        "started_at_ms": "<time>",
        "status": "completed",
-       "tool_count": 0,
+       "tool_count": 6,
        "turn_id": "<id:10>",
        "worked_ms": "<duration>"
       }
@@ -3057,7 +3311,7 @@
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#1@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:11>",
+    "notification_id": "pn-<id:17>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: [qa-tools] synthetic work with tools",
@@ -3183,14 +3437,14 @@
     "done_ts": "<time>",
     "event_id": "<eid:user-notification#2@f5caa0>",
     "muted": false,
-    "notification_id": "pn-<id:12>",
+    "notification_id": "pn-<id:18>",
     "origin": "user",
     "persona": "Claire",
     "preview": "Claude replay reply: [qa-tools] more synthetic work",
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "<row:9>",
+    "source_message_id": "<row:12>",
     "type": "user-notification",
     "unread": true
    },

@@ -9063,15 +9063,7 @@
       "timestamp": "<time>",
       "tool_name": null,
       "tools": [],
-      "trace_id": "<id:7>",
-      "turn": {
-       "ended_at_ms": "<time>",
-       "started_at_ms": "<time>",
-       "status": "completed",
-       "tool_count": 0,
-       "turn_id": "<id:7>",
-       "worked_ms": "<duration>"
-      }
+      "trace_id": "<id:7>"
      },
      {
       "automated": false,
@@ -9730,7 +9722,7 @@
     "push": true,
     "reason": "text-reply",
     "session": "claire",
-    "source_message_id": "<row:6>",
+    "source_message_id": "<a row the conversation does not have>",
     "type": "user-notification",
     "unread": true
    },
