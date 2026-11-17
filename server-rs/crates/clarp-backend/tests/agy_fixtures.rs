@@ -278,6 +278,29 @@ fn a_real_turn_of_a_newer_antigravity() {
 
 const INIT: &str = r#"{"event":"init","conversation_id":"c-9","init":{"model":"m"}}"#;
 
+#[test]
+fn a_real_turn_that_continues_a_conversation_took_what_its_steps_took() {
+    // Recorded on 17 Nov 2026 with agy 1.5.10: the second turn of a conversation, started
+    // with its name. Its one step took 4,969 tokens in and 1 out. Its result says 13,774 and
+    // 3: what the whole conversation has taken so far (the turn before took 8,805 and 2),
+    // which is no turn's.
+    let signals = read("agy-1.5.10-continued.jsonl");
+    let took: Vec<&Signal> = signals
+        .iter()
+        .filter(|signal| matches!(signal, Signal::Usage { .. }))
+        .collect();
+    assert_eq!(
+        took,
+        [&Signal::Usage {
+            tokens_in: 4_969,
+            tokens_out: 1
+        }]
+    );
+    let said = replies(&signals);
+    assert_eq!(said.last().map(|reply| reply.text.trim()), Some("falcon"));
+    assert_eq!(ended(&signals), &RunOutcome::Completed);
+}
+
 fn ended(signals: &[Signal]) -> &RunOutcome {
     match signals.last() {
         Some(Signal::Ended(outcome)) => outcome,
