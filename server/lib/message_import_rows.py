@@ -197,7 +197,7 @@ class _FinalRows:
         self._live_traces = set()
         self._live_all = False
         self._total_turns = start_seq + len(turns)
-        self._groups = {}
+        self._unresolved_peers = {}
         self._trace_replies = {}
         self._last_by_trace = {}
         self._last_unknown = start_seq - 1
@@ -224,8 +224,9 @@ class _FinalRows:
                 group = []
             elif role == "assistant" and group is not None:
                 if visible:
-                    group.append((start_seq + index, visible))
-                    self._groups[start_seq + index] = group
+                    if not trace:
+                        group.append((start_seq + index, visible))
+                    self._unresolved_peers[start_seq + index] = group
         self._turns = {row["trace_id"]: row for row in turn_index._rows} if turn_index else {}
         self._declined = {}
         self._occupied_adoptions = set()
@@ -237,6 +238,7 @@ class _FinalRows:
     def invalidate(self) -> None:
         self._rows = None
         self._live_rows = None
+        self._turns.clear()
         self._live_traces = set()
         self._live_all = False
 
@@ -300,17 +302,15 @@ class _FinalRows:
         adopting an earlier remark. A partial live final can otherwise lend its id to that remark.
         No provider ordinal is guessed from the opaque live id.
         """
-        group = self._groups.get(seq)
+        # Known traces span steered prompts. A reply with unresolved ownership
+        # in the current prompt group may veto a match but cannot adopt a row.
+        unknown = self._unresolved_peers.get(seq)
         known = self._trace_replies.get(trace)
-        if known is not None:
-            # An authored client row can still name this trace after the
-            # timestamp index's reach ends. Keep that current user group.
-            group = known if group is None or group == known else list(
-                {**dict(known), **dict(group)}.items())
-        if group is None:
+        if known is None and unknown is None:
             if exact:
                 self.decline_live(row, trace, seq)
             return not exact
+        group = (known or []) + (unknown or [])
         compatible = {position for position, visible in group
                       if (visible == row["visible"] if exact
                           else _related(visible, row["visible"]))}
@@ -345,7 +345,7 @@ class _FinalRows:
         """Only the last reply of a known, still-running turn can wait.
 
         Ended turns always use ordinary cleanup. This is per-import knowledge,
-        rebuilt from parsed replies and the gathered turn index after a restart.
+        with turn state validated in the writer hold that performs cleanup.
         A failure or an obsolete decision never makes an import keep a row.
         """
         try:
@@ -353,8 +353,17 @@ class _FinalRows:
             if declined is None:
                 return False
             trace = live["trace_id"] or ""
-            turn = self._turns.get(trace)
-            if turn is None or declined != (trace, _strip_voice_markup(live["text"])):
+            if declined != (trace, _strip_voice_markup(live["text"])):
+                self._guard_failure("obsolete_decision")
+                return False
+            if trace not in self._turns:
+                # A release invalidates the prelude's turn state. Read only
+                # on an actual decline and share the result within this hold.
+                self._turns[trace] = self._database.execute(
+                    "SELECT settled_at, outcome FROM turns WHERE agent_id=? AND trace_id=? "
+                    "ORDER BY started_at DESC LIMIT 1", (self._key[0], trace)).fetchone()
+            turn = self._turns[trace]
+            if turn is None:
                 self._guard_failure("obsolete_decision")
                 return False
             return turn["settled_at"] is None and turn["outcome"] is None

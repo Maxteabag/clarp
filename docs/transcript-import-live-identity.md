@@ -6,6 +6,10 @@ A transcript-first import can create a placeholder before a provider writes its 
 
 The final live row keeps its original id, so references already attached to it remain usable. Finalization is per assistant message: Claude message-stop/new-message/result handling and Codex item.completed call mark_live_message_final, clearing kind in place. Finalized provider rows still use live:<trace>, not final:%; the finalization writer is unchanged.
 
+Two rules matter when an import spans a writer release or a terminal prompt spans several Host turns. Cleanup uses the turn state gathered or validated in its current writer hold. A release discards that state. A matching declined row then requires one fresh turn-state SELECT per distinct trace in that cleanup hold. A replay without declined live rows performs none. A turn that settled during the release loses its duplicate in that import; a turn still running keeps the declined last reply.
+
+A reply with a known trace competes with other replies of that trace, including across steered prompts. Equal text in a different known trace does not compete, even when the two replies follow one native prompt. An untraced reply in the current prompt group can veto an uncertain match. It cannot adopt any live id. These rules apply both to exact occupied-slot uniqueness and to unoccupied exact-before-prefix matching.
+
 ## Candidate reads and cost
 
 One lazy candidate statement family per writer hold serves occupied and unoccupied matching. It uses this batch’s traced assistant replies, chunks of 32 through idx_messages_trace, or the same session-walk threshold as PR 405: len(traces)>max(1,total_turns//5). There are no per-reply point lookups. Commits/yields drop candidates; own adoptions/deletions discard entries. Cleanup performs its own fresh read. No schema or index change.
@@ -41,6 +45,33 @@ first-no-frontier imports the transcript before the live row exists. post-settle
 | Client provenance | same non-covering indexed read plus temporary ORDER BY | same |
 
 Cleanup adds only the flag (turn_json IS NOT NULL), not the summary JSON. The accepted provenance projection adds trace_id to the existing read. On 501 rows the cost was 14,602 → 15,604 VM operations (+2 per row), with no new table visit or SELECT.
+
+## Reviewer cost comparison
+
+Each cell gives all SQL statements / SQLite VM steps for main `90315c40` and this revision. These counts include writes and transaction statements.
+
+| Configuration | Old turns | Import | Main statements / steps | PR statements / steps |
+|---|---:|---|---:|---:|
+| defaults | 0 | initial | 51 / 1,665 | 51 / 1,538 |
+| defaults | 0 | late-live | 57 / 2,006 | 58 / 2,213 |
+| defaults | 0 | ordinary | 49 / 1,629 | 27 / 914 |
+| defaults | 0 | replay | 18 / 527 | 17 / 493 |
+| defaults | 500 | initial | 7,595 / 6,571,375 | 7,100 / 3,560,335 |
+| defaults | 500 | late-live | 6,102 / 342,459 | 6,109 / 380,871 |
+| defaults | 500 | ordinary | 57 / 167,709 | 27 / 109,914 |
+| defaults | 500 | replay | 3,018 / 118,525 | 3,018 / 125,516 |
+| hosts-nine | 0 | initial | 51 / 1,667 | 51 / 1,540 |
+| hosts-nine | 0 | late-live | 50 / 1,803 | 51 / 2,006 |
+| hosts-nine | 0 | ordinary | 50 / 1,641 | 28 / 926 |
+| hosts-nine | 0 | replay | 18 / 527 | 17 / 493 |
+| hosts-nine | 500 | initial | 7,596 / 6,571,387 | 7,101 / 3,560,347 |
+| hosts-nine | 500 | late-live | 51 / 167,813 | 51 / 168,006 |
+| hosts-nine | 500 | ordinary | 50 / 167,641 | 28 / 109,926 |
+| hosts-nine | 500 | replay | 3,018 / 118,525 | 3,018 / 125,516 |
+
+On the 500-turn full replay both configurations used 3,018 statements. The change adds 6,991 VM steps. Against the previous reviewer head, 15 of 16 measurements were identical. The short defaults initial import measured one extra statement and ten extra VM steps (51 / 1,538), equal in statement count to the main control in this run. That fixture has no declined live row during initial import.
+
+After a writer release, cleanup's lazy turn lookup used `idx_turns_agent_ts`. On an isolated 501-turn history the fresh lookup used 30 VM steps for the newest and preceding traces and 2,525 for the oldest trace. It is one SELECT per matching declined trace in the cleanup hold. Older traces can cost more because the index orders turns by agent and start time.
 
 ## Summary placement and recovery
 
@@ -99,3 +130,5 @@ Log events: transcriptLiveTwinOtherTurn is retired everywhere. The scoped reader
 Daytime verification passed with 336 focused checks, 303 named HOSTS cases, 17 integration checks, 908 critical tests and 53 guards. Critical also reported 7 skipped, 199 deselected and 1 expected failure. New summary matrix failed 24 bad-order cases before the repair while 24 good-order controls passed. The unmodified control passed. Of 36 mutants, 35 failed on the first run. One retained an ambiguous live row for two earlier replies even though the final reply was unrelated. A new regression passed on the unmodified code and failed on that mutant. All 36 mutants now have a failing test receipt. The final run passed 337 focused checks, 908 critical tests and 53 guards (all exit 0). The whole importer lane in both configurations is Arnold’s separate night gate on the PR merged with main. No live activation claimed.
 
 All three changed production modules are hashed into the importer parser fingerprint: installation costs one full import per conversation. No deliberate parser-version constant, wire feature or client-contract change.
+
+Review delta verification passed with 347 focused tests, 303 named HOSTS cases, 17 integration tests, 908 critical tests and 53 guards. All 38 mutants failed their tests with the unmodified control green. The six expected lane cases and both sets of 12 byte-identical replays were verified again.

@@ -987,3 +987,108 @@ def test_settled_tool_turn_keeps_summary_after_carry_input_full_import(
     assert [r['id'] for r in replies if r.get('turn')] == [live_final]
     assert replies[-1]['turn']['turn_id'] == 'turn-1'
     assert not db.conn().execute('SELECT 1 FROM messages WHERE message_id=?', (stale_remark,)).fetchone()
+
+
+@pytest.mark.parametrize('configuration', ['defaults', 'hosts-nine'])
+@pytest.mark.parametrize('settle_in_gap', [False, True])
+def test_cleanup_checks_current_turn_after_publishing_reply(
+        tmp_path, monkeypatch, configuration, settle_in_gap):
+    from lib import message_writes
+
+    aid, path, now = _opened_case(tmp_path, monkeypatch, configuration)
+    _record(path, 'assistant', 'The parcel arrived.', 200)
+    _import(aid, path)
+    now[0] = BASE + 300
+    live = message_store.upsert_live_assistant_message(agent_id=aid,
+        backend_session_id='native-session', trace_id='turn-1', item_key='parcel', text='The parcel')
+    revised = 'The parcel arrived this morning.'
+    path.write_bytes(path.read_bytes().replace(b'The parcel arrived.', revised.encode()))
+    monkeypatch.setattr(message_store, 'IMPORT_COMMIT_EVERY', 1)
+    monkeypatch.setattr(message_store, 'IMPORT_WRITE_BUDGET_SECONDS', 0)
+    release = message_writes._ImportWriter.yield_writer
+    published = []
+
+    def observe_committed_reply():
+        try:
+            if not db.conn().execute('SELECT 1 FROM messages WHERE source_file=? AND text=?',
+                                     (str(path), revised)).fetchone():
+                return False
+            assert db.conn().execute('SELECT 1 FROM messages WHERE message_id=?',
+                                     (live['id'],)).fetchone()
+            if settle_in_gap:
+                turn_lifecycle.transition(aid, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK,
+                                          {'trace_id': 'turn-1'})
+            return True
+        finally:
+            db.close_local()
+
+    with ThreadPoolExecutor(max_workers=1) as peer:
+        def released(writer):
+            assert not db.conn().in_transaction
+            if not published and peer.submit(observe_committed_reply).result(timeout=5):
+                published.append(True)
+            return release(writer)
+        monkeypatch.setattr(message_writes._ImportWriter, 'yield_writer', released)
+        _full_replay(aid, path)
+    assert published == [True]
+    assert bool(db.conn().execute('SELECT 1 FROM messages WHERE message_id=?',
+                                  (live['id'],)).fetchone()) is (not settle_in_gap)
+
+
+@pytest.mark.parametrize('configuration', ['defaults', 'hosts-nine'])
+@pytest.mark.parametrize('occupied', [False, True])
+def test_one_terminal_prompt_equal_replies_keep_each_traces_live_id(
+        tmp_path, monkeypatch, configuration, occupied):
+    aid, path, now = _opened_case(tmp_path, monkeypatch, configuration)
+    path.write_text('')
+    _record(path, 'user', 'Prompt from the terminal', 100)
+    answer = 'The check passed.'
+    _record(path, 'assistant', answer, 200)
+    def finalized(trace):
+        key = dict(agent_id=aid, backend_session_id='native-session', trace_id=trace, item_key='final')
+        row = message_store.upsert_live_assistant_message(**key, text=answer)
+        message_store.mark_live_message_final(**key)
+        return (trace, row['id'])
+
+    if occupied:
+        _full_replay(aid, path)
+    now[0] = BASE + 350
+    expected = [finalized('turn-1')]
+    turn_lifecycle.transition(aid, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK, {'trace_id': 'turn-1'})
+    now[0] = BASE + 30000
+    agents.open_turn(agent_id=aid, source='pwa', trace_id='turn-2')
+    turn_lifecycle.transition(aid, turn_lifecycle.TurnEvent.PROMPT_ADMITTED, {'trace_id': 'turn-2'})
+    _record(path, 'assistant', answer, 30200)
+    if occupied:
+        _full_replay(aid, path)
+    now[0] = BASE + 30350
+    expected.append(finalized('turn-2'))
+    turn_lifecycle.transition(aid, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK, {'trace_id': 'turn-2'})
+    _import(aid, path)
+    rows = db.conn().execute("SELECT trace_id,message_id FROM messages "
+                             "WHERE role='assistant' ORDER BY seq").fetchall()
+    assert [tuple(row) for row in rows] == expected
+
+
+@pytest.mark.parametrize('configuration', ['defaults', 'hosts-nine'])
+def test_untraced_reply_can_veto_a_match_but_cannot_take_the_live_id(
+        tmp_path, monkeypatch, configuration):
+    aid, path, now = _opened_case(tmp_path, monkeypatch, configuration)
+    path.write_text('')
+    _record(path, 'user', 'An older terminal prompt', -60000)
+    answer = 'Same output.'
+    _record(path, 'assistant', answer, -59000)  # before the Host turn index begins
+    _record(path, 'assistant', answer, 200)
+    now[0] = BASE + 300
+    live = message_store.upsert_live_assistant_message(
+        agent_id=aid, backend_session_id='native-session', trace_id='turn-1',
+        item_key='current', text=answer)
+    _import(aid, path)
+
+    rows = db.conn().execute("SELECT message_id, trace_id FROM messages "
+                             "WHERE source_file=? AND role='assistant' ORDER BY seq",
+                             (str(path),)).fetchall()
+    assert [row['trace_id'] or '' for row in rows] == ['', 'turn-1']
+    assert live['id'] not in {row['message_id'] for row in rows}
+    assert db.conn().execute("SELECT trace_id FROM messages WHERE message_id=?",
+                             (live['id'],)).fetchone()[0] == 'turn-1'
