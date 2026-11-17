@@ -829,3 +829,208 @@ pub fn decide(plan: &Value, answer: &Value) -> (Vec<(String, String, String)>, S
     };
     (steps, of("progress"), of("next_work"))
 }
+
+// ---- when a goal is updated ----------------------------------------------------------------
+
+/// A change of a goal's state is folded for this long only.
+const FAST_FOLD_MS: i64 = 30_000;
+/// A failed update is tried once more after this long; after that the sweep decides.
+const RETRY_AFTER_MS: i64 = 60_000;
+/// After a write the owner was ahead of, the goal is read again this soon, this many times
+/// in a row.
+const CONFLICT_RETRY_MS: i64 = 15_000;
+const CONFLICT_RETRIES: i64 = 3;
+/// Where no sweep is to come, a goal that is left to it waits this long.
+const WITHOUT_SWEEP_MS: i64 = 3_600_000;
+
+/// What happened as far as a keeper watches it: the end of an owner's turn where it
+/// watches those, everything else where it watches what happens around a goal.
+pub fn watched(mut seen: Activity, watch: &Watch) -> Activity {
+    seen.triggers.retain(|(_, what)| match what.as_str() {
+        "owner turn end" => watch.owner_turns,
+        _ => watch.goal_activity,
+    });
+    seen.status_change = seen.status_change && watch.goal_activity;
+    seen
+}
+
+/// An open goal, as the keeper is asked whether it is due: its name, and whether it would
+/// be read from its own start ([`needs_catch_up`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Open<'a> {
+    pub plan_id: &'a str,
+    pub needs_catch_up: bool,
+}
+
+fn fields<'a>(value: &'a mut Value, name: &str) -> &'a mut Map<String, Value> {
+    if !value[name].is_object() {
+        value[name] = json!({});
+    }
+    match &mut value[name] {
+        Value::Object(fields) => fields,
+        // It was made an object above.
+        _ => unreachable!("an object was just put there"),
+    }
+}
+
+/// The goals whose folded triggers are ripe, or that a sweep that is due finds with
+/// something no trigger covered (`due`). `progress` is the keeper's own state, kept by the
+/// Host, and is changed in place: for each goal when its fold began, whether it folds fast,
+/// when it may be tried again; when the sweep comes next; which goals were read from their
+/// start once. `look` reads a goal's world from where its update reads (from its own start
+/// where the second argument says so) and says what happened as far as the keeper watches
+/// it ([`activity`], [`watched`]); `stalled` says whether a goal has stalled and does not
+/// say so yet ([`needs_stall_flag`]).
+pub fn due(
+    watch: &Watch,
+    progress: &mut Value,
+    now: i64,
+    open: &[Open<'_>],
+    look: &mut dyn FnMut(&str, bool) -> Activity,
+    stalled: &mut dyn FnMut(&str) -> bool,
+) -> Vec<String> {
+    if !progress.is_object() {
+        *progress = json!({});
+    }
+    fields(progress, "goals");
+    let mut sweeping = false;
+    if let Some((Some(cron), zone)) = &watch.sweep
+        && !cron.is_empty()
+    {
+        let next = || {
+            crate::janitors::schedule::next_run(cron, zone, now)
+                .ok()
+                .flatten()
+        };
+        match progress.get("next_sweep_at").filter(|at| !at.is_null()) {
+            None => progress["next_sweep_at"] = json!(next()),
+            Some(at) if now >= whole(at) => {
+                sweeping = true;
+                progress["next_sweep_at"] = json!(next());
+            }
+            Some(_) => {}
+        }
+    }
+    fields(progress, "caught_up");
+    let mut ready = Vec::new();
+    for goal in open {
+        let plan_id = goal.plan_id;
+        let mut state = match &progress["goals"][plan_id] {
+            Value::Object(state) => state.clone(),
+            _ => Map::new(),
+        };
+        // A goal that waits to be tried again is left as it is.
+        let waits = state
+            .get("retry_at")
+            .filter(|at| python::truthy(at))
+            .is_some_and(|at| now < whole(at));
+        if waits {
+            fields(progress, "goals")
+                .entry(plan_id)
+                .or_insert_with(|| json!({}));
+            continue;
+        }
+        // The one-off catch-up: a goal never updated, not yet tried, is read whole once.
+        let full = !fields(progress, "caught_up").contains_key(plan_id) && goal.needs_catch_up;
+        let seen = look(plan_id, full);
+        let fold_began = json!(now - watch.fold_ms);
+        if full {
+            fields(progress, "caught_up").insert(plan_id.to_string(), json!(now));
+            if seen.any_messages || !seen.triggers.is_empty() {
+                state
+                    .entry("first_at")
+                    .or_insert_with(|| fold_began.clone());
+                state.insert("catch_up".to_string(), json!(true));
+            }
+        }
+        if let Some((first, _)) = seen.triggers.first() {
+            state.entry("first_at").or_insert_with(|| json!(first));
+            let fast = state.get("fast").is_some_and(python::truthy) || seen.status_change;
+            state.insert("fast".to_string(), json!(fast));
+        } else if sweeping && (seen.any_messages || stalled(plan_id)) {
+            state
+                .entry("first_at")
+                .or_insert_with(|| fold_began.clone());
+        }
+        let first = state
+            .get("first_at")
+            .filter(|first| python::truthy(first))
+            .map(whole);
+        let fold = if state.get("fast").is_some_and(python::truthy) {
+            FAST_FOLD_MS
+        } else {
+            watch.fold_ms
+        };
+        if first.is_some_and(|first| now - first >= fold) {
+            ready.push(plan_id.to_string());
+        }
+        let goals = fields(progress, "goals");
+        if state.is_empty() {
+            goals.shift_remove(plan_id);
+        } else {
+            goals.insert(plan_id.to_string(), Value::Object(state));
+        }
+    }
+    // What is no open goal of this keeper any more has no state.
+    let live = |plan_id: &String, _: &mut Value| open.iter().any(|goal| goal.plan_id == plan_id);
+    fields(progress, "goals").retain(live);
+    fields(progress, "caught_up").retain(live);
+    ready
+}
+
+/// Writes down how one goal's update ended (`settle`): one that was written or had nothing
+/// to write is forgotten; a failure is tried once more after a minute, and then left to the
+/// sweep; a write the owner was ahead of is read again after fifteen seconds, three times
+/// in a row, and then left to the sweep too.
+pub fn settle(progress: &mut Value, plan_id: &str, outcome: &str, now: i64, error: &str) {
+    if !progress.is_object() {
+        *progress = json!({});
+    }
+    let to_the_sweep = match progress
+        .get("next_sweep_at")
+        .filter(|at| python::truthy(at))
+    {
+        Some(at) => at.clone(),
+        None => json!(now + WITHOUT_SWEEP_MS),
+    };
+    let goals = fields(progress, "goals");
+    if matches!(outcome, "updated" | "skipped") {
+        goals.shift_remove(plan_id);
+        return;
+    }
+    let said = json!(first(error, 300));
+    let left = json!({ "retry_at": to_the_sweep, "last_error": said });
+    let state = goals.entry(plan_id).or_insert_with(|| json!({}));
+    if !state.is_object() {
+        *state = json!({});
+    }
+    state["last_error"] = said;
+    let counted = if outcome == "conflict" {
+        "conflicts"
+    } else {
+        "failures"
+    };
+    let count = whole(&state[counted]) + 1;
+    state[counted] = json!(count);
+    let again = match (outcome == "conflict", count) {
+        (true, count) if count <= CONFLICT_RETRIES => Some(now + CONFLICT_RETRY_MS),
+        (false, 1) => Some(now + RETRY_AFTER_MS),
+        _ => None,
+    };
+    match again {
+        Some(at) => state["retry_at"] = json!(at),
+        None => *state = left,
+    }
+}
+
+/// The name of the request for one run over some goals: the same for the same keeper, the
+/// same goals and the same moment.
+pub fn request_id(agent_id: &str, generation: i64, plan_ids: &[String], now: i64) -> String {
+    use sha2::{Digest, Sha256};
+    let mut sorted: Vec<&String> = plan_ids.iter().collect();
+    sorted.sort();
+    let named = python::dumps_ascii(&json!([agent_id, generation, sorted, now]));
+    let digest = Sha256::digest(named.as_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    first(&hex, 40)
+}

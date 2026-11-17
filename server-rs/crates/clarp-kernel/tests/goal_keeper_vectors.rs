@@ -4,7 +4,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use clarp_kernel::goals::keeper::{self, Ended, Event, Helper, Job, Row, World};
+use clarp_kernel::goals::keeper::{self, Activity, Ended, Event, Helper, Job, Open, Row, World};
 use serde_json::{Value, json};
 
 fn vectors() -> Value {
@@ -239,4 +239,149 @@ fn what_a_keeper_watches_is_read_off_its_attachments_as_the_python_host_reads_it
         assert_eq!(ours, row["watch"], "{}", row["config"]);
     }
     assert_eq!(watched.len(), 5);
+}
+
+#[test]
+fn a_goal_is_due_and_an_update_is_settled_as_the_python_hosts_keeper_does_it() {
+    let vectors = vectors();
+    let (mut asked, mut ready, mut looked_at, mut settled, mut named) = (0, 0, 0, 0, 0);
+    for scenario in vectors["scenarios"].as_array().unwrap() {
+        for step in scenario["steps"].as_array().unwrap() {
+            match step["what"].as_str().unwrap() {
+                "due" => {
+                    let what = step["note"].as_str().unwrap();
+                    let watch = keeper::watch(&step["config"]);
+                    let now = step["now"].as_i64().unwrap();
+                    let open: Vec<Open<'_>> = step["open"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|goal| Open {
+                            plan_id: goal["plan_id"].as_str().unwrap(),
+                            needs_catch_up: goal["catch_up"].as_bool().unwrap(),
+                        })
+                        .collect();
+                    let looked = &step["looked"];
+                    let mut looks = Vec::new();
+                    let mut look = |plan_id: &str, full: bool| -> Activity {
+                        let found = &looked[plan_id];
+                        assert_eq!(
+                            json!(full),
+                            found["full"],
+                            "{what}: {plan_id} read whole or not"
+                        );
+                        looks.push(plan_id.to_string());
+                        Activity {
+                            triggers: serde_json::from_value(found["triggers"].clone()).unwrap(),
+                            status_change: found["status_change"].as_bool().unwrap(),
+                            any_messages: found["any_messages"].as_bool().unwrap(),
+                            ..Activity::default()
+                        }
+                    };
+                    let mut flags = Vec::new();
+                    let mut stalled = |plan_id: &str| -> bool {
+                        flags.push(plan_id.to_string());
+                        looked[plan_id]["stall_flag"]
+                            .as_bool()
+                            .expect("the reference asked whether it stalled too")
+                    };
+                    let mut progress = step["before"].clone();
+                    let ours =
+                        keeper::due(&watch, &mut progress, now, &open, &mut look, &mut stalled);
+                    assert_eq!(json!(ours), step["ready"], "{what}");
+                    assert_eq!(progress, step["after"], "{what}");
+                    assert_eq!(
+                        progress.to_string(),
+                        step["after"].to_string(),
+                        "{what}, as text"
+                    );
+                    // Every goal the reference looked at was looked at, and no other; the same
+                    // for the goals it asked of whether they had stalled.
+                    let theirs = looked.as_object().unwrap();
+                    assert_eq!(looks.len(), theirs.len(), "{what}: {looks:?}");
+                    let asked_of = theirs
+                        .values()
+                        .filter(|found| found.get("stall_flag").is_some())
+                        .count();
+                    assert_eq!(flags.len(), asked_of, "{what}: {flags:?}");
+                    asked += 1;
+                    ready += ours.len();
+                    looked_at += looks.len();
+                }
+                "settle" => {
+                    let mut progress = step["before"].clone();
+                    let (plan, outcome) = (
+                        step["plan"].as_str().unwrap(),
+                        step["outcome"].as_str().unwrap(),
+                    );
+                    keeper::settle(
+                        &mut progress,
+                        plan,
+                        outcome,
+                        step["now"].as_i64().unwrap(),
+                        step["error"].as_str().unwrap(),
+                    );
+                    assert_eq!(progress, step["after"], "{outcome}");
+                    assert_eq!(
+                        progress.to_string(),
+                        step["after"].to_string(),
+                        "{outcome}, as text"
+                    );
+                    settled += 1;
+                }
+                "request_id" => {
+                    let config = &step["config"];
+                    let plans: Vec<String> = serde_json::from_value(step["plans"].clone()).unwrap();
+                    let ours = keeper::request_id(
+                        config["agent_id"].as_str().unwrap(),
+                        config["generation"].as_i64().unwrap(),
+                        &plans,
+                        step["now"].as_i64().unwrap(),
+                    );
+                    assert_eq!(ours, step["id"].as_str().unwrap());
+                    named += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(
+        (asked, ready, looked_at, settled, named),
+        (27, 27, 44, 11, 3)
+    );
+}
+
+#[test]
+fn a_keeper_is_told_only_of_what_it_watches() {
+    let seen = || Activity {
+        triggers: vec![
+            (10, "owner turn end".to_string()),
+            (20, "helper message".to_string()),
+            (30, "goal pause".to_string()),
+        ],
+        status_change: true,
+        newest_ms: 30,
+        newest_event: 4,
+        any_messages: true,
+    };
+    let watch = |owner_turns, goal_activity| {
+        keeper::watch(&json!({ "attachments": [
+        { "attachment_id": "a", "enabled": owner_turns, "trigger_version": 1, "trigger_id": "agent-work-completed" },
+        { "attachment_id": "b", "enabled": goal_activity, "trigger_version": 1, "trigger_id": "goal-activity-observed" },
+    ] }))
+    };
+    let labels = |found: &Activity| -> Vec<String> {
+        found
+            .triggers
+            .iter()
+            .map(|(_, what)| what.clone())
+            .collect()
+    };
+    let turns_only = keeper::watched(seen(), &watch(true, false));
+    assert_eq!(labels(&turns_only), ["owner turn end"]);
+    assert!(!turns_only.status_change && turns_only.any_messages);
+    let around_only = keeper::watched(seen(), &watch(false, true));
+    assert_eq!(labels(&around_only), ["helper message", "goal pause"]);
+    assert!(around_only.status_change);
+    assert_eq!(keeper::watched(seen(), &watch(true, true)), seen());
 }
