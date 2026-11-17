@@ -47,6 +47,7 @@ pub mod roster;
 pub mod router;
 pub mod said;
 pub mod schedules;
+pub mod seats;
 pub mod spoken;
 pub mod standing;
 pub mod told;

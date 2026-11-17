@@ -945,6 +945,29 @@ the Host, each caught. With this the feature `backend_quota` is listed. Left: th
 credits are used up (the provider's own word), and asking a provider at all, which stays off unless the
 owner turns it on.
 
+**The seats of the machine's accounts: first, what is served** (17 Nov 2026). What the owner's apps ask the
+Python Host for was counted off that Host's own request log on elitebook over three days (routes and counts
+only, read through a pipe): 170,256 requests, every one to a route this Host has. Of what this Host had not
+built they asked for teams 768 times, where the owner has none (the app's own polling, answered there with an
+empty list, as here), and for the desk of seats about 180 times; for vocabulary, the Oracle, dreaming, the
+terminal and the speech socket not once. So the seats come next, and the rest of the list after them. The
+first piece is `GET /hotseat/status`, the strict and redacted answer: `clarp-kernel` `seats.rs` is the Python
+Host's `hotseat_status.py`. Everything the owner's own tool says passes an allowlist; an alias that is an
+address is shown by its first letters, and anything like a token, a path or a link as `account`; an account is
+bound to a keyed digest of who it is, kept and never served, so that what was last known good is carried only
+to the very same account; and serving reads what is kept and never the tool. The contract has shared fixtures
+written by hand (`tests/fixtures/hotseat_status`: what the tool answered and what the switcher did, and the
+exact body served). A script (`tools/seats-vectors.py`) gives each to the Python Host's own functions as that
+Host's own test does, fails where the body is no longer what the fixture says, and writes them as vectors. The
+port matched all 28 at its first compile. Of 39 wrong rules planted into it, 12 went unnoticed: the fixtures
+were written for the shape of the body, and many a rule of the keeping is in none of them. One of the twelve
+changes nothing (the marks of a path are refused by the rule for a plain alias anyway); for the other eleven,
+sixteen cases were written and answered by the Python functions (a number above the whole, fresh and stale by
+twice the switcher's cadence, an alias like a token, a failed row that keeps what was last known good, a
+reading that says its age, the skips the switcher has and one it has not, a receipt that names the alias as
+it is kept): 44 cases, and all 38 plants are caught. Nothing of the Host reads the owner's tool with it yet:
+that is the desk, which is next.
+
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
 every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain
