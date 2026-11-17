@@ -899,6 +899,13 @@ pub fn roster_created(record: &AgentRecord) -> Value {
     })
 }
 
+/// An agent was made from a copy of a session its tool kept.
+pub fn roster_forked(record: &AgentRecord) -> Value {
+    let mut made = roster_created(record);
+    made["kind"] = json!("forked");
+    made
+}
+
 /// An agent was started again in place: the apps read the list again, and drop what they
 /// kept of its conversation.
 pub fn roster_started_again(record: &AgentRecord) -> Value {

@@ -72,14 +72,13 @@ Host's first day says there what this Host must not say of itself.
 | How much of an account is used (`GET /backend-usage`) | unknown for each tool: this Host asks no provider and keeps no account of what its turns cost | none |
 | The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
 | The skills kept installed for the tools (`GET /managed-skills`) | none: this Host manages no skills | refused |
-| The sessions a tool had in a directory (`GET /past-sessions`) | none offered | taking one up or forking one when an agent is made is refused (`resume_unsupported`) |
 
 Refused in words, 501, as not built: compacting a conversation from an app (`POST /compact`), a
 tool's own servers (`POST /agent-mcp`), nudging a team (`POST /team-nudging`), signing a harness in to
 a provider of models (`/harness-providers`: none is listed).
 
 Not answered yet, each "no such route": how an engine is told what to listen for
-(`/transcription-guidance`), the orchestrator's settings, the budgets of the vocabulary, dreaming's
+(`/transcription-guidance`), the budgets of the vocabulary, dreaming's
 settings and runs (an app asks for them only of a Host that lists `dreaming`), the Oracle's voice.
 
 ## Compared as what a client may rely on
@@ -120,6 +119,11 @@ it covers that exact difference and nothing else.
 
 | What | The Python Host | The Rust Host | Why |
 |---|---|---|---|
+| The past sessions of a directory whose path has a dot, an underscore or a space (`GET /past-sessions`) | none offered: it looks under another name than the one Claude Code gives the directory's project (defect R36) | the sessions Claude Code kept for that directory | A session is offered wherever its tool kept one |
+| A session Claude Code's index marks as a side chain | offered after all, by the pass over the transcripts its index does not account for (defect R37) | not offered | What a helper inside an agent's process said is no session to take up |
+| A new agent that is to take up a session which is not among those of the directory it works in (`resume_session_id`, without `open_existing`) | the agent is made, and its tool looks for the session in vain when its first turn starts | refused, 404, `Session is no longer available in this directory`, the words the Python Host has for a request with `open_existing` | An agent that cannot do what it was made for is not made. This Host reads the session before it makes the agent, since the agent's conversation begins with what was said in it |
+| Past sessions of Codex | offered and taken up (`codex_transcript.list_sessions`, and a thread resumed) | none offered; taking one up is refused, 400, `resume_unsupported` | Not built yet: this Host reads Claude Code's sessions only. Planned next |
+| The rows of a conversation that was read from a session's transcript | named `msg-` and twenty signs of a hash of the agent, the session and the row's place; a helper inside the agent's process (`Agent`, `Task`) is a cell of its own (`display_cells`, `subagents`) with what the helper did | named `u-` or `r-`, twelve signs of the session and the row's place in it; such a helper is a card like any other tool's | A row's name is the Host's own and is steady for the row; an app keeps what it is given. A cell of its own for such helpers is not built yet |
 | A plain send to a busy agent from something that is not a person | ends the running turn ("legacy other origins preempt", defect R7) | waits its turn | No automation ends a turn a person may be waiting for |
 | Pushes to phones | on by default, through the developer's relay | off until the Host is given a relay (`--push-relay`); `tools/install-host` names it | A Host that is started bare speaks to nobody outside. Tests and disposable Hosts never reach a real relay |
 | A paired device with limited scope registers a push token | registers a row nobody owns | refused, 403 | A limited device may read and send; it changes nothing on the Host |

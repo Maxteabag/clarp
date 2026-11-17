@@ -378,6 +378,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::forks::routes())
         .merge(crate::janitors::routes())
         .merge(crate::router::routes())
+        .merge(crate::past::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
@@ -1124,13 +1125,6 @@ pub(crate) async fn make_agent(
         Some(_) => Err(bad(&format!("{what} must be a string or null"))),
     };
     let plain = |key: &str| asked.get(key).and_then(Value::as_str).map(str::to_string);
-    // What this Host cannot do with a new agent yet is refused in words. Passed over, a
-    // request to take up a past session would start an agent that knows nothing of it.
-    let named = |key: &str| plain(key).is_some_and(|said| !said.trim().is_empty());
-    if named("resume_session_id") || named("fork_session_id") {
-        let why = "Taking up or forking a past session of a tool is not built on this Host yet.";
-        return Err(refused(StatusCode::BAD_REQUEST, "resume_unsupported", why));
-    }
     // No tool is given servers of its own here: every one that is named is one this Host
     // does not know, and is refused in the Python Host's words for that.
     match asked.get("mcp_servers") {
@@ -1149,7 +1143,7 @@ pub(crate) async fn make_agent(
         }
         Some(_) => return Err(bad("mcp_servers must be a list of names")),
     }
-    let request = CreateAgentRequest {
+    let mut request = CreateAgentRequest {
         name: plain("name").unwrap_or_default(),
         backend: plain("backend"),
         cwd: plain("cwd"),
@@ -1163,17 +1157,93 @@ pub(crate) async fn make_agent(
         avatar_symbol: plain("avatar_symbol"),
         avatar_base64: plain("avatar_base64"),
     };
+    let unavailable =
+        |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
     // The agent it names is started again in place; with none named a new agent is made.
     let replaces = plain("replace_sid").map(|said| said.trim().to_string());
-    let made = match replaces.filter(|said| !said.is_empty()) {
-        Some(replaces) => started_again(app, replaces, request).await?,
+    let record = match replaces.filter(|said| !said.is_empty()) {
+        Some(replaces) => started_again(app, replaces, request)
+            .await?
+            .map_err(not_made)?,
         None => {
-            let unavailable =
-                |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
-            app.fleet.create(request).await.map_err(unavailable)?
+            // A new agent may begin with a session its tool kept: taken up where it left
+            // off, or from a copy of it.
+            let said_cwd = request.cwd.as_deref().unwrap_or("");
+            let home = crate::config::home();
+            let cwd = crate::config::working_dir(said_cwd, &home, &app.config.default_cwd);
+            let begins = crate::past::begins(app, asked, &cwd).await?;
+            let (session, rows) = match begins {
+                crate::past::Begins::Afresh => (None, Vec::new()),
+                // An agent has that session, and the request said to open what is there.
+                crate::past::Begins::Open(owner) => {
+                    let directory = app.fleet.directory();
+                    let Some(member) = directory.by_session(&owner) else {
+                        return Err(refused(
+                            StatusCode::NOT_FOUND,
+                            "agent_not_found",
+                            "No such agent",
+                        ));
+                    };
+                    return Ok(made_as(app, &member.record));
+                }
+                crate::past::Begins::With {
+                    session,
+                    rows,
+                    parent,
+                    model,
+                } => {
+                    let named = |said: &Option<String>| {
+                        let said = said.as_deref();
+                        said.is_some_and(|said| !said.trim().is_empty())
+                    };
+                    // Forked from an agent's session, it is that agent's unless the request
+                    // names another.
+                    if !named(&request.parent) {
+                        request.parent = parent;
+                    }
+                    // It runs on the model the session last ran on, unless the request
+                    // names one.
+                    if !named(&request.model) && !model.is_empty() {
+                        request.model = Some(model);
+                    }
+                    (Some(session), rows)
+                }
+            };
+            let forked = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
+            // Its conversation goes by the name of the session it begins with: it is that
+            // session, which goes on, whatever its tool calls it later.
+            let made = app
+                .fleet
+                .create_as(request, forked, session.clone())
+                .await
+                .map_err(unavailable)?;
+            let record = made.map_err(not_made)?;
+            if let Some(session) = session {
+                let member = app.fleet.directory().named(&record.agent_id).cloned();
+                let taken = match member {
+                    Some(member) => {
+                        let from = "a session its tool kept".to_string();
+                        member.agent.import(from, Some(session), rows).await
+                    }
+                    None => Ok(Err("the agent is gone".to_string())),
+                };
+                if !matches!(taken, Ok(Ok(_))) {
+                    // An agent without the session it was to begin with is not what was
+                    // asked for: it does not stay.
+                    let _ = app.fleet.remove(record.session.clone()).await;
+                    let why = "The session could not be taken up: no agent was made.";
+                    return Err(refused(StatusCode::CONFLICT, "resume_failed", why));
+                }
+            }
+            record
         }
     };
-    let record = made.map_err(not_made)?;
+    Ok(made_as(app, &record))
+}
+
+/// What whoever makes an agent is answered: its session, its name and its row, in the
+/// fields the Python Host answers with.
+fn made_as(app: &App, record: &AgentRecord) -> Value {
     let directory = app.fleet.directory();
     let row = directory
         .named(&record.agent_id)
@@ -1191,12 +1261,12 @@ pub(crate) async fn make_agent(
             ((*field).to_string(), value)
         })
         .collect();
-    Ok(json!({
+    json!({
         "ok": true,
         "session": record.session,
         "name": record.persona,
         "agent": agent,
-    }))
+    })
 }
 
 async fn create_agent(State(app): State<App>, body: axum::body::Bytes) -> Response {
