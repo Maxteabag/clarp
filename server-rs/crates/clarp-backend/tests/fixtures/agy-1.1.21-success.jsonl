@@ -1,0 +1,4 @@
+{"event":"init","conversation_id":"11111111-2222-3333-4444-555555555555","init":{"model":"gemini-3.7-flash-low","cwd":"/fixture/project","tools":["run_command"],"permission_mode":"always-proceed"}}
+{"event":"step_update","step_update":{"conversation_id":"11111111-2222-3333-4444-555555555555","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"11111111-2222-3333-4444-555555555555","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"FIXTURE_OK\n","duration_seconds":1.116564774,"usage":{"input_tokens":18821,"output_tokens":5,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":18826}}}
+{"event":"result","result":{"conversation_id":"11111111-2222-3333-4444-555555555555","status":"SUCCESS","response":"FIXTURE_OK\n","duration_seconds":1.157446282,"num_turns":1,"usage":{"input_tokens":18821,"output_tokens":5,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":18826}}}
