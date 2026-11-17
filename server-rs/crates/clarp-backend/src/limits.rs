@@ -20,38 +20,60 @@ fn number(value: &Value) -> Option<f64> {
     }
 }
 
-/// A moment given as seconds since 1970, as text: to the second, in UTC. Nothing for a
-/// moment that is none (zero, or before), and for one no calendar has (the Python Host's
-/// reader breaks on such a one; here it is no time).
-fn moment(seconds: f64) -> String {
-    if seconds.is_nan() || seconds <= 0.0 || seconds >= 1e15 {
-        return String::new();
+/// The last second the Python Host's calendar has: the end of the year 9999.
+const LAST_SECOND: f64 = 253_402_300_799.0;
+
+/// A second since 1970 as a date and a time of day in UTC (the rule of days into dates that
+/// every calendar library uses), for any second from 1970 to the end of the year 9999.
+fn written(second: i64) -> String {
+    let (days, rest) = (second.div_euclid(86_400), second.rem_euclid(86_400));
+    let shifted = days + 719_468;
+    let (era, day_of_era) = (shifted.div_euclid(146_097), shifted.rem_euclid(146_097));
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    let (hour, minute, of_minute) = (rest / 3_600, rest % 3_600 / 60, rest % 60);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{of_minute:02}Z")
+}
+
+/// A moment given as seconds since 1970, as text: to the second, in UTC; empty for a moment
+/// that is none (zero, or before). `None` for one no calendar has.
+fn moment(seconds: f64) -> Option<String> {
+    if seconds.is_nan() || seconds >= LAST_SECOND + 1.0 {
+        return None;
+    }
+    if seconds <= 0.0 {
+        return Some(String::new());
     }
     // Whole seconds: what is left of one is dropped.
-    let whole = format!("{:.0}", seconds.floor()).parse::<i64>();
-    let Ok(at) = whole
-        .map_err(drop)
-        .and_then(|whole| jiff::Timestamp::from_second(whole).map_err(drop))
-    else {
-        return String::new();
-    };
-    at.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()
+    let whole = format!("{:.0}", seconds.floor()).parse::<i64>().ok()?;
+    Some(written(whole))
 }
 
 /// When a window begins anew, as text (`_normalize_time`): a number is seconds since 1970,
 /// and so is a text that is a number; any other text is kept as it is, with `+00:00`
-/// written as `Z`. Nothing where nothing is said.
+/// written as `Z`. Nothing where nothing is said. A number no calendar has is no time (the
+/// Python Host's reader breaks on it); a text that is such a number is kept as the text it
+/// is, as there.
 fn time(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
-        Some(Value::Number(number)) => number.as_f64().map(moment).unwrap_or_default(),
+        Some(Value::Number(number)) => number.as_f64().and_then(moment).unwrap_or_default(),
         // A yes is a number to the Python Host: one second.
-        Some(Value::Bool(yes)) => moment(if *yes { 1.0 } else { 0.0 }),
+        Some(Value::Bool(yes)) => moment(if *yes { 1.0 } else { 0.0 }).unwrap_or_default(),
         Some(Value::String(text)) => {
             let raw = text.trim();
             match raw.parse::<f64>() {
                 _ if raw.is_empty() => String::new(),
-                Ok(seconds) => moment(seconds),
+                Ok(seconds) => moment(seconds).unwrap_or_else(|| raw.replace("+00:00", "Z")),
                 Err(_) => raw.replace("+00:00", "Z"),
             }
         }
