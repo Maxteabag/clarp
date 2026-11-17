@@ -8487,6 +8487,686 @@
    "path": "/janitors/keeper-one",
    "status": 404,
    "step": "the janitor of an agent that was removed"
+  },
+  {
+   "body": {
+    "agent": {
+     "agent_id": "<id:5>",
+     "alive": true,
+     "avatar_generation_status": null,
+     "avatar_symbol": "",
+     "avatar_url": "/static/avatars/default-claude.png?v=e6ac65e6c935cff9",
+     "backend": "claude",
+     "cwd": "<ROOT>/workspace",
+     "dreaming_enabled": 0,
+     "effort": "",
+     "heartbeat_enabled": 0,
+     "helper_state": null,
+     "last_activity": "<time>",
+     "latest_state": "spawned",
+     "mcp_servers": [],
+     "model": "",
+     "muted": 0,
+     "parent_agent_id": null,
+     "persona": "Sweeper One",
+     "role": "agent",
+     "session": "sweeper-one",
+     "voice_id": {
+      "<form>": "default",
+      "<json>": {},
+      "<keys>": "1376774b81b4"
+     }
+    },
+    "name": "Sweeper One",
+    "ok": true,
+    "session": "sweeper-one"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/agents",
+   "status": 200,
+   "step": "an agent for a scheduled task"
+  },
+  {
+   "body": {
+    "janitor": "<fields>"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors",
+   "status": 200,
+   "step": "a scheduled task without its instructions"
+  },
+  {
+   "body": {
+    "code": "invalid_option",
+    "error": "Give the scheduled task its instructions first"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors/sweeper-one/enabled",
+   "status": 400,
+   "step": "turned on without its instructions"
+  },
+  {
+   "body": {
+    "cancellation_pending": false,
+    "janitor": {
+     "agent_id": "<id:5>",
+     "attachments": [
+      {
+       "attachment_id": "synthetic-new-year",
+       "config": {
+        "cron": "0 0 1 1 *",
+        "max_targets": 3,
+        "timezone": "Europe/Oslo"
+       },
+       "enabled": true,
+       "next_run_at": null,
+       "trigger_id": "schedule",
+       "trigger_version": 1
+      }
+     ],
+     "avatar_url": "/static/janitor-avatars/janitor-default.jpg?v=ad1e43276b734120",
+     "backend": "claude",
+     "builtin_role": null,
+     "cadence": [
+      {
+       "adaptive": false,
+       "base_interval_seconds": 31536000,
+       "current_interval_seconds": 31536000,
+       "idle_streak": 0,
+       "lane": "schedule:synthetic-new-year",
+       "last_activity": null,
+       "last_summary": "",
+       "max_interval_seconds": 31536000,
+       "next_run_at": null
+      }
+     ],
+     "cancellation_pending": false,
+     "capabilities": {
+      "can_change_template": true,
+      "can_release": true,
+      "can_remove": true
+     },
+     "configured_option_keys": [
+      "instructions"
+     ],
+     "current_run_id": null,
+     "effort": "",
+     "enabled": false,
+     "execution": {
+      "executor": "ephemeral",
+      "provider": "claude"
+     },
+     "generation": 2,
+     "health": "paused",
+     "is_janitor": true,
+     "last_change_at": null,
+     "last_error": "",
+     "last_run_at": null,
+     "model": "",
+     "name": "Sweeper One",
+     "options": {
+      "instructions": "Count the doors.",
+      "max_interval_seconds": 86400
+     },
+     "revision": 2,
+     "scope": {
+      "agent_ids": [],
+      "exclude_agent_ids": []
+     },
+     "session": "sweeper-one",
+     "supported_trigger_ids": [
+      "schedule"
+     ],
+     "template_id": "scheduled-prompt"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors/sweeper-one/configure",
+   "status": 200,
+   "step": "given its instructions"
+  },
+  {
+   "body": {
+    "cancellation_pending": false,
+    "janitor": {
+     "agent_id": "<id:5>",
+     "attachments": [
+      {
+       "attachment_id": "synthetic-new-year",
+       "config": {
+        "cron": "0 0 1 1 *",
+        "max_targets": 3,
+        "timezone": "Europe/Oslo"
+       },
+       "enabled": true,
+       "next_run_at": null,
+       "trigger_id": "schedule",
+       "trigger_version": 1
+      }
+     ],
+     "avatar_url": "/static/janitor-avatars/janitor-default.jpg?v=ad1e43276b734120",
+     "backend": "claude",
+     "builtin_role": null,
+     "cadence": [
+      {
+       "adaptive": false,
+       "base_interval_seconds": 31536000,
+       "current_interval_seconds": 31536000,
+       "idle_streak": 0,
+       "lane": "schedule:synthetic-new-year",
+       "last_activity": null,
+       "last_summary": "",
+       "max_interval_seconds": 31536000,
+       "next_run_at": null
+      }
+     ],
+     "cancellation_pending": false,
+     "capabilities": {
+      "can_change_template": true,
+      "can_release": true,
+      "can_remove": true
+     },
+     "configured_option_keys": [
+      "instructions"
+     ],
+     "current_run_id": null,
+     "effort": "",
+     "enabled": true,
+     "execution": {
+      "executor": "ephemeral",
+      "provider": "claude"
+     },
+     "generation": 3,
+     "health": "ready",
+     "is_janitor": true,
+     "last_change_at": null,
+     "last_error": "",
+     "last_run_at": null,
+     "model": "",
+     "name": "Sweeper One",
+     "options": {
+      "instructions": "Count the doors.",
+      "max_interval_seconds": 86400
+     },
+     "revision": 3,
+     "scope": {
+      "agent_ids": [],
+      "exclude_agent_ids": []
+     },
+     "session": "sweeper-one",
+     "supported_trigger_ids": [
+      "schedule"
+     ],
+     "template_id": "scheduled-prompt"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors/sweeper-one/enabled",
+   "status": 200,
+   "step": "turned on"
+  },
+  {
+   "body": {
+    "cancellation_pending": false,
+    "janitor": {
+     "agent_id": "<id:5>",
+     "attachments": [
+      {
+       "attachment_id": "synthetic-new-year",
+       "config": {
+        "cron": "0 0 1 1 *",
+        "max_targets": 3,
+        "timezone": "Europe/Oslo"
+       },
+       "enabled": true,
+       "next_run_at": null,
+       "trigger_id": "schedule",
+       "trigger_version": 1
+      }
+     ],
+     "avatar_url": "/static/janitor-avatars/janitor-default.jpg?v=ad1e43276b734120",
+     "backend": "claude",
+     "builtin_role": null,
+     "cadence": [
+      {
+       "adaptive": false,
+       "base_interval_seconds": 31536000,
+       "current_interval_seconds": 31536000,
+       "idle_streak": 0,
+       "lane": "schedule:synthetic-new-year",
+       "last_activity": null,
+       "last_summary": "",
+       "max_interval_seconds": 31536000,
+       "next_run_at": null
+      }
+     ],
+     "cancellation_pending": false,
+     "capabilities": {
+      "can_change_template": true,
+      "can_release": true,
+      "can_remove": true
+     },
+     "configured_option_keys": [
+      "instructions"
+     ],
+     "current_run_id": null,
+     "effort": "",
+     "enabled": true,
+     "execution": {
+      "executor": "ephemeral",
+      "provider": "claude"
+     },
+     "generation": 3,
+     "health": "ready",
+     "is_janitor": true,
+     "last_change_at": null,
+     "last_error": "",
+     "last_run_at": null,
+     "model": "",
+     "name": "Sweeper One",
+     "options": {
+      "instructions": "Count the doors.",
+      "max_interval_seconds": 86400
+     },
+     "revision": 3,
+     "scope": {
+      "agent_ids": [],
+      "exclude_agent_ids": []
+     },
+     "session": "sweeper-one",
+     "supported_trigger_ids": [
+      "schedule"
+     ],
+     "template_id": "scheduled-prompt"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors/sweeper-one/enabled",
+   "status": 200,
+   "step": "turned on, which it is"
+  },
+  {
+   "body": {
+    "janitor": {
+     "agent_id": "<id:5>",
+     "attachments": [
+      {
+       "attachment_id": "synthetic-new-year",
+       "config": {
+        "cron": "0 0 1 1 *",
+        "max_targets": 3,
+        "timezone": "Europe/Oslo"
+       },
+       "enabled": true,
+       "next_run_at": "<time>",
+       "trigger_id": "schedule",
+       "trigger_version": 1
+      }
+     ],
+     "avatar_url": "/static/janitor-avatars/janitor-default.jpg?v=ad1e43276b734120",
+     "backend": "claude",
+     "builtin_role": null,
+     "cadence": [
+      {
+       "adaptive": false,
+       "base_interval_seconds": 31536000,
+       "current_interval_seconds": 31536000,
+       "idle_streak": 0,
+       "lane": "schedule:synthetic-new-year",
+       "last_activity": null,
+       "last_summary": "",
+       "max_interval_seconds": 31536000,
+       "next_run_at": "<time>"
+      }
+     ],
+     "cancellation_pending": false,
+     "capabilities": {
+      "can_change_template": true,
+      "can_release": true,
+      "can_remove": true
+     },
+     "configured_option_keys": [
+      "instructions"
+     ],
+     "current_run_id": null,
+     "effort": "",
+     "enabled": true,
+     "execution": {
+      "executor": "ephemeral",
+      "provider": "claude"
+     },
+     "generation": 3,
+     "health": "ready",
+     "is_janitor": true,
+     "last_change_at": null,
+     "last_error": "",
+     "last_run_at": null,
+     "model": "",
+     "name": "Sweeper One",
+     "options": {
+      "instructions": "Count the doors.",
+      "max_interval_seconds": 86400
+     },
+     "revision": 3,
+     "scope": {
+      "agent_ids": [],
+      "exclude_agent_ids": []
+     },
+     "session": "sweeper-one",
+     "supported_trigger_ids": [
+      "schedule"
+     ],
+     "template_id": "scheduled-prompt"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/janitors/sweeper-one",
+   "status": 200,
+   "step": "the task when the runner has looked at it"
+  },
+  {
+   "body": {
+    "runs": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/janitors/sweeper-one/runs",
+   "status": 200,
+   "step": "its runs, of which there are none"
+  },
+  {
+   "body": {
+    "code": "run_not_found",
+    "error": "Maintenance run not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/janitor-runs/janitor-nobody/context",
+   "status": 404,
+   "step": "what a run nobody has is given to read"
+  },
+  {
+   "body": {
+    "code": "invalid_activity",
+    "error": "Activity must be worked, idle or failed"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitor-runs/janitor-nobody/activity",
+   "status": 400,
+   "step": "a run says something that is no ending"
+  },
+  {
+   "body": {
+    "code": "invalid_activity",
+    "error": "The summary is one line of at most 300 characters"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitor-runs/janitor-nobody/activity",
+   "status": 400,
+   "step": "a run says too much"
+  },
+  {
+   "body": {
+    "code": "run_not_found",
+    "error": "Maintenance run not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitor-runs/janitor-nobody/activity",
+   "status": 404,
+   "step": "a run nobody has says how it went"
+  },
+  {
+   "body": {
+    "error": "Expected a JSON object"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitor-runs/janitor-nobody/activity",
+   "status": 400,
+   "step": "said as a list"
+  },
+  {
+   "body": {
+    "error": "Janitor route not found"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/janitor-runs/janitor-nobody/no-such-thing",
+   "status": 404,
+   "step": "something of a run that there is not"
+  },
+  {
+   "body": {
+    "cancellation_pending": false,
+    "janitor": {
+     "agent_id": "<id:5>",
+     "attachments": [
+      {
+       "attachment_id": "synthetic-new-year",
+       "config": {
+        "cron": "0 0 1 1 *",
+        "max_targets": 3,
+        "timezone": "Europe/Oslo"
+       },
+       "enabled": true,
+       "next_run_at": null,
+       "trigger_id": "schedule",
+       "trigger_version": 1
+      }
+     ],
+     "avatar_url": "/static/janitor-avatars/janitor-default.jpg?v=ad1e43276b734120",
+     "backend": "claude",
+     "builtin_role": null,
+     "cadence": [
+      {
+       "adaptive": false,
+       "base_interval_seconds": 31536000,
+       "current_interval_seconds": 31536000,
+       "idle_streak": 0,
+       "lane": "schedule:synthetic-new-year",
+       "last_activity": null,
+       "last_summary": "",
+       "max_interval_seconds": 31536000,
+       "next_run_at": null
+      }
+     ],
+     "cancellation_pending": false,
+     "capabilities": {
+      "can_change_template": true,
+      "can_release": true,
+      "can_remove": true
+     },
+     "configured_option_keys": [
+      "instructions"
+     ],
+     "current_run_id": null,
+     "effort": "",
+     "enabled": false,
+     "execution": {
+      "executor": "ephemeral",
+      "provider": "claude"
+     },
+     "generation": 4,
+     "health": "paused",
+     "is_janitor": true,
+     "last_change_at": null,
+     "last_error": "",
+     "last_run_at": null,
+     "model": "",
+     "name": "Sweeper One",
+     "options": {
+      "instructions": "Count the doors.",
+      "max_interval_seconds": 86400
+     },
+     "revision": 4,
+     "scope": {
+      "agent_ids": [],
+      "exclude_agent_ids": []
+     },
+     "session": "sweeper-one",
+     "supported_trigger_ids": [
+      "schedule"
+     ],
+     "template_id": "scheduled-prompt"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors/sweeper-one/enabled",
+   "status": 200,
+   "step": "paused"
+  },
+  {
+   "body": {
+    "cancellation_pending": false,
+    "janitor": {
+     "agent_id": "<id:5>",
+     "attachments": [
+      {
+       "attachment_id": "synthetic-new-year",
+       "config": {
+        "cron": "0 0 1 1 *",
+        "max_targets": 3,
+        "timezone": "Europe/Oslo"
+       },
+       "enabled": true,
+       "next_run_at": null,
+       "trigger_id": "schedule",
+       "trigger_version": 1
+      }
+     ],
+     "avatar_url": "",
+     "backend": "claude",
+     "builtin_role": null,
+     "cadence": [
+      {
+       "adaptive": false,
+       "base_interval_seconds": 31536000,
+       "current_interval_seconds": 31536000,
+       "idle_streak": 0,
+       "lane": "schedule:synthetic-new-year",
+       "last_activity": null,
+       "last_summary": "",
+       "max_interval_seconds": 31536000,
+       "next_run_at": null
+      }
+     ],
+     "cancellation_pending": false,
+     "capabilities": {
+      "can_change_template": true,
+      "can_release": true,
+      "can_remove": true
+     },
+     "configured_option_keys": [
+      "instructions"
+     ],
+     "current_run_id": null,
+     "effort": "",
+     "enabled": false,
+     "execution": {
+      "executor": "ephemeral",
+      "provider": "claude"
+     },
+     "generation": 5,
+     "health": "paused",
+     "is_janitor": false,
+     "last_change_at": null,
+     "last_error": "",
+     "last_run_at": null,
+     "model": "",
+     "name": "Sweeper One",
+     "options": {
+      "instructions": "Count the doors.",
+      "max_interval_seconds": 86400
+     },
+     "revision": 5,
+     "scope": {
+      "agent_ids": [],
+      "exclude_agent_ids": []
+     },
+     "session": "sweeper-one",
+     "supported_trigger_ids": [
+      "schedule"
+     ],
+     "template_id": "scheduled-prompt"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/janitors/sweeper-one/release",
+   "status": 200,
+   "step": "the scheduled task let go"
+  },
+  {
+   "body": {
+    "ok": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "DELETE",
+   "path": "/agents/sweeper-one",
+   "status": 200,
+   "step": "the agent of the scheduled task removed"
   }
  ],
  "live": {
@@ -8676,6 +9356,55 @@
   },
   {
    "data": {
+    "backend": "claude",
+    "event_id": "<eid:agent-roster#1@0b073c>",
+    "kind": "created",
+    "persona": "Sweeper One",
+    "session": "sweeper-one",
+    "type": "agent-roster",
+    "voice_id": "{}"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#1@0b073c>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#12@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#12@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#13@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#13@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#14@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#14@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#15@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#15@390048>"
+  },
+  {
+   "data": {
     "agent_id": "<id:4>",
     "detail": {
      "reason": "deleted"
@@ -8713,6 +9442,114 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@13f604>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "detail": {
+     "session": "sweeper-one"
+    },
+    "event_id": "<eid:agent-state#1@bc6085>",
+    "kind": "spawned",
+    "persona": "Sweeper One",
+    "session": "sweeper-one",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@bc6085>"
+  },
+  {
+   "data": {
+    "action": "started",
+    "agent_id": "<id:5>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#2@bc6085>",
+    "file_path": "",
+    "kind": "spawned",
+    "persona": "Sweeper One",
+    "phase": "spawned",
+    "session": "sweeper-one",
+    "started_at_ms": null,
+    "state": "idle",
+    "status": "ok",
+    "summary": "Started",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#2@bc6085>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#16@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#16@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#17@390048>",
+    "kind": "janitor-changed",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#17@390048>"
+  },
+  {
+   "data": {
+    "event_id": "<eid:agent-roster#1@0c41c4>",
+    "kind": "deleted",
+    "session": "sweeper-one",
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": "<eid:agent-roster#1@0c41c4>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:5>",
+    "detail": {
+     "reason": "deleted"
+    },
+    "event_id": "<eid:agent-state#3@bc6085>",
+    "kind": "stopped",
+    "persona": "Sweeper One",
+    "session": "sweeper-one",
+    "status_text": "",
+    "ts": "<time>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#3@bc6085>"
+  },
+  {
+   "data": {
+    "action": "stopped",
+    "agent_id": "<id:5>",
+    "call_id": null,
+    "event_id": "<eid:agent-activity#4@bc6085>",
+    "file_path": "",
+    "kind": "stopped",
+    "persona": "Sweeper One",
+    "phase": "stopped",
+    "session": "sweeper-one",
+    "started_at_ms": null,
+    "state": "interrupted",
+    "status": "ok",
+    "summary": "Stopped",
+    "tool": "",
+    "ts": "<time>",
+    "turn_started_ms": null,
+    "type": "agent-activity"
+   },
+   "event": null,
+   "id": "<eid:agent-activity#4@bc6085>"
   }
  ]
 }

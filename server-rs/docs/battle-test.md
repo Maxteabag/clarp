@@ -173,11 +173,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 01:35 (17 Nov) | the Host updated by the installer, `aada15c0` to `d63e4c09`: the build whose tools take off the mark of another Host's hand-over before they run (the release owner's addition to issue 388). The relay was on: the new Host was connected to it again 42 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 02:13 (17 Nov) | the Host updated by the installer, `d63e4c09` to `35dd10c4`: the build in which an agent forks itself into helpers, and a message the Host sends by itself is told to the apps under no id. The relay was on: the new Host was connected to it again 119 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 03:48 (17 Nov) | the Host updated by the installer, `35dd10c4` to `2b48004c`: the build with the janitors as they are kept and set (nothing of one runs in it yet). At its first start it installed the seven janitors a Host has of its own. The relay was on: the new Host was connected to it again 40 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 04:26 (17 Nov) | the Host updated by the installer, `2b48004c` to `34641890`: the build in which a janitor's scheduled task runs. The relay was on: the new Host was connected to it again 146 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and nineteen turns in
-thirty-five exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-twenty-seven of Codex in the nine since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and twenty-two turns in
+thirty-six exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+thirty of Codex in the ten since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -668,6 +669,31 @@ Host's own and the same everywhere: the files of that directory that are no zone
 (`2b48004c`) was green in `Server (Rust)` (44002161507), in the repository's gates with the release, and in
 the conformance run on the same commit (44002165436: 82 differences, all registered; every planted change
 caught), as the run of the first candidate had been (44000762295).
+
+## A scheduled task runs
+
+A janitor's scheduled task runs since `34641890` (landed 17 Nov, 04:25, installed by exercise 36 at 04:26).
+Tried where it is installed, minutes after, with a real Codex agent of the check's own (`verify-janitor-run.py`):
+the agent is given a task of every minute ("run `date -u +%H:%M` once, then close the run as you are told,
+with the status worked and the time as its summary"), is turned on, and two minutes come.
+
+| What | On the installed Host |
+|---|---|
+| Turned on | 200, at rest; within a look the runner said when it runs next: when the next minute begins (50 seconds on) |
+| The first minute | a run was made for it, under an id of its own, waiting; a second later its turn ran in the janitor's own conversation and the janitor was told as running |
+| Its end | the run was over when its turn was: completed, 10 seconds after it was made; the janitor at rest again with the time of its run |
+| What the turn did | it closed its run itself with the agents' tool (`clarp-admin janitor outcome`): `worked`, with a summary of five signs, the time the command printed. That it does so is the model's; the Host counts a run that says nothing as work |
+| The conversation | read like an agent's (`GET /log`): five rows, what it was told and what it did |
+| After it | the task keeps its pace: its next run was the next minute |
+| The second minute | a second run was made and its turn ran; the janitor was paused while it did |
+| Cut off | the run was cancelled at once; its turn was ended; a word from the run after that was refused (409, `run_terminal`); nothing waited, the janitor's mailbox was not held, and no third run was made |
+| Afterwards | the janitor let go, its agent removed; every agent that was there before still there |
+
+The older check of what is kept and set (`verify-janitors.py`) was run beside it on the same build, with one
+line changed for it: a scheduled task is turned on (200) where the build before refused it, and a job that
+does not run here yet is still refused in words (503). 28 points, all as meant. Its first run of the night
+failed in a way worth a line: it names its triggers, and a trigger's id is never another agent's, also after
+that agent is gone, on both Hosts. The check now names its triggers anew for every run.
 
 ## The soak so far
 
