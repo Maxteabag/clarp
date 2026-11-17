@@ -178,11 +178,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 06:11 (17 Nov) | the Host updated by the installer, `c7332730` to `1473b6c7`: the build with the router of spoken messages. The relay was on: the new Host was connected to it again 74 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 06:27 (17 Nov) | the Host updated by the installer, `1473b6c7` to `bebd58a7`: the build in which an agent is started again in place. The relay was on: the new Host was connected to it again 177 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 | 07:48 (17 Nov) | the Host updated by the installer, `bebd58a7` to `e46cbf51`: the build in which a new agent begins with a session its tool kept, an agent asks for an event in its user's calendar, and an app's picker is told the models. The relay was on: the new Host was connected to it again 93 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
+| 09:39 (17 Nov) | the Host updated by the installer, `e46cbf51` to `5bf5ab93`: the build in which the Host's own turns are counted for an app's usage screen, the gauge shows what the last answer was made from, a turn is told this Host under the names a skill's own script reads, and the explainer of the use of tools is in as far as its desk (nothing of it runs in this build). The relay was on: the new Host was connected to it again 134 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and thirty-four turns in
-forty exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-forty-two of Codex in the fourteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and thirty-seven turns in
+forty-one exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+forty-five of Codex in the fifteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -787,6 +788,21 @@ no stand-in.
 | What this Host cannot do with a tool yet | not said to be possible; taking up and forking Claude Code's sessions is |
 | Asked again | told as it was found, in a millisecond: the tools are not asked again |
 | A calendar request | given an id (no device is paired with this Host, so no app was told and nobody was asked); one that leaves out when it begins: 400, `start required` |
+
+## What the Host's own turns used, and the gauge
+
+Landed with `5bf5ab93` (17 Nov, 09:39, installed by exercise 41 a minute later) and tried on the installed
+Host with the real tools (`verify-usage.py`, 17 points): an agent of Codex and an agent of Claude Code
+(Sonnet: Claude Code's own numbers are what is tried), each of the check's own, each answering one message.
+
+| What | On the installed Host |
+|---|---|
+| A turn of Codex | counted for the Host on the usage screen (`GET /backend-usage`): one turn more than the three of the exercise before it, 45,438 tokens taken in, 5 given out; told as what was spent, fresh, and as no share of an account |
+| Its gauge | none: Codex says nothing of how full its conversation is, and keeps it within bounds by itself. The build before showed what the turn took in |
+| A turn of Claude Code | counted: 31,684 tokens taken in (what was sent anew, read from the cache and written to it: the build before counted the first alone, a handful), 3 given out |
+| Its gauge | 31,684: what the answer was made from, which for a turn of one step is what the turn took in |
+| An agent's own command for its user's place | answered as the Python tool answers when nobody shares one in time: it ends with 1 and says so |
+| Afterwards | the check's two agents removed; the 23 agents that were there still are |
 
 ## The soak so far
 
