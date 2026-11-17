@@ -747,7 +747,9 @@ answer would be, as a message that used nothing, and that Host reads its zeros a
 conversation (defect R38; in Claude Code's own transcripts on elitebook there are 8,256 such messages, each
 with a usage of zero, 8,164 of them after an answer that held something). Here such a message says why the
 turn failed and nothing of the conversation: the gauge stays what the last answer said. Three registered
-differences, one cause.
+differences, one cause. The Python Host was mended the same morning (pull request 402, two hours after
+the report): asked again with the scenario alone (run 44058260247) the two Hosts show the same gauge, and
+the three registrations are taken out.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what

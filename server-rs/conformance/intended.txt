@@ -205,13 +205,3 @@ c3b1b59e98c4  past-sessions: the file it is named after
 f85f0a1fc780  past-sessions: its file, with a message after
 4bee9b170f22  past-sessions: the conversation in the agent's row
 
-# How full a conversation is (`context_tokens` in an agent's row) is what the model's last answer
-# was made from. When an account is out or the provider cannot be reached, Claude Code writes the
-# error where an answer would be: a message of the model `<synthetic>`, which used nothing. The
-# Python Host reads that message's zeros as the size of the conversation (defect R38), and its
-# gauge falls to 0 until the next answer. On this Host such a message says why the turn failed and
-# nothing of the conversation: the gauge stays what the last answer said, and there is none before
-# the first answer.
-0560d8982e39  failed-turns: the gauge after a first turn whose account was out
-da88614920fb  failed-turns: the same, after the tool then died
-5592e1a9de6a  failed-turns: the gauge after a turn that had begun to answer when its account was out
