@@ -176,7 +176,7 @@ def test_it_is_the_old_replies_that_carry_the_trace_not_the_old_prompts(tmp_path
         world.live("left", old, at=2400, trace="an-old-turn", settled=True)
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", ["live_row_of_old_reply"])
-        assert not _rows(world, "message_id='live-left'")
+        assert _rows(world, "source_file=? AND seq=8", (str(world.transcript),)) == [("live-left", str(world.transcript), "an-old-turn", old)]
 
 
 # ---- 3: a live row that is not the running turn's ----------------------------------

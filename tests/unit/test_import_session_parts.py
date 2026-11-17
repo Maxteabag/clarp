@@ -226,3 +226,20 @@ def test_a_send_row_written_between_preparation_and_the_lock_is_seen_from_the_ro
     assert again.client_user_provenance is not prelude.client_user_provenance
     assert (again.client_rows, again.user_provenance) == _asked(connection, agent, "one")
     assert isinstance(again.turn_index, message_turns.TurnIndex)
+
+
+def test_client_trace_is_named_and_preserves_original_positions(tmp_path):
+    agent = _agent(tmp_path)
+    connection = db.conn()
+    _insert(connection, agent, [{'message_id': 'client-trace', 'session': 'one',
+        'source': 'client:trace', 'seq': 1, 'role': 'user', 'text': 'request',
+        'timestamp': '2026-11-14T10:00:00Z', 'updated_at': 1, 'revision': 1,
+        'origin': 'user', 'sender': None}])
+    connection.execute('UPDATE messages SET trace_id=? WHERE message_id=?', ('authored-trace', 'client-trace'))
+    asked = common._client_provenance_rows(connection, agent, 'one')
+    derived, _ = common._session_parts(_every_column(connection, agent, 'one'), 'one')
+    for row in (asked[0], derived[0]):
+        assert row.trace_id == 'authored-trace'
+        assert row[:5] == ('client-trace', 'request', 'user', None, '2026-11-14T10:00:00Z')
+        assert common._client_provenance([row]) == {
+            'request': [('client-trace', 'user', '', '2026-11-14T10:00:00Z')]}

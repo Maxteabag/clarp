@@ -10,10 +10,14 @@ import os
 from typing import Any, NamedTuple
 
 from .clock import now_ms
-from .message_text import _related, _strip_voice_markup  # noqa: F401 - _related is used from here too
+from .message_text import (_related, _strip_voice_markup, strip_injected_blocks,
+                           strip_delivery_context, CALL_OPENING_OPEN)  # noqa: F401 - _related is used from here too
 from .message_turns import iso_ms
 from .message_import_common import (
     _FINAL_TWIN_WINDOW_S,
+    _norm_text,
+    _is_retry_echo,
+    _sqlite_order,
     _PARKED_SEQ_BASE,
     _client_provenance,
     _client_provenance_rows,
@@ -121,8 +125,58 @@ def _shifted_twin(database, agent_id: str, backend_session_id: str,
     return found[0] if len(found) == 1 else None
 
 
+def _parsed_traces(turns, turn_index, provenance, client_traces, *,
+                   start_seq=0, current_trace="", unanswered_key=""):
+    """Replay provenance selection without SQL or consuming the writer's rows."""
+    copied = (_ClientProvenance(None, "", "", prepared={
+        key: list(rows) for key, rows in provenance._by_text.items()})
+        if provenance is not None else None)
+    trace_at = getattr(turn_index, "trace_at", lambda _: "")
+    running_at = getattr(turn_index, "running_at", lambda _: ("", None))
+    outcomes = getattr(turn_index, "outcomes", {})
+    result = {}
+    for index, turn in enumerate(turns):
+        role = turn.get("role")
+        stamp = turn.get("timestamp")
+        if role == "assistant":
+            if not turn.get("failed"):
+                unanswered_key = ""
+            trace = current_trace or trace_at(stamp)
+        elif role == "user":
+            text = str(turn.get("text") or "")
+            if not text.lstrip().startswith(CALL_OPENING_OPEN):
+                if turn.get("id") is None and copied is not None:
+                    text = strip_injected_blocks(text)
+                    words = strip_delivery_context(text)
+                    if words != text and not copied.candidates(_norm_text(text)):
+                        text = words
+                    key = _norm_text(text)
+                    rows = copied.candidates(key)
+                    if key and key == unanswered_key and _is_retry_echo(
+                            stamp, rows[0][3] if rows else None):
+                        result[start_seq+index] = current_trace or trace_at(stamp)
+                        continue
+                    if rows:
+                        running, began = running_at(stamp)
+                        chosen = copied.take(key, rows, _own_turns_row(
+                            None, rows, running, began, trace_ids=client_traces))
+                        current_trace = client_traces.get(chosen[0]) or ""
+                        if running and current_trace not in outcomes:
+                            current_trace = running
+                        unanswered_key = key
+                        result[start_seq+index] = current_trace or trace_at(stamp)
+                        continue
+                    unanswered_key = ""
+                current_trace = str(turn.get("trace_id") or "")
+            trace = current_trace or trace_at(stamp)
+        else:
+            trace = str(turn.get("trace_id") or "") or trace_at(stamp)
+        result[start_seq+index] = trace
+    return result
+
+
 class _FinalRows:
-    """Finalized live rows of one conversation, read once per write batch.
+    """Server-authored final rows and live candidates, cached per writer hold.
 
     Every assistant turn of an import looks for its request's final row or a
     twin among them. Asking SQLite each time scanned the whole conversation
@@ -133,21 +187,99 @@ class _FinalRows:
     may run then.
     """
 
-    def __init__(self, database, agent_id: str, backend_session_id: str):
+    def __init__(self, database, agent_id: str, backend_session_id: str, *,
+                 turns=(), visible_replies=None, start_seq=0, turn_index=None,
+                 client_rows=(), provenance=None, current_trace="", unanswered_key=""):
         self._database = database
         self._key = (agent_id, backend_session_id)
         self._rows: list[tuple[str, str, str, Any]] | None = None
+        self._live_rows = None
+        self._live_traces = set()
+        self._live_all = False
+        self._total_turns = start_seq + len(turns)
+        self._groups = {}
+        self._trace_replies = {}
+        self._last_by_trace = {}
+        self._last_unknown = start_seq - 1
+        self._last_seq = start_seq + len(turns) - 1
+        client_traces = {row.message_id: row.trace_id for row in client_rows
+                         if hasattr(row, "trace_id")}
+        resolved = _parsed_traces(turns, turn_index, provenance, client_traces,
+            start_seq=start_seq, current_trace=current_trace, unanswered_key=unanswered_key)
+        group = None
+        for index, turn in enumerate(turns):
+            trace = resolved[start_seq+index]
+            if trace:
+                self._last_by_trace[trace] = start_seq + index
+            else:
+                self._last_unknown = start_seq + index
+            role = turn.get("role")
+            visible = None
+            if role == "assistant":
+                visible = (visible_replies[index] if visible_replies is not None
+                           else _strip_voice_markup(turn.get("text")))
+                if trace and visible:
+                    self._trace_replies.setdefault(trace, []).append((start_seq + index, visible))
+            if role == "user":
+                group = []
+            elif role == "assistant" and group is not None:
+                if visible:
+                    group.append((start_seq + index, visible))
+                    self._groups[start_seq + index] = group
+        self._turns = {row["trace_id"]: row for row in turn_index._rows} if turn_index else {}
+        self._declined = {}
+        self._occupied_adoptions = set()
+        self._guard_logged = False
+        self._candidate_traces = dict.fromkeys(
+            resolved[start_seq+index] for index, turn in enumerate(turns)
+            if turn.get("role") == "assistant" and resolved[start_seq+index])
 
     def invalidate(self) -> None:
         self._rows = None
+        self._live_rows = None
+        self._live_traces = set()
+        self._live_all = False
 
     def discard(self, message_ids) -> None:
+        gone = set(message_ids)
         if self._rows is not None:
-            gone = set(message_ids)
             self._rows = [row for row in self._rows if row[0] not in gone]
+        if self._live_rows is not None:
+            self._live_rows = [row for row in self._live_rows if row["message_id"] not in gone]
+
+    def live_rows(self, trace):
+        """One matching read family per hold; cleanup always reads separately."""
+        if self._live_rows is None:
+            traces = tuple(dict.fromkeys((*self._candidate_traces, trace)))
+            self._live_traces = set(traces)
+            self._live_all = len(traces) > max(1, self._total_turns // 5)
+            # Same bound, chunks and threshold as _finish_import. The
+            # projection carries the ordering keys so the query keeps its
+            # existing plan; sorting this small live set preserves main's
+            # timestamp/seq candidate order, including SQLite value types.
+            sql = """SELECT message_id, text, trace_id, kind, timestamp, seq FROM messages
+                       WHERE agent_id = ? AND backend_session_id = ?
+                         AND source_file LIKE 'live:%' AND role = 'assistant'"""
+            if self._live_all:
+                rows = self._database.execute(sql, self._key).fetchall()
+            else:
+                rows = []
+                for start in range(0, len(traces), 32):
+                    selected = traces[start:start+32]
+                    bounded = sql.replace('FROM messages', 'FROM messages INDEXED BY idx_messages_trace')
+                    rows.extend(self._database.execute(
+                        bounded + ' AND trace_id IN (' + ','.join('?' for _ in selected) + ')',
+                        (*self._key, *selected)).fetchall())
+            rows.sort(key=lambda row: (_sqlite_order(row["timestamp"]), _sqlite_order(row["seq"])))
+            self._live_rows = [{**dict(row), "visible": _strip_voice_markup(row["text"])}
+                               for row in rows]
+        if not self._live_all and trace not in self._live_traces:
+            self._guard_failure("batch_trace_not_in_read")
+            return []
+        return [row for row in self._live_rows if (row["trace_id"] or "") == trace]
 
     def rows(self) -> list[tuple[str, str, str, Any]]:
-        """(message_id, source_file, visible text, timestamp) per row."""
+        """Server-authored final:% rows: id, source, visible text, timestamp."""
         if self._rows is None:
             self._rows = [
                 (row["message_id"], row["source_file"],
@@ -161,9 +293,84 @@ class _FinalRows:
             ]
         return self._rows
 
+    def unique_reply(self, row, seq, trace, *, exact=False):
+        """A live id identifies exactly one parsed reply of this trace.
+
+        Look ahead through the parsed trace, including steered inputs, before
+        adopting an earlier remark. A partial live final can otherwise lend its id to that remark.
+        No provider ordinal is guessed from the opaque live id.
+        """
+        group = self._groups.get(seq)
+        known = self._trace_replies.get(trace)
+        if known is not None:
+            # An authored client row can still name this trace after the
+            # timestamp index's reach ends. Keep that current user group.
+            group = known if group is None or group == known else list(
+                {**dict(known), **dict(group)}.items())
+        if group is None:
+            if exact:
+                self.decline_live(row, trace, seq)
+            return not exact
+        compatible = {position for position, visible in group
+                      if (visible == row["visible"] if exact
+                          else _related(visible, row["visible"]))}
+        # The caller already checked its effective text against this row.
+        compatible.add(seq)
+        if len(compatible) > 1:
+            self.decline_live(row, trace, seq)
+            return False
+        return True
+
+    def is_last_reply(self, seq, trace):
+        # Unknown later records cannot establish that this is the last of
+        # its trace. The final parsed record is last without an inference.
+        return seq == self._last_seq or (
+            self._last_by_trace.get(trace) == seq and self._last_unknown < seq)
+
+    def decline_live(self, row, trace, seq):
+        if self.is_last_reply(seq, trace):
+            self._declined[row["message_id"]] = (trace, row["visible"])
+
+    def stamp_after_cleanup(self, deleted_stamps, stamp, next_revision):
+        """Re-stamp only traces whose visible survivor changed in this import.
+
+        Adoption markers survive writer yields; candidate rows do not. Ordinary
+        replay has neither marker and performs no extra reads.
+        """
+        traces = self._occupied_adoptions | deleted_stamps
+        return max((stamp(self._database, self._key[0], trace, next_revision)
+                    for trace in sorted(traces)), default=0)
+
+    def keep_declined_live(self, live) -> bool:
+        """Only the last reply of a known, still-running turn can wait.
+
+        Ended turns always use ordinary cleanup. This is per-import knowledge,
+        rebuilt from parsed replies and the gathered turn index after a restart.
+        A failure or an obsolete decision never makes an import keep a row.
+        """
+        try:
+            declined = self._declined.get(live["message_id"])
+            if declined is None:
+                return False
+            trace = live["trace_id"] or ""
+            turn = self._turns.get(trace)
+            if turn is None or declined != (trace, _strip_voice_markup(live["text"])):
+                self._guard_failure("obsolete_decision")
+                return False
+            return turn["settled_at"] is None and turn["outcome"] is None
+        except Exception as exc:  # noqa: BLE001 - uncertain retention must fall back to ordinary cleanup
+            self._guard_failure(type(exc).__name__)
+            return False
+
+    def _guard_failure(self, reason):
+        if not self._guard_logged:
+            self._guard_logged = True
+            _diagnose("transcriptLiveDeclineGuardFail", f"reason={reason} count=1")
+
 
 def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
-                   *, exclude: set[str], trace: str, visible: str | None = None) -> str:
+                   *, exclude: set[str], trace: str, final_rows: _FinalRows,
+                   seq: int, visible: str | None = None, occupied: bool = False) -> str:
     """The still-live streamed row of this reply's own turn that it completes.
 
     Kept rows of several turns can coexist, so only a row of the reply's turn
@@ -174,27 +381,41 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
         visible = _strip_voice_markup(text)
     if not visible or not trace:
         return ""
-    exact = prefix = elsewhere = ""
-    for row in database.execute(
-            """SELECT message_id, text, trace_id FROM messages
-                WHERE agent_id=? AND backend_session_id=? AND role='assistant'
-                  AND source_file LIKE 'live:%'
-                ORDER BY timestamp, seq""",
-            (agent_id, backend_session_id)).fetchall():
-        if row["message_id"] in exclude:
-            continue
-        streamed = _strip_voice_markup(row["text"])
+    if occupied and not final_rows.is_last_reply(seq, trace):
+        return ""
+    candidates = [row for row in final_rows.live_rows(trace)
+                  if row["message_id"] not in exclude]
+    if occupied:
+        # A new streaming reply can begin with an earlier reply's words.
+        # Replacing that earlier placeholder would lend its position to a
+        # row the live writer is still changing. Only a final exact match
+        # can replace an occupied slot, and neither side may be ambiguous.
+        matches = []
+        for row in candidates:
+            if not _related(visible, row["visible"]):
+                continue
+            if row["kind"] is None and row["visible"] == visible:
+                matches.append(row)
+            else:
+                final_rows.decline_live(row, trace, seq)
+        if len(matches) != 1:
+            for row in matches:
+                final_rows.decline_live(row, trace, seq)
+            return ""
+        row = matches[0]
+        return str(row["message_id"]) if final_rows.unique_reply(
+            row, seq, trace, exact=True) else ""
+    exact = prefix = ""
+    for row in candidates:
+        streamed = row["visible"]
         if not _related(visible, streamed):
             continue
-        if (row["trace_id"] or "") != trace:
-            elsewhere = elsewhere or str(row["message_id"])
-        elif streamed == visible:
+        if not final_rows.unique_reply(row, seq, trace):
+            continue
+        if streamed == visible:
             exact = exact or str(row["message_id"])
         else:
             prefix = prefix or str(row["message_id"])
-    if not (exact or prefix) and elsewhere:
-        _diagnose("transcriptLiveTwinOtherTurn",
-                  f"agent={agent_id} trace={trace} kept={elsewhere}")
     return exact or prefix
 
 
@@ -288,7 +509,8 @@ class _ClientProvenance:
         return row
 
 
-def _own_turns_row(database, rows: list, trace: str, began: int | None = None) -> int:
+def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *,
+                   trace_ids=None) -> int:
     """Which of several client rows with the same words a transcript turn
     belongs to. ``trace`` and ``began`` are the turn that was running when
     the provider wrote its copy (from the turn index).
@@ -307,9 +529,13 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None) -
     if len(rows) < 2 or not trace:
         return 0
     for index, row in enumerate(rows):
-        sent = database.execute(
-            "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
-        if sent is not None and (sent["trace_id"] or "") == trace:
+        if trace_ids is None:
+            sent = database.execute(
+                "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
+            sent_trace = (sent["trace_id"] or "") if sent is not None else ""
+        else:
+            sent_trace = trace_ids.get(row[0]) or ""
+        if sent_trace == trace:
             return index
     if began is not None:
         for index, row in enumerate(rows):
@@ -440,15 +666,23 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
         if len(matching) == 1:
             msg_id = matching[0]
             adopted_final_ids.add(msg_id)
-    if not slot and msg_id not in adopted_final_ids:
+    if (not slot or slot["message_id"] == _message_id(
+            agent_id, backend_session_id, source_file, seq)) and msg_id not in adopted_final_ids:
         # The row this reply streamed into becomes its durable row,
         # in place: same id, so no client sees it vanish and return.
         if visible is None:
             visible = _strip_voice_markup(text)
         streamed = _streamed_twin(database, agent_id, backend_session_id,
-                                  text, exclude=adopted_final_ids,
-                                  trace=reply_trace, visible=visible)
+                                  text, exclude=adopted_final_ids | placed_ids,
+                                  trace=reply_trace, visible=visible,
+                                  final_rows=final_rows, seq=seq, occupied=bool(slot))
         if streamed:
+            if slot:
+                # This slot was already read: do not add a second point read.
+                database.execute("DELETE FROM messages WHERE message_id=?", (slot["message_id"],))
+                changed = True
+                final_rows._occupied_adoptions.add(reply_trace)
+                slot = None
             msg_id = streamed
             adopted_final_ids.add(msg_id)
     if msg_id not in adopted_final_ids:
