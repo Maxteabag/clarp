@@ -176,11 +176,12 @@ On 15 Nov 2026, with real Claude Code turns, on the build of `d9868bea` and from
 | 04:26 (17 Nov) | the Host updated by the installer, `2b48004c` to `34641890`: the build in which a janitor's scheduled task runs. The relay was on: the new Host was connected to it again 146 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 04:56 (17 Nov) | the Host updated by the installer, `34641890` to `c7332730`: the build in which a janitor is looked at and not spoken to, a janitor is made as a new agent, and the rules of a run that answers one request are in. The relay was on: the new Host was connected to it again 66 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
 | 06:11 (17 Nov) | the Host updated by the installer, `c7332730` to `1473b6c7`: the build with the router of spoken messages. The relay was on: the new Host was connected to it again 74 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered at once, with all three |
+| 06:27 (17 Nov) | the Host updated by the installer, `1473b6c7` to `bebd58a7`: the build in which an agent is started again in place. The relay was on: the new Host was connected to it again 177 ms after it came up | 3 | every turn in its command (`sleep 40`) | held: the new build answered after 1 ms, with all three |
 
 Held means, for every turn of the exercise: its message is in the conversation once, one turn ended for it,
-completed, answered with its word, and its command ran exactly once. A hundred and twenty-eight turns in
-thirty-eight exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
-thirty-six of Codex in the twelve since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
+completed, answered with its word, and its command ran exactly once. A hundred and thirty-one turns in
+thirty-nine exercises, none interrupted, lost or run twice: ninety-two of Claude Code in twenty-six, and
+thirty-nine of Codex in the thirteen since 19:38 on 16 Nov, from when the agents of this test are Codex agents. The ten of 17:33 took 52 to 54 seconds from the message: the length of
 the command and no more.
 
 The updates from 20:02 on were installed from a release built out of a clean checkout of the commit that had
@@ -731,6 +732,23 @@ That a model finds the right agent is the model's; what the Host showed here is 
 question: its janitor's run, the tool started for one question and answered in time, the decision carried out
 and kept. The check of the janitors was run after it on the same build (37 points, as before), and the one of a
 scheduled task with a real Codex janitor.
+
+## An agent started again in place
+
+Restart landed with `bebd58a7` (17 Nov, 06:27, installed by exercise 39 the same minute) and was tried where
+it is installed right after, with a real Codex agent of the check's own (`verify-started-again.py`, 22
+points, three turns of Codex).
+
+| What | On the installed Host |
+|---|---|
+| Before | the agent is made, written to, and answers; its conversation has a name and its tool a session |
+| Started again (`POST /agents` with `replace_sid`) | 200: the same agent under the same session name |
+| For those who read | its conversation is empty; a reader that kept the old one is told to drop it (`replace_required`) |
+| Its row | no conversation, no session of its tool, no gauge and no model that answered; what it last said is still what a list of chats shows of it |
+| A message after it | answered, in a new session of Codex: the session the tool names is another, so it was not asked to go on where it was |
+| Its conversation then | holds only what was said since, goes by another name, and its revisions go on after the old ones |
+| Started again while a turn runs, under another name | 200 after 0.1 seconds; the turn was stopped first (`interrupted`), the conversation is empty again and the stopped turn is no part of it; the row has the new name |
+| Afterwards | the check's agent removed; the 23 agents that were there still there |
 
 ## The soak so far
 
