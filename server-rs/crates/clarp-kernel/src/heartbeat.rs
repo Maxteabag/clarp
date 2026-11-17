@@ -369,6 +369,11 @@ pub struct State {
     pub dormant: bool,
     /// The newest sign from outside that was taken as a reason to wake it, in milliseconds.
     pub last_wake_signal_ms: i64,
+    /// When the run of interruptions the agent is in began, in seconds: the first turn of
+    /// it that was cut off or failed, with no turn of it completed since. Nothing: it is in
+    /// none. An agent is tried again for so long from there, and not from the last heartbeat
+    /// that failed in its turn (the Python Host counts from the last: issue 396 there).
+    pub interrupted_since: f64,
 }
 
 impl State {
@@ -387,6 +392,36 @@ impl State {
     pub fn was_active(&mut self) {
         self.noop_streak = 0;
         self.dormant = false;
+        self.interrupted_since = 0.0;
+    }
+
+    /// What the agent last did is looked at. A turn of it that was cut off or failed, and
+    /// not by its user, begins a run of interruptions where it is in none; a turn of it
+    /// that completed, and its user's own stop, end the run. While a turn of it runs
+    /// nothing is known yet.
+    pub fn saw(&mut self, latest: &Latest) {
+        if latest.interrupted() {
+            if self.interrupted_since == 0.0 {
+                self.interrupted_since = latest.interrupted_at();
+            }
+        } else if matches!(
+            latest.kind.as_str(),
+            "done" | "idle" | "background" | "interrupted"
+        ) {
+            self.interrupted_since = 0.0;
+        }
+    }
+
+    /// Whether the agent has been interrupted for as long as it is tried again: counted
+    /// from the turn that was interrupted last, and from where its run of interruptions
+    /// began, whichever is longer ago.
+    fn interrupted_long_ago(&self, latest: &Latest, now: f64) -> bool {
+        let at = latest.interrupted_at();
+        let since = match self.interrupted_since {
+            run if run != 0.0 && at != 0.0 => run.min(at),
+            _ => at,
+        };
+        since != 0.0 && now - since >= MAX_INTERRUPTED_RETRY_S
     }
 
     /// A heartbeat is started now.
@@ -468,7 +503,7 @@ pub fn skip_reason(known: &Known, state: &State, policy: &Settings, now: f64) ->
     }
     let interrupted_at = latest.interrupted_at();
     let interrupted = latest.interrupted();
-    if interrupted && interrupted_at != 0.0 && now - interrupted_at >= MAX_INTERRUPTED_RETRY_S {
+    if interrupted && state.interrupted_long_ago(latest, now) {
         return "dormant".to_string();
     }
     let last_event = state.last_started.max(interrupted_at);
@@ -501,7 +536,7 @@ pub fn schedule(
 ) -> Value {
     let interrupted = latest.interrupted();
     let interrupted_at = latest.interrupted_at();
-    let long_ago = interrupted_at != 0.0 && now - interrupted_at >= MAX_INTERRUPTED_RETRY_S;
+    let long_ago = state.interrupted_long_ago(latest, now);
     let dormant = state.dormant || (interrupted && long_ago);
     let mut shown = state.clone();
     shown.dormant = dormant;
