@@ -21,6 +21,7 @@ pub mod catalogue;
 pub mod claude;
 pub mod codex;
 pub mod history;
+pub mod limits;
 pub mod past;
 pub mod scripted;
 
