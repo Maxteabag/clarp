@@ -92,8 +92,6 @@ def calls(monkeypatch):
     spy(team_store, "capture_assistant_message")
     spy(oracle_delegations, "complete_for_trace")
     spy(team_leader, "record_leader_noop")
-    spy(heartbeat, "record_heartbeat_noop_once")
-    spy(heartbeat, "record_heartbeat_activity_once")
     spy(dreaming, "process_assistant_text")
     return seen
 
@@ -203,7 +201,7 @@ def test_a_client_linked_turn_clears_what_an_earlier_import_left_in_its_slot(clo
 
 # ---- automation prompts and their replies --------------------------------
 
-def test_heartbeat_turns_read_heartbeat_and_account_once_per_prompt(clock, calls):
+def test_unattributed_heartbeat_rows_keep_their_products_without_accounting(clock):
     store([u(HEARTBEAT_PROMPT, 0), a(HEARTBEAT_OK, 1),
            u(HEARTBEAT_PROMPT, 60), a("Advanced the plan.", 61)])
     assert view(transcript_rows(), "seq", "role", "text", "origin") == [
@@ -211,12 +209,10 @@ def test_heartbeat_turns_read_heartbeat_and_account_once_per_prompt(clock, calls
         (1, "assistant", "Heartbeat check: no action needed.", "heartbeat"),
         (2, "user", HEARTBEAT_PROMPT, "heartbeat"),
         (3, "assistant", "Advanced the plan.", "heartbeat")]
-    ids = [r["message_id"] for r in transcript_rows()]
-    assert [c[0] for c in calls["record_heartbeat_noop_once"]] == [(AGENT, ids[0])]
-    assert [c[0] for c in calls["record_heartbeat_activity_once"]] == [(AGENT, ids[2])]
+    assert db.conn().execute("SELECT COUNT(*) FROM heartbeat_accounting").fetchone()[0] == 0
     store([u(HEARTBEAT_PROMPT, 0), a(HEARTBEAT_OK, 1),
            u(HEARTBEAT_PROMPT, 60), a("Advanced the plan.", 61)])
-    assert len(calls["record_heartbeat_noop_once"]) == 1      # unchanged rows account nothing
+    assert db.conn().execute("SELECT COUNT(*) FROM heartbeat_accounting").fetchone()[0] == 0
 
 
 def test_leader_ticks_and_dream_prompts_set_the_origin(clock, calls):
