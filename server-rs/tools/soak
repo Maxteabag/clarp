@@ -281,6 +281,20 @@ def run(args) -> int:
             if n % 12 == 0:
                 out.write(json.dumps({"at": int(time.time() * 1000), "run": run_id, **whole(host, args.session, run_id, n)},
                                      sort_keys=True) + "\n")
+            # A tool that continues a thread is sent the whole thread again with every call: a
+            # soak that wrote every round into one thread paid more for each (round 167 cost
+            # 215,000 tokens where the first cost 45,000). So the agent is started again in
+            # place every so many rounds, right after its whole conversation was read once more:
+            # the same agent, with a conversation that begins anew.
+            if args.fresh_every > 0 and n % args.fresh_every == 0 and line["outcome"] not in UNENDED and not unended:
+                row = snapshot(host).get(args.session) or {}
+                again = {"replace_sid": args.session, "name": row.get("persona") or row.get("name") or args.session,
+                         "backend": row.get("backend") or "codex"}
+                status, said = host.ask("POST", "/agents", again)
+                out.write(json.dumps({"kind": "begun_anew", "at": int(time.time() * 1000), "run": run_id, "after_round": n,
+                                      "status": status, **({} if status == 200 else {"said": str(said)[:200]})},
+                                     sort_keys=True) + "\n")
+                print(f"soak: after round {n} the agent begins a conversation anew: {status}", flush=True)
         print(f"soak: round {n}: {line['outcome']}" + (f" in {line.get('seconds')} s" if "seconds" in line else ""), flush=True)
         if args.rounds <= 0 or rounds < args.rounds:
             time.sleep(max(1.0, args.every))
@@ -566,6 +580,8 @@ def main() -> int:
             command.add_argument("--session", default="soak-codex")
             command.add_argument("--every", type=float, default=900)
             command.add_argument("--rounds", type=int, default=0, help="stop after so many rounds (default: never)")
+            command.add_argument("--fresh-every", type=int, default=12,
+                                 help="start the agent again in place after so many rounds (0: never)")
         if name == "restart":
             command.add_argument("--agents", type=int, default=10, help="how many turns run at the restart")
             command.add_argument("--seconds", type=int, default=45, help="how long each agent's command takes")
