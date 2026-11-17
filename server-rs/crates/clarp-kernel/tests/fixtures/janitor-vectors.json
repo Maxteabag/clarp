@@ -202,7 +202,7 @@
   {"given": {"exclude_agent_ids": []}, "taken": {"agent_ids": [], "exclude_agent_ids": []}},
   {"given": {"agent_ids": [], "exclude_agent_ids": [], "more": 1}, "refused": [400, "invalid_janitor", "Scope must contain agent_ids and exclude_agent_ids"]},
   {"given": {"agent_ids": ["{worker}"]}, "taken": {"agent_ids": ["id-worker"], "exclude_agent_ids": []}},
-  {"given": {"agent_ids": ["{coder}", "{worker}", "{coder}"], "exclude_agent_ids": ["{other}"]}, "taken": {"agent_ids": ["id-worker", "id-coder"], "exclude_agent_ids": ["id-other"]}},
+  {"given": {"agent_ids": ["{coder}", "{worker}", "{coder}"], "exclude_agent_ids": ["{other}"]}, "taken": {"agent_ids": ["id-coder", "id-worker"], "exclude_agent_ids": ["id-other"]}},
   {"given": {"agent_ids": "worker"}, "refused": [400, "invalid_janitor", "Scope agent IDs must be a bounded list"]},
   {"given": {"agent_ids": [7]}, "refused": [400, "invalid_janitor", "Scope agent IDs must be a bounded list"]},
   {"given": {"agent_ids": [""]}, "refused": [400, "invalid_janitor", "Scope agent IDs must be a bounded list"]},
