@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Whether everything the Rust CI and the conformance run read is the same in two commits: the
+# trees they build and run, and the files that say how. A verdict of either run is a verdict on
+# these, so it stands for a commit that was only put on top of a main that moved elsewhere.
+#
+#     server-rs/tools/gated-trees COMMIT-THE-VERDICT-WAS-GIVEN-FOR COMMIT-IT-IS-TO-STAND-FOR
+#
+# Prints each tree or file with its id in both; ends 0 only when all are the same. What it does
+# not cover runs again on the new commit itself: the repository's own gates (tools/repo-gates)
+# and the release that is installed, whose version is the commit.
+set -u
+if [ "$#" -ne 2 ]; then
+  echo "usage: gated-trees GATED-COMMIT NEW-COMMIT" >&2
+  exit 2
+fi
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)" || exit 97
+differs=0
+for path in server server-rs tests/replay bin pyproject.toml uv.lock scripts/ci_contained.sh \
+            .github/workflows/conformance.yml .github/workflows/server-rs.yml; do
+  was=$(git rev-parse --verify --quiet "$1:$path")
+  is=$(git rev-parse --verify --quiet "$2:$path")
+  if [ -n "$was" ] && [ "$was" = "$is" ]; then
+    echo "same      $path ${was:0:12}"
+  else
+    echo "DIFFERENT $path ${was:0:12} ${is:0:12}"
+    differs=1
+  fi
+done
+exit "$differs"

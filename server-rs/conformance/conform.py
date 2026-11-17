@@ -268,7 +268,9 @@ class TurnClock:
 
 def run_step(host, events, step, http, variables, clock=None):
     op = step['op']
-    session = step.get('session', scenarios.AGENT)
+    # The agent a step waits for: the scenario's own, or one a step saved the name of (`{name}`): a
+    # Host chooses the session name of an agent it makes.
+    session = replay.fill(step.get('session', scenarios.AGENT), variables)
     if op in HTTP_OPS:
         last = http[-1]['body'] if http else None
         path_values = dict(variables)
@@ -832,6 +834,24 @@ def called(value, found: dict) -> dict:
     return found
 
 
+def forked(http, found: dict) -> dict:
+    """The session names of the children a capture's forks made, each with the name it is given here.
+    A session name is the Host's to choose: the Python Host ends a new agent's with four signs it
+    draws, the Rust Host only where the plain name is taken (server-rs/docs/differences.md, "The
+    session name of a new agent"). What a client relies on is that the name a fork answered is the
+    name the child has wherever it is named: in the snapshot, in what the child is told, in who
+    wrote to whom."""
+    for exchange in http:
+        body = exchange.get('body')
+        if (exchange.get('method') != 'POST' or not str(exchange.get('path') or '').endswith('/fork')
+                or not isinstance(body, dict)):
+            continue
+        for child in body.get('children') or ():
+            if isinstance(child, dict) and isinstance(child.get('session'), str) and child['session']:
+                found.setdefault(child['session'], f'<forked:{len(found) + 1}>')
+    return found
+
+
 def cut_lists(value, found: dict) -> dict:
     """The names of the lists of Updates a capture's pages were cut from, and the cursors its
     pages ended with: each Host's own, named here in the order a client learns of them. What is
@@ -861,6 +881,9 @@ def seen_by_a_client(raw: dict) -> dict:
     calls = called([exchange['body'] for exchange in raw['http']], {})
     if calls:
         raw = {**raw, 'http': by_name(raw['http'], calls), 'sse': by_name(raw['sse'], calls)}
+    children = forked(raw['http'], {})
+    if children:
+        raw = {**raw, 'http': by_name(raw['http'], children), 'sse': by_name(raw['sse'], children)}
     # The agents a scenario is about: its own, unless it names more.
     sessions = tuple(scenarios.BY_ID.get(raw.get('scenario'), {}).get('sessions', (scenarios.AGENT,)))
     known = agents_by_id([exchange['body'] for exchange in raw['http']], {})

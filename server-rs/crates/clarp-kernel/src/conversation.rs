@@ -63,6 +63,11 @@ pub struct Message {
     /// id is `id` whole. Otherwise the app's id is `id` without the mark.
     #[serde(default, skip_serializing_if = "is_false")]
     pub marked: bool,
+    /// No app gave this message its id: the Host sent it by itself (a heartbeat, a prompt at
+    /// a set time, the task of a fork). It is filed and waits under the id the Host gave it,
+    /// and an app is told of it under none ([`Message::told_id`]).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unminted: bool,
 }
 
 impl Message {
@@ -78,13 +83,21 @@ impl Message {
         }
     }
 
-    /// The id the app that sent this message gave it: what an app is told a message by.
+    /// The id this message was sent under: the one its app gave it, or the one the Host
+    /// gave what it sent by itself. What waits in the queue is named by it.
     pub fn client_id(&self) -> &str {
         if self.marked {
             &self.id
         } else {
             self.id.strip_prefix(MARK).unwrap_or(&self.id)
         }
+    }
+
+    /// The id an app is told this message by (`client_msg_id` of an event): the one its app
+    /// gave it, and none where no app did. An app looks under that id for the bubble it
+    /// painted, and nobody painted what the Host sent by itself: so the Python Host says it.
+    pub fn told_id(&self) -> &str {
+        if self.unminted { "" } else { self.client_id() }
     }
 }
 
@@ -419,6 +432,21 @@ mod tests {
         assert!(written.get("marked").is_none(), "{written}");
         let old: Message = serde_json::from_value(written).unwrap();
         assert_eq!((old.marked, old.client_id()), (false, "decision-1"));
+        // What the Host sent by itself waits under its id, and an app is told none.
+        let own = Message {
+            unminted: true,
+            ..old.clone()
+        };
+        assert_eq!((own.client_id(), own.told_id()), ("decision-1", ""));
+        assert_eq!(old.told_id(), "decision-1");
+        let written = serde_json::to_value(&own).unwrap();
+        assert_eq!(written["unminted"], true);
+        assert!(
+            serde_json::to_value(&old)
+                .unwrap()
+                .get("unminted")
+                .is_none()
+        );
     }
 
     #[test]

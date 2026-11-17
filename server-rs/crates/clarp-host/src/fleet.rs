@@ -1596,10 +1596,11 @@ impl Fleet {
         }));
         self.publish();
         // The apps are told when the fleet has the agent: that it is there, and then what
-        // an agent that has never run is doing, in the Python Host's order.
+        // an agent that has never run is doing, in the Python Host's order. That its
+        // conversation changed is not said: nothing is in it, and the Python Host says so
+        // when the first thing is written to it, as the agent's own thread does here.
         let (hub, now, new) = (&self.works.hub, self.now_ms(), agent::never_ran());
         hub.publish(wire::roster_created(&record), now);
-        hub.publish(wire::transcript_updated(&record), now);
         hub.publish(wire::state(&record, &new, &record.backend, None), now);
         hub.publish(wire::activity(&record, &new), now);
         Ok(record)

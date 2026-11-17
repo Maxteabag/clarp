@@ -347,7 +347,7 @@ async fn tick(app: &App) {
             origin: Some("heartbeat".to_string()),
             ..SendRequest::default()
         };
-        if let Err(refused) = edge::send_message(app, request).await {
+        if let Err(refused) = edge::send_own(app, request).await {
             eprintln!(
                 "clarp-host: a heartbeat for {} was not sent: {}",
                 record.session,

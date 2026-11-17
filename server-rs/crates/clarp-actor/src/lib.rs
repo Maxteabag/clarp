@@ -283,8 +283,10 @@ pub struct Waiting {
     pub turn: TurnId,
     /// The message's id in the conversation.
     pub message_id: String,
-    /// The id its app gave it.
+    /// The id it was sent under: what the queue names it by.
     pub client_id: String,
+    /// The id an app is told it by: none for what the Host sent by itself.
+    pub told_id: String,
     pub text: String,
     pub accepted_at_ms: i64,
 }
@@ -340,8 +342,8 @@ fn follow_tool(running: &mut Vec<LiveTool>, calls: &mut Vec<ToolCall>, call: &To
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveStatus {
     pub turn: TurnId,
-    /// The id of the message this turn answers, the id its app gave it, and the trace it
-    /// travels under.
+    /// The id of the message this turn answers, the id an app is told it by (none for what
+    /// the Host sent by itself), and the trace it travels under.
     pub message_id: String,
     pub client_id: String,
     pub trace_id: Option<String>,
@@ -910,7 +912,7 @@ impl Actor {
                 interpreter: actor
                     .backend
                     .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
-                client_id: message.client_id().to_string(),
+                client_id: message.told_id().to_string(),
                 message_id: message.id,
                 trace_id: message.trace_id,
                 origin: message.origin,
@@ -1244,6 +1246,7 @@ impl Actor {
             waiting.push(Waiting {
                 turn: queued.id,
                 client_id: message.client_id().to_string(),
+                told_id: message.told_id().to_string(),
                 message_id: message.id,
                 text: message.text,
                 accepted_at_ms: queued.accepted_at_ms,
@@ -2110,7 +2113,7 @@ impl Actor {
         out: &mut Outputs,
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
-        let client_id = message.client_id().to_string();
+        let client_id = message.told_id().to_string();
         // What the attempts before put into the conversation is still the turn's.
         let before = self.live.take().filter(|live| live.turn == turn);
         let backend_session = self.recorder.agent().backend_session().map(str::to_string);
@@ -2323,7 +2326,7 @@ impl Actor {
         }
         self.live = Some(LiveTurn {
             turn,
-            client_id: message.client_id().to_string(),
+            client_id: message.told_id().to_string(),
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,

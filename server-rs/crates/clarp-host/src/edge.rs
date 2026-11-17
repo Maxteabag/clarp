@@ -130,6 +130,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Agents that make agents: who made an agent, how a helper's work stands
     // (`/agent-helper-state`), and what an agent's row says of the ones it made.
     ("helper_agents", 13),
+    // An agent forks itself into helpers that start from its conversation and each get a
+    // task (`POST /agents/<session>/fork`). Each child starts from the conversation as
+    // words (`fork: seed`): a tool's own copy of a conversation is not made here yet.
+    ("agent_fork", 41),
     // `GET /agents/snapshot?include_archived=0` and `GET /agents/archived`.
     ("snapshot_without_archived", 82),
     // `DELETE /devices` and `GET /devices/push-tokens`.
@@ -361,6 +365,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::chip::routes())
         .merge(crate::schedules::routes())
         .merge(crate::heartbeat::routes())
+        .merge(crate::forks::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
@@ -1448,6 +1453,17 @@ pub(crate) async fn send_message(
     app: &App,
     request: SendRequest,
 ) -> Result<SendResponse, ApiError> {
+    send_as(app, request, false).await
+}
+
+/// Takes a message the Host sends by itself: a heartbeat, a prompt at a set time, the task
+/// of a fork. It is a message like any other, but for this: no app gave it an id, and the
+/// apps are told of it under none.
+pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
+    send_as(app, request, true).await
+}
+
+async fn send_as(app: &App, request: SendRequest, own: bool) -> Result<SendResponse, ApiError> {
     // What the Python Host refuses a send with, in its order and its words (plain text).
     let text = python::strip(&request.text).to_string();
     if text.is_empty() {
@@ -1590,6 +1606,7 @@ pub(crate) async fn send_message(
     let message = Message {
         id,
         marked,
+        unminted: own,
         text,
         origin,
         trace_id: Some(trace_id.clone()),

@@ -453,7 +453,10 @@ fn tool(
         .current_dir(dir)
         .env("CLARP_HOST_ADDR", &host.address)
         .env("CLARP_HOST_TOKEN", &host.token)
-        .env_remove("CLARP_BACKGROUND_WORKER_PID");
+        .env_remove("CLARP_BACKGROUND_WORKER_PID")
+        // Whoever runs the tests may be an agent's turn itself: the tool is not told so.
+        .env_remove("CLARP_SESSION")
+        .env_remove("CLAUDE_PWA_SESSION");
     if let Some(pid) = worker {
         command.env("CLARP_BACKGROUND_WORKER_PID", pid.to_string());
     }
@@ -6654,7 +6657,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         .unwrap()
         .iter()
         .filter(|event| event["session"] == "slice-1")
-        .take(4)
+        .take(3)
         .cloned()
         .collect();
     assert_eq!(
@@ -6667,10 +6670,10 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             .collect::<Vec<_>>(),
         [
             ("agent-roster", "created"),
-            ("transcript-updated", ""),
             ("agent-state", "spawned"),
             ("agent-activity", "spawned"),
-        ]
+        ],
+        "an agent that was made and has said nothing: its conversation has not changed"
     );
     assert_eq!(
         (
@@ -6680,7 +6683,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         ),
         (&json!("Slice Helper"), &json!("scripted"), &json!("{}"))
     );
-    assert_eq!(about[2]["detail"], json!({ "session": "slice-1" }));
+    assert_eq!(about[1]["detail"], json!({ "session": "slice-1" }));
 
     // The maker hands it work: it is working already, nothing moves. A message from
     // another agent waits its turn like one left for later: it goes through the queue.
@@ -6887,7 +6890,8 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         "clarp-admin: HTTP 409: {\"error\": \"illegal_transition\", \"message\": \"tool-helper is done; cannot mark failed\"}"
     );
     assert_eq!(admin(&["helper-state", "tool-helper", "sideways"]).0, 2);
-    assert_eq!(admin(&["fork", "x"]).0, 69);
+    // A command of `agent` there is none of is not here, and says so.
+    assert_eq!(admin(&["adopt", "x"]).0, 69);
 
     // A helper that has been done long enough is put away by the fleet.
     wait_for("the finished helper to be put away", || {
@@ -6936,6 +6940,362 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         host.get(&format!("/agent-helper-state?session={helper}")),
         before
     );
+}
+
+/// One command of git in a directory, for a repository a test makes for itself: under a
+/// name of its own, and with nothing of the settings of whoever runs the tests.
+fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+        ])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    let complained = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "git {args:?}: {complained}");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
+    let place = Place::new("forks");
+    // Git looks for a repository in the directories above the one it is run in: not above
+    // this test's own place, wherever that is.
+    let ceiling = place.root.display().to_string();
+    let host = place.start_in("", &[], &[("GIT_CEILING_DIRECTORIES", ceiling.as_str())]);
+    let heard = host.listen();
+    let maker = host.new_agent("Maker");
+    let fork = |session: &str, body: Value| -> (u16, Value) {
+        host.ask("POST", &format!("/agents/{session}/fork"), Some(&body))
+    };
+    let told = |status: u16, code: &str, message: &str| {
+        (status, json!({ "error": code, "message": message }))
+    };
+    let row = |session: &str| -> Value {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .cloned()
+            .unwrap_or_else(|| panic!("{session} is not in the snapshot"))
+    };
+    let agents = || {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    let features = host.get("/server-info")["capabilities"]["features"].clone();
+    assert!(features.as_array().unwrap().contains(&json!("agent_fork")));
+    let one = json!({ "children": [{ "name": "Probe", "task": "look" }] });
+
+    // What asks wrongly is refused before anybody is looked for. Then the agent that forks
+    // has to be there, and to have a conversation a child can start from.
+    assert_eq!(
+        fork("nobody", json!({})),
+        told(400, "children_required", "Give children or a count")
+    );
+    assert_eq!(fork("nobody", json!([1])).1["error"], "bad json");
+    assert_eq!(
+        fork("nobody", one.clone()),
+        told(404, "agent_not_found", "No live agent: nobody")
+    );
+    assert_eq!(
+        fork(&maker, one.clone()),
+        told(
+            409,
+            "no_conversation",
+            "maker has no conversation to fork yet"
+        )
+    );
+
+    // The agent says something and calls a tool: what a child will start from.
+    let said = r#"{"session": "s-maker", "reply": "three files", "tool": "Bash", "id": "t1", "input": {"command": "ls -la"}, "done": "t1", "output": "a b c"}"#;
+    host.send(&maker, said, "f1");
+    wait_for("the maker's turn", || host.state(&maker) == "done");
+    let maker_id = row(&maker)["agent_id"].as_str().unwrap().to_string();
+    let work = row(&maker)["cwd"].as_str().unwrap().to_string();
+    let before = agents();
+    let said_so_far = host.turns(&maker).len();
+
+    // A tool nobody has is refused whole, and nothing is made.
+    let odd = json!({ "children": [
+        { "name": "Probe", "task": "look" },
+        { "name": "Other", "task": "look", "backend": "abacus" },
+    ] });
+    assert_eq!(
+        fork(&maker, odd),
+        told(400, "invalid_backend", "Unknown backend: abacus")
+    );
+    assert_eq!(agents(), before);
+
+    // Four children at once: one where its maker works, one in a worktree of its own, and
+    // two that cannot be made. Each is told in its own row, and the two are made.
+    let repo = place.root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git_in(&repo, &["init", "-q"]);
+    git_in(&repo, &["commit", "-q", "--allow-empty", "-m", "first"]);
+    let top = git_in(&repo, &["rev-parse", "--show-toplevel"]);
+    let tree = format!("{top}-worktrees/fix-the-thing");
+    let nowhere = place.root.join("nowhere").display().to_string();
+    let (status, forked) = fork(
+        &maker,
+        json!({
+            "backend": "scripted",
+            "children": [
+                { "name": "Probe", "task": "  Read the log.\nSay what failed.  " },
+                { "name": "Tree", "task": "Fix it.",
+                  "worktree": { "repo": repo.display().to_string(), "branch": "fix/the-thing" } },
+                { "name": "Lost", "task": "x", "cwd": nowhere },
+                { "name": "Bare", "task": "x", "worktree": { "repo": work, "branch": "b" } },
+            ],
+        }),
+    );
+    assert_eq!(status, 200, "{forked}");
+    assert_eq!(
+        forked,
+        json!({
+            "ok": true,
+            "parent": "maker",
+            "children": [
+                { "name": "Probe", "session": "probe", "cwd": work, "backend": "scripted",
+                  "fork": "seed", "delivered": true },
+                { "name": "Tree", "session": "tree", "cwd": tree, "backend": "scripted",
+                  "fork": "seed", "delivered": true, "branch": "fix/the-thing" },
+                { "name": "Lost", "error": "cwd_missing",
+                  "message": format!("No such directory: {nowhere}") },
+                { "name": "Bare", "error": "worktree_failed",
+                  "message": format!("{work} is not a git repository") },
+            ],
+        })
+    );
+    assert_eq!(agents(), before + 2);
+    assert_eq!(
+        git_in(std::path::Path::new(&tree), &["branch", "--show-current"]),
+        "fix/the-thing"
+    );
+    // Each is a helper of the agent that forked, at work where its row says.
+    for (child, place_of) in [("probe", &work), ("tree", &tree)] {
+        let made = row(child);
+        assert_eq!(
+            (
+                &made["role"],
+                &made["parent_agent_id"],
+                &made["helper_state"],
+                &made["cwd"],
+                &made["backend"],
+            ),
+            (
+                &json!("helper"),
+                &json!(maker_id),
+                &json!("running"),
+                &json!(place_of),
+                &json!("scripted"),
+            ),
+            "{child}"
+        );
+    }
+    assert_eq!(row(&maker)["child_count"], 2);
+
+    // A child's first message is from the agent that forked: what the child is, the part
+    // of its maker's conversation it starts from, its task, and how to report back.
+    wait_for("the first child's turn", || host.state("probe") == "done");
+    let first = host.turns("probe")[0].clone();
+    assert_eq!(
+        (&first["role"], &first["sender_session"]),
+        (&json!("user"), &json!("maker"))
+    );
+    let listed = clarp_kernel::tools::summarize("Bash", &json!({ "command": "ls -la" })).summary;
+    assert!(!listed.is_empty());
+    let expected = format!(
+        "You are the Clarp helper agent `probe` (Probe), a fork of `maker`. Below is the most \
+         recent part of maker's conversation, up to the moment it forked you. Treat it as your \
+         own memory. You are child 1 of 4 forked together; the others work on their own tasks. \
+         maker carries on with its own work: do not continue it, only the task below. Work in \
+         {work} and stay there.\n\n\
+         --- maker's conversation so far ---\n\
+         User: {said}\n\n\
+         Assistant: three files\n  → Bash: {listed}\n\
+         --- end ---\n\n\
+         Your task:\nRead the log.\nSay what failed.\n\n\
+         When you are finished (or blocked), send your final report to your parent in one \
+         message:\n  clarp-admin prompt --to maker --from probe --text \"<report>\"\n\
+         That message marks you reported. Do not message your parent for routine progress."
+    );
+    assert_eq!(first["text"].as_str().unwrap(), expected);
+    // The task is the Host's own message: no app gave it an id, and the apps are told of
+    // it under none, where they are told of a message an app sent under the app's id.
+    let told_of = |session: &str| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let named = heard
+            .iter()
+            .filter(|event| event["session"] == session && event.get("client_msg_id").is_some());
+        named.map(|event| event["client_msg_id"].clone()).collect()
+    };
+    wait_for("the apps to hear of the child's turn", || {
+        !told_of("probe").is_empty()
+    });
+    assert!(
+        told_of("probe").iter().all(|id| id == ""),
+        "{:?}",
+        told_of("probe")
+    );
+    assert_eq!(told_of(&maker), [json!("f1")]);
+    wait_for("the second child's turn", || host.state("tree") == "done");
+    let second = host.turns("tree")[0]["text"].as_str().unwrap().to_string();
+    assert!(
+        second.contains(&format!(
+            "You are child 2 of 4 forked together; the others work on their own tasks. maker \
+             carries on with its own work: do not continue it, only the task below. Work in \
+             your own git worktree {tree} on branch fix/the-thing and stay there."
+        )),
+        "{second}"
+    );
+    assert!(second.contains("\n\nYour task:\nFix it.\n\n"));
+    // Nothing was said to the agent that forked.
+    assert_eq!(host.turns(&maker).len(), said_so_far);
+
+    // The agents' own command for it. So many of one task: each is named and has a branch
+    // of its own, and a repository is named from where the tool was called.
+    let fork_tool = |args: &[&str]| -> (i32, Value, String) {
+        let mut all = vec!["clarp-admin", "agent", "fork"];
+        all.extend_from_slice(args);
+        let (code, out, err) = tool(&host, &place.root, None, &all);
+        (
+            code,
+            serde_json::from_str(&out).unwrap_or(Value::Null),
+            err.trim_end().to_string(),
+        )
+    };
+    let (code, parts, err) = fork_tool(&[
+        "part",
+        "--task",
+        "  do a part  ",
+        "--count",
+        "2",
+        "--worktree",
+        "repo:parts",
+        "--from",
+        &maker,
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let part = |at: u32| {
+        json!({
+            "name": format!("part-{at}"), "session": format!("part-{at}"),
+            "cwd": format!("{top}-worktrees/parts-{at}"), "backend": "scripted",
+            "fork": "seed", "delivered": true, "branch": format!("parts-{at}"),
+        })
+    };
+    assert_eq!(
+        parts,
+        json!({ "ok": true, "parent": "maker", "children": [part(1), part(2)] })
+    );
+    wait_for("a part's first turn", || host.state("part-2") == "done");
+    let task = host.turns("part-2")[0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(task.contains("\n\nYour task:\ndo a part\n\n"), "{task}");
+    // A list of children in a file, and the agent that forks told by its own turn.
+    std::fs::write(
+        place.root.join("spec.json"),
+        r#"{"children": [{"name": "Spec One", "task": "from a file"}]}"#,
+    )
+    .unwrap();
+    let own = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args([
+            "tool",
+            "clarp-admin",
+            "agent",
+            "fork",
+            "--spec",
+            "spec.json",
+        ])
+        .current_dir(&place.root)
+        .env("CLARP_HOST_ADDR", &host.address)
+        .env("CLARP_HOST_TOKEN", &host.token)
+        .env_remove("CLAUDE_PWA_SESSION")
+        .env("CLARP_SESSION", &maker)
+        .output()
+        .unwrap();
+    let shown: Value = serde_json::from_slice(&own.stdout).unwrap_or(Value::Null);
+    assert_eq!(own.status.code(), Some(0), "{shown}");
+    assert_eq!(
+        (
+            &shown["children"][0]["session"],
+            &shown["children"][0]["delivered"]
+        ),
+        (&json!("spec-one"), &json!(true))
+    );
+    // A child that is not made is in the answer, and the command says so by how it ends.
+    let (code, gone, _) = fork_tool(&["Gone", "--task", "x", "--cwd", "nowhere", "--from", &maker]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        gone["children"],
+        json!([{ "name": "Gone", "error": "cwd_missing",
+                 "message": format!("No such directory: {nowhere}") }])
+    );
+    // What it cannot ask is said in the Python tool's words.
+    let said_of = |args: &[&str]| {
+        let (code, _, err) = fork_tool(args);
+        (code, err)
+    };
+    let refused = |why: &str| (1, why.to_string());
+    assert_eq!(
+        said_of(&["x", "--task", "t"]),
+        refused("agent fork needs --from SESSION or $CLARP_SESSION")
+    );
+    assert_eq!(
+        said_of(&["x", "--from", &maker]),
+        refused("agent fork needs --task TEXT, --task-file FILE or --spec FILE")
+    );
+    assert_eq!(
+        said_of(&["--task", "t", "--from", &maker]),
+        refused("agent fork needs a NAME (or --spec FILE)")
+    );
+    assert_eq!(
+        said_of(&[
+            "x",
+            "--task",
+            "t",
+            "--worktree",
+            "nobranch",
+            "--from",
+            &maker
+        ]),
+        refused("--worktree must be REPO:BRANCH")
+    );
+    std::fs::write(place.root.join("empty.json"), "[]").unwrap();
+    assert_eq!(
+        said_of(&["--spec", "empty.json", "--from", &maker]),
+        refused("--spec must hold a JSON list of {name, task, ...} children")
+    );
+    assert_eq!(
+        said_of(&["x", "--task", "t", "--from", "nobody"]),
+        refused(
+            "clarp-admin: HTTP 404: {\"error\": \"agent_not_found\", \"message\": \"No live agent: nobody\"}"
+        )
+    );
+    assert_eq!(
+        said_of(&["x", "--task", "t", "--count", "many", "--from", &maker]).0,
+        2
+    );
+    assert_eq!(agents(), before + 5);
 }
 
 /// Writes a program a test runs in place of a real one.

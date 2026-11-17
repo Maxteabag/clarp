@@ -2071,4 +2071,82 @@ SCENARIOS.append({
     ],
 })
 
+
+# A child a fork asks for, and the child it makes. Its session name is the Host's to choose: the
+# suite names it where a Host says it (`<forked:1>`).
+CHILD = {'name': 'Fork One', 'task': 'synthetic task one'}
+FORKED = '<forked:1>'
+
+
+def fork(body, name, session=AGENT):
+    return post(f'/agents/{session}/fork', body, name)
+
+
+def fork_raw(text, name):
+    """A fork whose body is sent as it is written here."""
+    return {'op': 'post', 'path': f'/agents/{AGENT}/fork', 'name': name,
+            'raw': {'bytes': text, 'content_type': 'application/json'}}
+
+
+SCENARIOS.append({
+    'id': 'agent-forks',
+    'what': 'an agent forks itself into helpers that start from its conversation and each get a task: what a '
+            'request that asks wrongly is told and that it makes nothing, a child that cannot be made told in its '
+            'own row beside its siblings, and a child that is made: a helper of the agent that forked, at work',
+    'sessions': (AGENT, FORKED),
+    'steps': [
+        send('synthetic greeting alpha', 'alpha'),
+        {'op': 'wait_reply', 'after': 'u-alpha'},
+        {'op': 'quiesce'},
+        LOG,
+        # What asks wrongly is refused whole, in a word for the reason and in words.
+        fork({}, 'a fork that asks for nothing'),
+        fork_raw('', 'a fork without a body'),
+        fork_raw('[1]', 'a fork whose body is a list'),
+        fork_raw('{not json', 'a fork whose body is no JSON'),
+        fork({'children': 'two'}, 'children that are no list'),
+        fork({'children': []}, 'no children'),
+        fork({'children': ['one']}, 'a child that is no object'),
+        fork({'children': [{'name': 'Fork One'}]}, 'a child without a task'),
+        fork({'children': [{'task': 'synthetic task one'}]}, 'a child without a name'),
+        fork({'children': [{'name': 'x' * 65, 'task': 'synthetic task one'}]}, 'a child whose name is too long'),
+        fork({'children': [CHILD, {**CHILD, 'name': ' FORK ONE '}]}, 'two children of one name'),
+        fork({'children': [{'name': f'Fork {number}', 'task': 'synthetic task'} for number in range(17)]},
+             'more children than a fork may make'),
+        fork({'count': 17, 'task': 'synthetic task one'}, 'more of one task than a fork may make'),
+        fork({'count': 'several', 'task': 'synthetic task one'}, 'a count that is no number'),
+        fork({'count': 2}, 'so many of no task'),
+        fork({'count': 0, 'task': 'synthetic task one'}, 'none of a task'),
+        fork({'children': [{**CHILD, 'worktree': 'repo:branch'}]}, 'a worktree that is no object'),
+        fork({'children': [{**CHILD, 'worktree': {'branch': 'synthetic'}}]}, 'a worktree without a repository'),
+        fork({'children': [{**CHILD, 'worktree': {'repo': '{workspace}'}}]}, 'a worktree without a branch'),
+        fork({'children': [CHILD, {**CHILD, 'name': 'Fork Two', 'backend': 'abacus'}]},
+             'a child on a tool no Host has'),
+        fork({'children': [CHILD]}, 'a fork of an agent that is not there', session='nobody-there'),
+        fork({}, 'a fork that asks wrongly of an agent that is not there', session='nobody-there'),
+        {**SNAPSHOT, 'name': 'the snapshot when nothing was made'},
+        # A child that cannot be made is told in its own row, and its sibling beside it too: where one is to
+        # work is no directory, and what the other is to have a worktree of is no repository.
+        fork({'children': [{**CHILD, 'cwd': '{workspace}/nowhere'},
+                           {**CHILD, 'name': 'Fork Two',
+                            'worktree': {'repo': '{workspace}/no-repository', 'branch': 'synthetic'}}]},
+             'children that cannot be made'),
+        {**SNAPSHOT, 'name': 'the snapshot when no child could be made'},
+        # A child that is made: a helper of the agent that forked, with its task delivered.
+        {**fork({'children': [CHILD]}, 'a fork of one child'), 'save': {'forked': 'children.0.session'}},
+        {'op': 'quiesce', 'session': '{forked}'},
+        {'op': 'quiesce'},
+        get('/agent-helper-state?session={forked}', 'who made the child and how its work stands'),
+        get(f'/agent-helper-state?session={AGENT}', 'the same of the agent that forked'),
+        {**LOG, 'name': 'the conversation of the agent that forked'},
+        # An agent that has said nothing yet has nothing a child could start from: one on the tool of the
+        # scenarios, and one on another.
+        post('/agents', {**MAKE_HELPER, 'name': 'Quiet One', 'session': 'quiet-one'}, 'an agent that says nothing'),
+        fork({'children': [{**CHILD, 'name': 'Fork Three'}]}, 'a fork of an agent that has said nothing',
+             session='quiet-one'),
+        fork({'children': [{**CHILD, 'name': 'Fork Four'}]}, 'a fork of an agent on another tool that has said nothing',
+             session='rachel'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

@@ -1818,7 +1818,7 @@ impl Worker {
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|waiting| !was_waiting.contains(&waiting.turn))
-                .map(|waiting| waiting.client_id)
+                .map(|waiting| waiting.told_id)
                 .collect()
         } else {
             Vec::new()
