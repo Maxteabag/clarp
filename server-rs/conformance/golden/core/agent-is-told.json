@@ -1157,7 +1157,7 @@
       "id": "<row:6>",
       "kind": null,
       "origin": "user",
-      "phase": "final",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
@@ -1508,7 +1508,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "Claude replay reply: [qa-who] synthetic told golf | I was told who I am: You ar\u2026",
+      "last_completed_message": "You: [qa-who] synthetic told golf",
       "last_message": "Claude replay reply: [qa-who] synthetic told golf | I was told who I am: You ar\u2026",
       "last_message_id": "<row:6>",
       "last_turn_end": "<time>",
@@ -3098,21 +3098,6 @@
   {
    "data": {
     "agent_id": "<id:13>",
-    "client_msg_id": "whoalfa",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:13>",
     "detail": {
      "backend_session_id": "<id:12>",
      "dispatch": "claude",
@@ -3153,6 +3138,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:13>",
+    "client_msg_id": "whoalfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {

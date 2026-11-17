@@ -4206,6 +4206,31 @@
   {
    "data": {
     "agent_id": "<id:1>",
+    "event_id": "<eid:transcript-updated#1@e2940b>",
+    "session": "nova",
+    "type": "transcript-updated"
+   },
+   "event": null,
+   "id": "<eid:transcript-updated#1@e2940b>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "client_msg_id": "routealfa",
+    "event_id": "<eid:agent-state#1@cfc612>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "nova",
+    "trace_id": "<id:3>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@cfc612>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
     "detail": {
      "session": "nova"
     },
@@ -4242,46 +4267,6 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@95ff8e>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "event_id": "<eid:transcript-updated#1@e2940b>",
-    "session": "nova",
-    "type": "transcript-updated"
-   },
-   "event": null,
-   "id": "<eid:transcript-updated#1@e2940b>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:1>",
-    "client_msg_id": "routealfa",
-    "event_id": "<eid:agent-state#1@cfc612>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "nova",
-    "trace_id": "<id:3>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@cfc612>"
-  },
-  {
-   "data": {
-    "action": "route",
-    "confidence": 0.95,
-    "decision_id": 1,
-    "event_id": "<eid:orchestrator-decision#1@781105>",
-    "kind": "agent_message",
-    "reason": "synthetic: the message says whom it is for",
-    "target_session": "nova",
-    "trace_id": "<id:3>",
-    "type": "orchestrator-decision"
-   },
-   "event": null,
-   "id": "<eid:orchestrator-decision#1@781105>"
   },
   {
    "data": {
@@ -4326,6 +4311,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#4@95ff8e>"
+  },
+  {
+   "data": {
+    "action": "route",
+    "confidence": 0.95,
+    "decision_id": 1,
+    "event_id": "<eid:orchestrator-decision#1@781105>",
+    "kind": "agent_message",
+    "reason": "synthetic: the message says whom it is for",
+    "target_session": "nova",
+    "trace_id": "<id:3>",
+    "type": "orchestrator-decision"
+   },
+   "event": null,
+   "id": "<eid:orchestrator-decision#1@781105>"
   },
   {
    "data": {

@@ -847,7 +847,7 @@
     "file": "<id:10>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 25,
+    "latest_revision": 30,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -1016,7 +1016,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 25,
+      "revision": 30,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1060,7 +1060,7 @@
     "file": "<id:15>.jsonl",
     "has_more": false,
     "includes_automated": true,
-    "latest_revision": 35,
+    "latest_revision": 34,
     "latest_ts": "<time>",
     "missing": false,
     "replace_required": false,
@@ -1146,7 +1146,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 26,
+      "revision": 25,
       "role": "user",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1168,7 +1168,7 @@
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 30,
+      "revision": 29,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1225,11 +1225,11 @@
       "id": "live-<id:18>",
       "kind": null,
       "origin": "user",
-      "phase": "final",
+      "phase": null,
       "reply_to_agent_id": "",
       "reply_to_name": "",
       "reply_to_session": "",
-      "revision": 35,
+      "revision": 34,
       "role": "assistant",
       "sender_agent_id": "",
       "sender_name": "",
@@ -1487,7 +1487,7 @@
       "effort": "",
       "focused": false,
       "goal": null,
-      "head_revision": 25,
+      "head_revision": 30,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -1581,7 +1581,7 @@
       "effort": "",
       "focused": true,
       "goal": null,
-      "head_revision": 35,
+      "head_revision": 34,
       "heartbeat_enabled": false,
       "helper_state": null,
       "interaction_capabilities": {
@@ -1592,7 +1592,7 @@
       },
       "is_janitor": false,
       "last_activity": "<time>",
-      "last_completed_message": "Claude replay reply: [qa-who] synthetic told golf | I was told who I am: You ar\u2026",
+      "last_completed_message": "You: [qa-who] synthetic told golf",
       "last_message": "Claude replay reply: [qa-who] synthetic told golf | I was told who I am: You ar\u2026",
       "last_message_id": "live-<id:18>",
       "last_turn_end": "<time>",
@@ -3197,21 +3197,6 @@
   {
    "data": {
     "agent_id": "<id:21>",
-    "client_msg_id": "whoalfa",
-    "event_id": "<eid:agent-state#1@91d46a>",
-    "kind": "thinking",
-    "queue_remaining": 0,
-    "queue_started": false,
-    "session": "claire",
-    "trace_id": "<id:1>",
-    "type": "agent-state"
-   },
-   "event": null,
-   "id": "<eid:agent-state#1@91d46a>"
-  },
-  {
-   "data": {
-    "agent_id": "<id:21>",
     "detail": {
      "backend_session_id": "<id:19>",
      "dispatch": "claude",
@@ -3252,6 +3237,21 @@
    },
    "event": null,
    "id": "<eid:agent-activity#2@0952e1>"
+  },
+  {
+   "data": {
+    "agent_id": "<id:21>",
+    "client_msg_id": "whoalfa",
+    "event_id": "<eid:agent-state#1@91d46a>",
+    "kind": "thinking",
+    "queue_remaining": 0,
+    "queue_started": false,
+    "session": "claire",
+    "trace_id": "<id:1>",
+    "type": "agent-state"
+   },
+   "event": null,
+   "id": "<eid:agent-state#1@91d46a>"
   },
   {
    "data": {
