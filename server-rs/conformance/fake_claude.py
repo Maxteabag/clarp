@@ -37,6 +37,18 @@ no part of it. Markers in the prompt:
   block is said whole once before it ends. It thinks, says what it will do, reads a file,
   edits it, and answers.
 
+Started for one question outside every conversation (``--no-session-persistence``), it is the
+model a Host's router of spoken messages asks whom a message is for. The Python Host gives the
+question as the last argument of the command line, the Rust Host on standard input; the answer
+is the same for both, and is what the message itself asks for, in marks:
+
+- ``[qa-route:SESSION]``: the message is for that agent, surely;
+- ``[qa-unsure:SESSION]``: for that agent, and not surely enough to give it;
+- ``[qa-yes:SESSION]``: for that agent, and it is the newest of the messages that are held;
+- ``[qa-status:SESSION]``: a question about that agent, with the words to answer it in;
+- ``[qa-router-fails]``: the tool ends badly;
+- anything else: nothing that is meant for anybody.
+
 Every process appends its lifecycle to ``$CLARP_QA_PROVIDER_ROOT/claude-procs.jsonl``.
 """
 from __future__ import annotations
@@ -252,8 +264,55 @@ def out_of_usage(path: Path | None, session: str, asked: str) -> int:
     return 1
 
 
+ROUTER_ASKS = 'You are the low-latency hands-free routing orchestrator'
+
+
+def one_question(args: list[str]) -> int:
+    """The router's model: one question, one answer in JSON, by the marks in the message."""
+    by_argument = bool(args) and args[-1].startswith(ROUTER_ASKS)
+    question = args[-1] if by_argument else sys.stdin.read()
+    try:
+        packet = json.loads(question.split('INPUT:\n', 1)[1])
+    except (IndexError, ValueError):
+        sys.stderr.write('Error: the synthetic model was asked nothing it can read\n')
+        log('exit', how='no question')
+        return 1
+    said = str(packet.get('utterance') or '')
+    log('question', scope=packet.get('context_scope'), agents=len(packet.get('agents') or []))
+
+    def mark(name: str) -> str | None:
+        found = re.search(r'\[qa-' + name + r':([A-Za-z0-9_.-]+)\]', said)
+        return found.group(1) if found else None
+
+    if '[qa-router-fails]' in said:
+        sys.stderr.write('Error: the synthetic model is not signed in\n')
+        log('exit', how='router fails')
+        return 1
+    held = packet.get('pending') or []
+    if mark('route'):
+        answer = {'kind': 'agent_message', 'target_session': mark('route'), 'confidence': 0.95, 'addressing': True,
+                  'reason': 'synthetic: the message says whom it is for'}
+    elif mark('unsure'):
+        answer = {'kind': 'agent_message', 'target_session': mark('unsure'), 'confidence': 0.6, 'addressing': True,
+                  'reason': 'synthetic: not sure enough'}
+    elif mark('yes'):
+        answer = {'kind': 'agent_message', 'target_session': mark('yes'), 'confidence': 0.95, 'addressing': True,
+                  'pending_id': held[0]['pending_id'] if held else '', 'reason': 'synthetic: the answer to what was asked'}
+    elif mark('status'):
+        answer = {'kind': 'status_query', 'target_session': mark('status'), 'confidence': 0.9,
+                  'status_text': 'Synthetic words about an agent.', 'reason': 'synthetic: a question about an agent'}
+    else:
+        answer = {'kind': 'ignored', 'confidence': 0.99, 'reason': 'synthetic: meant for nobody'}
+    sys.stdout.write(json.dumps(answer) + '\n')
+    sys.stdout.flush()
+    log('exit', how='answered a question')
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
+    if '--no-session-persistence' in args:
+        return one_question(args)
     session = (args[args.index('--resume') + 1] if '--resume' in args
                else args[args.index('--session-id') + 1] if '--session-id' in args
                else str(uuid.uuid4()))
