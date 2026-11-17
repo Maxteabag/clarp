@@ -211,6 +211,63 @@ pub fn unheaded(prompt: &str) -> &str {
     }
 }
 
+/// The marks around the Host's own record of a conversation its tool has let go of, as it
+/// is put before a turn's message (the Python Host's `RESTORED_CONTEXT_OPEN` and `_CLOSE`):
+/// what stands between them is no part of what the user said.
+pub const RESTORED_OPEN: &str = "--- Clarp restored conversation ---";
+pub const RESTORED_CLOSE: &str = "--- End Clarp restored conversation ---";
+/// How much of the record is carried over, in bytes (it travels on a command line), and
+/// how much of one thing that was said, in signs.
+pub const RESTORED_MOST: usize = 60_000;
+pub const RESTORED_OF_ONE: usize = 4_000;
+
+/// A turn's message with the most recent part of its conversation before it, as the Host
+/// recorded it: for a tool that no longer has the conversation and continues it in a new
+/// one. `said`: what was said, the oldest first, each with whether the user said it. Of
+/// one thing that was said both ends are kept, since how a long answer ends matters most;
+/// of all of it, what is most recent. Where nothing was said, the message is itself. As
+/// the Python Host does it (`backend/agy.py`, `_restore_prompt`), with the tool by its name.
+pub fn restored(tool: &str, said: &[(bool, &str)], message: &str) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    for (by_user, text) in said {
+        let shown = clarp_speech::markup::clean_for_display(text, false);
+        let body = crate::python::strip(&shown);
+        if body.is_empty() {
+            continue;
+        }
+        let signs = body.chars().count();
+        let who = if *by_user { "User" } else { "Assistant" };
+        if signs > RESTORED_OF_ONE {
+            let half = RESTORED_OF_ONE / 2;
+            let begins: String = body.chars().take(half).collect();
+            let ends: String = body.chars().skip(signs - half).collect();
+            blocks.push(format!("{who}: {begins}\n[\u{2026}]\n{ends}"));
+        } else {
+            blocks.push(format!("{who}: {body}"));
+        }
+    }
+    let mut kept: Vec<&str> = Vec::new();
+    let mut size = 0;
+    for block in blocks.iter().rev() {
+        let cost = block.len() + 2;
+        if size + cost > RESTORED_MOST {
+            break;
+        }
+        kept.push(block);
+        size += cost;
+    }
+    if kept.is_empty() {
+        return message.to_string();
+    }
+    kept.reverse();
+    format!(
+        "{RESTORED_OPEN}\n[{tool} no longer has this conversation (it prunes old ones), so it \
+         continues in a new one. Below is Clarp's record of it, most recent last; carry on from \
+         it. The new message follows the record.]\n\n{}\n{RESTORED_CLOSE}\n\n{message}",
+        kept.join("\n\n")
+    )
+}
+
 /// What a Host knows of an agent that its tool is told.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Told {
@@ -392,6 +449,91 @@ impl Humanness {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conversation_its_tool_let_go_of_is_told_again_before_the_message() {
+        // Nothing was said, or nothing that is anything: the message is itself.
+        assert_eq!(restored("Antigravity", &[], "Go on"), "Go on");
+        assert_eq!(
+            restored("Antigravity", &[(true, "   "), (false, "\n")], "Go on"),
+            "Go on"
+        );
+        // What was said, the oldest first, each by who said it, between the marks; then the
+        // message. What is for the ear only is told as it is shown.
+        let said = [
+            (true, "The word is heron."),
+            (false, "<speak>Kept.</speak>"),
+            (true, "  "),
+            (true, "And the bird is grey."),
+        ];
+        let told = restored("Antigravity", &said, "What was the word?");
+        let kept = clarp_speech::markup::clean_for_display("<speak>Kept.</speak>", false);
+        assert!(!kept.contains('<'), "{kept}");
+        assert_eq!(
+            told,
+            format!(
+                "--- Clarp restored conversation ---\n[Antigravity no longer has this \
+                 conversation (it prunes old ones), so it continues in a new one. Below is \
+                 Clarp's record of it, most recent last; carry on from it. The new message \
+                 follows the record.]\n\nUser: The word is heron.\n\nAssistant: {kept}\n\n\
+                 User: And the bird is grey.\n--- End Clarp restored conversation ---\n\n\
+                 What was the word?"
+            )
+        );
+        // Of one long thing both ends are kept, and what was between them is marked.
+        let long = format!(
+            "{}{}{}",
+            "a".repeat(3_000),
+            "m".repeat(3_000),
+            "z".repeat(3_000)
+        );
+        let told = restored("Antigravity", &[(false, &long)], "Go on");
+        let ends = format!(
+            "Assistant: {}\n[\u{2026}]\n{}\n{RESTORED_CLOSE}",
+            "a".repeat(2_000),
+            "z".repeat(2_000)
+        );
+        assert!(told.contains(&ends));
+        assert!(!told.contains("mm"));
+        // More than a command line carries: the most recent is kept, in whole things only.
+        // Twenty of 3,993 signs each, 60,000 bytes in all: the newest fourteen (worked out
+        // with the Python Host's own loop).
+        let many: Vec<(bool, String)> = (0..20)
+            .map(|n| (n % 2 == 0, format!("{n:02} {}", "x".repeat(3_990))))
+            .collect();
+        let many: Vec<(bool, &str)> = many
+            .iter()
+            .map(|(by_user, text)| (*by_user, text.as_str()))
+            .collect();
+        let told = restored("Antigravity", &many, "Go on");
+        assert_eq!(
+            told.matches("\n\nUser: ").count() + told.matches("\n\nAssistant: ").count(),
+            14
+        );
+        assert!(told.contains("]\n\nUser: 06 x"), "the oldest that is kept");
+        assert!(!told.contains("Assistant: 05 "));
+        assert!(told.contains("Assistant: 19 x"));
+        assert!(told.ends_with(&format!("x\n{RESTORED_CLOSE}\n\nGo on")));
+        // It is bytes that are counted, not signs: of the same twenty in signs of two bytes
+        // each, the newest seven.
+        let many: Vec<(bool, String)> = (0..20)
+            .map(|n| (n % 2 == 0, format!("{n:02} {}", "\u{e9}".repeat(3_990))))
+            .collect();
+        let many: Vec<(bool, &str)> = many
+            .iter()
+            .map(|(by_user, text)| (*by_user, text.as_str()))
+            .collect();
+        let told = restored("Antigravity", &many, "Go on");
+        assert_eq!(
+            told.matches("\n\nUser: ").count() + told.matches("\n\nAssistant: ").count(),
+            7
+        );
+        assert!(
+            told.contains("]\n\nAssistant: 13 \u{e9}"),
+            "the oldest that is kept"
+        );
+        assert!(!told.contains("User: 12 "));
+    }
 
     #[test]
     fn the_texts_are_there() {

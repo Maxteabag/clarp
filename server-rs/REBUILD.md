@@ -968,6 +968,19 @@ counted), and the one the Goal keeper's job recommends. `clarp-backend` `agy.rs`
 - *In the Host*: listed for the picker, the usage screen and the router; the Goal keeper of a new Host is
   installed on it, as on the Python Host (one installed before keeps Codex until it is set otherwise);
   the installer pins its program beside the other two (`--agy`).
+- *A conversation it let go of.* Antigravity keeps the newest few hundred conversations, each in a file
+  of its name, and begins an empty one without a word when it is given the name of one it has no more.
+  A backend says whether its tool still has a conversation (`Backend::keeps`; for Antigravity that file
+  under its user's home, and where there is no store at all nothing is known and it counts as kept).
+  Before a turn the actor asks; where the conversation is gone the turn names none, and its message is
+  preceded by the Host's own record of what was said, between two marks (`told::restored`: the most
+  recent 60,000 bytes, of one thing 4,000 signs with both its ends kept, as the Python Host's
+  `_restore_prompt`). When the tool then names its new conversation, the agent's goals follow it
+  (`GoalBook::carried`, the Python Host's `carry_native_session`, held by the goal tool's vectors: a
+  goal that waits, one that is cancelled, a plan without a goal, a conversation no goal is bound to,
+  carried twice), each one revision on with a `rebind` in its history, and a wake that is out for the
+  plan as it stood stays the plan's. The conversation the user reads is the one it was: the record is
+  told to the tool and written nowhere.
 
 Held by the Python Host's three recordings of agy 1.1.21 and 1.2.16, by one of 1.5.10 made for this
 (below), by nine recorded answers of `agy models` and six stories of the tool on a machine from that
@@ -978,9 +991,12 @@ any Host and on its cheapest model, in a home made for it: one question to read 
 object with `status` and `response`, held to the schema it was given; 9,661 tokens went in for a
 question of nine words, which is what such a question costs) and one turn with a command (the stream has
 the shape of the older recordings; what a command gave back now comes with when it ran and how it ended
-written around it, which is read off). Not there yet: the conversations Antigravity kept (listed, taken
-up), a conversation it let go of continued from the Host's own record, and making a conversation shorter.
-No agent has run on it through an installed Host yet.
+written around it, which is read off). The conversation it let go of is held through the Host with a
+stand-in that keeps its conversations as the tool does: a turn in a conversation it has, the file taken
+away, the next turn without a name and with the record before its message, the goal bound to the new
+conversation, the turn after that by the new name, and the same after the Host was killed. Not there
+yet: the conversations Antigravity kept (listed, taken up), and making a conversation shorter. No agent
+has run on it through an installed Host yet.
 
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:

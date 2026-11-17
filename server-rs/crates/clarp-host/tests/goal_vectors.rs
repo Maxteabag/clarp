@@ -12,7 +12,7 @@
 use clarp_host::goaltool::{self, About};
 use clarp_host::tools::NOT_HERE;
 use clarp_kernel::goals::{GoalBook, Owner, World};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// Where two values differ, as paths into them.
 fn differences(path: &str, ours: &Value, theirs: &Value, found: &mut Vec<String>) {
@@ -58,6 +58,11 @@ fn same_message(ours: &str, theirs: &str) -> bool {
         })
 }
 
+/// The carrying of goals to a new conversation in the vectors, counted by the script that
+/// wrote them: how often the Host carried one over, how many plans followed, and how many
+/// steps were taken under a bound conversation.
+const CARRIED: (usize, usize, usize) = (4, 3, 17);
+
 /// What the tool printed, as the vectors keep it: the JSON it is, or nothing.
 fn printed(stdout: &str) -> Value {
     match stdout.trim() {
@@ -73,6 +78,7 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
     let mut prompts = 0;
     let mut users = 0;
     let mut keeper = 0;
+    let (mut carries, mut carried, mut bound) = (0, 0, 0);
     let mut wrong: Vec<String> = Vec::new();
     for scenario in vectors["scenarios"].as_array().unwrap() {
         let name = scenario["name"].as_str().unwrap();
@@ -97,6 +103,33 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
             let at = step["at"].as_i64().unwrap();
             let verb = argv.first().map_or("", String::as_str);
             let context = format!("{name}, step {number} ({verb})");
+            // The owner's conversation with its tool, as it was bound at this step.
+            let native = step["native"].as_str().unwrap_or("");
+            bound += usize::from(!native.is_empty());
+            // The Host continued the owner's conversation in a new one: no command of the
+            // tool either. Written down as [carry, from, to, reason], with the plans that
+            // moved.
+            if step["by"] == "host" {
+                let moved = book.carried(&argv[1], &argv[2], &argv[3], at);
+                let ids: Vec<&str> = moved
+                    .iter()
+                    .map(|change| change.plan.plan_id.as_str())
+                    .collect();
+                assert_eq!(
+                    json!(ids),
+                    step["stdout"],
+                    "{context}: the plans that moved"
+                );
+                for change in &moved {
+                    let record = book.record(change, at);
+                    let kept: clarp_kernel::goals::GoalRecord =
+                        serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+                    book.apply(&kept);
+                }
+                carries += 1;
+                carried += moved.len();
+                continue;
+            }
             // What the Goal keeper writes beside the owner's record is no command of the tool:
             // it is written down as [updater, plan, what was asked], with the plan as it is
             // read afterwards.
@@ -190,7 +223,7 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
                     if ours {
                         let mut world = World {
                             now_ms: at,
-                            native_session: "",
+                            native_session: native,
                             queue_revision: 0,
                             token_hex: &mut ids,
                             has_job: &|_, _| false,
@@ -290,4 +323,7 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
         keeper, 17,
         "what the Goal keeper wrote, and what it was refused"
     );
+    // Counted by the script that wrote the vectors: the times the Host carried a
+    // conversation over, the plans that followed, and the steps under a bound conversation.
+    assert_eq!((carries, carried, bound), CARRIED);
 }

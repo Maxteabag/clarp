@@ -1317,6 +1317,55 @@ impl GoalBook {
         ))
     }
 
+    /// The Host continued the owner's conversation with its tool in a new one: the tool let
+    /// go of the old, and the new one opens with the Host's own record of it. A goal is
+    /// bound to its owner's conversation and stops when that changes, since a silent change
+    /// means the agent lost what it knew; here the Host carried the conversation over, so
+    /// every goal that is bound to the old one and is not over follows it, one revision on,
+    /// and a wake that is out for the plan as it stood is the plan's still. Answers the
+    /// plans that moved, each as it now stands, in the order they were made. The rule is
+    /// the Python Host's (`task_plans.carry_native_session`), held by the goal tool's
+    /// vectors.
+    pub fn carried(&self, from: &str, to: &str, reason: &str, now: i64) -> Vec<Change> {
+        if from.is_empty() || to.is_empty() {
+            return Vec::new();
+        }
+        let mut open: Vec<&Plan> = self.plans.values().collect();
+        open.sort_by_key(|plan| plan.order);
+        let mut moved = Vec::new();
+        for plan in open {
+            let over = matches!(
+                plan.status.as_str(),
+                "completed" | "cancelled" | "superseded"
+            );
+            let bound = |goal: &&Goal| goal.fields.get("native_session_id") == Some(&json!(from));
+            let Some(goal) = plan.goal.as_ref().filter(|_| !over).filter(bound) else {
+                continue;
+            };
+            let (mut plan, mut goal) = (plan.clone(), goal.clone());
+            goal.fields
+                .insert("native_session_id".to_string(), json!(to));
+            let next = plan.revision + 1;
+            let waited_for = goal.continuation.get("plan_revision");
+            if waited_for.and_then(Value::as_i64) == Some(plan.revision) {
+                goal.continuation
+                    .insert("plan_revision".to_string(), json!(next));
+            }
+            let detail = json!({
+                "reason": reason, "from_native_session_id": from, "native_session_id": to,
+            });
+            remember(&mut plan, &mut goal, "rebind", next, detail, now);
+            plan.revision = next;
+            plan.updated_at = now;
+            plan.goal = Some(goal);
+            moved.push(Change {
+                plan,
+                documents: Vec::new(),
+            });
+        }
+        moved
+    }
+
     /// Ends a plan: completed, blocked or cancelled.
     pub fn finish(
         &self,
@@ -2067,6 +2116,80 @@ mod tests {
             .unwrap();
         keep(book, &change, 1_000);
         change.plan.plan_id
+    }
+
+    #[test]
+    fn a_goal_follows_the_conversation_its_host_carried_over() {
+        let mut ids = counter();
+        let mut book = GoalBook::new();
+        let goal = json!({ "outcome": "It is done", "criteria": ["It runs"], "limits": "None" });
+        let items = json!([{ "id": "one", "title": "The first step" }]);
+        // Two goals made in the agent's conversation "old", and one made in another.
+        let mut made = |book: &mut GoalBook, name: &str, native: &str, at: i64| {
+            let mut seen = World {
+                native_session: native,
+                ..world(at, &mut ids)
+            };
+            let change = book
+                .create(VERA, name, "Ship it", &items, Some(&goal), &mut seen)
+                .unwrap();
+            keep(book, &change, at);
+            change.plan.plan_id
+        };
+        let first = made(&mut book, "ship", "old", 1_000);
+        let second = made(&mut book, "mend", "old", 1_001);
+        let other = made(&mut book, "else", "another", 1_002);
+        let bound = |book: &GoalBook, id: &str| {
+            let goal = book.plan(id).unwrap().goal.clone().unwrap();
+            goal.fields.get("native_session_id").cloned()
+        };
+        assert_eq!(bound(&book, &first), Some(json!("old")));
+        // A wake is out for the first as it stands, and one for the second as it stood before.
+        let revision = book.plan(&first).unwrap().revision;
+        for (id, waits_for) in [(&first, revision), (&second, revision - 1)] {
+            let plan = book.plans.get_mut(id.as_str()).unwrap();
+            let goal = plan.goal.as_mut().unwrap();
+            goal.continuation
+                .insert("plan_revision".to_string(), json!(waits_for));
+        }
+        // Nothing to carry from, nothing to carry to, a conversation no goal is bound to:
+        // nothing moves.
+        assert!(book.carried("", "new", "why", 2_000).is_empty());
+        assert!(book.carried("old", "", "why", 2_000).is_empty());
+        assert!(book.carried("gone", "new", "why", 2_000).is_empty());
+        let moved = book.carried("old", "new", "The tool let go of it", 2_000);
+        let which: Vec<&str> = moved
+            .iter()
+            .map(|change| change.plan.plan_id.as_str())
+            .collect();
+        assert_eq!(which, [first.as_str(), second.as_str()]);
+        // What is written down of it is read back as the same plans.
+        for change in &moved {
+            keep(&mut book, change, 2_000);
+        }
+        let plan = book.plan(&first).unwrap();
+        let goal = plan.goal.as_ref().unwrap();
+        assert_eq!((plan.revision, plan.updated_at), (revision + 1, 2_000));
+        assert_eq!(goal.fields["native_session_id"], "new");
+        // The wake that was out for the plan as it stood is the plan's still.
+        assert_eq!(goal.continuation["plan_revision"], revision + 1);
+        assert_eq!(
+            goal.history.last().unwrap(),
+            &json!({
+                "at": 2_000, "kind": "rebind", "revision": revision + 1,
+                "detail": {
+                    "reason": "The tool let go of it",
+                    "from_native_session_id": "old", "native_session_id": "new",
+                },
+            })
+        );
+        // One that was out for an earlier revision is as stale as it was.
+        let goal = book.plan(&second).unwrap().goal.as_ref().unwrap();
+        assert_eq!(goal.continuation["plan_revision"], revision - 1);
+        assert_eq!(goal.fields["native_session_id"], "new");
+        // A goal of another conversation stays where it is, and nothing follows twice.
+        assert_eq!(bound(&book, &other), Some(json!("another")));
+        assert!(book.carried("old", "new", "why", 3_000).is_empty());
     }
 
     #[test]

@@ -19699,7 +19699,12 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
         started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
     );
     program(&agy, &script);
-    let world = [("CLARP_AGY_PROGRAM", agy.to_str().unwrap())];
+    // The Host's user has a home of their own, in which Antigravity keeps no conversations:
+    // nothing is known of what it has let go of.
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
     let host = place.start_in("", &[], &world);
     let made = host.post("/agents", json!({ "name": "Gemma", "backend": "agy" }));
     let agent = made["session"].as_str().unwrap().to_string();
@@ -19863,4 +19868,208 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     );
     assert_eq!(starts().len(), begun);
     assert!(!host.turns(&agent).iter().any(|row| row["id"] == "u-4"));
+}
+
+#[test]
+fn a_conversation_antigravity_let_go_of_is_continued_in_a_new_one() {
+    let place = Place::new("agy-lost");
+    let (agy, started) = (place.root.join("agy-forgets"), place.root.join("started"));
+    let begun = place.root.join("begun");
+    let store = place.root.join(".gemini/antigravity-cli/conversations");
+    std::fs::create_dir_all(&store).unwrap();
+    // A stand-in for Antigravity that keeps its conversations as the tool does: each in a
+    // file of its name under its user's home. One it is not given, it begins, under the
+    // next name of its own. It writes down how it was started, and answers by the count.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
+store = os.path.join(os.environ["HOME"], ".gemini", "antigravity-cli", "conversations")
+given = args[args.index("--conversation") + 1] if "--conversation" in args else None
+if given is None:
+    with open({begun}, "a") as out:
+        out.write("x")
+    conversation = "conv-%d" % os.path.getsize({begun})
+else:
+    conversation = given
+open(os.path.join(store, conversation + ".db"), "a").close()
+with open({started}, "a") as out:
+    out.write(json.dumps({{"given": given, "prompt": prompt}}) + "\n")
+with open({started}) as seen:
+    count = len(seen.readlines())
+def say(event, **body):
+    print(json.dumps({{"event": event, **body}}), flush=True)
+def step(index, state, kind, **more):
+    update = {{"conversation_id": conversation, "step_index": index, "state": state, "step_type": kind, **more}}
+    say("step_update", step_update=update)
+usage = {{"input_tokens": 10, "output_tokens": 2, "thinking_tokens": 0}}
+say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []}})
+step(0, "DONE", "user_input")
+answer = "Answer %d." % count
+step(1, "DONE", "agent_response", text_delta=answer, usage=usage)
+say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": answer, "usage": usage}})
+"#,
+        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
+        begun = serde_json::to_string(begun.to_str().unwrap()).unwrap(),
+    );
+    program(&agy, &script);
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Gemma", "backend": "agy" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let over = |host: &Host, id: &str| {
+        let turns = host.turns(&agent);
+        let asked = turns.iter().position(|row| row["id"] == id);
+        asked.is_some_and(|at| turns[at..].iter().any(|row| row["turn"].is_object()))
+    };
+    let starts = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&started).unwrap_or_default();
+        let lines = written.lines();
+        lines
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let bound = |host: &Host| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["session"] == agent.as_str());
+        row.unwrap()["backend_session_id"].clone()
+    };
+    const MARK: &str = "--- Clarp restored conversation ---";
+
+    // A first turn begins a conversation, which Antigravity keeps.
+    host.send(&agent, "The word is heron.", "u-1");
+    wait_for("the first turn to be over", || over(&host, "u-1"));
+    assert_eq!(starts()[0]["given"], Value::Null);
+    assert_eq!(bound(&host), "conv-1");
+    assert!(store.join("conv-1.db").exists());
+    // A goal of the agent is bound to that conversation.
+    let dir = place.root.clone();
+    let items = json!([{ "id": "probe", "title": "Probe the behaviour" }]).to_string();
+    let commitment =
+        json!({ "outcome": "It is shipped", "criteria": ["It runs"], "limits": "None" })
+            .to_string();
+    let plan = goal(
+        &host,
+        &dir,
+        &[
+            "create",
+            &agent,
+            "ship",
+            "Ship the thing",
+            &items,
+            &commitment,
+        ],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
+    assert_eq!(plan["goal"]["native_session_id"], "conv-1", "{plan}");
+    let (revision, status) = (plan["revision"].as_i64().unwrap(), plan["status"].clone());
+
+    // While Antigravity has the conversation, a turn continues it by its name, and nothing
+    // is told again.
+    host.send(&agent, "And the bird is grey.", "u-2");
+    wait_for("the second turn to be over", || over(&host, "u-2"));
+    let second = starts().remove(1);
+    assert_eq!(second["given"], "conv-1", "{second}");
+    assert!(!second["prompt"].as_str().unwrap().contains(MARK));
+    assert_eq!(goal(&host, &dir, &["get", &plan_id])["revision"], revision);
+
+    // Antigravity lets go of it. Named, it would begin an empty conversation without a
+    // word: the next turn begins a new one instead, which opens with this Host's own record
+    // of the old, the oldest first, and then the message.
+    std::fs::remove_file(store.join("conv-1.db")).unwrap();
+    host.send(&agent, "What was the word?", "u-3");
+    wait_for("the third turn to be over", || over(&host, "u-3"));
+    let third = starts().remove(2);
+    assert_eq!(third["given"], Value::Null, "{third}");
+    let record = "--- Clarp restored conversation ---\n[Antigravity no longer has this \
+                  conversation (it prunes old ones), so it continues in a new one. Below is \
+                  Clarp's record of it, most recent last; carry on from it. The new message \
+                  follows the record.]\n\nUser: The word is heron.\n\nAssistant: Answer 1.\n\n\
+                  User: And the bird is grey.\n\nAssistant: Answer 2.\n\
+                  --- End Clarp restored conversation ---\n\nWhat was the word?";
+    assert!(
+        third["prompt"].as_str().unwrap().contains(record),
+        "{third}"
+    );
+    assert_eq!(bound(&host), "conv-2");
+    assert!(store.join("conv-2.db").exists());
+    // The conversation the user reads is the one it was: what was said, and no record.
+    let rows = host.turns(&agent);
+    assert!(!rows.iter().any(|row| row.to_string().contains(MARK)));
+    let said: Vec<&str> = rows
+        .iter()
+        .filter(|row| row["kind"].is_null())
+        .filter_map(|row| row["text"].as_str())
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "The word is heron.",
+            "Answer 1.",
+            "And the bird is grey.",
+            "Answer 2.",
+            "What was the word?",
+            "Answer 3.",
+        ],
+        "{rows:?}"
+    );
+    // The goal followed: bound to the new conversation, one revision on, as it was
+    // otherwise, and it says why.
+    wait_for("the goal to follow its conversation", || {
+        goal(&host, &dir, &["get", &plan_id])["goal"]["native_session_id"] == "conv-2"
+    });
+    let plan = goal(&host, &dir, &["get", &plan_id]);
+    assert_eq!(
+        (plan["revision"].as_i64(), &plan["status"]),
+        (Some(revision + 1), &status),
+        "{plan}"
+    );
+    let last = plan["goal"]["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        (
+            &last["kind"],
+            &last["revision"],
+            &last["detail"]["from_native_session_id"],
+            &last["detail"]["native_session_id"],
+            &last["detail"]["reason"],
+        ),
+        (
+            &json!("rebind"),
+            &json!(revision + 1),
+            &json!("conv-1"),
+            &json!("conv-2"),
+            &json!(
+                "Antigravity pruned the conversation; Clarp continued it in a new one that \
+                 opens with its record of the old one"
+            ),
+        ),
+        "{last}"
+    );
+
+    // The turn after that continues the new conversation by its name, with nothing told
+    // again, and the goal stays as it is.
+    host.send(&agent, "Thank you.", "u-4");
+    wait_for("the fourth turn to be over", || over(&host, "u-4"));
+    let fourth = starts().remove(3);
+    assert_eq!(fourth["given"], "conv-2", "{fourth}");
+    assert!(!fourth["prompt"].as_str().unwrap().contains(MARK));
+    assert_eq!(
+        goal(&host, &dir, &["get", &plan_id])["revision"],
+        revision + 1
+    );
+
+    // The Host is killed and started: the agent is in the new conversation, and so is its goal.
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    assert_eq!(bound(&host), "conv-2");
+    let plan = goal(&host, &dir, &["get", &plan_id]);
+    assert_eq!(plan["goal"]["native_session_id"], "conv-2");
+    host.send(&agent, "Once more.", "u-5");
+    wait_for("the fifth turn to be over", || over(&host, "u-5"));
+    assert_eq!(starts()[4]["given"], "conv-2");
 }

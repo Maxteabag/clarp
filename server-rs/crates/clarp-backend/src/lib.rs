@@ -194,6 +194,14 @@ pub trait Backend: Send + Sync {
         None
     }
 
+    /// Whether the tool still has the conversation of this name. A tool that lets go of old
+    /// conversations would begin an empty one under the name of one it has no more, without
+    /// a word: the Host asks first, and continues such a conversation in a new one that
+    /// opens with its own record of the old.
+    fn keeps(&self, _session: &str) -> bool {
+        true
+    }
+
     /// How long a message this tool takes may be, in bytes, where it takes its message on
     /// its command line: a machine takes no word of a command longer than 128 KiB, and what
     /// the Host says with the message comes on top. `None`: as long as it likes.
