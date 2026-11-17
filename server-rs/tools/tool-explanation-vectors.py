@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """What a tool's use is, and what is said of it without asking a model, as the Python Host reads
 it for the plain words under a tool's row (`server/lib/tool_explanations.py`, `normalize_activity`:
-the bounded fields that are read of an activity, with what a heredoc only feeds withheld; and
+the bounded fields that are read of an activity, with what a heredoc only feeds withheld;
 `server/lib/tool_explanation_templates.py`, `lookup`: the scripted template that fits, with what
-it says at each of the five levels of detail, or why none fits): what its own functions make of
-made-up uses of tools, written to `crates/clarp-kernel/tests/fixtures/tool-explanation-vectors.json`
-for the Rust Host's reading to be held to, use by use. The library of templates itself
+it says at each of the five levels of detail, or why none fits; and
+`server/lib/tool_explanation_shapes.py`, `split`: the parts a call has, each with the shape it is
+learned under and the values that may differ between two calls of one shape): what its own
+functions make of made-up uses of tools, written to
+`crates/clarp-kernel/tests/fixtures/tool-explanation-vectors.json` for the Rust Host's reading to
+be held to, use by use. With them, under `helpers`, what the smaller functions of the second layer
+answer by themselves (the kind of a word, the program of a whole command, a sentence with places
+for a call's values, the one sentence of several parts, what is kept of a value). The library of templates itself
 (`server/lib/tool_explanation_templates.json`) is copied beside the Rust that reads it
 (`crates/clarp-kernel/src/explain-templates.json`), byte for byte.
 
@@ -205,6 +210,128 @@ MORE_OTHERS = [
 ]
 
 
+# Uses for the second layer (`tool_explanation_shapes.py`): what a call's parts are and what shape
+# each has, by the branch of that reading.
+SHAPES_SHELL = [
+    # substitutions that only read, and those that do not
+    'echo $(date +%F)', 'git checkout $(git rev-parse HEAD)', 'ls $(pwd)/src', 'cat $(ls | head -1)', 'echo "$(whoami)@$(hostname)"',
+    "echo '$(date)'", 'rm $(find . -name x)', 'echo $(date -s tomorrow)', 'echo $(sed -i s/a/b/ f)', 'echo $(echo $(date))', 'echo $(',
+    'echo $()', 'echo $(date; ls)', 'x=$(date) ls', 'echo $(git log -1 --format=%H)', 'echo $(git push)', 'echo $(cat f | wc -l)',
+    'echo $(cat f | xargs rm)', 'echo `date`', 'echo "`date`"', "echo '`date`'", 'tar czf backup-$(date +%Y%m%d).tgz src',
+    'echo $(basename "$PWD")', "echo $(echo 'a b'  c)", 'echo $(date)$(whoami)', 'echo $(git)', 'echo $( )', 'echo "$(cat "a b")"',
+    # lines that go on, and redirections
+    'ls \\\n  -la', 'ls > out.txt', 'ls >> out.txt', 'sort < in.txt', 'ls > out.txt 2>&1', 'ls &> all.log', 'ls >/dev/null 2>&1',
+    'echo hi >&2', 'ls 1>&2', 'cat < a > b', 'ls >', 'ls 2> err.log', 'echo "<b>" > page.html', 'cmd > "my file.txt"', 'ls > &1',
+    'wc -l < file.txt', 'ls 2>>err.log', 'ls &>/dev/null', 'ls >&/dev/null', 'ls > a > b', 'prog 3> x', 'ls >| out', 'cat <a.txt',
+    # pipelines
+    'cat a.txt | grep x | sort | uniq -c', 'ls | xargs rm', 'ps aux | grep python | head -5', 'ls |& tee log', 'ls | tail -n 5 | wc -l',
+    'git log --oneline | head -20', 'cat f | python3 -c "import sys"', 'ls | grep -v x > out.txt', 'ls |& head -3', 'ls | head -3 | sort',
+    'FOO=1 ls | FOO=2 grep x', 'ls | /usr/bin/grep x', 'ls || true', 'ls | head', 'ls |',
+    # what a shell reads as its own words
+    'for f in *.txt; do cat $f; done', 'if [ -f x ]; then cat x; fi', 'while true; do sleep 1; done', '[[ -f x ]] && cat x',
+    '{ ls; pwd; }', 'case $x in a) ls;; esac', 'function f { ls; }', 'A=1 for x in y; do ls; done', '! grep -q x file', 'A=1 if x',
+    # several commands
+    'cd src && ls && cat a.txt', 'cd src; ls', 'true && ls', ': ; ls', 'ls; true', 'cd a && cd b && ls', 'cd', 'cd src', 'true', 'ls & pwd',
+    'a && b && c && d && e && f && g && h', 'a && b && c && d && e && f && g && h && i', 'make build && make test || echo failed',
+    'cd "my dir" && cat notes.txt', 'cd /srv/app && git status && git diff', 'cd src && true', 'cd a b c && ls', 'true; :', 'cd x; cd y',
+    'ls;; pwd', 'ls\n\npwd', 'cd /a && ls; cd /b && ls', 'cd src && ls | head -2',
+    # a shell started for one script, inside
+    "bash -c 'ls -la'", "cd /srv && bash -lc 'git status && git log -3'", "sh -c 'sh -c \"sh -c ls\"'", 'bash -c "ls" | head -3',
+    "bash -c 'cd x && ls'", 'bash -x -c ls', "timeout 5 bash -c 'ls'", "ls && bash -c 'pwd' && cat a", "zsh -lc 'cd /x && true'",
+    "bash -c ''", "bash -c 'for x in y; do ls; done'",
+    # interpreters and what they run
+    'python3 script.py --flag value', 'python3 -m http.server 8000', 'python3 -m "bad module"', "python3 -c 'print(1)'", 'node -e "1"',
+    'node --inspect app.js', 'uv run python manage.py migrate', 'python3 "my script.py"', 'python3 - arg', 'ruby -e "puts 1"',
+    'perl -pe s/a/b/ f', 'bash run.sh arg1 arg2', 'python3 -u script.py', 'python3 -W ignore script.py', 'uv run python3 -m pytest tests',
+    'python', 'deno run --allow-net server.ts', 'python3.11 tool.py 42', 'python3 -m', 'python3 script.py -c x', 'uv run python', 'tsx a.ts b.ts',
+    # flags and their values
+    'prog --name=value', 'prog --name=/a/b.txt', 'prog -n5', 'prog -pSECRET', 'prog --Bad=1', 'prog -5', 'prog --', 'prog - file', 'prog -abc',
+    'prog -abcd', 'prog --a', 'prog --count=42 --mode=list', 'prog --message="two words"', 'prog +5 -3 10s 1.5 50% 2K', 'head -n 5 f.txt',
+    'tail -20 f.txt', 'prog --name=', 'prog -x=1', 'prog --very-long-flag-name-that-goes-on-and-on-forever', 'prog -1.5', 'prog --no-color -v',
+    # the kinds of a word
+    'prog 0123abc 7f3a9c2 deadbeef cafe 1234567 abcdefg', 'prog https://example.org/x ftp://h/p mailto:x', 'prog ./a ../b ~/c /d e/f g.txt .hidden',
+    'prog $HOME ${X} "$A/b"', 'prog nadia-1374 MyClass 550e8400-e29b-41d4-a716-446655440000 v1.2.3 a:b', 'prog "free text" "x;y" "tab\there"',
+    'prog word two-words snake_case python3 v2 HEAD TODO ALL_CAPS Mixed', "prog ''", 'prog ' + 'w' * 241,
+    'prog ' + ' '.join(f'/p/{n}' for n in range(17)), 'prog ' + ' '.join(['word'] * 90), 'prog ' + ' '.join(f'/p/{n}' for n in range(16)),
+    'prog a.b c.toolongextension d. .e f.1 abc12 abc123 A B_ _C', 'prog \u00e9t\u00e9 na\u00efve.txt \u00c9T\u00c9', 'prog a,b a=b a@b a+b a%b',
+    # what only changes how a command runs, in a shape
+    'FOO=bar prog x', 'FOO= prog', 'timeout 60 dotnet test', 'timeout -s KILL 60 dotnet test', 'env A=1 B=2 prog', 'nice -n 5 prog',
+    'sudo -u www prog x', 'sudo prog', 'nohup prog &', 'time prog', 'timeout 60', 'FOO=$(date) prog', 'timeout -pX 5 prog', 'env -i prog',
+    'timeout 30s nice prog --x=1', 'A=/a/b.txt B=42 C="x y" prog', 'env', 'FOO=bar', 'sudo', 'timeout -5 prog', 'nice -n 5',
+    # programs
+    '/usr/bin/prog x', './prog', '"my prog" x', 'prog! x', '../bin/tool --v', '~/bin/tool', 'p' * 62 + ' x', '-prog', '"/bad path/prog" x',
+    '.hidden-tool x', '+x', '_tool',
+    # heredocs
+    "python3 - <<'PY'\nprint(1)\nPY", "cat > notes.txt <<EOF\nhello\nEOF", "cd /srv && python3 - <<EOF\nprint(1)\nEOF", "cat <<EOF\nx\nEOF",
+    "python3 - <<EOF\nprint(1)\nEOF\nls", "ls && python3 - <<EOF\nprint(1)\nEOF", "tee out.txt <<EOF > /dev/null\nx\nEOF",
+    "python3 - <<EOF | head -3\nprint(1)\nEOF", "cat > a.txt <<EOF\n$(date)\nEOF", "bash -c 'python3 - <<EOF\nprint(1)\nEOF'",
+    "cat > a.txt <<EOF && ls\nx\nEOF", "python3 - <<A <<B\n1\nA\n2\nB", "cat > a.txt <<EOF\nx\nEOF\ncat > b.txt <<EOF\ny\nEOF",
+    "FOO=1 timeout 5 python3 - <<EOF\nprint(1)\nEOF", "cat <<EOF | python3 -\nprint(1)\nEOF", "python3 - <<EOF > out.txt\nprint(1)\nEOF",
+]
+
+SHAPES_OTHERS = [
+    {'name': 'Read', 'file_path': '/srv/app/src/main.rs', 'title': 'Read main', 'description': 'Reads'},
+    {'name': 'Grep', 'pattern': 'fn main', 'path': 'src', 'input': {'pattern': 'fn main', 'path': 'src'}},
+    {'name': 'T', 'input': {'code': 'print(1)'}}, {'name': 'T', 'input': {'command': 'ls'}}, {'name': 'T', 'input': 'text'},
+    {'kind': 'exploration', 'operations': ['Read: src/main.rs', 'List: src', 'Search: TODO in src']},
+    {'kind': 'exploration', 'operations': ['Two Words: x']}, {'kind': 'patch', 'operations': ['Edit: a.rs', 'Add: b.rs']},
+    {'name': 'T', 'path': 'README', 'file_path': 'docs/', 'query': 'q', 'summary': 's'}, {'name': 'T', 'path': '', 'title': ''},
+    {'kind': 'reasoning'}, {'name': 'X', 'summary': 'word'}, {'name': 'X', 'path': 'word'}, {'name': 'X', 'path': '7f3a9c2'},
+    {'name': 'X', 'file_path': 'https://example.org/a'}, {'name': 'X', 'path': '42'}, {'name': 'X', 'path': 'a b'},
+    {'name': '/usr/bin/bash -lc "cd /srv && make ' + 'y' * 60}, {'name': 'bash -lc "for f in *; do rm $f; done ' + 'z' * 50},
+    {'name': 'bash -lc "FOO=$(date) sudo -u x env A=1 /opt/t/tool --flag ' + 'q' * 40},
+    {'name': 'sh -c "cd /a && true && ls -la | head -3"'}, {'name': 'X', 'operations': ['read-only: a/b', 'do_it: c']},
+    {'name': 'X', 'operations': ['Read: a', 'Bad Label: b']}, {'name': 'X', 'title': 'T', 'input': {'title': 'from input', 'query': 'q'}},
+    {'name': 'N' * 200, 'path': 'p/q.txt'}, {'name': 'Bash', 'command': 'ls', 'description': 'List files'},
+    {'kind': 'command', 'summary': 'cd /srv && cat a.txt | head -5', 'name': 'Shell'},
+]
+
+# Words, and what kind each is.
+WORDS = ['', 'word', 'two-words', 'snake_case', 'a-', '-a', 'python3', 'abc12', 'abc123', 'HEAD', 'A', 'A_B', '_A', 'Mixed', '42', '-5', '+7',
+         '1.5', '30s', '50%', '2K', '1.5.2', '7f3a9c2', 'deadbeef', '1234567', 'abcdefg', 'abc123f', 'ABCDEF1', '0' * 6 + 'a', 'a' * 64 + '1',
+         'a1' * 33, 'https://example.org', 'x://y', '1x://y', 'a+b.c-d://e f', '$HOME', 'a$b', './a', '~', '.', '..', 'a/b', 'a.txt', 'a.',
+         'a.toolongext', '.env', 'a b.txt', 'a\tb', 'nadia-1374', 'MyClass', 'a:b', 'a,b', 'a@b', ':a', 'free text', 'x;y', '(x)', 'a' * 161,
+         'a' * 162, 'A' + 'b' * 161, '\u00e9t\u00e9', '\u00c9', 'caf\u00e9.txt', 'abc\u0663', '\u0663', 'a\x1cb', 'http://', 'a.b.c', '-', '--', 'a=b']
+
+# Whole commands, and the program each mostly runs.
+PROGRAMS = ['ls -la', 'cd src && make test', 'FOO=1 BAR=2 cargo build', 'FOO=$(date) cargo build', 'for f in *; do rm $f; done',
+            'if true; then ls; fi', '(cd x && make)', 'x=$(git rev-parse HEAD)', 'echo hi && true', 'true; :; ls', '/usr/bin/bash -lc "cd /srv && npm test',
+            "bash -lc 'python3 - <<EOF\nimport os\nEOF", 'time nohup ./run.sh', 'sudo -u x systemctl restart y', 'timeout 60 dotnet test',
+            '! grep -q x f', '{ ls; }', 'case x in', 'function f', '"quoted prog" x', 'export A=1; node app.js', '', '   ', '&&', 'a|b', 'weird!name x',
+            'exec python3 app.py', 'while read l; do echo $l; done < f', 'env A=1 prog', 'nice', 'p' * 62, 'cd', '$(pwd)/bin/tool x', '`which ls`',
+            "sh  -c\t'make all'", 'zsh -lc "', 'select x in a b', 'do ls', 'A=`date` ls']
+
+# Slots a call has, and sentences with places for them.
+SLOT_SETS = [{}, {'path1': '/srv/app/src/main.rs'}, {'path1': 'main.rs'}, {'path1': 'src/'}, {'path1': '~'}, {'path1': '/'}, {'path1': 'a/..'},
+             {'url1': 'https://Example.ORG:8443/x?y'}, {'url1': 'notaurl'}, {'url1': 'file:///tmp/x'}, {'num1': '42', 'path1': 'a/b.txt', 'text1': 'two words'},
+             {'path1': 'a/b', 'path2': 'c/d/', 'path10': 'e/f'}, {'pathological': 'x/y'}, {'url1': 'https://[::1]:80/'}, {'id1': 'nadia-1374', 'sha1': '7f3a9c2'}]
+TEMPLATES = ['Reads {path1}.', 'Reads {path1_name} in {path1}.', 'Opens {url1_host}.', 'Runs {num1} times on {path1_name} with {text1}.',
+             'No places at all.', 'An unknown {path9}.', 'A {Bad1} and a {path} and a {path1_x}.', '{path1}{path1}', 'Shows {id1} at {sha1}.', '{path10_name}', '']
+# What a model answered for a call, and whether its sentence may be said of other values.
+PARAMETERISED = [
+    ('Reads main.rs.', 'Reads {path1_name}.', {'path1': 'src/main.rs'}), ('Reads main.rs.', 'Reads main.rs.', {'path1': 'src/main.rs'}),
+    ('Reads main.rs.', 'Reads {path2}.', {'path1': 'src/main.rs'}), ('Reads other.', 'Reads {path1_name}.', {'path1': 'src/main.rs'}),
+    ('Reads main.rs in src/main.rs.', 'Reads main.rs in {path1}.', {'path1': 'src/main.rs'}), ('Waits 5 seconds.', 'Waits {num1} seconds.', {'num1': '5'}),
+    ('Waits 5 seconds twice.', 'Waits {num1} seconds twice.', {'num1': '5'}), ('Waits 5 seconds, 3 times.', 'Waits {num1} seconds, 3 times.', {'num1': '5'}),
+    ('Lists files.', 'Lists files.', {}), ('Lists files.', '', {}), ('Lists files.', None, {}), ('Lists files.', '   ', {}), ('Lists 2 files.', 'Lists 2 files.', {}),
+    ('Shows x.', 'Shows {id1}.', {'id1': 'x'}), ('Shows x and x.', 'Shows {id1} and x.', {'id1': 'x'}), ('Shows AB and ab.', 'Shows {id1} and ab.', {'id1': 'AB'}),
+    ('Runs one test in a.py.', 'Runs one test in {path1}.', {'path1': 'a.py', 'num1': '1'}), ('Opens example.org.', 'Opens {url1_host}.', {'url1': 'https://example.org/x'}),
+    ('Does it.', 7, {}), ('Reads \u00c9T\u00c9.', 'Reads {path1_name} \u00e9t\u00e9.', {'path1': 'x/\u00c9T\u00c9'}),
+]
+# The sentences of a call's parts, and the one sentence they make.
+JOINS = [[], [''], ['Lists files.'], ['Lists files.', 'Reads a file.'], ['Lists files.', 'Lists files.', 'Reads a file.'], ['  Lists files.  ', '', 'Reads a file.'],
+         ['Lists files.', 'README is read.'], ['Lists files.', 'A file is read.'], ['Lists files.', 'a file is read.'], ['Lists files.', '\u00c9t\u00e9 comes.'],
+         ['Lists files.', 'X'], ['One. ' * 20, 'Two. ' * 20, 'Three. ' * 20], ['S' * 250], ['A' * 100, 'B' * 100, 'C' * 100, 'D' * 100], ['A' * 239, 'Bb'],
+         ['Lists files.', 'Lists files.'], ['Lists files.', 'Reads.', 'Lists files.'], ['A' * 120, 'B' * 119], ['x' * 300, 'y']]
+# Values, and what is kept of each for the explainer to read.
+SNIPPETS = [('plain', 1600), ('x' * 2000, 1600), ('token=abcdef123456 after', 1600), ('api_key: "abc" ; password=hunter2;', 1600),
+            ("Authorization: Bearer abc.def-ghi end", 1600), ('"authorization": "bearer xyz"', 1600), ('sk-abcdefghijkl', 1600), ('sk-short', 1600),
+            ('task-sk-abcdefghijklmnop', 1600), ('a sk-abcdefghijklmnop_qrs-tuv b', 1600), ({'a': 1, 'b': ['x', None, True, 1.5]}, 1600), (7, 1600), (None, 1600),
+            (['\u00e9t\u00e9', 'token=secretvalue'], 1600), ('x' * 1590 + ' token=abcdefghijklmnop', 1600), ('y' * 235 + ' secret=zzzzzzzzzz', 240),
+            ('SECRET = value', 1600), ('TOKEN:value', 1600), ("api-key='v'", 1600), ('apikey=v', 1600), ('my_token=abc', 1600), ('token =', 1600),
+            ('password=\u00e9t\u00e9 x', 1600), ('token=a;b', 1600), ('K' + 'x' * 1700 + ' sk-abcdefghijklmnop', 1600)]
+
+
 def run() -> dict:
     """Runs in a process of its own: what the Python Host makes of the uses above."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
@@ -216,6 +343,7 @@ def run() -> dict:
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
     from lib import settings_store
+    from lib import tool_explanation_shapes as shapes
     from lib import tool_explanation_templates as templates
     from lib import tool_explanations
 
@@ -224,6 +352,7 @@ def run() -> dict:
     uses = [sh(command) for command in SHELL] + OTHERS + [case['activity'] for case in templates.REGRESSION]
     # What was added later stands after what was there: every earlier use keeps its place.
     uses += [sh(command) for command in MORE_SHELL] + MORE_OTHERS
+    uses += [sh(command) for command in SHAPES_SHELL] + SHAPES_OTHERS
     out = []
     for use in uses:
         row = {'use': use}
@@ -242,8 +371,37 @@ def run() -> dict:
             route = dict(found)
         row['route'] = route
         row['said'] = said
+        # The parts of the call, and each part as the templates are asked about it.
+        try:
+            parts = shapes.split(json.loads(json.dumps(read)))
+        except IndexError:
+            # The Python Host's splitter fails on a shell command that has no word at all (a comment
+            # alone, a lone operator, a shell started for an empty script): it looks at the first of
+            # no parts. Written down as what it is; the Rust Host answers such a command.
+            row['parts_fail'] = 'IndexError'
+            out.append(row)
+            continue
+        row['parts'] = [{**part.to_json(), 'template_activity': part.template_activity()} for part in parts]
         out.append(row)
-    return {'version': templates.VERSION, 'clip': templates.LABEL_CLIP, 'identity_key': KEY, 'uses': out}
+
+    scripts = [[], [{'file': 'a.py', 'source_excerpt': 'print(1)\n', 'excerpt_only': True}],
+               [{'file': 'a.py', 'source_excerpt': 'it\'s "quoted" \u00e9\n\tx'}, {'file': 'b.sh'}]]
+    bound = []
+    for use in (sh('python3 script.py 42'), sh("python3 -c 'x'"), sh('timeout 5 python3 run.py'), {'name': 'Read', 'file_path': 'a.py'}):
+        for with_these in scripts:
+            part = shapes.split(tool_explanations.normalize_activity(json.loads(json.dumps(use))))[0]
+            bound.append([use, with_these, shapes.with_scripts(part, json.loads(json.dumps(with_these))).to_json()])
+    helpers = {
+        'kinds': [[word, shapes.kind(word)] for word in WORDS],
+        'programs': [[command, shapes.first_program(command)] for command in PROGRAMS],
+        'slots': [[slots, shapes.slot_values(slots)] for slots in SLOT_SETS],
+        'rendered': [[template, slots, shapes.render(template, slots)] for template in TEMPLATES for slots in SLOT_SETS],
+        'parameterised': [[text, template, slots, list(shapes.parameterise(text, template, slots))] for text, template, slots in PARAMETERISED],
+        'joined': [[texts, shapes.join(texts)] for texts in JOINS],
+        'snippets': [[value, limit, tool_explanations.snippet(value, limit)] for value, limit in SNIPPETS],
+        'scripts': bound,
+    }
+    return {'version': templates.VERSION, 'clip': templates.LABEL_CLIP, 'identity_key': KEY, 'uses': out, 'helpers': helpers}
 
 
 def main() -> int:
@@ -260,7 +418,15 @@ def main() -> int:
     out = ['{', f' "version": {json.dumps(said["version"])}, "clip": {json.dumps(said["clip"])}, '
                 f'"identity_key": {json.dumps(said["identity_key"])},', ' "uses": [']
     out.extend('  ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(rows) - 1 else '') for n, row in enumerate(rows))
-    out.append(' ]')
+    out.append(' ],')
+    out.append(' "helpers": {')
+    names = list(said['helpers'])
+    for name in names:
+        cases = said['helpers'][name]
+        out.append(f'  {json.dumps(name)}: [')
+        out.extend('   ' + json.dumps(case, ensure_ascii=True) + (',' if n < len(cases) - 1 else '') for n, case in enumerate(cases))
+        out.append('  ]' + (',' if name != names[-1] else ''))
+    out.append(' }')
     out.append('}')
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text('\n'.join(out) + '\n')
@@ -273,6 +439,14 @@ def main() -> int:
     print(f'  {LIBRARY_COPY.relative_to(REPO)}: the library, version {said["version"]}, '
           f'{sum(1 for row in rows for text in row.get("said", []) if text is not None)} sentences said of these uses')
     print('  templates:', dict(templates_used.most_common()))
+    parts = [part for row in rows for part in row.get('parts', [])]
+    failed = [row['use'] for row in rows if 'parts_fail' in row]
+    print(f'  the splitter fails on {len(failed)}:', [use.get('command', use.get('name')) for use in failed])
+    exact = collections.Counter(part['reason'] for part in parts if part['exact'])
+    print(f'  parts: {len(parts)} of {len(rows)} uses; shaped {sum(not part["exact"] for part in parts)}, exact {sum(exact.values())}: '
+          f'{dict(exact.most_common())}; with slots {sum(bool(part["slots"]) for part in parts)}, with a directory '
+          f'{sum(bool(part["cwd"]) for part in parts)}, with an earlier name {sum(bool(part["legacy"]) for part in parts)}')
+    print('  helpers:', {name: len(cases) for name, cases in said['helpers'].items()})
     print('  reasons:', dict(reasons.most_common()))
     return 0
 
