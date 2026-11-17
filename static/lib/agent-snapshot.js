@@ -111,7 +111,7 @@ function normalizeAgent(row) {
     // Stream-json result fields, populated when an IDLE row carries them.
     last_tokens_in: Number(row.last_tokens_in) || 0,
     last_tokens_out: Number(row.last_tokens_out) || 0,
-    last_cost_usd: Number(row.last_cost_usd) || 0,
+    last_cost_usd: row.last_cost_usd == null ? null : Number(row.last_cost_usd),
     last_duration_ms: Number(row.last_duration_ms) || 0,
   };
 }
@@ -220,10 +220,10 @@ export function createAgentSnapshotStore() {
     // Stream-json result fields ride on the IDLE row written by
     // clarp's on_result callback — pick them up so the brief
     // post-turn banner can show tokens/cost like Claude Code's CLI.
-    const hasResult = ev.kind === AgentState.IDLE
+    const hasResult = (ev.kind === AgentState.IDLE || ev.kind === AgentState.DONE)
       && (detail.tokens_in != null
        || detail.tokens_out != null
-       || detail.cost_usd != null
+       || Object.hasOwn(detail, 'cost_usd')
        || detail.duration_ms != null);
     bySession.set(sid, {
       ...current,
@@ -251,7 +251,7 @@ export function createAgentSnapshotStore() {
       last_tool: lastTool,
       last_tokens_in: hasResult ? Number(detail.tokens_in || 0) : current.last_tokens_in,
       last_tokens_out: hasResult ? Number(detail.tokens_out || 0) : current.last_tokens_out,
-      last_cost_usd: hasResult ? Number(detail.cost_usd || 0) : current.last_cost_usd,
+      last_cost_usd: hasResult ? (detail.cost_usd == null ? null : Number(detail.cost_usd)) : current.last_cost_usd,
       last_duration_ms: hasResult ? Number(detail.duration_ms || 0) : current.last_duration_ms,
     });
     return asStatusMap();

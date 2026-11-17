@@ -105,18 +105,19 @@ def test_the_matrix_shows_the_known_paths(monkeypatch):
     assert "_migrate_to_v127" in fresh["calls"]         # a table created if missing: a no-op too
     assert from_119["calls"] == ["_migrate_to_v121", "_migrate_to_v122", "_migrate_to_v123",
                                  "_migrate_to_v124", "_migrate_to_v125", "_migrate_to_v126",
-                                 "_migrate_to_v127"]
+                                 "_migrate_to_v127", "_migrate_to_v128"]
     assert from_119["final"] == db_schema._SCHEMA_VERSION
     assert run_from(121, monkeypatch)["calls"] == ["_migrate_to_v122", "_migrate_to_v123",
                                                    "_migrate_to_v124", "_migrate_to_v125", "_migrate_to_v126",
-                                                   "_migrate_to_v127"]
+                                                   "_migrate_to_v127", "_migrate_to_v128"]
     assert run_from(122, monkeypatch)["calls"] == ["_migrate_to_v123", "_migrate_to_v124", "_migrate_to_v125",
-                                                   "_migrate_to_v126", "_migrate_to_v127"]
+                                                   "_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128"]
     assert run_from(123, monkeypatch)["calls"] == ["_migrate_to_v124", "_migrate_to_v125", "_migrate_to_v126",
-                                                   "_migrate_to_v127"]
-    assert run_from(124, monkeypatch)["calls"] == ["_migrate_to_v125", "_migrate_to_v126", "_migrate_to_v127"]
-    assert run_from(125, monkeypatch)["calls"] == ["_migrate_to_v126", "_migrate_to_v127"]
-    assert run_from(126, monkeypatch)["calls"] == ["_migrate_to_v127"]
+                                                   "_migrate_to_v127", "_migrate_to_v128"]
+    assert run_from(124, monkeypatch)["calls"] == ["_migrate_to_v125", "_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128"]
+    assert run_from(125, monkeypatch)["calls"] == ["_migrate_to_v126", "_migrate_to_v127", "_migrate_to_v128"]
+    assert run_from(126, monkeypatch)["calls"] == ["_migrate_to_v127", "_migrate_to_v128"]
+    assert run_from(127, monkeypatch)["calls"] == ["_migrate_to_v128"]
 
 
 def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
@@ -135,4 +136,6 @@ def test_every_supported_start_reaches_the_final_stamp(monkeypatch):
             assert "_migrate_to_v125" in result["calls"], start
         if start < 126:
             assert "_migrate_to_v126" in result["calls"], start
-        assert "_migrate_to_v127" in result["calls"], start
+        if start < 127:
+            assert "_migrate_to_v127" in result["calls"], start
+        assert "_migrate_to_v128" in result["calls"], start

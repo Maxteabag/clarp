@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { createAgentSnapshotStore } from '../../static/lib/agent-snapshot.js';
 
 describe('agent snapshot store', () => {
+  it('keeps an unknown Claude completion cost distinct from a measured zero', () => {
+    const store = createAgentSnapshotStore();
+    store.replaceFromSnapshot({ agents: [{ session: 'sam', last_cost_usd: 1 }] });
+    for (const cost of [null, 0, 0.050047]) {
+      const state = store.patchState({ session: 'sam', kind: 'done', ts: 123,
+        detail: { cost_usd: cost, tokens_out: 0 } });
+      expect(state.sam.last_cost_usd).toBe(cost);
+    }
+  });
+
   it('retains maintenance identity and capabilities across state updates', () => {
     const store = createAgentSnapshotStore();
     store.replaceFromSnapshot({ agents: [{ session: 'sam', is_janitor: true,

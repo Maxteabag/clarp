@@ -1,4 +1,4 @@
--- user_version 127
+-- user_version 128
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -676,6 +676,9 @@ CREATE INDEX oracle_threads_owner ON oracle_threads(owner_principal, contact, up
 (implicit);
 
 -- index sqlite_autoindex_transcription_results_1 on transcription_results
+(implicit);
+
+-- index sqlite_autoindex_usage_cursors_1 on usage_cursors
 (implicit);
 
 -- index sqlite_autoindex_user_notifications_1 on user_notifications
@@ -2273,6 +2276,15 @@ CREATE TABLE turns (
     synthesize_audio INTEGER NOT NULL DEFAULT 1,
     settled_at INTEGER,
     outcome TEXT
+);
+
+-- table usage_cursors on usage_cursors
+CREATE TABLE usage_cursors (
+    backend TEXT NOT NULL,
+    native_session_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    last_total REAL NOT NULL,
+    PRIMARY KEY (backend, native_session_id, metric)
 );
 
 -- table user_notifications on user_notifications

@@ -1,0 +1,32 @@
+[
+  {
+    "call": "one",
+    "total_cost_usd": 0.0765235,
+    "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 18823,
+      "cache_read_input_tokens": 11875,
+      "output_tokens": 4
+    }
+  },
+  {
+    "call": "two",
+    "total_cost_usd": 0.1265705,
+    "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 12030,
+      "cache_read_input_tokens": 18690,
+      "output_tokens": 5
+    }
+  },
+  {
+    "call": "compact",
+    "total_cost_usd": 0.14364100000000002,
+    "usage": {
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0
+    }
+  }
+]

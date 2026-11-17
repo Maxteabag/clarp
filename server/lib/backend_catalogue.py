@@ -84,6 +84,7 @@ class BackendDefinition:
     hidden: bool = False
     supports_mcp: bool = False
     supports_usage: bool = False
+    reports_session_cost: bool = False
     login_kind: str = 'none'
     effort_ui: str = 'picker'
     effort_help: str = ''
@@ -112,6 +113,7 @@ DEFAULT_DEFINITION = BackendDefinition()
 CLAUDE = BackendDefinition(
     probe=ModelProbe("file", "parse_claude_models", "claude account model cache", source_kind="cli_cache", cache_path="claude_model_cache_path", auth_path="claude_model_cache_path", append_fallback=True, fallback_efforts=True),
     id='claude',
+    reports_session_cost=True,
     label='Claude',
     required_binary='claude',
     badge='BackendClaude',

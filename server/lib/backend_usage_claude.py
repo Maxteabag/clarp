@@ -34,6 +34,7 @@ def _claude_response_row(now: int) -> dict[str, Any]:
         "error": "" if last else "no turns recorded yet",
         "windows": {},
         "totals": data["windows"],
+        "cost_activation_ms": data["cost_activation_ms"],
     }
 
 
