@@ -22,6 +22,7 @@ pub mod heard;
 pub mod heartbeat;
 pub mod helpers;
 pub mod herald;
+pub mod janitors;
 pub mod jobs;
 pub mod journal;
 pub mod kept_portraits;

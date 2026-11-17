@@ -318,6 +318,40 @@ pub fn state(
     })
 }
 
+/// What is told of an agent that was removed, after the roster's own word that it is gone:
+/// that it stopped, and why. The Python Host tells the state of an agent it removes so.
+pub fn removed(record: &AgentRecord, at_ms: i64) -> [Value; 2] {
+    let state = json!({
+        "type": "agent-state",
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "persona": record.persona,
+        "kind": "stopped",
+        "status_text": "",
+        "ts": at_ms,
+        "detail": { "reason": "deleted" },
+    });
+    let activity = json!({
+        "type": "agent-activity",
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "persona": record.persona,
+        "kind": "stopped",
+        "phase": "stopped",
+        "action": "stopped",
+        "state": "interrupted",
+        "status": "ok",
+        "summary": "Stopped",
+        "tool": "",
+        "file_path": "",
+        "call_id": null,
+        "started_at_ms": null,
+        "turn_started_ms": null,
+        "ts": at_ms,
+    });
+    [state, activity]
+}
+
 /// The state a Stop leaves, as the route that took the Stop tells it at once.
 pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
     let last = status.last.as_ref()?;
@@ -1348,10 +1382,11 @@ pub fn summary(
         "heartbeat_enabled": record.heartbeat_enabled,
         "dreaming_enabled": false,
         "muted": record.muted,
-        "quiet": false,
+        // A janitor is never unread and never counted among the agents at work.
+        "quiet": record.is_janitor,
         "archived_at": record.archived_at_ms,
         "role": record.role(),
-        "is_janitor": false,
+        "is_janitor": record.is_janitor,
         "parent_agent_id": record.parent_agent_id,
         "helper_state": record.helper_state,
         // What the agent made: counted over the whole fleet, by whoever builds the list.
@@ -1361,11 +1396,12 @@ pub fn summary(
         "schedules": [],
         "goal": null,
         "call_mode": "classic",
+        // A janitor is looked at, not spoken to.
         "interaction_capabilities": {
-            "can_chat": true,
+            "can_chat": !record.is_janitor,
             "can_inspect": true,
-            "can_restart": true,
-            "can_voice_target": true,
+            "can_restart": !record.is_janitor,
+            "can_voice_target": !record.is_janitor,
         },
 
         "backend_session_id": session_name(record, status),

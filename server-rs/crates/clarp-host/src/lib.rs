@@ -31,6 +31,7 @@ pub mod heard;
 pub mod heartbeat;
 pub mod hub;
 pub mod ids;
+pub mod janitors;
 pub mod joblog;
 pub mod launcher;
 pub mod library;

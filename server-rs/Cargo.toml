@@ -56,6 +56,12 @@ webpki-roots = "1"
 # the same routes as what came through the door, with no socket in between.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 nix = { version = "0.29", features = ["signal", "process", "poll", "user"] }
+# A janitor's schedule is read in a time zone its owner chooses. Which local times a clock skips
+# and which come twice is the zone's own, read from the machine's table of zones, the one the
+# Python Host reads. Pinned to a release that had been in use for six weeks when it was taken:
+# 1.0.0 came out on 15 Nov 2026, two days before. Only what reads that table: nothing bundled,
+# and no asking the machine which zone it is in.
+jiff = { version = "=0.2.38", default-features = false, features = ["std", "tzdb-zoneinfo"] }
 regex = "1"
 # A name a message spells out is found whatever way its letters are composed: the Python Host
 # compares the two in the canonical form that takes a letter apart into its base and its marks.

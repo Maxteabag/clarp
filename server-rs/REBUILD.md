@@ -904,6 +904,56 @@ of the corpus that is made and never spoken to: this Host said that a conversati
 (`transcript-updated`) when an agent was made, and the Python Host says it when the first thing is written
 to one. It is not said at the making any more.
 
+**The janitors: the book and the routes** (17 Nov 2026). A janitor is an agent with a job of maintenance: a
+template (what it does), a scope (the agents it watches), attachments (the triggers that start it) and
+options. On the owner's Host three of them run a hundred times a day each (the one that keeps goals current,
+the one that explains a tool's use, the one that switches account seats); they are the largest thing this
+Host did not have. The first part is what is kept and how it is set, with nothing running:
+
+- The rules are the Python Host's (`lib/janitors.py`, `janitor_store.py`, `janitor_builtins.py`) and are held
+  by vectors that its own modules write on a database made for it (`tools/janitor-vectors.py`): the catalogue
+  of ten templates and eleven triggers, which the same tool writes for the kernel to carry
+  (`janitor-catalogue.json`); 369 cases of what is made of options, attachments, a scope and how a job is run
+  (`janitors.rs`); and three stories of 77 steps in which janitors are made, changed, turned on and off, put
+  back as their job has them, removed and let go (`janitors/book.rs`), with the seven a Host installs for itself.
+  Every change that could let an old run act on a new configuration moves a janitor's generation and
+  revision; a save pauses it; whoever changes one says which revision they saw.
+- A schedule is read in a time zone its owner names (`janitors/schedule.rs`): the local days are gone through,
+  a local time that does not come is not run, and one that comes twice is run the first time, as
+  `lib/janitor_schedule.py` does it. Held by 3,024 moments around the days clocks change in eight zones (a
+  half-hour change, a change at midnight, a rule read from the end of a zone's file in 2045), 96 times between
+  two runs and 91 previews. The zones are the machine's table, read by the crate `jiff`, pinned to `0.2.38`:
+  its `1.0.0` came out two days before this was written, and a release six weeks in use was taken instead. Two
+  crates are built for it. A name is a zone's own, letter for letter, as the Python Host finds a zone by its
+  file.
+- **A janitor is a member of the fleet and no agent of the roster.** `Directory.members` stays what it was,
+  the agents a person can speak to, and the forty-five places that go through it meet no janitor; the
+  janitors are beside them (`Directory.janitors`), and who means one asks for it. Inside the fleet's thread a
+  request's key finds an agent of the roster only: no control of a chat renames, puts away, selects or
+  removes a janitor. The snapshot shows the janitors' rows after the agents', as the Python Host shows them
+  (`is_janitor`, `role: janitor`, never unread, looked at and not spoken to), each with the picture of its job.
+- The Host's part is `janitors.rs`: the book kept whole with the fleet, the seven of the Host's own installed
+  once at start under the ids and session names they have on every Host, and the routes (`GET /janitors`,
+  `/janitors/<s>`, `/janitors/<s>/runs`, `/janitor-triggers`, `/janitor-triggers/preview`; `POST /janitors`,
+  `/janitors/<s>/configure`, `/enabled`, `/reset-defaults`, `/adopt-options`, `/release`; `DELETE /janitors/<s>`), which
+  answer in the Python Host's statuses, bodies and words, and tell the apps to read again (`agent-roster`,
+  `janitor-changed`).
+- **Nothing runs yet, and the Host says so**: `runtime_available: false`, the seven installed paused, and
+  turning one on refused in words (503, `janitor_runtime_unavailable`). That is the next part: the runner
+  with a schedule and the scheduled task, then the turn's end and the goal keeper, then the workers that
+  answer one request (the tool explainer first).
+
+The scenario `janitors` asks 74 requests of both Hosts. Its first asking (run 43998740314, of 64) found three
+differences in all of them: a janitor's row says `role: janitor` there, and the Python Host installs the one
+that finds whom a spoken message is for with its five options chosen (what its owner had set for the router
+before there were janitors). Both are as there now. Its third asking (43999909674), with the steps that let a
+janitor go and remove the agent it then is, found what no scenario had asked before: **removing an agent**
+(`DELETE /agents/<session>`) was answered with the session's name beside `ok`, where the Python Host says
+`ok` alone, and the apps were told that the agent was gone and not, as there, that it had stopped because it
+was removed (`agent-state` and `agent-activity`, `stopped`). Both are as there now, and an agent that is not
+there is refused in the Python Host's word and words (`agent_not_found`). Two findings in the Python Host on
+the way are R29 and R30 in `docs/reference-defects.md`.
+
 Reading for the queue's routes found what no run had: **the phone's ids for its messages begin with `u-`**,
 the mark a message's id has in a conversation (`"u-" + id` in the phone app's source, and so in the log:
 `DELETE /turn-queue/u-6485F414-...`); the desk's come without. The Python Host files a message under its

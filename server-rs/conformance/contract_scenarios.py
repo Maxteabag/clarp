@@ -2149,4 +2149,130 @@ SCENARIOS.append({
     ],
 })
 
+
+# An agent that is made a janitor, and the triggers it is given: each under an id the scenario
+# chose, since an id a Host draws is the Host's own.
+KEEPER = 'keeper-one'
+AFTER_WORK = [{'attachment_id': 'synthetic-after-work', 'trigger_id': 'agent-work-completed'}]
+NIGHTLY = [{'attachment_id': 'synthetic-nightly', 'trigger_id': 'schedule',
+            'config': {'cron': '15 3 * * *', 'timezone': 'Europe/Oslo'}}]
+NOWHERE = [{'attachment_id': 'synthetic-nowhere', 'trigger_id': 'schedule',
+            'config': {'cron': '15 3 * * *', 'timezone': 'Europe/Nowhere'}}]
+OWN = 'clarp-message-delegator'
+# The first of January, by the clocks of a city: far from every day the suite runs on but one.
+PREVIEW = '/janitor-triggers/preview?cron=0%200%201%201%20*'
+
+
+def janitor(action, body, name, session=KEEPER):
+    return post(f'/janitors/{session}/{action}', body, name)
+
+
+def gone(path, name):
+    return {'op': 'delete', 'path': path, 'name': name}
+
+
+SCENARIOS.append({
+    'id': 'janitors',
+    'what': 'the janitors of a Host, agents with a job of maintenance: what a Host offers, one of its own, an '
+            'agent made a janitor with a job, set, paused, put back as its job has it and removed, what each '
+            'is refused in a word for the reason and in words, and when a schedule would run',
+    'sessions': (AGENT, KEEPER),
+    'steps': [
+        get('/janitors', 'the janitors of a Host, and what it offers'),
+        get('/janitor-triggers', 'what can start a janitor'),
+        get(f'/janitors/{OWN}', "one of the Host's own, which is paused"),
+        get('/janitors/nobody-there', 'a janitor of an agent that is not there'),
+        get(f'/janitors/{AGENT}', 'a janitor of an agent that is none'),
+        get(f'/janitors/{AGENT}/runs', 'the runs of an agent that is no janitor'),
+        {**get(f'/agent-helper-state?session={AGENT}', 'who an agent is'), 'save': {'watched': 'agent_id'}},
+        post('/agents', {**MAKE_HELPER, 'name': 'Keeper One', 'session': KEEPER}, 'an agent to be made a janitor'),
+        # Made: paused, with the job it is given and the trigger it is given.
+        post('/janitors', {'session': 'nobody-there'}, 'make a janitor of an agent that is not there'),
+        post('/janitors', {'session': KEEPER, 'template_id': 'no-such-job'}, 'make one with a job there is not'),
+        post('/janitors', {'session': KEEPER, 'attachments': [{'attachment_id': 'synthetic-wrong',
+                                                               'trigger_id': 'routing-requested'}]},
+             'make one with a trigger its job has not'),
+        post('/janitors', {'session': KEEPER, 'attachments': AFTER_WORK, 'options': {'detail_level': 1}},
+             'make one with an option its job has not'),
+        post('/janitors', {'session': KEEPER, 'attachments': AFTER_WORK, 'scope': {'agent_ids': ['nobody-has-this-id']}},
+             'make one that watches an agent nobody has'),
+        post('/janitors', {'session': KEEPER, 'attachments': AFTER_WORK}, 'make a janitor'),
+        post('/janitors', {'session': KEEPER, 'template_id': 'message-delegator'}, 'make it again, with another job'),
+        get(f'/janitors/{KEEPER}', 'the janitor'),
+        get(f'/janitors/{KEEPER}/runs?limit=5', 'its runs'),
+        get(f'/janitors/{KEEPER}/runs?limit=few', 'so many of its runs as no number says'),
+        get(f'/janitors/{KEEPER}/no-such-thing', 'something of a janitor that there is not'),
+        {**SNAPSHOT, 'name': 'the snapshot with a janitor'},
+        # Set: whoever changes it says which revision they saw.
+        janitor('configure', {'expected_revision': 7, 'options': {'max_interval_seconds': 3600}},
+                'set with a revision nobody saw'),
+        janitor('configure', {'options': {'max_interval_seconds': 3600}}, 'set without a revision'),
+        janitor('configure', {'expected_revision': True}, 'set with a revision that is yes'),
+        janitor('configure', {'expected_revision': 0}, 'set with a revision of nothing'),
+        janitor('configure', {'expected_revision': 1.5}, 'set with half a revision'),
+        janitor('configure', {'expected_revision': 'soon'}, 'set with a revision that is a word'),
+        janitor('configure', {'expected_revision': 1, 'options': {'max_interval_seconds': 604801}},
+                'an option beyond what it may be'),
+        janitor('configure', {'expected_revision': 1, 'options': None}, 'options that are none'),
+        janitor('configure', {'expected_revision': 1, 'scope': {'agent_ids': ['nobody-has-this-id']}},
+                'a scope of an agent nobody has'),
+        janitor('configure', {'expected_revision': 1, 'scope': {'watch': 'all'}}, 'a scope that is none'),
+        janitor('configure', {'expected_revision': 1, 'attachments': NOWHERE}, 'a schedule in a zone there is not'),
+        janitor('configure', {'expected_revision': 1, 'attachments': []}, 'no trigger at all'),
+        janitor('configure', {'expected_revision': 1, 'backend': 'abacus'}, 'a tool no Host has'),
+        janitor('configure', {'expected_revision': 1, 'effort': 'extreme'}, 'an effort its tool has not'),
+        janitor('configure', {'expected_revision': 1, 'template_id': 'no-such-job'}, 'a job there is not'),
+        janitor('configure', {'expected_revision': '1', 'options': {'max_interval_seconds': 3600}, 'attachments': NIGHTLY,
+                              'scope': {'agent_ids': ['{watched}']}},
+                'set its options, its schedule and whom it watches'),
+        janitor('configure', {'expected_revision': 2, 'attachments': AFTER_WORK}, 'a trigger it had and has no more'),
+        janitor('enabled', {'expected_revision': 2, 'enabled': 'yes'}, 'turned on with a word'),
+        janitor('enabled', {'expected_revision': 9, 'enabled': False}, 'turned off with a revision nobody saw'),
+        janitor('enabled', {'expected_revision': 2, 'enabled': False}, 'turned off, which it is'),
+        janitor('adopt-options', {'expected_revision': 2, 'options': {'detail_level': 1}},
+                "a choice taken over that is another job's"),
+        janitor('reset-defaults', {'expected_revision': 2}, 'put back as its job has it'),
+        janitor('no-such-action', {'expected_revision': 3}, 'an action there is not'),
+        {'op': 'post', 'path': f'/janitors/{KEEPER}/configure', 'name': 'set with a body that is a list',
+         'raw': {'bytes': '[1]', 'content_type': 'application/json'}},
+        get(f'/janitors/{KEEPER}', 'the janitor as it was set'),
+        # One of the Host's own keeps its job and is not removed.
+        janitor('configure', {'expected_revision': 1, 'template_id': 'task-labels'},
+                "another job for one of the Host's own", session=OWN),
+        gone(f'/janitors/{OWN}?expected_revision=1', "remove one of the Host's own"),
+        janitor('adopt-options', {'expected_revision': 1, 'options': {'detail_level': 1, 'more': 2}},
+                'take over more than the one choice', session=OWN),
+        # Removed: paused for good, its agent put away, and what it was still told.
+        gone(f'/janitors/{KEEPER}', 'remove without a revision'),
+        gone(f'/janitors/{KEEPER}?expected_revision=1', 'remove with a revision nobody saw'),
+        gone(f'/janitors/{KEEPER}?expected_revision=3', 'remove'),
+        gone(f'/janitors/{KEEPER}?expected_revision=4', 'remove what was removed'),
+        get(f'/janitors/{KEEPER}', 'the janitor that was removed'),
+        post('/janitors', {'session': KEEPER}, 'make of what was removed'),
+        {**SNAPSHOT, 'name': 'the snapshot afterwards'},
+        get('/agents/snapshot?include_archived=0', 'the snapshot without what was put away'),
+        # When a schedule would run, without keeping it.
+        get(f'{PREVIEW}&timezone=Europe/Oslo&count=2', 'when a schedule would run'),
+        get(f'{PREVIEW}&timezone=Europe/Oslo', 'the same, as often as nothing says'),
+        get(f'{PREVIEW}&timezone=Europe/Oslo&count=40', 'more of them than are shown'),
+        get(f'{PREVIEW}&timezone=Europe/Nowhere', 'in a zone there is not'),
+        get(f'{PREVIEW}&timezone=europe/oslo', "in a zone that is not spelled as it is"),
+        get('/janitor-triggers/preview?cron=61%200%20*%20*%20*&timezone=UTC', 'of what is no schedule'),
+        get(f'{PREVIEW}&timezone=UTC&count=few', 'as often as no number says'),
+        get('/janitor-triggers/preview', 'of nothing'),
+        # Let go: an agent like any other again, which is removed as one. One of the Host's own is not let go.
+        janitor('release', {'expected_revision': 1}, "let one of the Host's own go", session=OWN),
+        janitor('release', {'expected_revision': 9}, 'let go with a revision nobody saw'),
+        janitor('release', {'expected_revision': 5, 'successor_session': AGENT},
+                'let go to a successor that is named without its revision'),
+        janitor('release', {'expected_revision': 5}, 'let go'),
+        janitor('release', {'expected_revision': 6}, 'let go what was let go'),
+        get(f'/janitors/{KEEPER}', 'the agent that was a janitor'),
+        janitor('enabled', {'expected_revision': 6, 'enabled': False}, 'turned off after it was let go'),
+        {**SNAPSHOT, 'name': 'the snapshot when it is an agent again'},
+        gone(f'/agents/{KEEPER}', 'removed as the agent it is'),
+        get(f'/janitors/{KEEPER}', 'the janitor of an agent that was removed'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

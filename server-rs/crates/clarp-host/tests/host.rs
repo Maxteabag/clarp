@@ -6090,11 +6090,13 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
     );
     let put_away_at = row(&host, &ada)["archived_at"].as_i64().unwrap();
     assert!(put_away_at > 1_600_000_000_000);
+    // The agents of the roster: the Host's own janitors are listed after them, apart.
     let sessions = |snapshot: &Value| -> Vec<String> {
         snapshot["agents"]
             .as_array()
             .unwrap()
             .iter()
+            .filter(|agent| agent["is_janitor"] == false)
             .map(|agent| agent["session"].as_str().unwrap().to_string())
             .collect()
     };
@@ -6940,6 +6942,545 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         host.get(&format!("/agent-helper-state?session={helper}")),
         before
     );
+}
+
+#[test]
+fn the_janitors_of_a_host_are_shown_made_set_paused_and_removed() {
+    let place = Place::new("janitors");
+    let host = place.start();
+    let heard = host.listen();
+    let janitors = || host.get("/janitors");
+    let sessions = |listed: &Value| -> Vec<String> {
+        let all = listed["janitors"].as_array().unwrap().iter();
+        let mut sessions: Vec<String> = all
+            .map(|one| one["session"].as_str().unwrap().to_string())
+            .collect();
+        sessions.sort();
+        sessions
+    };
+    let told = |status: u16, code: &str, message: &str| {
+        (status, json!({ "error": message, "code": code }))
+    };
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+
+    // The Host's own, on its first day: seven, each under the id and the session name it has
+    // on every Host, each paused, and what a Host offers beside them.
+    let first = janitors();
+    assert_eq!(
+        sessions(&first),
+        [
+            "clarp-audio-bookkeeper",
+            "clarp-goal-keeper",
+            "clarp-heartbeat-decider",
+            "clarp-label-auditor",
+            "clarp-message-delegator",
+            "clarp-quota-monitor",
+            "clarp-tool-explainer",
+        ]
+    );
+    assert_eq!(
+        (
+            first["templates"].as_array().unwrap().len(),
+            first["triggers"].as_array().unwrap().len(),
+            &first["runtime_available"],
+            &first["providers"],
+        ),
+        (10, 11, &json!(false), &json!([]))
+    );
+    for own in first["janitors"].as_array().unwrap() {
+        let role = own["builtin_role"].as_str().unwrap();
+        assert_eq!(
+            (
+                own["agent_id"].as_str(),
+                &own["enabled"],
+                &own["health"],
+                &own["revision"],
+                &own["is_janitor"],
+                &own["scope"],
+                &own["capabilities"]["can_remove"],
+            ),
+            (
+                clarp_kernel::janitors::own_id(role),
+                &json!(false),
+                &json!("paused"),
+                &json!(1),
+                &json!(true),
+                &json!({ "agent_ids": [], "exclude_agent_ids": [] }),
+                &json!(false),
+            ),
+            "{role}"
+        );
+    }
+    let keeper = host.get("/janitors/clarp-goal-keeper")["janitor"].clone();
+    assert_eq!(
+        (
+            &keeper["template_id"],
+            keeper["attachments"].as_array().unwrap().len(),
+            &keeper["cadence"][0]["lane"],
+            &keeper["cadence"][0]["base_interval_seconds"],
+        ),
+        (
+            &json!("goal-keeper"),
+            3,
+            &json!("schedule:builtin-goal-keeper-schedule-v1"),
+            &json!(3600),
+        )
+    );
+
+    // A janitor is a member of the fleet and no agent of the roster: its row says so, comes
+    // after the agents', and its name is none an app offers.
+    let worker = host.new_agent("Worker");
+    let other = host.new_agent("Other");
+    let rows = |host: &Host| host.get("/agents/snapshot");
+    let snapshot = rows(&host);
+    let listed = snapshot["agents"].as_array().unwrap();
+    assert_eq!(listed.len(), 9);
+    assert_eq!(
+        (&listed[0]["session"], &listed[1]["session"]),
+        (&json!("worker"), &json!("other"))
+    );
+    for row in &listed[2..] {
+        assert_eq!(
+            (
+                &row["is_janitor"],
+                &row["role"],
+                &row["interaction_capabilities"]
+            ),
+            (
+                &json!(true),
+                &json!("janitor"),
+                &json!({ "can_chat": false, "can_inspect": true, "can_restart": false, "can_voice_target": false }),
+            ),
+            "{}",
+            row["session"]
+        );
+    }
+    assert_eq!(listed[0]["is_janitor"], false);
+    let offered = snapshot["roster"].to_string();
+    assert!(
+        !offered.contains("Goal keeper") && offered.contains("Worker"),
+        "{offered}"
+    );
+    // No control of a chat reaches one: it is no agent a message, a stop or a removal means.
+    let sent = post(
+        "/send",
+        json!({ "session": "clarp-goal-keeper", "text": "hello", "client_msg_id": "j1" }),
+    );
+    assert_ne!(sent.0, 200);
+    assert_ne!(host.ask("DELETE", "/agents/clarp-goal-keeper", None).0, 200);
+    assert_eq!(sessions(&janitors()).len(), 7);
+
+    // An agent is made a janitor, paused, with the job that keeps labels and its first trigger.
+    assert_eq!(
+        post("/janitors", json!({ "session": "nobody-there" })),
+        told(404, "agent_not_found", "Agent not found")
+    );
+    assert_eq!(
+        post(
+            "/janitors",
+            json!({ "session": worker, "template_id": "no-such-job" })
+        ),
+        told(400, "unsupported_template", "Unsupported maintenance job")
+    );
+    assert_eq!(
+        host.ask("POST", "/janitors", Some(&json!([1]))).1,
+        json!({ "error": "Expected a JSON object" })
+    );
+    assert_eq!(post("/janitors", json!({ "name": "A new one" })).0, 501);
+    let (status, made) = post("/janitors", json!({ "session": worker }));
+    assert_eq!(status, 200, "{made}");
+    let made = &made["janitor"];
+    assert_eq!(
+        (
+            &made["session"],
+            &made["template_id"],
+            &made["enabled"],
+            &made["revision"],
+            &made["generation"],
+            &made["is_janitor"],
+            &made["builtin_role"],
+            &made["attachments"][0]["trigger_id"],
+            &made["attachments"][0]["config"],
+            &made["options"],
+        ),
+        (
+            &json!("worker"),
+            &json!("task-labels"),
+            &json!(false),
+            &json!(1),
+            &json!(1),
+            &json!(true),
+            &Value::Null,
+            &json!("agent-work-completed"),
+            &json!({ "coalesce_seconds": 8, "max_targets": 3 }),
+            &json!({ "max_interval_seconds": 86400 }),
+        )
+    );
+    assert!(
+        made["attachments"][0]["attachment_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("attachment-")
+    );
+    wait_for("the apps to be told to read the janitors again", || {
+        let heard = heard.lock().unwrap();
+        heard
+            .iter()
+            .any(|event| event["type"] == "agent-roster" && event["kind"] == "janitor-changed")
+    });
+    assert_eq!(sessions(&janitors()).len(), 8);
+    let snapshot = rows(&host);
+    let listed = snapshot["agents"].as_array().unwrap();
+    assert_eq!(listed[0]["session"], "other");
+    let as_janitor = listed
+        .iter()
+        .find(|row| row["session"] == "worker")
+        .unwrap();
+    assert_eq!(
+        (
+            &as_janitor["is_janitor"],
+            &as_janitor["quiet"],
+            &as_janitor["role"]
+        ),
+        (&json!(true), &json!(true), &json!("janitor"))
+    );
+    // The one that finds whom a spoken message is for comes with its options chosen.
+    let delegator = host.get("/janitors/clarp-message-delegator")["janitor"].clone();
+    assert_eq!(
+        delegator["configured_option_keys"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+    // Made again, it is read as it is.
+    assert_eq!(
+        post(
+            "/janitors",
+            json!({ "session": worker, "template_id": "scheduled-prompt" })
+        )
+        .1["janitor"]["template_id"],
+        "task-labels"
+    );
+
+    // It is set: whoever changes it says which revision they saw.
+    let configure = |body: Value| post("/janitors/worker/configure", body);
+    assert_eq!(
+        configure(json!({ "expected_revision": 7, "options": { "max_interval_seconds": 3600 } })),
+        told(
+            409,
+            "revision_conflict",
+            "This configuration changed. Refresh it and repeat your change."
+        )
+    );
+    for (seen, why) in [
+        (json!("soon"), "expected_revision is required"),
+        (Value::Null, "expected_revision is required"),
+        (json!(true), "expected_revision must be an integer"),
+        (json!(0), "expected_revision must be a positive integer"),
+        (json!(1.5), "expected_revision must be a positive integer"),
+    ] {
+        assert_eq!(
+            configure(json!({ "expected_revision": seen })),
+            (400, json!({ "error": why })),
+            "{seen}"
+        );
+    }
+    assert_eq!(
+        configure(json!({ "expected_revision": 1, "options": { "max_interval_seconds": 604801 } })),
+        told(
+            400,
+            "invalid_option",
+            "Invalid option: max_interval_seconds"
+        )
+    );
+    assert_eq!(
+        configure(json!({ "expected_revision": 1, "backend": "codex" })),
+        told(400, "invalid_janitor", "Unsupported Janitor backend")
+    );
+    let nightly = json!([{ "attachment_id": "nightly", "trigger_id": "schedule",
+                           "config": { "cron": "15 3 * * *", "timezone": "Europe/Oslo" } }]);
+    let mut nowhere = nightly.clone();
+    nowhere[0]["config"]["timezone"] = json!("Europe/Nowhere");
+    assert_eq!(
+        configure(json!({ "expected_revision": 1, "attachments": nowhere })),
+        told(
+            400,
+            "invalid_janitor",
+            "Use a valid five-field schedule and IANA timezone"
+        )
+    );
+    let (status, set) = configure(json!({
+        "expected_revision": "1", "options": { "max_interval_seconds": 3600 }, "attachments": nightly,
+        "scope": { "agent_ids": [row_id(&host, &other)] }, "effort": "",
+    }));
+    assert_eq!(status, 200, "{set}");
+    assert_eq!(set["cancellation_pending"], false);
+    let set = &set["janitor"];
+    assert_eq!(
+        (
+            &set["revision"],
+            &set["generation"],
+            &set["enabled"],
+            &set["configured_option_keys"],
+            &set["scope"]["agent_ids"],
+            &set["attachments"][0]["attachment_id"],
+            &set["cadence"][0]["lane"],
+            &set["cadence"][0]["base_interval_seconds"],
+            &set["cadence"][0]["max_interval_seconds"],
+        ),
+        (
+            &json!(2),
+            &json!(2),
+            &json!(false),
+            &json!(["max_interval_seconds"]),
+            &json!([row_id(&host, &other)]),
+            &json!("nightly"),
+            &json!("schedule:nightly"),
+            &json!(86400),
+            &json!(86400),
+        )
+    );
+    // Turning one on is refused in words: nothing starts a janitor on this Host yet. Turning
+    // off what is off changes nothing.
+    let enabled = |body: Value| post("/janitors/worker/enabled", body);
+    let (status, refused) = enabled(json!({ "expected_revision": 2, "enabled": true }));
+    assert_eq!(
+        (status, &refused["code"]),
+        (503, &json!("janitor_runtime_unavailable"))
+    );
+    assert_eq!(
+        enabled(json!({ "expected_revision": 2, "enabled": "yes" })),
+        (400, json!({ "error": "enabled must be true or false" }))
+    );
+    let (status, paused) = enabled(json!({ "expected_revision": 2, "enabled": false }));
+    assert_eq!((status, &paused["janitor"]["revision"]), (200, &json!(2)));
+    assert_eq!(
+        post(
+            "/janitors/worker/import-pilot",
+            json!({ "expected_revision": 2 })
+        ),
+        (404, json!({ "error": "Janitor action not found" }))
+    );
+    assert_eq!(
+        host.get("/janitors/worker/runs?limit=5"),
+        json!({ "runs": [] })
+    );
+    assert_eq!(
+        host.ask("GET", "/janitors/worker/runs?limit=few", None),
+        (
+            400,
+            json!({ "error": "invalid literal for int() with base 10: 'few'" })
+        )
+    );
+    assert_eq!(
+        host.ask("GET", "/janitors/worker/nothing", None),
+        (404, json!({ "error": "Janitor route not found" }))
+    );
+    assert_eq!(
+        host.ask("GET", "/janitors/other", None),
+        told(404, "janitor_not_found", "Janitor not found")
+    );
+
+    // A schedule is previewed without being kept.
+    let preview = host
+        .get("/janitor-triggers/preview?cron=30%208%20*%20*%201-5&timezone=Europe/Oslo&count=2");
+    let runs = preview["next_runs"].as_array().unwrap();
+    assert_eq!(
+        (runs.len(), &preview["timezone"]),
+        (2, &json!("Europe/Oslo"))
+    );
+    assert!(runs[0].as_i64().unwrap() > now_ms() && runs[1].as_i64() > runs[0].as_i64());
+    assert_eq!(
+        host.ask(
+            "GET",
+            "/janitor-triggers/preview?cron=30%208%20*%20*%20*&timezone=Europe/Nowhere",
+            None
+        ),
+        (400, json!({ "error": "Choose a valid IANA timezone" }))
+    );
+    assert_eq!(
+        host.get("/janitor-triggers")["triggers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        11
+    );
+
+    // One of the Host's own is set like any other, and is neither given another job nor removed.
+    let own =
+        |action: &str, body: Value| post(&format!("/janitors/clarp-tool-explainer/{action}"), body);
+    assert_eq!(
+        own(
+            "configure",
+            json!({ "expected_revision": 1, "template_id": "task-labels" })
+        ),
+        told(
+            409,
+            "builtin_janitor",
+            "A built-in Janitor cannot change its job"
+        )
+    );
+    assert_eq!(
+        host.ask(
+            "DELETE",
+            "/janitors/clarp-tool-explainer?expected_revision=1",
+            None
+        ),
+        told(
+            409,
+            "builtin_janitor",
+            "Pause a built-in Janitor instead of removing it"
+        )
+    );
+    let (status, explains) = own(
+        "configure",
+        json!({ "expected_revision": 1, "options": { "detail_level": 3 } }),
+    );
+    assert_eq!(
+        (
+            status,
+            &explains["janitor"]["options"]["detail_level"],
+            &explains["janitor"]["revision"]
+        ),
+        (200, &json!(3), &json!(2))
+    );
+    let (status, adopted) = own(
+        "adopt-options",
+        json!({ "expected_revision": 2, "options": { "detail_level": 1 } }),
+    );
+    assert_eq!(
+        (status, &adopted["janitor"]["options"]["detail_level"]),
+        (200, &json!(3)),
+        "a choice that is made stands"
+    );
+
+    // It is removed: paused for good, and its agent put away. Who it was stays.
+    assert_eq!(
+        host.ask("DELETE", "/janitors/worker", None),
+        (400, json!({ "error": "expected_revision is required" }))
+    );
+    assert_eq!(
+        host.ask("DELETE", "/janitors/worker?expected_revision=1", None),
+        told(
+            409,
+            "revision_conflict",
+            "This configuration changed. Refresh it and repeat your change."
+        )
+    );
+    assert_eq!(
+        host.ask("DELETE", "/janitors/worker?expected_revision=2", None),
+        (200, json!({ "ok": true, "cancellation_pending": false }))
+    );
+    assert_eq!(sessions(&janitors()).len(), 7);
+    let gone = host.get("/janitors/worker")["janitor"].clone();
+    assert_eq!(
+        (&gone["revision"], &gone["enabled"]),
+        (&json!(3), &json!(false))
+    );
+    let snapshot = rows(&host);
+    let put_away = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == "worker")
+        .unwrap();
+    assert!(put_away["archived_at"].as_i64().is_some());
+
+    // Let go, it is an agent like any other again, and is removed as one. One of the Host's
+    // own is not let go, and no janitor is removed as an agent.
+    assert_eq!(
+        post(
+            "/janitors/clarp-quota-monitor/release",
+            json!({ "expected_revision": 1 })
+        ),
+        told(
+            409,
+            "builtin_janitor",
+            "A built-in Janitor cannot be released"
+        )
+    );
+    assert_ne!(host.ask("DELETE", "/agents/worker", None).0, 200);
+    let (status, let_go) = post(
+        "/janitors/worker/release",
+        json!({ "expected_revision": 3 }),
+    );
+    assert_eq!(status, 200, "{let_go}");
+    assert_eq!(
+        (
+            &let_go["janitor"]["is_janitor"],
+            &let_go["janitor"]["revision"],
+            &let_go["cancellation_pending"]
+        ),
+        (&json!(false), &json!(4), &json!(false))
+    );
+    let snapshot = rows(&host);
+    let all = snapshot["agents"].as_array().unwrap();
+    let as_agent = all.iter().find(|row| row["session"] == "worker").unwrap();
+    assert_eq!(
+        (&as_agent["is_janitor"], &as_agent["role"]),
+        (&json!(false), &json!("agent"))
+    );
+    assert_eq!(
+        host.ask("DELETE", "/agents/worker", None),
+        (200, json!({ "ok": true }))
+    );
+    assert_eq!(
+        host.ask("DELETE", "/agents/worker", None),
+        (
+            404,
+            json!({ "error": "agent_not_found", "message": "No active agent session: worker" })
+        )
+    );
+    // The apps are told that it is gone, and then that it stopped because it was removed.
+    wait_for("the apps to hear that the agent stopped", || {
+        let heard = heard.lock().unwrap();
+        let of_it: Vec<(&str, &str)> = heard
+            .iter()
+            .filter(|event| event["session"] == "worker")
+            .filter(|event| event["kind"] == "deleted" || event["kind"] == "stopped")
+            .map(|event| {
+                (
+                    event["type"].as_str().unwrap(),
+                    event["kind"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        of_it
+            == [
+                ("agent-roster", "deleted"),
+                ("agent-state", "stopped"),
+                ("agent-activity", "stopped"),
+            ]
+    });
+    let stopped = {
+        let heard = heard.lock().unwrap();
+        let state = |event: &&Value| event["type"] == "agent-state" && event["kind"] == "stopped";
+        heard.iter().find(state).cloned().unwrap()
+    };
+    assert_eq!(stopped["detail"], json!({ "reason": "deleted" }));
+    assert_eq!(
+        host.ask("GET", "/janitors/worker", None),
+        told(404, "agent_not_found", "Agent not found")
+    );
+
+    // The Host keeps all of it, and installs its own janitors once.
+    let before = janitors();
+    host.kill();
+    let host = place.start();
+    assert_eq!(host.get("/janitors"), before);
+    assert_eq!(
+        host.get("/janitors/clarp-tool-explainer")["janitor"]["options"]["detail_level"],
+        3
+    );
+}
+
+/// The id of the agent a session names, as its row in the snapshot has it.
+fn row_id(host: &Host, session: &str) -> String {
+    let snapshot = host.get("/agents/snapshot");
+    let rows = snapshot["agents"].as_array().unwrap();
+    let row = rows.iter().find(|row| row["session"] == session).unwrap();
+    row["agent_id"].as_str().unwrap().to_string()
 }
 
 /// One command of git in a directory, for a repository a test makes for itself: under a
@@ -9535,11 +10076,10 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
         host.get("/automation-settings"),
         json!({ "special_treatment": false })
     );
+    // The janitors are the Host's own, installed paused: nothing starts one here yet.
     let janitors = host.get("/janitors");
-    assert_eq!(
-        (&janitors["janitors"], &janitors["runtime_available"]),
-        (&json!([]), &json!(false))
-    );
+    assert_eq!(janitors["runtime_available"], false);
+    assert_eq!(janitors["janitors"].as_array().unwrap().len(), 7);
     let transcribes = host.get("/transcription-capabilities");
     assert_eq!(
         (&transcribes["available"], &transcribes["models"]),
@@ -12867,11 +13407,11 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     let place = Place::new("not-yet");
     let host = place.start();
     let made = |body: Value| host.ask("POST", "/agents", Some(&body));
+    // The agents of the roster: the Host's own janitors are no agents anybody made.
     let agents = |host: &Host| {
-        host.get("/agents/snapshot")["agents"]
-            .as_array()
-            .unwrap()
-            .len()
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap().iter();
+        rows.filter(|agent| agent["is_janitor"] == false).count()
     };
     host.new_agent("Echo");
 
