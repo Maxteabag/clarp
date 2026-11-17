@@ -8,8 +8,10 @@ keeping of such records makes them (`backend_usage_codex.capture_codex_rate_limi
 Its own code is given made-up records over a made-up day, one story at a time, each story in a
 store of its own, with a clock the script holds, and is asked after every step as an app's
 request asks it. What it answers is written to
-`crates/clarp-host/tests/fixtures/codex-usage-vectors.json`, so that what the Rust Host shows
-of the same records is held to it.
+`crates/clarp-kernel/tests/fixtures/codex-usage-vectors.json`, so that what the Rust Host shows
+of the same records is held to it. With each record is written what the Python Host's reader
+makes of it (`_codex_snapshot_from_payload`: its windows), which is what the Rust Host's keeper
+is given too.
 
 A record is given as Codex writes one into a conversation's rollout with a count of tokens
 (`rate_limits`: `primary` and `secondary`, each with `used_percent`, `window_minutes` and
@@ -17,9 +19,13 @@ A record is given as Codex writes one into a conversation's rollout with a count
 nothing of what it leaves out (not as a whole reading of the account): that is what a record in
 a rollout is. The account is a made-up one: the login is never read.
 
-A story's steps: `record` (a record of limits is seen), `advance` (the clock goes on, in
-seconds), `asked` (an app asks: limits whose window began anew are closed first, as a request
-closes them).
+A story's steps: `record` (a record of limits is seen, under the login it is seen on),
+`advance` (the clock goes on, in seconds), `asked` (an app asks: limits whose window began anew
+are closed first, as a request closes them). A login is two names, neither of them anybody's:
+which login it is (another after every renewal of it) and whose account. What an app is shown
+depends on the login the Host is on when it asks (`_active_codex_identity`, which is given the
+story's word for it here, since no login is ever read): `active` on an asking, or nothing where
+the Host has no login.
 
 It runs in processes of its own, one for each story, whose every home, data, config and cache
 directory is a new empty directory (the replay harness's own isolation,
@@ -38,7 +44,7 @@ import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-OUT = HERE.parent / 'crates' / 'clarp-host' / 'tests' / 'fixtures' / 'codex-usage-vectors.json'
+OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'codex-usage-vectors.json'
 
 # The moment a story begins, in milliseconds, and the made-up account its records are of.
 BEGAN = 1_900_000_000_000
@@ -54,9 +60,20 @@ def window(used, minutes, resets_at):
     return {'used_percent': used, 'window_minutes': minutes, 'resets_at': resets_at}
 
 
-def record(five=None, week=None, **more):
+# Logins: the one most stories are told on, the same account after its login was renewed (and
+# renewed again, with nothing seen since), another account, an account nothing was seen of, and
+# a login whose account nobody could tell.
+RENEWED = ['generation-two', 'account-one']
+RENEWED_AGAIN = ['generation-three', 'account-one']
+OTHER = ['generation-other', 'account-other']
+NOT_SEEN = ['generation-nine', 'account-nine']
+NO_ACCOUNT = ['generation-bare', None]
+NO_LOGIN = 'no login'
+
+
+def record(five=None, week=None, on=None, **more):
     """A record of limits as a rollout has it: the five-hour window first, the week second."""
-    return {'record': {
+    return {**({} if on is None else {'identity': on}), 'record': {
         'limit_id': 'codex', 'limit_name': None,
         'primary': None if five is None else window(five, 300, more.pop('five_resets', FIVE_HOURS_ON)),
         'secondary': None if week is None else window(week, 10_080, more.pop('week_resets', WEEK_ON)),
@@ -70,6 +87,12 @@ def advance(seconds):
 
 
 ASKED = {'asked': True}
+
+
+def asked(on):
+    """An app asks while the Host is on this login (or on none)."""
+    return {'asked': True, 'active': None if on == NO_LOGIN else on}
+
 
 STORIES = [
     ('nothing-seen', 'Nothing was seen of the account yet', [ASKED]),
@@ -106,6 +129,61 @@ STORIES = [
      [{'record': {'primary': {'used_percent': 97.0, 'window_minutes': 300},
                   'secondary': {'used_percent': 44.0, 'window_minutes': 10_080}}}, ASKED,
       advance(60), {'record': {'primary': {'used_percent': 100.0, 'window_minutes': 300}}}, ASKED]),
+    ('a-quarter-of-an-hour-exactly', 'What was said a quarter of an hour ago is fresh; a second on it is not',
+     [record(37.5, 82.0), advance(15 * 60), ASKED, advance(1), ASKED]),
+    ('at-its-reset-exactly', 'A window is stale from the second it begins anew',
+     [record(60.0, 30.0, five_resets=BEGAN // 1000 + 300), advance(299), ASKED, advance(1), ASKED]),
+    ('the-limit-at-its-reset-exactly', 'A limit is no longer known from the second its window begins anew',
+     [record(100.0, 11.0, five_resets=BEGAN // 1000 + 300), advance(299), ASKED, advance(1), ASKED,
+      advance(1), ASKED]),
+    ('a-warning-grown-old', 'A warning nobody has heard of for a quarter of an hour is not known to stand',
+     [record(85.0, 10.0), ASKED, advance(16 * 60), ASKED, advance(60), record(86.0, 10.0), ASKED]),
+    ('limited-again-after-recovering', 'Back under the warning and over it again: another stretch',
+     [record(85.0, 10.0), advance(60), record(5.0, 10.0), advance(60), record(90.0, 10.5), ASKED,
+      advance(60), record(100.0, 11.0), ASKED]),
+    ('still-used-up-in-the-next-window', 'Used up, and used up again in the window after it, with nobody asking between',
+     [record(100.0, 10.0), ASKED, advance(4 * HOUR + 60),
+      record(100.0, 10.5, five_resets=FIVE_HOURS_ON + 5 * HOUR), ASKED]),
+    ('used-up-again-after-the-reset', 'Used up, asked after the window began anew, and used up again',
+     [record(100.0, 10.0), advance(4 * HOUR + 60), ASKED, advance(60),
+      record(100.0, 10.5, five_resets=FIVE_HOURS_ON + 5 * HOUR), ASKED]),
+    ('another-login', 'Another account is logged in while a warning stands, and the first comes back',
+     [record(90.0, 10.0), ASKED, advance(60), record(20.0, 30.0, on=OTHER), asked(OTHER), asked(IDENTITY),
+      asked(NO_LOGIN), asked(NOT_SEEN), advance(60), record(91.0, 10.5), asked(IDENTITY), asked(OTHER),
+      asked(NO_LOGIN)]),
+    ('the-login-renewed', 'The login of the same account is renewed while a warning stands',
+     [record(90.0, 10.0), ASKED, advance(60), asked(RENEWED), advance(60), record(92.0, 10.0, on=RENEWED),
+      asked(RENEWED), asked(IDENTITY), asked(RENEWED_AGAIN), asked(NOT_SEEN), asked(NO_LOGIN)]),
+    ('renewed-and-only-the-week-seen', 'After a renewal only the week is seen: the five hours of the login before are not shown',
+     [record(40.0, 10.0), advance(60), record(None, 10.5, on=RENEWED), asked(RENEWED), asked(NO_LOGIN)]),
+    ('no-account-known', 'A login whose account nobody could tell',
+     [record(85.0, 10.0, on=NO_ACCOUNT), asked(NO_ACCOUNT), advance(60), record(5.0, 10.0, on=NO_ACCOUNT),
+      asked(NO_ACCOUNT), asked(['generation-bare', 'account-one']), asked(IDENTITY), asked(NO_LOGIN)]),
+    ('an-account-and-a-login-without-one', 'Records of an account, then of a login whose account nobody could tell',
+     [record(85.0, 10.0), advance(60), record(30.0, 20.0, on=NO_ACCOUNT), asked(IDENTITY), asked(NO_ACCOUNT),
+      asked(['generation-bare', 'account-one']), asked(NO_LOGIN)]),
+    ('a-window-that-does-not-say-its-use', 'While a warning stands, a later window says when it begins anew and not how much is used',
+     [record(85.0, 10.0), advance(60),
+      {'record': {'primary': {'used_percent': None, 'window_minutes': 300, 'resets_at': FIVE_HOURS_ON + 5 * HOUR}}},
+      ASKED, advance(4 * HOUR), ASKED]),
+    ('the-reset-moves', 'A window says another second for its reset, and the first again (Codex does)',
+     [record(50.0, 10.0), advance(60),
+      record(50.5, 10.0, five_resets=FIVE_HOURS_ON + 1, week_resets=WEEK_ON + 30), ASKED, advance(60),
+      record(51.0, 10.0), ASKED]),
+    ('recovered-and-the-reset-moves-back', 'A warning is over; the window says another second for its reset, and the first again',
+     [record(85.0, 10.0), advance(60), record(5.0, 10.0), advance(60),
+      record(6.0, 10.0, five_resets=FIVE_HOURS_ON + 1), ASKED, advance(60), record(7.0, 10.0), ASKED]),
+    ('a-warning-and-the-reset-moves', 'A warning stands while the window says another second for its reset',
+     [record(85.0, 10.0), advance(60), record(86.0, 10.0, five_resets=FIVE_HOURS_ON + 1), ASKED, advance(60),
+      record(87.0, 10.0), ASKED, advance(4 * HOUR), ASKED]),
+    ('only-a-week', 'An account whose only window is its week, said first',
+     [{'record': {'limit_id': 'codex', 'primary': window(64.0, 10_080, WEEK_ON), 'secondary': None,
+                  'plan_type': 'pro'}}, ASKED, advance(16 * 60), ASKED, advance(60),
+      {'record': {'limit_id': 'codex', 'primary': window(64.5, 10_080, WEEK_ON + 45), 'secondary': None,
+                  'plan_type': 'pro'}}, ASKED]),
+    ('only-a-week-and-it-is-used-up', 'The only window is the week, and it is used up',
+     [{'record': {'limit_id': 'codex', 'primary': window(100.0, 10_080, WEEK_ON), 'secondary': None,
+                  'plan_type': 'pro'}}, ASKED]),
 ]
 
 
@@ -125,6 +203,9 @@ def told(story):
     from lib import db
     db.conn()
     clock = [BEGAN]
+    # The login the Host is on, as the story says it: no login is read.
+    active = [tuple(IDENTITY)]
+    usage._active_codex_identity = lambda *, create=False: active[0]
     # Every module of the Host that took the clock's reading by name is given this clock.
     for module in list(sys.modules.values()):
         if getattr(module, '__name__', '').startswith('lib.') and hasattr(module, '_now_ms'):
@@ -138,17 +219,28 @@ def told(story):
             continue
         if 'record' in step:
             seen = step['record']
+            identity = step.get('identity', IDENTITY)
+            # The Host is on the login it sees a record on, until a story says otherwise.
+            active[0] = tuple(identity)
+            at['identity'] = identity
             payload = {'rate_limit': seen, 'plan_type': seen.get('plan_type')}
             try:
-                kept = codex.capture_codex_rate_limits(payload, source_detail=SEEN_IN, identity=tuple(IDENTITY))
+                at['snapshot'] = codex._codex_snapshot_from_payload(json.loads(json.dumps(payload)))
+            except RuntimeError:
+                at['snapshot'] = None
+            try:
+                kept = codex.capture_codex_rate_limits(payload, source_detail=SEEN_IN, identity=tuple(identity))
                 did = {'limit_events': kept.get('limit_events') or []}
             except RuntimeError as refused:
                 did = {'refused': str(refused)}
             done.append({**at, 'record': seen, **did})
             continue
         now = clock[0]
+        if 'active' in step:
+            active[0] = None if step['active'] is None else tuple(step['active'])
         closed = usage._reconcile_expired_limits(now)
-        done.append({**at, 'asked': True, 'limit_events': closed,
+        done.append({**at, 'asked': True, 'active': None if active[0] is None else list(active[0]),
+                     'limit_events': closed,
                      'provider': usage._structured_provider('codex', now),
                      'row': store._response_row('codex', now)})
     return {'name': name, 'what': what, 'steps': done}
