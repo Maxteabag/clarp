@@ -23,7 +23,6 @@ pub struct Book {
     profiles: BTreeMap<String, Profile>,
     assignments: Vec<Assignment>,
     last_term: i64,
-    pub last_run: i64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
