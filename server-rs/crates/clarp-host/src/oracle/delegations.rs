@@ -93,14 +93,15 @@ async fn looked_again(app: &App, book: &mut Book) -> Result<(), Unavailable> {
         fates.push((row, fate));
     }
     let now = app.clock.now_ms();
-    let mut lost = Vec::new();
+    let mut became = HashMap::new();
     for (row, fate) in fates {
-        match fate {
-            TurnFate::Unknown | TurnFate::Waits => {}
+        let fate = match fate {
+            TurnFate::Unknown | TurnFate::Waits => Fate::NotAdmitted,
             TurnFate::Runs => {
                 book.started(&row.trace_id, now);
+                Fate::Live
             }
-            TurnFate::Gone => lost.push(row.delegation_id),
+            TurnFate::Gone => Fate::Lost,
             TurnFate::Ended {
                 status,
                 closes,
@@ -108,29 +109,31 @@ async fn looked_again(app: &App, book: &mut Book) -> Result<(), Unavailable> {
                 ended_at_ms,
             } => {
                 // No delegation changes before the moment it was last written.
-                let at = ended_at_ms.max(row.updated_at);
+                let at_ms = ended_at_ms.max(row.updated_at);
                 if status != "completed" {
                     // Why, in the tool's own words where the Host has them: they stand
                     // below the sentence a user is told.
-                    let why = text
-                        .split_once("\n\n")
-                        .map_or(text.as_str(), |(_, tools)| tools);
-                    book.failed_for_trace(&row.trace_id, why, at);
+                    let why = text.split_once("\n\n");
+                    let why = why.map_or(text.as_str(), |(_, tools)| tools);
+                    book.failed_for_trace(&row.trace_id, why, at_ms);
                 } else if python::strip(&text).is_empty() {
-                    book.failed_for_trace(&row.trace_id, SAID_NOTHING, at);
-                } else {
-                    book.completed(&row.trace_id, &closes, &text, at);
+                    book.failed_for_trace(&row.trace_id, SAID_NOTHING, at_ms);
+                }
+                Fate::Said {
+                    message_id: closes,
+                    text,
+                    at_ms,
                 }
             }
-        }
+        };
+        became.insert(row.delegation_id, fate);
     }
+    // What is still open is ended by the book's own rule: with the answer its turn left,
+    // or as failed where the turn is gone.
     book.orphans(
         |row| {
-            if lost.contains(&row.delegation_id) {
-                Fate::Lost
-            } else {
-                Fate::NotAdmitted
-            }
+            let fate = became.get(&row.delegation_id);
+            fate.cloned().unwrap_or(Fate::NotAdmitted)
         },
         now,
     );

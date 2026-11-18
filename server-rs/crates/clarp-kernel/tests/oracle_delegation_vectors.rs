@@ -57,7 +57,7 @@ fn whole(book: &Book) -> Value {
 /// What became of the turn of a delegation, as a step of the vectors has it: the messages
 /// the turn left are looked through as that Host's query does, the newest first, and one
 /// that is nothing but spaces is none.
-fn fate(step: &Value, row: &Delegation) -> Fate {
+fn fate(step: &Value, row: &Delegation, at: i64) -> Fate {
     let named = |list: &str| {
         let ids = step[list].as_array().unwrap().iter();
         ids.filter_map(Value::as_str)
@@ -89,6 +89,7 @@ fn fate(step: &Value, row: &Delegation) -> Fate {
         Some((_, text, revision)) => Fate::Said {
             message_id: format!("m-{}-{revision}", row.delegation_id),
             text: (*text).to_string(),
+            at_ms: at,
         },
         None => Fate::Lost,
     }
@@ -271,7 +272,7 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                     let mut asked = Vec::new();
                     let count = book.orphans(
                         |row| {
-                            let fate = fate(step, row);
+                            let fate = fate(step, row, at);
                             if fate != Fate::NotAdmitted {
                                 asked.push(row.trace_id.clone());
                             }
