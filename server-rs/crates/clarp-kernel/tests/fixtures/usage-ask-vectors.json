@@ -1329,6 +1329,176 @@
     }
    },
    "used_up": null
+  },
+  {
+   "action": "stream",
+   "due": true,
+   "events": [],
+   "now": 1900002500014,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:28:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "rollout/token_count",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+       "state": "recovered"
+      },
+      "observed_at": "2030-03-17T18:28:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "rollout/token_count",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:28:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "rollout/token_count",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:23:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  },
+  {
+   "action": "ask",
+   "due": true,
+   "events": [],
+   "now": 1900002500015,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:28:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "rollout/token_count",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+       "state": "recovered"
+      },
+      "observed_at": "2030-03-17T18:28:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "rollout/token_count",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:28:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "rollout/token_count",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:23:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
   }
  ],
  "blocks": [

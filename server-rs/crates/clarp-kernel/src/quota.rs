@@ -138,6 +138,9 @@ struct Episode {
     current_kind: String,
     threshold_id: Option<String>,
     opened_at_ms: i64,
+    /// An authoritative read can omit the window before this episode ages out.
+    #[serde(default)]
+    omitted_window_end_ms: Option<i64>,
     current_event_id: Option<String>,
 }
 
@@ -307,6 +310,21 @@ impl Kept {
                     self.episodes[at].status = "invalidated".into();
                 }
             }
+            for episode in &mut self.episodes {
+                if let Some(window) = self.windows.iter().find(|w| {
+                    omitted(w)
+                        && w.generation == episode.generation
+                        && w.window_id == episode.window_id
+                }) {
+                    episode.omitted_window_end_ms = Some(
+                        window
+                            .resets_at
+                            .as_deref()
+                            .and_then(from_text)
+                            .unwrap_or(window.observed_at_ms),
+                    );
+                }
+            }
             self.windows.retain(|w| !omitted(w));
             if self.block.is_none()
                 && !seen.is_empty()
@@ -368,7 +386,9 @@ impl Kept {
                 let reset = window.resets_at.as_deref().and_then(from_text);
                 reset.unwrap_or(window.observed_at_ms)
             });
-            ended.is_none_or(|ended_ms| now_ms - ended_ms > KEPT_AFTER_MS)
+            ended
+                .or(episode.omitted_window_end_ms)
+                .is_none_or(|ended_ms| now_ms - ended_ms > KEPT_AFTER_MS)
         };
         self.episodes
             .retain(|episode| episode.status == "open" || !long_over(episode));
@@ -469,6 +489,7 @@ impl Kept {
                     current_kind: "unknown".to_string(),
                     threshold_id: None,
                     opened_at_ms: now_ms,
+                    omitted_window_end_ms: None,
                     current_event_id: None,
                 });
                 self.episodes.len() - 1
@@ -579,6 +600,7 @@ impl Kept {
                         current_kind: "unknown".to_string(),
                         threshold_id: None,
                         opened_at_ms: now_ms,
+                        omitted_window_end_ms: None,
                         current_event_id: None,
                     });
                     self.episodes.len() - 1

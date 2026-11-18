@@ -81,6 +81,14 @@ fn asks_when_the_reference_does_and_shows_every_model_group_bucket() {
         let action = case["action"].as_str().unwrap();
         let events = match action {
             "read" => kept.seen(tool, login, &case["snapshot"], "/wham/usage", now, &mut id),
+            "stream" => kept.seen(
+                tool,
+                login,
+                &case["snapshot"],
+                "rollout/token_count",
+                now,
+                &mut id,
+            ),
             "refused" => kept.refused(tool, Some(login), now, &mut id),
             "failure" => {
                 kept.refresh_failed(now);
