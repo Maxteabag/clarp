@@ -603,6 +603,10 @@ def bind_backend_session(agent_id: str, backend_session_id: str) -> None:
         raise ValueError("bind_backend_session requires agent_id")
     if not backend_session_id:
         raise ValueError("bind_backend_session requires non-empty backend_session_id")
+    from . import transcript_paths
+    if not transcript_paths.session_id_ok(backend_session_id):
+        # Every binding passes here (R70): an id that is not one path component never is.
+        raise ValueError("bind_backend_session requires a session id that is one path component")
 
     c = conn()
     # Ensure a live runtime row exists. record_state and other writers

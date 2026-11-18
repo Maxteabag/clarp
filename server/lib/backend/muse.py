@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
-from .. import muse_transcript
+from .. import muse_transcript, transcript_paths
 from ..tts_queue_records import enqueue as enqueue_tts
 from ..log import log, log_exception, log_fault
 from ..proc_util import stderr_text
@@ -414,7 +414,7 @@ class MuseBackend(StreamJsonBackend):
                 return outcome
             paths = list(muse_transcript.sessions_root().glob(
                 f'[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/{session_id}/.session.lock'))
-            if len(paths) != 1:
+            if len(paths) != 1 or not transcript_paths.inside(self.id, muse_transcript.sessions_root(), paths[0]):
                 return outcome
             lock = paths[0]
             fields = dict(line.split('=', 1) for line in lock.read_text()[:4096].splitlines()

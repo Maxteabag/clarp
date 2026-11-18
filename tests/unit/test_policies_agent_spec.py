@@ -86,6 +86,11 @@ def parse(data, view=VIEW, *, janitor=False, backends=None):
      VIEW, 400, "resume_unsupported"),
     ({"name": "X", "open_existing": True, "resume_session_id": "r"}, VIEW, 404,
      "Session is no longer available in this directory"),
+    # R70: an id that is not one path component is never bound (the tool's id grammar).
+    *[({"name": "X", key: value}, VIEW, 400, "invalid session id")
+      for key in ("resume_session_id", "fork_session_id")
+      for value in ("../x", "a/b", "a\\b", "a\x00b", "*", "..", 5)],
+    ({"name": "X", "open_existing": True, "resume_session_id": "../x"}, VIEW, 400, "invalid session id"),
 ])
 def test_refusals(data, view, status, message):
     result = parse(data, view)

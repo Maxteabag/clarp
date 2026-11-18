@@ -96,6 +96,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     'stream_pacing',
     'telemetry',
     'text_util',
+    'transcript_paths',
     'tool_output',
     'trace',
     'tts_queue_records',

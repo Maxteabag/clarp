@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Collection, Mapping, Sequence
 
 from .. import roster as contact_roster
+from .. import transcript_paths
 from ..voice import CARTESIA, resolve_voice
 from . import helper_state as helper_policy
 
@@ -108,6 +109,14 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
     current = roster.agents.get(replace_sid) if replace_sid else None
     # A relaunch inherits the backend the way it inherits voice and cwd.
     backend = backends.normalize(data.get("backend") or (current or {}).get("backend"))
+
+    # A native session id names one file in the tool's own store (R70): one that is
+    # not a single path component is never bound to an agent.
+    for key in ("resume_session_id", "fork_session_id"):
+        value = data.get(key)
+        if value not in (None, "") and not (isinstance(value, str)
+                                             and transcript_paths.session_id_ok(value.strip())):
+            return SpecError(400, "invalid session id")
 
     if data.get("open_existing") is True and data.get("resume_session_id") and not janitor:
         sid = str(data["resume_session_id"]).strip()
