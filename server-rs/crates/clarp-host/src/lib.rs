@@ -140,3 +140,5 @@ mod tests {
         assert_eq!(tool_token(""), "");
     }
 }
+
+pub mod vocabulary;
