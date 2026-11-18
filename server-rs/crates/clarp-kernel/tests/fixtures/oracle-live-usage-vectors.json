@@ -1,0 +1,2891 @@
+[
+ {
+  "mode": "api",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.0,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000833,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000917,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000333,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.035,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": null
+     },
+     "reason": null
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": false,
+     "reason": "unknown",
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": false,
+     "reason": "unknown",
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "api",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.0,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000833,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000917,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000333,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.035,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": 0
+     },
+     "reason": null
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "unknown",
+     "voice_estimate_usd": 0.0,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "unknown",
+     "voice_estimate_usd": 0.0,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "api",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.0,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000833,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000917,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.000333,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.035,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.025,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": 31.25
+     },
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 31.25,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "voice_estimate_usd": 0.026042,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 31.25,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "voice_estimate_usd": 0.026042,
+     "billing": "openai_api",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "subscription",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": null
+     },
+     "reason": null
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": false,
+     "reason": "unknown",
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": false,
+     "reason": "unknown",
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "subscription",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": 0
+     },
+     "reason": null
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "unknown",
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "unknown",
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "subscription",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": 0,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": 1,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": 31.25
+     },
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 31.25,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 31.25,
+     "context_ratio": 0.4,
+     "expires_at": 99,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "voice_estimate_usd": null,
+     "billing": "chatgpt_subscription",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "gemini",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 1,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 1.1,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.4,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 42,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": null
+     },
+     "reason": null
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": true,
+     "usage_final": false,
+     "reason": "unknown",
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": true,
+     "usage_final": false,
+     "reason": "unknown",
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "gemini",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 1,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 1.1,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.4,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 42,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": 0
+     },
+     "reason": null
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "unknown",
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "unknown",
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ },
+ {
+  "mode": "gemini",
+  "steps": [
+   {
+    "event": {},
+    "observed": false,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.started",
+     "session": {
+      "expires_at": 99
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": null,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": null,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0,
+      "voice_estimate_usd": 0
+     },
+     "context_window": {
+      "usage_ratio": 0
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1,
+      "voice_estimate_usd": 1
+     },
+     "context_window": {
+      "usage_ratio": 1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 1,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 1.1,
+      "voice_estimate_usd": 1.1
+     },
+     "context_window": {
+      "usage_ratio": 1.1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 1.1,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 1.1,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 0.4,
+      "voice_estimate_usd": 0.4
+     },
+     "context_window": {
+      "usage_ratio": 0.4
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 0.4,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 0.4,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 42,
+      "voice_estimate_usd": 42
+     },
+     "context_window": {
+      "usage_ratio": 42
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 42,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 42,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 30,
+      "voice_estimate_usd": 30
+     },
+     "context_window": {
+      "usage_ratio": 30
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": -1,
+      "voice_estimate_usd": -1
+     },
+     "context_window": {
+      "usage_ratio": -1
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": true,
+      "voice_estimate_usd": true
+     },
+     "context_window": {
+      "usage_ratio": true
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": "2",
+      "voice_estimate_usd": "2"
+     },
+     "context_window": {
+      "usage_ratio": "2"
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": null,
+      "voice_estimate_usd": null
+     },
+     "context_window": {
+      "usage_ratio": null
+     }
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 30,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": false,
+     "usage_final": false,
+     "reason": null,
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.closed",
+     "usage": {
+      "seconds": 31.25
+     },
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "observed": true,
+    "snapshot": {
+     "seconds": 31.25,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   },
+   {
+    "event": {
+     "type": "session.usage.updated",
+     "usage": {
+      "seconds": 100
+     }
+    },
+    "observed": false,
+    "snapshot": {
+     "seconds": 31.25,
+     "context_ratio": null,
+     "expires_at": null,
+     "finalized": true,
+     "usage_final": true,
+     "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "voice_estimate_usd": 30,
+     "billing": "gemini_api",
+     "scope": "voice_only"
+    }
+   }
+  ]
+ }
+]

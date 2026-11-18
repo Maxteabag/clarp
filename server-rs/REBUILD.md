@@ -1921,6 +1921,18 @@ here (`docs/differences.md`). The Host's test holds a call with the words told, 
 with the voice not reached, the two bounds from both sides, a path from where the Host stands, what is no
 file, the owner's file in place of the environment and the environment before it.
 
+**The Oracle: its second voice** (18 Nov 2026). The phone speaks the same protocol on either voice.
+Gemini Live takes the languages and history at setup, sends transcripts and PCM audio, and asks the Host
+for work through a non-blocking function. A routing collects the Host's appends and answers that function
+when it finishes. A phone interrupt suppresses the remainder of the current reply. A provider interrupt
+flushes buffered playback and holds the active relay. Token usage and the final estimate belong to the
+voice alone. A replacement connection takes the latest handle after a departure notice or a lost socket.
+The OpenAI key is required at the door for routing. An initial Gemini connection failure falls back to
+GPT-Live and holds further Gemini attempts for ten minutes. Status continues to describe the owner's
+choice and the keys. The adapter, cumulative usage and conversation effects are recorded from the Python
+Host by the Gemini (38 stories, 384 steps), Live usage (9 stories, 126 steps) and conversation
+(80 stories, 1623 steps) vector generators. The Gemini fixture uses the reference repaired in PR 430.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

@@ -79,8 +79,18 @@ pub struct Now {
     pub wall_ms: i64,
 }
 
+/// Provider actions that cross the conversation boundary in order with ordinary frames.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hook {
+    LocalInterrupt,
+    DelegationRouting(String),
+    DelegationFinished(String),
+}
+
 /// What a conversation tells the two sides of its call.
 pub trait Wire {
+    fn hook(&mut self, hook: Hook);
     fn voice(&mut self, said: Value);
     fn phone(&mut self, said: Value);
 }
@@ -236,6 +246,8 @@ pub struct Admission {
 /// The conversation of one call.
 #[derive(Debug, Clone)]
 pub struct Conversation {
+    pub(super) gemini: bool,
+    usage: super::usage::LiveUsage,
     pub(super) provider_session: String,
     pub(super) principal: String,
     pub(super) thread_id: String,
@@ -348,6 +360,8 @@ impl Conversation {
             earcons: true,
             progress_interval: 0,
             cues: Vec::new(),
+            gemini: false,
+            usage: super::usage::LiveUsage::new(super::usage::Billing::Api),
             owned: BTreeSet::new(),
             background: BTreeSet::new(),
             results_sent: BTreeSet::new(),
@@ -437,6 +451,15 @@ impl Conversation {
 
     pub fn earcons(&self) -> bool {
         self.earcons
+    }
+
+    pub fn use_gemini(&mut self) {
+        self.gemini = true;
+        self.usage = super::usage::LiveUsage::new(super::usage::Billing::Gemini);
+    }
+
+    pub fn usage(&self) -> Value {
+        self.usage.snapshot()
     }
 
     /// The Host's owner wants no cues, whatever was kept.
@@ -629,6 +652,9 @@ impl Conversation {
                 Phoned::Taken
             }
             "oracle_v2.interrupt" => {
+                if self.gemini {
+                    wire.hook(Hook::LocalInterrupt);
+                }
                 if let Some(relay) = self.active_mut() {
                     relay.held = true;
                 }
@@ -662,6 +688,11 @@ impl Conversation {
 
     /// What the voice sent.
     pub fn voice(&mut self, event: &Value, wire: &mut dyn Wire, now: Now) {
+        if event["type"] != "session.started" && self.usage.observe(event) && self.gemini {
+            let mut frame = self.usage.snapshot();
+            frame["type"] = json!("oracle_v2.usage");
+            wire.phone(frame);
+        }
         match event["type"].as_str().unwrap_or("") {
             "session.output_audio.delta" => {
                 let sound = python::b64decode(event["delta"].as_str().unwrap_or(""));
