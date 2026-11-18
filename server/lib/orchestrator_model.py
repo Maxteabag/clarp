@@ -74,7 +74,8 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
     # Bytes in (routing_input encodes the prompt as argv would), text out as before.
     stdout, stderr = (proc.stdout or b"").decode(), (proc.stderr or b"").decode()
     if proc.returncode != 0:
-        raise RuntimeError((stderr or stdout or f"{binary} rc={proc.returncode}")[:1000])
+        from .model_fallbacks import cli_failure
+        raise cli_failure(runner.id, stderr or stdout, prompt=prompt, returncode=proc.returncode)
     return _extract_json(runner.routing_text(stdout))
 
 
