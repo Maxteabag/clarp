@@ -2,7 +2,7 @@
 //! starts. The shim never waits on a Host and carries no opening token.
 use crate::edge::App;
 use clarp_kernel::rings::opening as rules;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
 pub type Request = (String, String, oneshot::Sender<bool>);
@@ -20,6 +20,9 @@ impl Gate {
 }
 
 pub async fn run(app: App, mut rx: mpsc::UnboundedReceiver<Request>) {
+    if let Err(why) = app.calls.recover_openings(&app).await {
+        eprintln!("clarp-host: opening recovery: {why}");
+    }
     while let Some((id, trace, reply)) = rx.recv().await {
         let _guard = app.calls.opening_turn.lock().await;
         let result = app

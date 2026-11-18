@@ -2738,6 +2738,7 @@ async fn revoke_device(
         // What the device still listens to ends now, not when it next asks.
         let _ = app.door.revoked.send(device_id.clone());
         app.android_chip.forget(&app, &device_id).await?;
+        app.calls.retire_openings(&app, Some(&device_id)).await?;
         Ok(Json(json!({ "ok": true })))
     } else {
         Err(ApiError::new(StatusCode::NOT_FOUND, "device not found"))

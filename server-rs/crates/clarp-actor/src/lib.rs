@@ -150,7 +150,7 @@ pub struct ShimOrder {
     pub before_stop: Option<(&'static str, u64)>,
     /// An initiative admitted by the Host. A user can reuse a name but cannot
     /// manufacture this provenance; the gate never intercepts a foreign turn.
-    pub opening: Option<(String, String)>,
+    pub opening: Option<Box<(String, String)>>,
     pub turn: TurnId,
     /// Which attempt of the turn the shim runs, from 1.
     pub attempt: u32,
@@ -2627,7 +2627,7 @@ impl Actor {
                 .trace_id
                 .as_deref()
                 .filter(|trace| trace.starts_with("callopen-"))
-                .map(|trace| (message.client_id().into(), trace.into()))
+                .map(|trace| Box::new((message.client_id().into(), trace.into())))
         } else {
             None
         };

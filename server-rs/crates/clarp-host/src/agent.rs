@@ -2050,7 +2050,7 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
-                        if let Some((id, trace)) = &order.opening
+                        if let Some((id, trace)) = order.opening.as_deref()
                             && !opening_gate.allowed(id, trace)
                         {
                             tell(
