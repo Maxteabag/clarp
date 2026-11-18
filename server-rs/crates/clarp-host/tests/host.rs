@@ -5308,16 +5308,26 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
 
 #[test]
 fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto() {
-    for (mode, relay_status, direct_status, handed, relayed, sent, failed, disabled) in [
-        ("direct", 200, 200, 1, 0, 1, 0, 0),
-        ("direct", 200, 410, 1, 0, 0, 0, 1),
-        ("auto", 503, 200, 1, 1, 1, 0, 0),
-        ("auto", 403, 200, 0, 1, 0, 1, 0),
-        ("relay", 503, 200, 0, 1, 0, 1, 0),
+    // The grant names the phone; the account binds and sends to its token instead.
+    for (mode, granted, credential, relay_status, direct_status, reason, handed, relayed, sent, failed, disabled) in [
+        ("direct", true, "", 200, 200, "", 1, 0, 1, 0, 0),
+        ("DIRECT", true, "", 200, 410, "", 1, 0, 0, 0, 1),
+        ("direct", true, "", 200, 400, "BadDeviceToken", 1, 0, 0, 0, 1),
+        ("direct", true, "", 200, 429, "TooManyRequests", 1, 0, 0, 1, 0),
+        ("auto", true, "", 503, 200, "", 1, 1, 1, 0, 0),
+        ("auto", true, "", 401, 200, "", 1, 1, 1, 0, 0),
+        ("auto", true, "", 403, 200, "", 0, 1, 0, 1, 0),
+        ("relay", true, "", 503, 200, "", 0, 1, 0, 1, 0),
+        ("relay", true, "", 401, 200, "", 0, 1, 0, 0, 1),
+        ("off", true, "", 200, 200, "", 0, 0, 0, 0, 0),
+        ("auto", false, "", 200, 200, "", 1, 0, 1, 0, 0),
+        ("relay", false, "", 200, 200, "", 0, 0, 0, 1, 0),
+        ("auto", false, "cav1.a.b.c", 200, 200, "", 0, 2, 1, 0, 0),
+        ("auto", false, "cav1.a.b.c", 503, 200, "", 1, 1, 1, 0, 0),
     ] {
         let place = Place::new("direct-alert");
         let service = stand_in_push_service();
-        service.answers(&[(direct_status, "")]);
+        service.answers(&[(direct_status, &json!({"reason": reason}).to_string())]);
         let relay = StandInRelay::start();
         relay.answers(relay_status, json!({"results": [{"status": 200}]}));
         let (key, public) = push_key(&place);
@@ -5338,7 +5348,7 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
                 "--push-keys",
                 settings.to_str().unwrap(),
             ],
-            &[("CLARP_APNS_ENDPOINT", &service.address)],
+            &[("CLARP_APNS_ENDPOINT", &service.address), ("CLARP_PUSH_CREDENTIAL", credential)],
         );
         let agent = host.new_agent("Echo");
         let (phone, _) = pair(&host, "Phone", "full");
@@ -5354,7 +5364,7 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
                 &phone,
                 "POST",
                 "/devices",
-                Some(&json!({"token": token, "push_grant": grant}))
+                Some(&json!({"token": token, "push_grant": if granted { &grant } else { "" }}))
             )
             .0,
             200
@@ -5375,7 +5385,24 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
             (&json!(sent), &json!(failed), &json!(disabled)),
             "{mode} {rung}"
         );
-        assert_eq!(relay.taken().len(), relayed);
+        assert_eq!(delivery["enabled"], mode != "off");
+        let attempts = relay.taken();
+        assert_eq!(attempts.len(), relayed);
+        if let Some((path, auth, body)) = attempts.first() {
+            if granted {
+                assert_eq!(path, "/v1/push/send");
+                assert_eq!(auth, &format!("Bearer {grant}"));
+                assert!(body["notifications"][0].get("deviceToken").is_none());
+            } else {
+                assert_eq!(path, "/v1/push/devices");
+                assert_eq!(auth, &format!("Bearer {credential}"));
+                assert_eq!(body["devices"][0]["deviceToken"], token);
+                if let Some((path, _, body)) = attempts.get(1) {
+                    assert_eq!(path, "/v1/push/send");
+                    assert_eq!(body["notifications"][0]["deviceToken"], token);
+                }
+            }
+        }
         let requests = service.handed();
         assert_eq!(requests.len(), handed);
         if let Some((path, headers, payload)) = requests.first() {
@@ -5387,6 +5414,25 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
                 "TEAM"
             );
             assert_eq!(payload["ring_id"], rung["ring"]["ring_id"]);
+            assert_eq!(payload["kind"], "agent-ring");
+            assert_eq!(headers["apns-priority"], "10");
+            assert_eq!(headers["apns-collapse-id"], payload["notification_id"].as_str().unwrap());
+            assert!(!headers.contains_key("apns-expiration"));
+            if granted && relayed == 1 {
+                assert_eq!(payload, &attempts[0].2["notifications"][0]["payload"]);
+            }
+        }
+        if sent > 0 {
+            wait_for("the successful push is recorded", || {
+                host.get("/devices/push-tokens")["tokens"][0]["last_push_at"].is_number()
+            });
+        }
+        if granted && mode == "auto" && relay_status == 401 {
+            relay.answers(200, json!({"results": [{"status": 200}]}));
+            host.post("/calls/ring/cancel", json!({"ring_id": rung["ring"]["ring_id"]}));
+            wait_for("the revoked grant is forgotten on the next alert", || service.handed().len() == 2);
+            assert_eq!(relay.taken().len(), 1);
+            assert_eq!(service.handed()[1].2["ring_state"], "cancelled");
         }
         if disabled > 0 {
             wait_for("direct rejection disables the token", || {

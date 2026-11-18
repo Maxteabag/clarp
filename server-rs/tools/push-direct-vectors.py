@@ -49,13 +49,14 @@ def record(root):
             return 200, '', ''
 
     apns._DirectTransport = Direct
+    test_key = root / "direct.p8"
+    test_key.write_text("stand-in key; signing is captured by Direct")
     rows = []
     for mode, relay, account, key in itertools.product(
             ('auto', 'direct', 'relay', 'off', 'other'), (False, True), (False, True), (False, True)):
-        cfg = SimpleNamespace(apns_mode=mode, audio_central_url='https://127.0.0.1',
-                              audio_central_credential='cav1.x.y.z', apns_direct_ready=lambda: key,
-                              apns_relay_url_ok=lambda: relay, apns_relay_ready=lambda: relay and account)
-        cfg.apns_transport = lambda: config.Config.apns_transport(cfg)
+        cfg = config.Config(apns_mode=mode, audio_central_url='https://127.0.0.1' if relay else '',
+                            audio_central_credential='cav1.x.y.z' if account else '',
+                            apns_key_path=str(test_key) if key else '', apns_key_id='TEST', apns_team_id='TEST')
         for grant_status, account_status in ((200, 200), (401, 200), (503, 200), (403, 503), (401, 503)):
             outcomes.update(grant=grant_status, account=account_status)
             router = apns._Router(cfg)
