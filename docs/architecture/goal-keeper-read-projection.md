@@ -21,12 +21,27 @@ Message memo hits require the same agent, exact requested cursor and complete or
 
 Every twentieth pass checks the authoritative plan list and the plain batched message query in the same snapshot. The receiver compares raw facts and Activity, including sorted triggers with multiplicity, and uses authoritative results for that pass. One content-free mismatch event identifies the number of affected goals and field classes and the memo is discarded. On exception, partial progress is discarded before the plain pass.
 
+Both readers return open plans in ascending task-plan rowid order (oldest inserted first). The keeper takes its capped batch from that order. Both installed Hosts returned this order before the change and had empty SQLite statistics. A database on which the planner previously chose another order after ANALYZE can therefore get a different batch.
+
+One existing writer can change a row under another agent when a caller supplies a colliding message ID. Only the caller's head advances. The affected agent's message memo can then serve stale facts until the plain comparison, at most twenty passes. The review fixture observed 18 stale answers before correction. The writer repair is tracked separately.
+
 ## Read diagnostic
 
-Set `[diagnostics] janitor_autonomy_reads = true` to measure intervals of 20 autonomy passes. Turning it off discards a partial interval. The default path does not open procfs or install a SQL wrapper. One `janitorAutonomyReads` record reports decimal MB of thread rchar for setup, heartbeat, quota, hotseat, labels and keeper. For the keeper it also reports plan headers/points/plain rows, session-head validation, helper membership, messages, stall MAX, jobs, goal events, owner state and other queries. The keeper remainder includes eligibility/progress reads and operations outside the decision SELECTs. Lane totals already include query totals. A worked flag means a lane began a check/run, delivered a notification or applied setup, even if it found nothing to act on. Sweep and self-check flags mean at least one occurred in the interval. On a system without thread rchar the record marks sampling unavailable. Cached/mapped SQLite work need not register read bytes; use a warm live sample for the operator's target.
+Set `[diagnostics] janitor_autonomy_reads = true` to measure intervals of 20 autonomy passes. The Host writes the interval to stderr (the service journal) whenever this switch is on. The ordinary capture policy controls whether the same fields also persist in telemetry. Turning the switch off discards a partial interval. The default path does not open procfs or install a SQL wrapper. One `janitorAutonomyReads` record reports decimal MB of thread rchar for setup, heartbeat, quota, hotseat, labels and keeper. For the keeper it also reports plan headers/points/plain rows, session-head validation, helper membership, messages, stall MAX, jobs, goal events, owner state and other queries. The keeper remainder includes eligibility/progress reads and operations outside the decision SELECTs. Lane totals already include query totals. A worked flag means a lane began a check/run, delivered a notification or applied setup, even if it found nothing to act on. Sweep and self-check flags mean at least one occurred in the interval. On a system without thread rchar the record marks sampling unavailable. Cached/mapped SQLite work need not register read bytes; use a warm live sample for the operator's target.
 
 ## Synthetic equivalence sample
 
 Two independent scratch databases started with 23 goals and 43 agents, two sessions per agent, 128 historical messages per session. Over 26 fixed-clock passes the original reader and the memo reader produced identical ordered ready IDs, raw Activity fields/trigger sequences and entire progress maps. Inputs included same-millisecond activity, a terminal job then re-registration, retry/clock expiry, forced sweeps, scope changes, helper reassignment, closure, one-off catch-up and a cold worker restart. The real-session carry and AGY restore tests cover invalidation through production writers.
 
 After warm-up, a stable idle agent/cursor hit. Five of the 23 goals had no updater cursor and a moving lookback; those five owners and two helpers missed on every such pass. Across the 43 agents that was 36 hits / 7 misses (83.7%). Changing one of the stable owners’ heads on every busy pass gave 35 hits / 8 misses (81.4%). The complete 43-agent, 86-session head lookup **including headless-session certification** took 5,932 SQLite VM operations, 1.50 ms and zero additional warm thread read bytes on this small mapped fixture. These numbers are shape-specific. No production thread throughput is inferred.
+
+
+With memory mapping disabled, the review fixture measured these read volumes per pass in decimal MB. About 3.2 MB of the ordinary memo pass came from plan header pages.
+
+| Pass | Plain | Memo |
+| --- | ---: | ---: |
+| Ordinary | 6.77 | 3.69 |
+| Sweep | 6.78 | 7.03 |
+| Twentieth-pass comparison | 6.79 | 10.26 |
+
+The operator measures the live thread separately with the diagnostic switch.

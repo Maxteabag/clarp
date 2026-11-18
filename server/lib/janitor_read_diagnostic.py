@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from . import eventlog
+from .log import log
 
 LANES = ("setup", "heartbeat", "quota", "hotseat", "labels", "keeper")
 FAMILIES = ("plan_headers", "plan_points", "plain_plans", "heads", "helpers", "messages",
@@ -114,4 +114,4 @@ class ReadMeter:
                   "sweep": self.sweep, "self_check": self.self_check,
                   "sample_unavailable": self.unavailable}
         self.__init__()
-        eventlog.emit("server", "janitorAutonomyReads", detail=detail)
+        log("janitorAutonomyReads", detail)
