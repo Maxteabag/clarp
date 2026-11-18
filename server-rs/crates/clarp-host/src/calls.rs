@@ -371,6 +371,54 @@ impl Desk {
                 ));
             }
         }
+        // A clip may be synthesized after the opening changes. Keep a trace
+        // index with the state change, so the voice worker needs one lookup.
+        if out.changed.rings {
+            for ring in rings.rings().iter().filter(|r| !r.opening.is_null()) {
+                let previous = books
+                    .rings
+                    .rings()
+                    .iter()
+                    .find(|r| r.ring_id == ring.ring_id)
+                    .map(|r| &r.opening);
+                if previous == Some(&ring.opening) {
+                    continue;
+                }
+                for field in ["intent", "greeting"] {
+                    let trace = ring.opening[field]["trace_id"].as_str();
+                    if let Some(old) = previous
+                        .and_then(|p| p[field]["trace_id"].as_str())
+                        .filter(|old| Some(*old) != trace)
+                    {
+                        rows.push(("opening_audio", old.into(), b"null".to_vec()));
+                    }
+                    if let Some(trace) = trace
+                        && let Some((tag, skip)) = rings::opening::clip(&ring.opening, trace)
+                    {
+                        rows.push((
+                            "opening_audio",
+                            trace.into(),
+                            json!({"agent_id":ring.agent_id,"tag":tag,"skip":skip})
+                                .to_string()
+                                .into_bytes(),
+                        ));
+                    }
+                }
+            }
+            // The bounded ring trail can evict a call whose opening token is
+            // still on a phone. Keep the opening for a later owner replay.
+            for dropped in books.rings.rings().iter().filter(|old| {
+                !old.opening.is_null() && !rings.rings().iter().any(|r| r.ring_id == old.ring_id)
+            }) {
+                if let Some(token) = dropped.opening["token"].as_str().filter(|s| !s.is_empty()) {
+                    rows.push((
+                        "opening_history",
+                        token.to_owned(),
+                        dropped.opening.to_string().into_bytes(),
+                    ));
+                }
+            }
+        }
         app.fleet.keep_together(rows).await?;
         books.calls = calls;
         books.rings = rings;

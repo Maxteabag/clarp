@@ -910,6 +910,10 @@ impl Rings {
             } else {
                 String::new()
             };
+            let before = proof.generation();
+            let after = proof.generation();
+            let proven = if before == after { before } else { Value::Null };
+            let late = opening::breach(&generation, &proven);
             ring.opening = opening::record(
                 opening::Record {
                     ring,
@@ -918,10 +922,36 @@ impl Rings {
                     token: &token,
                     nonce: &nonce,
                     now: now_ms,
-                    generation,
+                    generation: if late.is_some() {
+                        Value::Null
+                    } else {
+                        generation
+                    },
                 },
                 proof,
             );
+            if let Some(cause) = late {
+                ring.opening["retired"] = json!({"reason":cause,"at":now_ms});
+                ring.opening["identity_breach"] = json!({"cause":cause,"at":now_ms});
+                if ring.opening["state"] != "fallback" {
+                    ring.opening["state"] = json!("unknown");
+                }
+                out.changed.rings = true;
+                let ring = ring.clone();
+                self.write(json!({"outcome":"refused","error":"the call is over","ring_id":ring.ring_id,"cause":cause,"by":asked.principal,"call_id":ring.call_id}),now_ms,out);
+                let _ = calls.end(
+                    Asker {
+                        caller: asked.principal,
+                        call_id: &ring.call_id,
+                        by: &ring.session,
+                        ..Default::default()
+                    },
+                    at,
+                    of_calls,
+                );
+                Self::announce(&ring, ANSWERED, now_ms, out);
+                return Err(over(&ring, now_ms));
+            }
         }
         out.changed.rings = true;
         let ring = ring.clone();

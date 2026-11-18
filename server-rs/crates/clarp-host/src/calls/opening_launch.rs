@@ -21,7 +21,7 @@ impl Gate {
 
 pub async fn run(app: App, mut rx: mpsc::UnboundedReceiver<Request>) {
     if let Err(why) = app.calls.recover_openings(&app).await {
-        eprintln!("clarp-host: opening recovery: {why}");
+        eprintln!("clarp-host: opening recovery: {}", why.0);
     }
     while let Some((id, trace, reply)) = rx.recv().await {
         let _guard = app.calls.opening_turn.lock().await;
