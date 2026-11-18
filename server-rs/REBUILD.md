@@ -1775,6 +1775,20 @@ that cannot be written, work for an agent there is none of, a tool there is none
 call handing work on as any other; and a call carried through the relay as it is at the door (opened,
 sound both ways, ended by the phone, refused, and left by a phone that went away). Four defects of the reference were found on the way (R58 to R61).
 
+**The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
+part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
+the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
+plants them one at a time and writes down whether the tests caught each. What is missed gets a test, or
+the code that nothing can observe goes, or the rule is taken off the list with its reason written there.
+The lists run on GitHub's machines, started by hand (`Planted rules (Rust)`, `.github/workflows/
+server-rs-plants.yml`: several machines share a list and the last job fails where a rule was not caught),
+or through the build machine. On the commit that landed: the delegations 165 of 165 caught, the relay 60
+of 60, the cues 32 of 32, the tools 80 of 80, the memory 158 of 158, the conversation 475 of 475,
+the call on the Host 93 of 93. What their first runs missed was mended before: the memory's stories went
+from 10 to 18, the conversation's from 43 to 70, the tools' and the call's cases grew, and code that
+nothing could observe is gone (the set of what was handed to the contact, the early end of a tick after a
+part, a second look at whose work a thread's work is, guards that nothing reaches).
+
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
 on, changes and removes it, and a runner looks every fifteen seconds for what is due, moves each schedule
