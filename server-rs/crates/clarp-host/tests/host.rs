@@ -30600,12 +30600,12 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     let db = clarp_store_sqlite::SqliteKeyValue
         .open(&place.root.join("data/fleet.db"))
         .unwrap();
-    let tagged: Value = serde_json::from_slice(
-        &db.get("kept.opening_audio", "callopen-test-recovery")
-            .unwrap()
-            .unwrap(),
-    )
-    .unwrap();
+    let archive: Value = serde_json::from_slice(&db.get("kept.opening_history",r["ring_id"].as_str().unwrap()).unwrap().unwrap()).unwrap();
+    let binding=&archive["_opening"]["clip_bindings"][0];
+    assert_eq!(binding["kind"],"initiative");
+    assert_eq!(binding["admission_id"],id);
+    let key=clarp_kernel::rings::binding::key(archive["agent_id"].as_str().unwrap(), binding["turn_id"].as_u64().unwrap()).unwrap();
+    let tagged: Value=serde_json::from_slice(&db.get("kept.opening_by_turn",&key).unwrap().unwrap()).unwrap();
     assert_eq!(tagged["skip"], true);
     drop(db);
     assert_eq!(

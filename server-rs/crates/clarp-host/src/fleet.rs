@@ -575,7 +575,7 @@ enum Ask {
         answer: Answer<Result<(), Unavailable>>,
     },
     KeepTogether {
-        writes: Vec<(String, String, Vec<u8>)>,
+        writes: Vec<clarp_ports::kv::Write>,
         answer: Answer<Result<(), Unavailable>>,
     },
     /// What was left of a kind: under one key, or all of it, ordered by key.
@@ -921,12 +921,16 @@ impl FleetHandle {
         &self,
         rows: Vec<(&'static str, String, Vec<u8>)>,
     ) -> Result<(), Unavailable> {
-        if rows.is_empty() {
+        self.change_together(rows,Vec::new()).await
+    }
+
+    pub async fn change_together(&self,rows:Vec<(&'static str,String,Vec<u8>)>, deletes:Vec<(&'static str,String)>) -> Result<(),Unavailable> {
+        if rows.is_empty() && deletes.is_empty() {
             return Ok(());
         }
         let writes = rows
             .into_iter()
-            .map(|(kind, key, value)| (shelf(kind), key, value))
+            .map(|(kind, key, value)| (shelf(kind), key, Some(value))).chain(deletes.into_iter().map(|(kind,key)|(shelf(kind),key,None)))
             .collect();
         self.ask(|answer| Ask::KeepTogether { writes, answer })
             .await?

@@ -588,6 +588,10 @@ impl super::Rings {
             .filter(|r| !r.opening.is_null())
     }
 
+    pub fn forget_opening(&mut self,id:&str) {
+        if let Some(ring)=self.rings.iter_mut().find(|r|r.ring_id==id){ring.opening=Value::Null;}
+    }
+
     pub fn attach_opening(&mut self, ring: super::Ring) {
         self.archived.push(ring);
     }
