@@ -21273,13 +21273,28 @@ if args == ["--version"]:
     print("stand-in 1")
     sys.exit(0)
 if args == ["models"]:
+    if os.path.exists(os.path.join(os.environ["HOME"],"probe-failed")):
+        print("private-example",file=sys.stderr)
+        sys.exit(2)
     print("You are not authenticated." if os.path.exists(os.path.join(os.environ["HOME"],"signed-out")) else "synthetic")
+    sys.exit(0)
+if "--session-id" not in args and "--resume" not in args:
+    with open(os.path.join(os.environ["HOME"], "one-question"), "w") as out:
+        json.dump(args,out)
+    decision=json.dumps({"kind":"status_query","target_session":"recorder","confidence":0.99})
+    if tool=="muse":
+        print(json.dumps({"payload_type":"run.terminal.completed","payload":{"text":decision}}))
+    else:
+        print(json.dumps({"type":"text","data":decision}))
     sys.exit(0)
 flag = "--resume" if "--resume" in args else "--session-id"
 sid = args[args.index(flag)+1]
 prompt = open(args[args.index("--prompt-file")+1]).read() if "--prompt-file" in args else args[-1]
 with open(os.path.join(os.environ["HOME"], "calls"), "a") as calls:
     calls.write(json.dumps([flag, sid, prompt[-20:]])+"\n")
+if prompt.endswith("locked"):
+    print("session %s is already in use" % sid, file=sys.stderr)
+    sys.exit(1)
 def emit(**event):
     print(json.dumps(event),flush=True)
 if tool == "grok":
@@ -21376,6 +21391,14 @@ else:
             assert_eq!(auth()["state"], "signed_out");
             std::fs::remove_file(place.root.join("signed-out")).unwrap();
         }
+        if tool == "grok" {
+            std::fs::write(place.root.join("probe-failed"), "").unwrap();
+            let failed = auth();
+            assert_eq!(failed["state"], "error");
+            assert_eq!(failed["credential_present"], false);
+            assert!(!failed.to_string().contains("private-example"));
+            std::fs::remove_file(place.root.join("probe-failed")).unwrap();
+        }
         let fixture: Value = serde_json::from_str(include_str!(
             "../../clarp-kernel/tests/fixtures/backend-grok-vectors.json"
         ))
@@ -21447,14 +21470,14 @@ else:
                 .filter_map(|line| serde_json::from_str(line).ok())
                 .collect()
         };
-        let over = |id: &str| {
+        let over = |host: &Host, id: &str| {
             let rows = host.turns(&agent);
             rows.iter()
                 .position(|r| r["id"] == id)
                 .is_some_and(|at| rows[at..].iter().any(|r| r["turn"].is_object()))
         };
         host.send(&agent, "begin", "u-1");
-        wait_for("first answer", || over("u-1"));
+        wait_for("first answer", || over(&host, "u-1"));
         assert!(host.turns(&agent).iter().any(|r| r["text"] == "Answer."));
         let turns = host.turns(&agent);
         let card = turns
@@ -21471,23 +21494,42 @@ else:
             let usage = host.get("/backend-usage");
             usage["backends"].as_array().unwrap().iter().any(|r| {
                 r["backend"] == tool
-                    && r["totals"]["windows"]["five_hour"]["tokens_in"] == 10
-                    && r["totals"]["windows"]["five_hour"]["tokens_out"] == 2
+                    && r["totals"]["five_hour"]["tokens_in"] == 10
+                    && r["totals"]["five_hour"]["tokens_out"] == 2
             })
         });
         host.send(&agent, "hold", "u-2");
         wait_for("second launch", || calls().len() == 2);
+        host.kill();
+        let host = place.start_in("", &[], &world);
+        let snapshot = host.get("/agents/snapshot");
+        let row = snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session"] == agent)
+            .unwrap();
+        assert_eq!(row["backend_session_id"], calls()[0][1]);
         host.post("/stop", json!({"session":agent}));
-        wait_for("stop", || over("u-2"));
+        wait_for("stop", || over(&host, "u-2"));
         host.send(&agent, &format!("{}refuse", "x".repeat(66 * 1024)), "u-3");
-        wait_for("failure", || over("u-3"));
+        wait_for("failure", || over(&host, "u-3"));
         assert!(
             host.turns(&agent)
                 .iter()
                 .any(|r| r.to_string().contains("recorded failure"))
         );
+        if tool == "muse" {
+            host.send(&agent, "locked", "u-4");
+            wait_for("session lock refusal", || over(&host, "u-4"));
+            assert!(
+                host.turns(&agent)
+                    .iter()
+                    .any(|r| r.to_string().contains("muse_session_locked"))
+            );
+        }
         let seen = calls();
-        assert_eq!(seen.len(), 3);
+        assert_eq!(seen.len(), if tool == "muse" { 4 } else { 3 });
         assert_eq!(seen[0][0], "--session-id");
         assert!(seen[0][1].as_str().is_some_and(|s| !s.is_empty()));
         for call in &seen[1..] {
@@ -21502,6 +21544,20 @@ else:
             assert_eq!(call[1], seen[0][1]);
         }
         assert!(seen[2][2].as_str().unwrap().ends_with("refuse"));
+        let settings=host.post("/orchestrator/settings",json!({"provider":tool,"enabled":true,"fallback_only":false,"model":"synthetic","effort":"high"}));
+        assert_eq!(settings["ok"], true, "{settings}");
+        let route=host.post("/send",json!({"session":agent,"text":"How is Recorder doing?","client_msg_id":"ask-status","hands_free":true}));
+        assert_eq!(route["orchestrator"]["action"], "status", "{route}");
+        let argv: Vec<String> =
+            serde_json::from_slice(&std::fs::read(place.root.join("one-question")).unwrap())
+                .unwrap();
+        assert!(argv.last().unwrap().contains("How is Recorder doing?"));
+        assert_eq!(argv.contains(&"--no-session-log".into()), tool == "muse");
+        assert!(argv.windows(2).any(|pair| pair == ["--model", "synthetic"]));
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["--reasoning-effort", "high"])
+        );
     }
 }
 
