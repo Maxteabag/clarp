@@ -2,5 +2,5 @@
 //! returns only the observation, or none if the provider could not answer.
 pub trait UsageReader {
     type Reading;
-    fn read(self) -> impl std::future::Future<Output=Option<Self::Reading>> + Send;
+    fn read(self) -> impl std::future::Future<Output = Option<Self::Reading>> + Send;
 }

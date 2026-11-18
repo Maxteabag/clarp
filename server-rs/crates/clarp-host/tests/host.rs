@@ -21939,12 +21939,18 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
             ),
             (503, "failed"),
             (503, "failed"),
-            (200,r#"{"five_hour":{"utilization":1,"resets_at":"synthetic-claude"}}"#),
-            (200,r#"{"rate_limit":{"allowed":false},"rate_limit_reached_type":{"type":"credits_depleted"},"rate_limit_upsell":{"reset_at":2100000000}}"#),
-            (200,"{}"),
-            (401,"synthetic-codex"),
-            (200,r#"{"five_hour":{"utilization":40}}"#),
-            (200,"{}"),
+            (
+                200,
+                r#"{"five_hour":{"utilization":1,"resets_at":"synthetic-claude"}}"#,
+            ),
+            (
+                200,
+                r#"{"rate_limit":{"allowed":false},"rate_limit_reached_type":{"type":"credits_depleted"},"rate_limit_upsell":{"reset_at":2100000000}}"#,
+            ),
+            (200, "{}"),
+            (401, "synthetic-codex"),
+            (200, r#"{"five_hour":{"utilization":40}}"#),
+            (200, "{}"),
         ] {
             let (mut stream, _) = listener.accept().unwrap();
             let request = whole_request(&mut stream);
@@ -21962,13 +21968,38 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         ("CLARP_CLAUDE_PROGRAM", fallback.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let help=Command::new(env!("CARGO_BIN_EXE_clarp-host")).arg("--help").output().unwrap();
-    assert!(format!("{}{}",String::from_utf8_lossy(&help.stdout),String::from_utf8_lossy(&help.stderr)).contains("--ask-usage"));
-    let mut refused=Command::new(env!("CARGO_BIN_EXE_clarp-host")).args(["--ask-usage","--data",home.join("invalid").to_str().unwrap(),"--run",home.join("invalid-run").to_str().unwrap(),"--listen","127.0.0.1:0"])
-        .envs(world.iter().copied()).env("CLARP_USAGE_LOOPBACK","192.0.2.10:8888")
-        .stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
-    wait_for("an off-machine stand-in to be refused at startup",||refused.try_wait().unwrap().is_some());
-    let refusal=refused.wait_with_output().unwrap();
+    let help = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&help.stdout),
+            String::from_utf8_lossy(&help.stderr)
+        )
+        .contains("--ask-usage")
+    );
+    let mut refused = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args([
+            "--ask-usage",
+            "--data",
+            home.join("invalid").to_str().unwrap(),
+            "--run",
+            home.join("invalid-run").to_str().unwrap(),
+            "--listen",
+            "127.0.0.1:0",
+        ])
+        .envs(world.iter().copied())
+        .env("CLARP_USAGE_LOOPBACK", "192.0.2.10:8888")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for("an off-machine stand-in to be refused at startup", || {
+        refused.try_wait().unwrap().is_some()
+    });
+    let refusal = refused.wait_with_output().unwrap();
     assert!(!refusal.status.success());
     assert!(String::from_utf8_lossy(&refusal.stderr).contains("loopback"));
     let bare = place.start_in("", &[], &world);
@@ -21977,7 +22008,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
     assert!(!agy.with_extension("calls").exists());
     drop(bare);
     let host = place.start_in("", &["--ask-usage"], &world);
-    let heard=host.listen();
+    let heard = host.listen();
     let first = host.get("/backend-usage");
     assert_eq!(
         first["providers"]["claude"]["windows"][0]["used_percentage"],
@@ -21992,12 +22023,29 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         75.0
     );
     assert_eq!(first["limit_events"][0]["kind"], "warning");
-    let ident=first["limit_events"][0]["provider_limit_event_id"].clone();
-    wait_for("Codex warning on the event stream",||heard.lock().unwrap().iter().any(|event|event["type"]=="provider-limit" && event["provider_limit_event_id"]==ident));
-    assert_eq!(first["providers"]["claude"]["windows"][1]["used_percentage"],27.0);
-    assert_eq!(first["providers"]["agy"]["windows"][0]["scope"],"model_group");
-    assert_eq!(first["providers"]["agy"]["windows"][0]["label"],"model family");
-    assert_eq!(first["providers"]["codex"]["source"]["detail"],"/wham/usage");
+    assert_eq!(first["providers"]["claude"]["source"]["detail"], "anthropic-oauth-usage");
+    let ident = first["limit_events"][0]["provider_limit_event_id"].clone();
+    wait_for("Codex warning on the event stream", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "provider-limit" && event["provider_limit_event_id"] == ident
+        })
+    });
+    assert_eq!(
+        first["providers"]["claude"]["windows"][1]["used_percentage"],
+        27.0
+    );
+    assert_eq!(
+        first["providers"]["agy"]["windows"][0]["scope"],
+        "model_group"
+    );
+    assert_eq!(
+        first["providers"]["agy"]["windows"][0]["label"],
+        "model family"
+    );
+    assert_eq!(
+        first["providers"]["codex"]["source"]["detail"],
+        "/wham/usage"
+    );
     let auth = host.get("/backend-auth");
     assert!(
         auth["backends"]
@@ -22027,54 +22075,88 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         std::fs::read_to_string(agy.with_extension("calls")).unwrap(),
         "/usage\n/usage\n"
     );
-    assert_eq!(next["limit_events"][0]["kind"],"recovered");
-    let auth=host.get("/backend-auth");
-    let states=|auth:&Value,id:&str|auth["backends"].as_array().unwrap().iter().find(|b|b["id"]==id).unwrap()["state"].clone();
-    assert_eq!(states(&auth,"claude"),"unverified");
-    assert_eq!(states(&auth,"codex"),"valid");
-
-    std::fs::write(agy.with_extension("fail"),"").unwrap();
-    let blocked=host.get("/backend-usage?refresh=TRUE");
-    assert_eq!(blocked["providers"]["claude"],next["providers"]["claude"]);
-    assert_eq!(blocked["providers"]["agy"],next["providers"]["agy"]);
-    assert!(blocked["providers"]["codex"]["windows"].as_array().unwrap().is_empty());
-    let made=host.post("/agents",json!({"name":"Cody","backend":"codex"}));
-    let quota=|host:&Host|{
-        let roster=host.get("/agents/snapshot");
-        roster["agents"].as_array().unwrap().iter().find(|r|r["session"]==made["session"]).unwrap()["backend_quota"].clone()
+    assert_eq!(next["limit_events"][0]["kind"], "recovered");
+    let auth = host.get("/backend-auth");
+    let states = |auth: &Value, id: &str| {
+        auth["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == id)
+            .unwrap()["state"]
+            .clone()
     };
-    assert_eq!(quota(&host)["reason"],"credits_depleted");
+    assert_eq!(states(&auth, "claude"), "unverified");
+    assert_eq!(states(&auth, "codex"), "valid");
+
+    std::fs::write(agy.with_extension("fail"), "").unwrap();
+    let blocked = host.get("/backend-usage?refresh=TRUE");
+    assert_eq!(blocked["providers"]["claude"], next["providers"]["claude"]);
+    assert_eq!(blocked["providers"]["agy"], next["providers"]["agy"]);
+    assert!(
+        blocked["providers"]["codex"]["windows"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let made = host.post("/agents", json!({"name":"Cody","backend":"codex"}));
+    let quota = |host: &Host| {
+        let roster = host.get("/agents/snapshot");
+        roster["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session"] == made["session"])
+            .unwrap()["backend_quota"]
+            .clone()
+    };
+    assert_eq!(quota(&host)["reason"], "credits_depleted");
     assert!(!blocked.to_string().contains("synthetic-"));
 
-    std::fs::write(fallback.with_extension("fail"),"").unwrap();
-    let failed=host.get("/backend-usage?refresh=1");
-    let row=failed["backends"].as_array().unwrap().iter().find(|r|r["backend"]=="codex").unwrap();
-    assert_eq!(row["freshness"],"unknown");
-    assert_eq!(row["source"],"codex-usage-endpoint");
-    assert_eq!(row["error"],"Codex usage unavailable");
-    assert!(quota(&host).is_null(),"the reference clears a block with no percentage on a failed refresh");
-    assert_eq!(failed["providers"]["agy"],next["providers"]["agy"]);
+    std::fs::write(fallback.with_extension("fail"), "").unwrap();
+    let failed = host.get("/backend-usage?refresh=1");
+    let row = failed["backends"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["backend"] == "codex")
+        .unwrap();
+    assert_eq!(row["freshness"], "unknown");
+    assert_eq!(row["source"], "codex-usage-endpoint");
+    assert_eq!(row["error"], "Codex usage unavailable");
+    assert!(
+        quota(&host).is_null(),
+        "the reference clears a block with no percentage on a failed refresh"
+    );
+    assert_eq!(failed["providers"]["agy"], next["providers"]["agy"]);
     assert!(!failed.to_string().contains("synthetic-"));
     std::fs::remove_file(fallback.with_extension("fail")).unwrap();
-    std::fs::write(fallback.with_extension("retry"),"").unwrap();
-    let again=host.get("/backend-usage?refresh=true");
-    assert_eq!(again["providers"]["codex"]["windows"][0]["used_percentage"],16.0);
-    assert_eq!(again["providers"]["claude"]["windows"][0]["used_percentage"],40.0);
-    let starts=std::fs::read_to_string(fallback.with_extension("starts")).unwrap();
+    std::fs::write(fallback.with_extension("retry"), "").unwrap();
+    let again = host.get("/backend-usage?refresh=true");
+    assert_eq!(
+        again["providers"]["codex"]["windows"][0]["used_percentage"],
+        16.0
+    );
+    assert_eq!(
+        again["providers"]["claude"]["windows"][0]["used_percentage"],
+        40.0
+    );
+    let starts = std::fs::read_to_string(fallback.with_extension("starts")).unwrap();
     assert!(starts.ends_with("-s read-only -a never app-server\n-s read-only -a on-request app-server\n-s read-only app-server\n"));
     std::fs::write(codex.join("auth.json"),r#"{"auth_mode":"chatgpt","tokens":{"account_id":"another","access_token":"new-synthetic"}}"#).unwrap();
-    let auth=host.get("/backend-auth");
-    assert_eq!(states(&auth,"codex"),"unverified");
+    let auth = host.get("/backend-auth");
+    assert_eq!(states(&auth, "codex"), "unverified");
     held.join().unwrap();
     let requests = calls.lock().unwrap();
-    for pair in requests.chunks_exact(2) {
+    for pair in requests.as_chunks::<2>().0 {
         assert!(
             pair[0].starts_with("get /api/oauth/usage ")
                 && pair[0].contains("authorization: bearer synthetic-claude")
                 && pair[0].contains("anthropic-beta: oauth-2025-04-20")
         );
         assert!(
-            pair[1].contains("user-agent: codex-cli") && pair[1].starts_with("get /backend-api/wham/usage ")
+            pair[1].contains("user-agent: codex-cli")
+                && pair[1].starts_with("get /backend-api/wham/usage ")
                 && pair[1].contains("authorization: bearer synthetic-codex")
                 && pair[1].contains("chatgpt-account-id: example-account")
         );
