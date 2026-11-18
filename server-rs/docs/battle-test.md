@@ -1242,6 +1242,44 @@ installed Host carries `cost_activation_ms`, and no other tool's row does.
 
 What stands open of this: a stream carried to the real engine, once the owner gives this Host a key for it.
 
+## A ring held as a live voice call, at the door of the installed Host (18 Nov 2026, L33)
+
+Installed at 07:55 from the landed commit (`57210067`), the relay back after 47 ms, 23 agents.
+
+The voice of a live call is a provider's, paid by the minute, and reached with the owner's key. No call was
+held with it: nothing of this landing was tried against the real voice, and nothing was spent. The installed
+Host could reach it, and that is said here plainly: it is installed, as its installer has it, to look up
+the owner's keys in his own file each time one is needed (`--speech-keys`), and that file has his key for
+this voice. What keeps a call from being held is that it takes a paired phone that says it can hold one,
+and an approved profile in this Host's own folder: this Host has neither, and neither was made. The same
+file names the owner's key at the push service; the pushing of a ring as an incoming call is a word of its
+own for that reason, and it is not given here (the next landing).
+
+What the installed Host answers was asked at its door, as the administrator and as nobody (nothing was
+placed, nothing rang):
+
+| Asked | Answered |
+|---|---|
+| the features an app looks for | `agent_ring_live`, `agent_call_live` and `agent_ring_device_optout` are there; `agent_live_fcm` is not |
+| `GET /calls/ring/live` as no socket | 426 `live_websocket_required` |
+| the same as a socket, as the administrator | 403 `live_auth` |
+| as a socket, without the Host's token | 401 |
+| `POST /calls/live` as the administrator | 403 `live_auth` |
+| `GET /calls/ring/device` as the administrator | 403 `ring_device_required` |
+| `POST /calls/ring/live/close` as the administrator | 403 `live_auth` |
+| `POST /calls/ring` for a live ring with a context that is none | 400 `live_context_invalid` |
+| the same with a context that is well made, for an agent that is muted | 403 `this agent is muted` |
+| the same for a janitor of this Host (the only members of it that are not muted) | 404 `unknown agent`: a janitor is no agent a ring names |
+| `GET /calls/ring` before and after | no ring |
+
+Every agent's row says how it takes the user's call (`call_mode`: `classic` for each of the 23, since no
+profile says otherwise).
+
+What stands open of this, for the owner's own test once everything is built: a call held with the real
+voice from his phone; a ring that reaches his locked phone as an incoming call (the next landing, with his
+word for the key); and a call with the tools his own profile opts into, which this Host refuses in words
+until they are built.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

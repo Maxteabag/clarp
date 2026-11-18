@@ -42,9 +42,10 @@ pub mod live;
 
 /// What became of a request to ring, under the desk's lock.
 enum Placing {
-    /// It is answered already: a live ring that was placed (and until when it rings), or
-    /// the ring its event rang before.
-    Told(Value, Option<i64>),
+    /// It is answered already: the ring its event rang before.
+    Told(Value),
+    /// A ring held as a live voice call: placed, with nothing voiced.
+    Placed(live::Placed),
     /// An ordinary ring: its line is voiced, and then it is placed.
     ToVoice(rings::Admitted),
 }
@@ -370,16 +371,12 @@ impl Desk {
         }
         let (show_reason, without) = self.alerted().await;
         for pushed in pushes {
-            // A ring held as a live voice call has no alert, in any state of it: a phone that
-            // cannot hold one must never be shown one.
-            if !pushed.ring.conversation_mode.is_empty() {
-                continue;
-            }
             app.pusher.rung(crate::pusher::Rung {
                 ring: pushed.ring,
                 kind: pushed.kind,
                 show_reason,
                 without: without.clone(),
+                calls: Vec::new(),
             });
         }
     }
@@ -432,83 +429,114 @@ impl Desk {
             event_context: &said["event_context"],
             opening_mode: said.get("opening_mode"),
         };
-        let admitted = self.rings(app, |rings, _, with, (out, _)| {
+        let admitted = self.ask_rings(app, |rings, _, with, (out, _)| {
             let now = with.at.now_ms;
             let admission = rings.admit(&asked, with.people(), &with.world, now, out)?;
             Ok(match admission {
-                rings::Admission::Again(answer) => Placing::Told(answer, None),
+                rings::Admission::Again(answer) => Placing::Told(answer),
+                // A live ring's opening is its voice's own: it is placed at once.
                 rings::Admission::Place(admitted) if admitted.is_live() => {
-                    let (answer, expires_at) = live::placed(rings, admitted, with, out);
-                    Placing::Told(answer, Some(expires_at))
+                    let ring = rings.place(admitted, "", with.new_id, now, out);
+                    Placing::Placed(live::placed(rings, ring, &with.world))
                 }
                 rings::Admission::Place(admitted) => Placing::ToVoice(admitted),
             })
         });
-        let admitted = match admitted.await? {
-            Ok(Placing::ToVoice(admitted)) => admitted,
-            Ok(Placing::Told(answer, expires_at)) => {
-                if let Some(expires_at) = expires_at {
-                    timer(app, expires_at);
-                }
+        let (admitted, pushes) = admitted.await?;
+        let (placed, pushes) = match admitted {
+            Ok(Placing::Placed(placed)) => (placed, pushes),
+            Ok(Placing::ToVoice(admitted)) => {
+                // What else the request did is told as ever (an older ring missed by now).
+                self.push(app, pushes).await;
+                // Said in the agent's own voice now, so that answering plays it at once.
+                // When nothing here can say it, the ring rings all the same and the phone
+                // shows the line.
+                let voiced = match app.member(&admitted.caller().session) {
+                    Some(member) => {
+                        let said = app
+                            .mouth
+                            .said_outside_a_turn(&member.record, admitted.opening());
+                        said.await
+                    }
+                    None => None,
+                };
+                let voiced = voiced.map_or_else(String::new, |name| format!("/audio/{name}"));
+                let placed = self.ask_rings(app, |rings, _, with, (out, _)| {
+                    let now = with.at.now_ms;
+                    let ring = rings.place(admitted, &voiced, with.new_id, now, out);
+                    live::placed(rings, ring, &with.world)
+                });
+                placed.await?
+            }
+            Ok(Placing::Told(answer)) => {
+                self.push(app, pushes).await;
                 return Ok(Ok(answer));
             }
-            Err(refused) => return Ok(Err(refused)),
-        };
-        // Said in the agent's own voice now, so that answering plays it at once. When
-        // nothing here can say it, the ring rings all the same and the phone shows the line.
-        let voiced = match app.member(&admitted.caller().session) {
-            Some(member) => {
-                let said = app
-                    .mouth
-                    .said_outside_a_turn(&member.record, admitted.opening());
-                said.await
+            Err(refused) => {
+                self.push(app, pushes).await;
+                return Ok(Err(refused));
             }
-            None => None,
         };
-        let voiced = voiced.map_or_else(String::new, |name| format!("/audio/{name}"));
-        let placed = self.ask_rings(app, |rings, _, with, (out, _)| {
-            rings.place(admitted, &voiced, with.new_id, with.at.now_ms, out)
-        });
-        let (ring, pushes) = placed.await?;
-        timer(app, ring.expires_at);
-        // The phones are pushed, and the one who rang hears what became of it. No phone
-        // takes a call through a key of this Host's own: the push is the incoming call.
+        timer(app, placed.ring.expires_at);
+        let delivery = self.rang(app, &placed, pushes).await;
+        Ok(Ok(Rings::rung(&placed.ring, delivery, app.clock.now_ms())))
+    }
+
+    /// A ring that was placed is pushed to the phones, and what became of that is what the
+    /// one who rang is told (`delivery`): as an incoming call to the phones that left a token
+    /// for one, where this Host has a key at the push service; and as an alert where that
+    /// reached no phone, never for a ring held as a live voice call.
+    async fn rang(&self, app: &App, placed: &live::Placed, pushes: Vec<rings::Pushed>) -> Value {
         let (show_reason, without) = self.alerted().await;
-        let mut counted = crate::pusher::Counted::default();
+        let mut rang = None;
         let mut still_going = false;
         for pushed in pushes {
+            let begins = pushed.kind == "ring" && pushed.ring.ring_id == placed.ring.ring_id;
             let rung = crate::pusher::Rung {
                 ring: pushed.ring,
                 kind: pushed.kind,
                 show_reason,
                 without: without.clone(),
+                calls: Vec::new(),
             };
-            if pushed.kind == "ring" {
-                let told = app.pusher.rung_and_told(rung);
-                match tokio::time::timeout(PUSH_WAIT, told).await {
-                    Ok(Ok(told)) => counted = told,
-                    // The pusher is gone with the Host; nothing was sent.
-                    Ok(Err(_)) => {}
-                    // A push service that takes its time: the ring rings, and the one who
-                    // rang is not kept waiting for the count.
-                    Err(_) => {
-                        still_going = true;
-                        counted.enabled = !app.config.push_relay.is_empty();
-                    }
-                }
-            } else {
+            if !begins {
                 app.pusher.rung(rung);
+                continue;
+            }
+            let calls = placed.calls.clone();
+            let told = app
+                .pusher
+                .rung_and_told(crate::pusher::Rung { calls, ..rung });
+            match tokio::time::timeout(PUSH_WAIT, told).await {
+                Ok(Ok(told)) => rang = Some(told),
+                // The pusher is gone with the Host; nothing was sent.
+                Ok(Err(_)) => {}
+                // A push service that takes its time: the ring rings, and the one who rang
+                // is not kept waiting for the count.
+                Err(_) => still_going = true,
             }
         }
-        let mut delivery = json!({ "voip": { "enabled": false, "sent": 0, "failed": 0 } });
-        if let (Some(delivery), Value::Object(counted)) = (delivery.as_object_mut(), counted.told())
-        {
-            delivery.extend(counted);
-            if still_going {
-                delivery.insert("pending".to_string(), json!(true));
-            }
+        let live = !placed.ring.conversation_mode.is_empty();
+        let mut delivery = rang.unwrap_or_default().told();
+        if delivery.get("voip").is_none() {
+            delivery["voip"] = json!({ "enabled": false, "sent": 0, "failed": 0 });
         }
-        Ok(Ok(Rings::rung(&ring, delivery, app.clock.now_ms())))
+        if placed.android > 0 {
+            delivery["fcm_live"] = json!({ "pending": placed.android });
+        }
+        if still_going {
+            if !live && let Some(counted) = delivery.as_object_mut() {
+                let relay = crate::pusher::Counted {
+                    enabled: !app.config.push_relay.is_empty(),
+                    ..crate::pusher::Counted::default()
+                };
+                if let Value::Object(relay) = relay.told() {
+                    counted.extend(relay);
+                }
+            }
+            delivery["pending"] = json!(true);
+        }
+        delivery
     }
 
     /// Where a message that carries a call goes: the session of the agent that takes it,

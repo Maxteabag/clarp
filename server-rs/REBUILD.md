@@ -1517,11 +1517,12 @@ granted and not joined keeps its minute. The agent's own tool rings so too
 (`clarp-admin call ring --oracle --context-file FILE`). The features are advertised (`agent_ring_live`,
 `agent_call_live`, `agent_ring_device_optout`), and an agent's row says how it takes the user's call
 (`call_mode`).
-Not with this landing, each registered in `docs/differences.md`: the pushes of calls with a key of the
-Host's own (a live ring reaches a phone whose app is open; a call the user starts needs none), the tools of
-a call (a profile that opts a call into them is refused in words until they are built, since a voice told
-that it has tools it has not would promise what nobody does), and pushes to Android phones. No test and no
-live check reaches the paid voice.
+Not with this landing, each registered in `docs/differences.md`: the tools of a call (a profile that opts
+a call into them is refused in words until they are built, since a voice told that it has tools it has not
+would promise what nobody does), and pushes to Android phones. The push by which such a ring reaches a
+locked phone as an incoming call came with the next landing ("A ring pushed as an incoming call" below);
+until a Host is given the word for it, a live ring reaches a phone whose app is open, and a call the user
+starts needs no push. No test and no live check reaches the paid voice.
 Tested: each kernel layer by its vectors; the Shelf on real folders; and through a real Host process with
 a stand-in voice on a loopback socket (`a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice`):
 a ring refused where no phone can hold one, placed, the same event once, shown to the phone that can hold
@@ -1564,6 +1565,44 @@ agents publish, and sends through the gate one push after another, by the Host's
 an activity's token has no grant of the phone's. The relay tells the gate when it is asked too much, by an
 alert as well. The feature is listed (`live_activity_push`) only on a Host that has that account. Not built
 with it: the same summary for a phone of another kind.
+
+**A ring pushed as an incoming call** (18 Nov 2026). A ring reaches a phone that is locked or asleep as an
+incoming call only by a push of a kind the relay does not carry: the Host hands it to the push service
+itself, with a key its owner gave it there. The owner's Python Host has such a key, and his rings ring so.
+This Host does it where it is told the file that names the owner's key (`--push-keys`; in it `[apns]`:
+`key_path`, `key_id`, `team_id`, and `bundle_id` and `environment` where they are not the usual ones, as
+the Python Host reads them). That word is one of its own, and off where a Host is installed: the file of
+the keys of speech is read by a Host that is only being tried too, and such a Host is not to push to its
+owner's phones with his key because that file names it (shown in the test of the live call, whose Host
+reads such a file and hands the push service nothing). Without the word, or the key, nothing is handed to
+the service, and whoever rings is told so (`delivery.voip.enabled` is false). The rules are the kernel's, held to the Python Host's own module: who is pushed a ring as a call,
+what became of it as the one who rang is told, and that the alert follows only where no phone was reached
+and never for a ring held as a live voice call (`rings/live.rs`, by that Host's `send_agent_ring_voip` run
+over a stand-in for the push service in `tools/live-ring-vectors.py`: 97 pushes handed over in 13 scripts
+of 642 steps); and where the service is, the request for one push of every kind, what an answer means,
+what a token of the Host's says and for how long one is used, and when a push is handed over a second time
+(`direct_push.rs`, `tools/direct-push-vectors.py`). The Host's part (`clarp-host` `direct.rs`): the key is
+read and a token signed with it (ES256), and the service is spoken to over HTTP/2, over one connection for
+the pushes of one ring. That is the one new thing this Host needs from outside for it (`h2`, the HTTP/2
+client of the hyper project; the signing is done by the provider of cryptography the Host's TLS already
+brings). The key never leaves the Host, and nothing said of a failure holds the key, a token signed with
+it, a phone's token or what a push says. One thing is not the Python Host's, on purpose: a phone whose
+pairing was taken away is not rung, though the token it left is still there (candidate R56, reported).
+Tested: the kernel by its vectors; the signing against the key's public half; and through a real Host
+process with a stand-in push service that speaks HTTP/2 on this machine (`CLARP_APNS_ENDPOINT`, a loopback
+address and no other): no push without a key; with one, each phone that left a token is handed the push,
+with the token of the Host's signed for the owner's team and the ring as the app reads it, and no alert
+follows; an alert where the service took the push for no phone; a token the service refuses signed anew
+once; a phone that switched rings off and one whose pairing was taken away left out; a live ring pushed to
+the phone that can hold one, with no alert whatever became of the push. Wrong rules were planted one at a
+time, 62 into the kernel's rules and the Host's part: 58 were caught and 4 were not. A token refused twice
+was signed a third time unseen (the story has an answer more, which a third try would take). A push was
+handed over again after a failure that came when its request was already on its way: the Python Host does
+not, and nobody knows then whether it reached the service, so that code is gone. The pusher's check of the
+kind of a ring's job and the desk's skip of what becomes of a live ring changed nothing when they were
+planted against, being second places for the rule that a live ring has no alert: they are gone, and the
+rule is planted where it is, in the pusher by the kernel's function. On the mended code the 17 rules that
+touch what was mended were planted again, and all were caught.
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
@@ -2172,7 +2211,10 @@ connection relay under the name the phone is paired with. Each of these is true 
 4. **The phones' pairings are there.** The paired devices of the Python Host, each with the hash of its
    token, its scope and its name, are in the Rust Host before it dials: a phone presents the token it has.
 5. **Pushes have an account.** The Rust Host has a credential of its own at the push relay, given by the
-   owner; the Python Host's is never copied.
+   owner; the Python Host's is never copied. And for a ring to ring a locked phone as an incoming call, the
+   Host is installed with the word that names the file of the owner's key at the push service
+   (`tools/install-host --push-keys FILE`): it is his word to give, the key stays where he keeps it, and
+   without it this Host pushes no call.
 6. **What the owner set for all his agents is set here.** The settings a Host keeps for itself do not
    come with an agent: the heartbeat's interval, strategy, cap and dormancy, the herald's, and what else an
    app's settings screens write. They are read from the Python Host's own routes and set on this Host

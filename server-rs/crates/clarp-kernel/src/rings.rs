@@ -31,7 +31,8 @@ use crate::python;
 mod live;
 
 pub use live::{
-    Admission, Android, Claim, Given, JOIN_MS, Joined, Live, Minted, Profiles, Sent, World, claimed,
+    Admission, Android, Claim, Given, JOIN_MS, Joined, Live, Minted, Profiles, Sent, World,
+    alert_follows, claimed,
 };
 
 /// How long a ring rings before it is missed.
@@ -1052,6 +1053,40 @@ mod tests {
         let ring = rings.place(placed(admitted), "", "1", 1_000, &mut out);
         assert_eq!(rings.ringing(), Some(&ring));
         assert_eq!(ring.expires_at, 1_000 + RING_MS);
+    }
+
+    #[test]
+    fn a_ring_is_pushed_as_a_call_only_to_a_phone_that_is_still_paired() {
+        let known = |agent_id: &str| (agent_id == "a-theo").then(theo);
+        let people = People {
+            roster: &[],
+            known: &known,
+        };
+        let paired = |phone: &str| phone == "device_a";
+        let world = world(&paired);
+        let mut rings = Rings::default();
+        let mut out = Effects::default();
+        for phone in ["device_a", "device_gone", "administrator"] {
+            let token = (&*"ab".repeat(32), "", &Value::Null);
+            rings.voip_token(phone, token, 500, &mut out).unwrap();
+        }
+        let admitted = rings.admit(&asked(&Value::Null, None), people, &world, 1_000, &mut out);
+        let ring = rings.place(placed(admitted.unwrap()), "", "1", 1_000, &mut out);
+        // The Python Host pushes the call to every phone that left a token for one; here
+        // only the phone that is still paired with all rights is rung.
+        let theirs = rings.sent(&ring, "ring", &world).voip.unwrap();
+        assert_eq!(theirs, ["device_a", "device_gone", "administrator"]);
+        assert_eq!(rings.rung_as_calls(&ring, &world), ["device_a"]);
+        assert_eq!(
+            rings.call_token("device_a"),
+            Some((&*"ab".repeat(32), "production"))
+        );
+        assert_eq!(rings.call_token("device_none"), None);
+        // An alert follows where no call push reached a phone, and never for a live ring.
+        assert_eq!(rings.alerted(&ring, 0), Some(Vec::new()));
+        assert_eq!(rings.alerted(&ring, 1), None);
+        assert!(alert_follows("", 0) && !alert_follows("", 2));
+        assert!(!alert_follows("agent_live_v1", 0));
     }
 
     #[test]

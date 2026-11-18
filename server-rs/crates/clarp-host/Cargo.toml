@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 axum.workspace = true
+bytes.workspace = true
 clarp-actor.workspace = true
 clarp-backend.workspace = true
 clarp-codec.workspace = true
@@ -19,13 +20,17 @@ clarp-store-files.workspace = true
 clarp-store-mem.workspace = true
 clarp-store-sqlite.workspace = true
 futures-util.workspace = true
+h2.workspace = true
+http.workspace = true
 nix.workspace = true
 pty-process.workspace = true
+ring.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tokio-tungstenite.workspace = true
 toml.workspace = true
 tower.workspace = true

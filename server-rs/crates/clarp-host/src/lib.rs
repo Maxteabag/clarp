@@ -24,6 +24,7 @@ pub mod chip;
 pub mod compact;
 pub mod config;
 pub mod connector;
+pub mod direct;
 pub mod edge;
 pub mod explain;
 pub mod faces;

@@ -18,6 +18,7 @@ pub mod conversation;
 pub mod desk;
 pub mod devices;
 pub mod difflib;
+pub mod direct_push;
 pub mod explain;
 pub mod failures;
 pub mod fork;

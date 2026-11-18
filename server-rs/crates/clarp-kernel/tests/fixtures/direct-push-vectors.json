@@ -1,0 +1,1119 @@
+{
+ "what": "server/lib/apns.py: a push handed to the push service with a key of the Host own",
+ "hosts": {
+  "production": "https://api.push.apple.com",
+  "sandbox": "https://api.sandbox.push.apple.com",
+  "Sandbox": "https://api.sandbox.push.apple.com",
+  "SANDBOX": "https://api.sandbox.push.apple.com",
+  "": "https://api.push.apple.com",
+  "other": "https://api.push.apple.com",
+  " sandbox": "https://api.push.apple.com"
+ },
+ "gone_for_good": [
+  "BadDeviceToken",
+  "DeviceTokenNotForTopic",
+  "Unregistered"
+ ],
+ "token_refused": [
+  "ExpiredProviderToken",
+  "InvalidProviderToken"
+ ],
+ "requests": [
+  {
+   "name": "an alert",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": "Theo",
+      "body": "Done"
+     }
+    },
+    "session": "theo-97e5"
+   },
+   "push_type": "alert",
+   "priority": "10",
+   "collapse_id": null,
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp",
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-collapse-id": "turn-done-theo-97e5"
+   },
+   "body": "{\"aps\": {\"alert\": {\"title\": \"Theo\", \"body\": \"Done\"}}, \"session\": \"theo-97e5\"}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "an alert with a name of its own",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "notification_id": "pn-1",
+    "session": "theo-97e5"
+   },
+   "push_type": "alert",
+   "priority": "10",
+   "collapse_id": null,
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp",
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-collapse-id": "pn-1"
+   },
+   "body": "{\"notification_id\": \"pn-1\", \"session\": \"theo-97e5\"}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "an alert of nobody",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "aps": {}
+   },
+   "push_type": "alert",
+   "priority": "10",
+   "collapse_id": null,
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp",
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-collapse-id": "turn-done"
+   },
+   "body": "{\"aps\": {}}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a ring as an incoming call",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "kind": "agent-ring",
+    "ring_id": "rng_1",
+    "ring_state": "ringing",
+    "session": "theo-97e5",
+    "persona": "Theo",
+    "reason": "Possible water leak",
+    "expires_at": 1800000045000
+   },
+   "push_type": "voip",
+   "priority": "10",
+   "collapse_id": "ring-rng_1",
+   "expiration": 1800000045,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp.voip",
+    "apns-push-type": "voip",
+    "apns-priority": "10",
+    "apns-collapse-id": "ring-rng_1",
+    "apns-expiration": "1800000045"
+   },
+   "body": "{\"kind\": \"agent-ring\", \"ring_id\": \"rng_1\", \"ring_state\": \"ringing\", \"session\": \"theo-97e5\", \"persona\": \"Theo\", \"reason\": \"Possible water leak\", \"expires_at\": 1800000045000}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a ring as a call with nothing said of how long it is kept",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "kind": "agent-ring",
+    "ring_id": "rng_1",
+    "ring_state": "ringing",
+    "session": "theo-97e5",
+    "persona": "Theo",
+    "reason": "Possible water leak",
+    "expires_at": 1800000045000
+   },
+   "push_type": "voip",
+   "priority": "10",
+   "collapse_id": "ring-rng_1",
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp.voip",
+    "apns-push-type": "voip",
+    "apns-priority": "10",
+    "apns-collapse-id": "ring-rng_1"
+   },
+   "body": "{\"kind\": \"agent-ring\", \"ring_id\": \"rng_1\", \"ring_state\": \"ringing\", \"session\": \"theo-97e5\", \"persona\": \"Theo\", \"reason\": \"Possible water leak\", \"expires_at\": 1800000045000}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a ring as a call kept until the first second",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "kind": "agent-ring",
+    "ring_id": "rng_1",
+    "ring_state": "ringing",
+    "session": "theo-97e5",
+    "persona": "Theo",
+    "reason": "Possible water leak",
+    "expires_at": 1800000045000
+   },
+   "push_type": "voip",
+   "priority": "10",
+   "collapse_id": "ring-rng_1",
+   "expiration": 0,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp.voip",
+    "apns-push-type": "voip",
+    "apns-priority": "10",
+    "apns-collapse-id": "ring-rng_1",
+    "apns-expiration": "0"
+   },
+   "body": "{\"kind\": \"agent-ring\", \"ring_id\": \"rng_1\", \"ring_state\": \"ringing\", \"session\": \"theo-97e5\", \"persona\": \"Theo\", \"reason\": \"Possible water leak\", \"expires_at\": 1800000045000}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a push for the chip on the lock screen",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "aps": {
+     "event": "update"
+    }
+   },
+   "push_type": "liveactivity",
+   "priority": "5",
+   "collapse_id": "chip",
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp.push-type.liveactivity",
+    "apns-push-type": "liveactivity",
+    "apns-priority": "5",
+    "apns-collapse-id": "chip"
+   },
+   "body": "{\"aps\": {\"event\": \"update\"}}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a quiet push",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "aps": {
+     "content-available": 1
+    },
+    "session": "s"
+   },
+   "push_type": "background",
+   "priority": "5",
+   "collapse_id": null,
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp",
+    "apns-push-type": "background",
+    "apns-priority": "5",
+    "apns-collapse-id": "turn-done-s"
+   },
+   "body": "{\"aps\": {\"content-available\": 1}, \"session\": \"s\"}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a body of other alphabets",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "aps": {
+     "alert": {
+      "body": "Bl\u00e5 \ud83d\udc4b"
+     }
+    },
+    "session": "s"
+   },
+   "push_type": "alert",
+   "priority": "10",
+   "collapse_id": null,
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp",
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-collapse-id": "turn-done-s"
+   },
+   "body": "{\"aps\": {\"alert\": {\"body\": \"Bl\\u00e5 \\ud83d\\udc4b\"}}, \"session\": \"s\"}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "a collapse id that is given empty",
+   "bundle_id": "com.maxteabag.clarp",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "session": "theo-97e5"
+   },
+   "push_type": "alert",
+   "priority": "10",
+   "collapse_id": "",
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "com.maxteabag.clarp",
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-collapse-id": "turn-done-theo-97e5"
+   },
+   "body": "{\"session\": \"theo-97e5\"}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  },
+  {
+   "name": "another bundle",
+   "bundle_id": "org.example.app",
+   "token": "abababababababababababababababababababababababababababababababab",
+   "payload": {
+    "session": "s"
+   },
+   "push_type": "voip",
+   "priority": "10",
+   "collapse_id": null,
+   "expiration": null,
+   "url": "https://api.push.apple.com/3/device/abababababababababababababababababababababababababababababababab",
+   "headers": {
+    "authorization": "bearer the-token",
+    "apns-topic": "org.example.app.voip",
+    "apns-push-type": "voip",
+    "apns-priority": "10",
+    "apns-collapse-id": "turn-done-s"
+   },
+   "body": "{\"session\": \"s\"}",
+   "result": [
+    200,
+    "",
+    "id-1"
+   ]
+  }
+ ],
+ "answers": [
+  {
+   "name": "taken",
+   "status": 200,
+   "body": "",
+   "headers": {
+    "apns-id": "id-7"
+   },
+   "result": [
+    200,
+    "",
+    "id-7"
+   ]
+  },
+  {
+   "name": "taken, with no name for it",
+   "status": 200,
+   "body": "",
+   "headers": {},
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "a token that is gone",
+   "status": 410,
+   "body": "{\"reason\": \"Unregistered\", \"timestamp\": 1}",
+   "headers": {},
+   "result": [
+    410,
+    "Unregistered",
+    ""
+   ]
+  },
+  {
+   "name": "a token that is none",
+   "status": 400,
+   "body": "{\"reason\": \"BadDeviceToken\"}",
+   "headers": {
+    "apns-id": "id-8"
+   },
+   "result": [
+    400,
+    "BadDeviceToken",
+    "id-8"
+   ]
+  },
+  {
+   "name": "a token of another app",
+   "status": 400,
+   "body": "{\"reason\": \"DeviceTokenNotForTopic\"}",
+   "headers": {},
+   "result": [
+    400,
+    "DeviceTokenNotForTopic",
+    ""
+   ]
+  },
+  {
+   "name": "a provider token that ran out",
+   "status": 403,
+   "body": "{\"reason\": \"ExpiredProviderToken\"}",
+   "headers": {},
+   "result": [
+    403,
+    "ExpiredProviderToken",
+    ""
+   ]
+  },
+  {
+   "name": "a provider token that is none",
+   "status": 403,
+   "body": "{\"reason\": \"InvalidProviderToken\"}",
+   "headers": {},
+   "result": [
+    403,
+    "InvalidProviderToken",
+    ""
+   ]
+  },
+  {
+   "name": "too many",
+   "status": 429,
+   "body": "{\"reason\": \"TooManyRequests\"}",
+   "headers": {},
+   "result": [
+    429,
+    "TooManyRequests",
+    ""
+   ]
+  },
+  {
+   "name": "an answer without a reason",
+   "status": 500,
+   "body": "{}",
+   "headers": {},
+   "result": [
+    500,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is nothing",
+   "status": 500,
+   "body": "null",
+   "headers": {},
+   "result": [
+    500,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is a list",
+   "status": 500,
+   "body": "[1]",
+   "headers": {},
+   "result": [
+    500,
+    "[1]",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is no JSON",
+   "status": 502,
+   "body": "<html>Bad gateway</html>",
+   "headers": {},
+   "result": [
+    502,
+    "<html>Bad gateway</html>",
+    ""
+   ]
+  },
+  {
+   "name": "a long answer that is no JSON",
+   "status": 503,
+   "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "headers": {},
+   "result": [
+    503,
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    ""
+   ]
+  },
+  {
+   "name": "an empty answer",
+   "status": 503,
+   "body": "",
+   "headers": {},
+   "result": [
+    503,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "a reason that is a number",
+   "status": 400,
+   "body": "{\"reason\": 5}",
+   "headers": {},
+   "result": [
+    400,
+    5,
+    ""
+   ]
+  },
+  {
+   "name": "a reason that is nothing",
+   "status": 400,
+   "body": "{\"reason\": null}",
+   "headers": {},
+   "result": [
+    400,
+    null,
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is false",
+   "status": 500,
+   "body": "false",
+   "headers": {},
+   "result": [
+    500,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is nought",
+   "status": 500,
+   "body": "0",
+   "headers": {},
+   "result": [
+    500,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is an empty text",
+   "status": 500,
+   "body": "\"\"",
+   "headers": {},
+   "result": [
+    500,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is an empty list",
+   "status": 500,
+   "body": "[]",
+   "headers": {},
+   "result": [
+    500,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is true",
+   "status": 500,
+   "body": "true",
+   "headers": {},
+   "result": [
+    500,
+    "true",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is a text",
+   "status": 500,
+   "body": "\"no\"",
+   "headers": {},
+   "result": [
+    500,
+    "\"no\"",
+    ""
+   ]
+  },
+  {
+   "name": "an answer that is a number",
+   "status": 500,
+   "body": " 7 ",
+   "headers": {},
+   "result": [
+    500,
+    " 7 ",
+    ""
+   ]
+  },
+  {
+   "name": "a long answer of other alphabets",
+   "status": 500,
+   "body": "\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5",
+   "headers": {},
+   "result": [
+    500,
+    "\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5\u00e5",
+    ""
+   ]
+  },
+  {
+   "name": "taken, with a body all the same",
+   "status": 200,
+   "body": "{\"reason\": \"Ignored\"}",
+   "headers": {},
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  }
+ ],
+ "provider_tokens": {
+  "used_for_s": 3000,
+  "steps": [
+   {
+    "name": "the first asking",
+    "now": 1800000000,
+    "team_id": "TEAM1",
+    "key_id": "KEY1",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY1",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800000000
+    }
+   },
+   {
+    "name": "asked again at once",
+    "now": 1800000000,
+    "team_id": "TEAM1",
+    "key_id": "KEY1",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": false,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY1",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800000000
+    }
+   },
+   {
+    "name": "a second before it is fifty minutes old",
+    "now": 1800002999,
+    "team_id": "TEAM1",
+    "key_id": "KEY1",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": false,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY1",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800000000
+    }
+   },
+   {
+    "name": "fifty minutes old",
+    "now": 1800003000,
+    "team_id": "TEAM1",
+    "key_id": "KEY1",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY1",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003000
+    }
+   },
+   {
+    "name": "another team",
+    "now": 1800003010,
+    "team_id": "TEAM2",
+    "key_id": "KEY1",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY1",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM2",
+     "iat": 1800003010
+    }
+   },
+   {
+    "name": "the first team again",
+    "now": 1800003020,
+    "team_id": "TEAM1",
+    "key_id": "KEY1",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY1",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003020
+    }
+   },
+   {
+    "name": "another key id",
+    "now": 1800003030,
+    "team_id": "TEAM1",
+    "key_id": "KEY2",
+    "key_file": "one",
+    "written_anew": false,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY2",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003030
+    }
+   },
+   {
+    "name": "another key file",
+    "now": 1800003040,
+    "team_id": "TEAM1",
+    "key_id": "KEY2",
+    "key_file": "two",
+    "written_anew": false,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY2",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003040
+    }
+   },
+   {
+    "name": "the same key file, written anew",
+    "now": 1800003050,
+    "team_id": "TEAM1",
+    "key_id": "KEY2",
+    "key_file": "two",
+    "written_anew": true,
+    "minted": true,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY2",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003050
+    }
+   },
+   {
+    "name": "asked again",
+    "now": 1800003060,
+    "team_id": "TEAM1",
+    "key_id": "KEY2",
+    "key_file": "two",
+    "written_anew": false,
+    "minted": false,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY2",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003050
+    }
+   },
+   {
+    "name": "a clock that went back",
+    "now": 1799998060,
+    "team_id": "TEAM1",
+    "key_id": "KEY2",
+    "key_file": "two",
+    "written_anew": false,
+    "minted": false,
+    "header": {
+     "alg": "ES256",
+     "kid": "KEY2",
+     "typ": "JWT"
+    },
+    "claims": {
+     "iss": "TEAM1",
+     "iat": 1800003050
+    }
+   }
+  ]
+ },
+ "second_tries": [
+  {
+   "name": "taken at once",
+   "answers": [
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "a provider token that ran out, then taken",
+   "answers": [
+    {
+     "status": 403,
+     "body": "{\"reason\": \"ExpiredProviderToken\"}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1",
+    "bearer token-2"
+   ],
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "a provider token that is none, twice",
+   "answers": [
+    {
+     "status": 403,
+     "body": "{\"reason\": \"InvalidProviderToken\"}"
+    },
+    {
+     "status": 403,
+     "body": "{\"reason\": \"InvalidProviderToken\"}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1",
+    "bearer token-2"
+   ],
+   "result": [
+    403,
+    "InvalidProviderToken",
+    ""
+   ]
+  },
+  {
+   "name": "refused for another reason",
+   "answers": [
+    {
+     "status": 403,
+     "body": "{\"reason\": \"Forbidden\"}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": [
+    403,
+    "Forbidden",
+    ""
+   ]
+  },
+  {
+   "name": "a token that is gone",
+   "answers": [
+    {
+     "status": 410,
+     "body": "{\"reason\": \"Unregistered\"}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": [
+    410,
+    "Unregistered",
+    ""
+   ]
+  },
+  {
+   "name": "a provider token said to have run out, under another status",
+   "answers": [
+    {
+     "status": 400,
+     "body": "{\"reason\": \"ExpiredProviderToken\"}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": [
+    400,
+    "ExpiredProviderToken",
+    ""
+   ]
+  },
+  {
+   "name": "refused, with a reason that is no text",
+   "answers": [
+    {
+     "status": 403,
+     "body": "{\"reason\": 7}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": [
+    403,
+    7,
+    ""
+   ]
+  },
+  {
+   "name": "a connection that was closed, then taken",
+   "answers": [
+    {
+     "raised": "RuntimeError",
+     "closed": true
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1",
+    "bearer token-1"
+   ],
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "a connection that was closed twice",
+   "answers": [
+    {
+     "raised": "RuntimeError",
+     "closed": true
+    },
+    {
+     "raised": "RuntimeError",
+     "closed": true
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1",
+    "bearer token-1"
+   ],
+   "result": {
+    "raised": "RuntimeError"
+   }
+  },
+  {
+   "name": "a connection closed, then a provider token that ran out, then taken",
+   "answers": [
+    {
+     "raised": "RuntimeError",
+     "closed": true
+    },
+    {
+     "status": 403,
+     "body": "{\"reason\": \"ExpiredProviderToken\"}"
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1",
+    "bearer token-1",
+    "bearer token-2"
+   ],
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "a provider token that ran out, then a connection closed, then taken",
+   "answers": [
+    {
+     "status": 403,
+     "body": "{\"reason\": \"ExpiredProviderToken\"}"
+    },
+    {
+     "raised": "RuntimeError",
+     "closed": true
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1",
+    "bearer token-2",
+    "bearer token-2"
+   ],
+   "result": [
+    200,
+    "",
+    ""
+   ]
+  },
+  {
+   "name": "another failure of the connection",
+   "answers": [
+    {
+     "raised": "RuntimeError",
+     "closed": false
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": {
+    "raised": "RuntimeError"
+   }
+  },
+  {
+   "name": "a failure that is no runtime error",
+   "answers": [
+    {
+     "raised": "OSError",
+     "closed": false
+    },
+    {
+     "status": 200,
+     "body": ""
+    }
+   ],
+   "sent_with": [
+    "bearer token-1"
+   ],
+   "result": {
+    "raised": "OSError"
+   }
+  }
+ ]
+}
