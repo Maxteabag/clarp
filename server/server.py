@@ -411,6 +411,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         # connection, so _send() drains or closes before responding early
         # (e.g. 401 before the handler ever touched rfile).
         self._body_consumed = False
+        self._json_read = None      # the body, once read (lib.request_texts reads it first)
         # The request clock starts here. handle_one_request() blocks in
         # readline() for the next request on a keep-alive connection, so a
         # clock started there counts idle socket time as handler latency
@@ -1045,6 +1046,12 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         return True
 
     def _read_json(self) -> dict | None:
+        """The request's JSON object, or None; read once, then kept for every later call."""
+        if getattr(self, "_json_read", None) is None:
+            self._json_read = (self._read_json_once(),)
+        return self._json_read[0]
+
+    def _read_json_once(self) -> dict | None:
         try:
             n = int(self.headers.get("Content-Length", "0"))
             self._body_consumed = True
