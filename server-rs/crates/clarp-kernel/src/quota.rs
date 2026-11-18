@@ -196,16 +196,24 @@ impl Kept {
     }
 
     pub fn refresh_due(&self, login: Option<Login<'_>>, now: i64) -> bool {
-        let Some(row) = &self.row else {return true};
+        let Some(row) = &self.row else { return true };
         let other = login.is_some_and(|on| match &row.account {
             Some(account) => on.account != Some(account.as_str()),
             None => on.generation != row.generation,
         });
-        let latest = self.shown(login, now).into_iter().filter(|w| w.kind != "unknown")
-            .map(|w| w.window.observed_at_ms).max();
-        other || crate::usage_ask::due(latest,now) || crate::usage_ask::due(self.authoritative_ms,now)
-            || ((self.block.is_some() || row.used.as_f64().is_some_and(|n| n>=100.0))
-                && self.done_ms.is_some_and(|done| done>self.authoritative_ms.unwrap_or(0) && done<=now))
+        let latest = self
+            .shown(login, now)
+            .into_iter()
+            .filter(|w| w.kind != "unknown")
+            .map(|w| w.window.observed_at_ms)
+            .max();
+        other
+            || crate::usage_ask::due(latest, now)
+            || crate::usage_ask::due(self.authoritative_ms, now)
+            || ((self.block.is_some() || row.used.as_f64().is_some_and(|n| n >= 100.0))
+                && self
+                    .done_ms
+                    .is_some_and(|done| done > self.authoritative_ms.unwrap_or(0) && done <= now))
     }
 
     pub fn refresh_failed(&mut self, now: i64) {
@@ -239,7 +247,8 @@ impl Kept {
             row.generation == login.generation && row.account.as_deref() == login.account
         };
         let whole = matches!(detail, "/wham/usage" | "account/rateLimits/read");
-        let mut merged: Map<String, Value> = match self.row.as_ref().filter(same).filter(|_| !whole) {
+        let mut merged: Map<String, Value> = match self.row.as_ref().filter(same).filter(|_| !whole)
+        {
             Some(row) => {
                 let named = |(name, window): &(&String, &Value)| {
                     ROW_WINDOWS.contains(&name.as_str()) && window.is_object()
@@ -267,20 +276,42 @@ impl Kept {
         if whole {
             self.authoritative_ms = Some(now_ms);
             self.block = snapshot.get("blocked").cloned();
-            let omitted = |w: &Window| w.generation == login.generation && match w.kind.as_str() {
-                "five_hour" => five_hours.is_none(), "seven_day" => week.is_none(), _ => false,
+            let omitted = |w: &Window| {
+                w.generation == login.generation
+                    && match w.kind.as_str() {
+                        "five_hour" => five_hours.is_none(),
+                        "seven_day" => week.is_none(),
+                        _ => false,
+                    }
             };
             for at in 0..self.episodes.len() {
                 let ep = &self.episodes[at];
-                if ep.status == "open" && self.windows.iter().any(|w| omitted(w) && w.window_id == ep.window_id) {
-                    let tell = Told {kind:"unknown",threshold_id:None,used:None,resets_at:None,freshness:"unknown",source_kind:"authoritative_window_omitted"};
-                    events.extend(self.tell(tool,at,&tell,now_ms,new_id));
+                if ep.status == "open"
+                    && self
+                        .windows
+                        .iter()
+                        .any(|w| omitted(w) && w.window_id == ep.window_id)
+                {
+                    let tell = Told {
+                        kind: "unknown",
+                        threshold_id: None,
+                        used: None,
+                        resets_at: None,
+                        freshness: "unknown",
+                        source_kind: "authoritative_window_omitted",
+                    };
+                    events.extend(self.tell(tool, at, &tell, now_ms, new_id));
                     self.episodes[at].status = "invalidated".into();
                 }
             }
             self.windows.retain(|w| !omitted(w));
-            if self.block.is_none() && !seen.is_empty() && seen.values().all(|w| w["used_percentage"].as_f64().unwrap_or(0.0)<100.0) {
-                events.extend(self.clear_unknown(tool,Some(login),now_ms,new_id));
+            if self.block.is_none()
+                && !seen.is_empty()
+                && seen
+                    .values()
+                    .all(|w| w["used_percentage"].as_f64().unwrap_or(0.0) < 100.0)
+            {
+                events.extend(self.clear_unknown(tool, Some(login), now_ms, new_id));
             }
         }
         self.error.clear();
@@ -804,10 +835,16 @@ impl Kept {
         new_id: &mut dyn FnMut(&str) -> String,
     ) -> Vec<Value> {
         self.done_ms = Some(self.done_ms.map_or(at_ms, |done| done.max(at_ms)));
-        self.clear_unknown(tool,login,at_ms,new_id)
+        self.clear_unknown(tool, login, at_ms, new_id)
     }
 
-    fn clear_unknown(&mut self, tool: Tool<'_>, login: Option<Login<'_>>, at_ms: i64, new_id: &mut dyn FnMut(&str) -> String) -> Vec<Value> {
+    fn clear_unknown(
+        &mut self,
+        tool: Tool<'_>,
+        login: Option<Login<'_>>,
+        at_ms: i64,
+        new_id: &mut dyn FnMut(&str) -> String,
+    ) -> Vec<Value> {
         // Whose such limits: this login's, those kept under no login, and those of this
         // login's account under whichever login.
         let generation = login.map_or(NO_LOGIN, |login| login.generation);
@@ -858,11 +895,23 @@ impl Kept {
         full.retain(all_used);
         let block = self.block.as_ref().filter(|b| {
             let at = self.authoritative_ms.unwrap_or(0);
-            now_ms - at <= WINDOW_FRESH_MS && !self.done_ms.is_some_and(|d| d>at && d<=now_ms)
-            && !b["resets_at"].as_str().and_then(from_text).is_some_and(|end| now_ms>=end)
-            && login.is_none_or(|l| self.row.as_ref().is_some_and(|r| r.account.as_deref()==l.account))
+            now_ms - at <= WINDOW_FRESH_MS
+                && !self.done_ms.is_some_and(|d| d > at && d <= now_ms)
+                && !b["resets_at"]
+                    .as_str()
+                    .and_then(from_text)
+                    .is_some_and(|end| now_ms >= end)
+                && login.is_none_or(|l| {
+                    self.row
+                        .as_ref()
+                        .is_some_and(|r| r.account.as_deref() == l.account)
+                })
         });
-        let first_said = full.iter().map(|one| one.window.observed_at_ms).min().unwrap_or(now_ms);
+        let first_said = full
+            .iter()
+            .map(|one| one.window.observed_at_ms)
+            .min()
+            .unwrap_or(now_ms);
         // A turn that completed after the first of it was said: what still counts is what
         // was said after that turn.
         let since = |done: &i64| *done > first_said && *done <= now_ms;

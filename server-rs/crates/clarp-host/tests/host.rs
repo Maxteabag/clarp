@@ -21872,6 +21872,144 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
 }
 
 #[test]
+fn asking_for_usage_reads_each_provider_and_remembers_the_answer() {
+    let place = Place::new("ask-usage");
+    let home = &place.root;
+    let codex = home.join(".codex");
+    let claude = home.join(".claude");
+    std::fs::create_dir_all(&codex).unwrap();
+    std::fs::create_dir_all(&claude).unwrap();
+    std::fs::write(codex.join("auth.json"),r#"{"auth_mode":"chatgpt","tokens":{"account_id":"example-account","access_token":"synthetic-codex"}}"#).unwrap();
+    std::fs::write(
+        claude.join(".credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"synthetic-claude"}}"#,
+    )
+    .unwrap();
+    let fallback = home.join("codex-example");
+    let agy = home.join("agy-example");
+    program(
+        &fallback,
+        r#"#!/usr/bin/env python3
+import pathlib,sys,json
+assert sys.argv[1:] == ["-s","read-only","-a","never","app-server"]
+for line in sys.stdin:
+    msg=json.loads(line)
+    with pathlib.Path(__file__).with_suffix(".calls").open("a") as log:
+        print(msg["method"],file=log)
+    if msg["method"]=="initialize": print('{"id":1,"result":{}}',flush=True)
+    if msg["method"]=="account/rateLimits/read":
+        print('{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":16,"windowDurationMins":300}}}}',flush=True)
+"#,
+    );
+    program(
+        &agy,
+        r#"#!/usr/bin/env python3
+import os,pathlib,sys
+assert sys.argv[1:] == ["--output-format","json","-p","/usage"]
+assert pathlib.Path(os.environ["HOME"]) != pathlib.Path(__file__).parent
+with pathlib.Path(__file__).with_suffix(".calls").open("a") as log: print("/usage",file=log)
+print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaining_fraction":0.25,"window":"5h"}]}]}}}')
+"#,
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let seen = calls.clone();
+    let held = std::thread::spawn(move || {
+        for (status, body) in [
+            (
+                200,
+                r#"{"five_hour":{"utilization":1},"seven_day_oauth_apps":{"utilization":27}}"#,
+            ),
+            (
+                200,
+                r#"{"rate_limit":{"primary_window":{"used_percent":82,"limit_window_seconds":18000,"reset_at":2100000000}}}"#,
+            ),
+            (503, "failed"),
+            (503, "failed"),
+        ] {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = whole_request(&mut stream);
+            seen.lock().unwrap().push(request.to_lowercase());
+            write!(stream,"HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+        }
+    });
+    let world = [
+        ("HOME", home.to_str().unwrap()),
+        ("CLAUDE_CONFIG_DIR", claude.to_str().unwrap()),
+        ("CODEX_HOME", codex.to_str().unwrap()),
+        ("CODEX_CHATGPT_BASE_URL", "https://chatgpt.com/backend-api"),
+        ("CLARP_USAGE_LOOPBACK", address.as_str()),
+        ("CLARP_CODEX_PROGRAM", fallback.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", fallback.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let bare = place.start_in("", &[], &world);
+    bare.get("/backend-usage?refresh=yes");
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(!agy.with_extension("calls").exists());
+    drop(bare);
+    let host = place.start_in("", &["--ask-usage"], &world);
+    let first = host.get("/backend-usage");
+    assert_eq!(
+        first["providers"]["claude"]["windows"][0]["used_percentage"],
+        1.0
+    );
+    assert_eq!(
+        first["providers"]["codex"]["windows"][0]["used_percentage"],
+        82.0
+    );
+    assert_eq!(
+        first["providers"]["agy"]["windows"][0]["used_percentage"],
+        75.0
+    );
+    assert_eq!(first["limit_events"][0]["kind"], "warning");
+    let auth = host.get("/backend-auth");
+    assert!(
+        auth["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["state"] == "valid")
+    );
+    host.get("/backend-usage?refresh=false");
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    assert!(!fallback.with_extension("calls").exists());
+    let next = host.get("/backend-usage?refresh=0&refresh=Yes");
+    assert_eq!(next["providers"]["claude"], first["providers"]["claude"]);
+    assert_eq!(
+        next["providers"]["codex"]["windows"][0]["used_percentage"],
+        16.0
+    );
+    assert_eq!(
+        next["providers"]["codex"]["source"]["detail"],
+        "account/rateLimits/read"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fallback.with_extension("calls")).unwrap(),
+        "initialize\ninitialized\naccount/rateLimits/read\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(agy.with_extension("calls")).unwrap(),
+        "/usage\n/usage\n"
+    );
+    held.join().unwrap();
+    let requests = calls.lock().unwrap();
+    for pair in requests.chunks_exact(2) {
+        assert!(
+            pair[0].starts_with("get /api/oauth/usage ")
+                && pair[0].contains("authorization: bearer synthetic-claude")
+                && pair[0].contains("anthropic-beta: oauth-2025-04-20")
+        );
+        assert!(
+            pair[1].starts_with("get /backend-api/wham/usage ")
+                && pair[1].contains("authorization: bearer synthetic-codex")
+                && pair[1].contains("chatgpt-account-id: example-account")
+        );
+    }
+}
+
+#[test]
 fn what_claude_code_says_of_its_accounts_windows_is_shown_and_marks_its_agents_when_used_up() {
     let place = Place::new("claude-windows");
     let own = place.root.join("claude-own");

@@ -77,6 +77,15 @@ impl Standing {
         (!self.windows.is_empty()).then_some(self.seen_at_ms)
     }
 
+    pub fn refresh_due(&self, account: Option<&str>, failed_at: Option<i64>, now: i64) -> bool {
+        let other = self
+            .account
+            .as_deref()
+            .zip(account)
+            .is_some_and(|(a, b)| a != b);
+        other || crate::usage_ask::due(self.seen_at_ms().or(failed_at), now)
+    }
+
     /// A turn of the tool completed, whatever agent's: an account that served a turn was not
     /// used up when it did.
     pub fn completed(&mut self, at_ms: i64) {

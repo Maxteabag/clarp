@@ -283,12 +283,19 @@ async fn logins(State(app): State<App>, Query(asked): Asked) -> Answered {
     let every = asked.get("harnesses").is_some_and(|said| said == "all");
     let now = app.clock.now_ms();
     let read = move || {
-        let home=crate::config::home();
-        let mut told=crate::logins::told(&home,every,now);
-        if app.config.ask_usage && let Some(rows)=told["backends"].as_array_mut(){
-            for row in rows.iter_mut(){
-                if row["state"]=="unverified" && row["id"].as_str().is_some_and(|tool|app.limits.login_verified(tool,&home,now)){
-                    row["state"]=json!("valid"); row["logged_in"]=json!(true);
+        let home = crate::config::home();
+        let mut told = crate::logins::told(&home, every, now);
+        if app.config.ask_usage
+            && let Some(rows) = told["backends"].as_array_mut()
+        {
+            for row in rows.iter_mut() {
+                if row["state"] == "unverified"
+                    && row["id"]
+                        .as_str()
+                        .is_some_and(|tool| app.limits.login_verified(tool, &home, now))
+                {
+                    row["state"] = json!("valid");
+                    row["logged_in"] = json!(true);
                 }
             }
         }
