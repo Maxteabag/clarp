@@ -1,11 +1,12 @@
 //! Driver for a single OpenCode server. Only the driver knows the server's password.
 use std::collections::BTreeSet;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use clarp_kernel::{opencode, python};
+use clarp_tool_args::opencode;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use nix::sys::signal::{SigSet, Signal, kill};
 use nix::unistd::Pid;
 use serde_json::{Value, json};
@@ -108,17 +109,6 @@ struct Client {
     directory: String,
 }
 
-fn http(within: Option<Duration>) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .proxy(None)
-        .max_redirects(0)
-        .timeout_global(within)
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
-        .build()
-        .into()
-}
-
 fn component(value: &str) -> String {
     let mut out = String::new();
     for b in value.bytes() {
@@ -141,21 +131,66 @@ impl Client {
         )
     }
 
-    fn post(&self, path: &str, body: Option<&Value>, seconds: u64) -> Result<Value> {
-        let agent = http(Some(Duration::from_secs(seconds)));
-        let req = agent
-            .post(self.url(path))
-            .header("Authorization", &self.auth);
-        let mut reply = match body {
-            Some(body) => req.send_json(body)?,
-            None => req.send_empty()?,
-        };
-        let text = reply.body_mut().read_to_string()?;
-        if text.trim().is_empty() {
+    fn request(&self, method: minreq::Method, path: &str) -> minreq::Request {
+        minreq::Request::new(method, self.url(path))
+            .with_follow_redirects(false)
+            .with_max_headers_size(64 * 1024)
+            .with_max_status_line_length(4096)
+            .with_header("Authorization", &self.auth)
+    }
+
+    fn response(req: minreq::Request) -> Result<minreq::ResponseLazy> {
+        let reply = req.send_lazy()?;
+        if !(200..300).contains(&reply.status_code) {
+            return Err(format!("OpenCode server returned HTTP {}", reply.status_code).into());
+        }
+        Ok(reply)
+    }
+
+    fn json(req: minreq::Request) -> Result<Value> {
+        const LIMIT: u64 = 10 * 1024 * 1024;
+        let mut bytes = Vec::new();
+        Read::take(Self::response(req)?, LIMIT + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > LIMIT {
+            return Err("OpenCode response exceeds ten MiB".into());
+        }
+        if bytes.iter().all(u8::is_ascii_whitespace) {
             Ok(Value::Null)
         } else {
-            Ok(serde_json::from_str(&text)?)
+            Ok(serde_json::from_slice(&bytes)?)
         }
+    }
+
+    fn post(&self, path: &str, body: Option<&Value>, seconds: u64) -> Result<Value> {
+        let mut req = self
+            .request(minreq::Method::Post, path)
+            .with_timeout(seconds);
+        if let Some(body) = body {
+            req = req
+                .with_header("Content-Type", "application/json")
+                .with_body(serde_json::to_vec(body)?);
+        }
+        Self::json(req)
+    }
+
+    fn subscribe(&self) -> Result<mpsc::Receiver<Value>> {
+        let req = self
+            .request(minreq::Method::Get, "/event")
+            .with_header("Accept", "text/event-stream");
+        let (opened, ready) = mpsc::channel();
+        let (send, receive) = mpsc::sync_channel(8);
+        std::thread::spawn(move || match Self::response(req) {
+            Ok(stream) => {
+                if opened.send(Ok(())).is_ok() {
+                    events(stream, send);
+                }
+            }
+            Err(err) => {
+                let _ = opened.send(Err(err));
+            }
+        });
+        ready.recv_timeout(Duration::from_secs(30))??;
+        Ok(receive)
     }
 
     fn open_session(&self, old: &str) -> Result<String> {
@@ -167,21 +202,16 @@ impl Client {
             let result = self.post("/session", Some(&json!({"permission":rules})), 30)?;
             return result["id"]
                 .as_str()
-                .filter(|id| clarp_kernel::native_session_name(id))
+                .filter(|id| clarp_tool_args::native_session_name(id))
                 .map(str::to_owned)
                 .ok_or_else(|| "OpenCode did not create a session".into());
         }
-        if !clarp_kernel::native_session_name(old) {
+        if !clarp_tool_args::native_session_name(old) {
             return Err(format!("OpenCode session {old} not found").into());
         }
         let path = format!("/session/{}", component(old));
-        let result = http(Some(Duration::from_secs(30)))
-            .get(self.url(&path))
-            .header("Authorization", &self.auth)
-            .call()
-            .map_err(|_| format!("OpenCode session {old} not found"))?
-            .body_mut()
-            .read_json::<Value>()?;
+        let result = Self::json(self.request(minreq::Method::Get, &path).with_timeout(30))
+            .map_err(|_| format!("OpenCode session {old} not found"))?;
         if result["id"].as_str() != Some(old) {
             return Err(format!("OpenCode session {old} not found").into());
         }
@@ -215,7 +245,7 @@ fn stop_handle() -> Result<Arc<Mutex<Stop>>> {
             }
             // Ending the driver releases the outer shim's wait immediately.
             // The shim terminates the server and any other members of this group.
-            let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGTERM);
+            let _ = kill(Pid::this(), Signal::SIGTERM);
             // If the kernel could not deliver TERM, the outer shim still owns escalation.
             loop {
                 std::thread::park();
@@ -233,54 +263,47 @@ fn emit(value: &Value) -> Result<()> {
     Ok(())
 }
 
-fn events(input: impl Read + Send + 'static) -> mpsc::Receiver<Value> {
-    let (send, receive) = mpsc::sync_channel(8);
-    std::thread::spawn(move || {
-        let mut input = BufReader::new(input);
-        let mut data = String::new();
-        loop {
-            let mut line = String::new();
-            let Ok(n) = (&mut input).take(4 * 1024 * 1024).read_line(&mut line) else {
-                break;
-            };
-            if n == 0 || !line.ends_with('\n') {
+// ResponseLazy decodes HTTP chunking incrementally. Its Read implementation waits
+// to fill the caller's buffer, so take decoded bytes directly: the next event
+// must be delivered even when the peer is now waiting for a permission reply.
+fn events(stream: minreq::ResponseLazy, send: mpsc::SyncSender<Value>) {
+    const LIMIT: usize = 4 * 1024 * 1024;
+    let mut line = Vec::new();
+    let mut data = Vec::new();
+    for byte in stream {
+        let Ok((byte, _)) = byte else { break };
+        if byte != b'\n' {
+            if line.len() >= LIMIT {
                 break;
             }
-            match line.trim_end_matches(['\n', '\r']) {
-                "" => {
-                    if let Ok(event) = serde_json::from_str(&data)
-                        && send.send(event).is_err()
-                    {
-                        break;
-                    }
-                    data.clear();
-                }
-                line if line.starts_with("data:") => {
-                    data.push_str(line[5..].trim_start());
-                    data.push('\n');
-                    if data.len() > 4 * 1024 * 1024 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
+            line.push(byte);
+            continue;
         }
-    });
-    receive
+        let payload = line.strip_suffix(b"\r").unwrap_or(&line);
+        if payload.is_empty() {
+            if let Ok(event) = serde_json::from_slice(&data)
+                && send.send(event).is_err()
+            {
+                break;
+            }
+            data.clear();
+        } else if let Some(text) = payload.strip_prefix(b"data:") {
+            let text = text.trim_ascii_start();
+            if data.len() + text.len() + 1 > LIMIT {
+                break;
+            }
+            data.extend_from_slice(text);
+            data.push(b'\n');
+        }
+        line.clear();
+    }
 }
 
 fn serve(client: Client, request: &Value, stop: &Mutex<Stop>) -> Result<()> {
     let sid = client.open_session(request["session"].as_str().unwrap_or_default())?;
     emit(&json!({"type":"session", "sessionID":sid}))?;
     let session = format!("/session/{}", component(&sid));
-    let stream = http(None)
-        .get(client.url("/event"))
-        .header("Authorization", &client.auth)
-        .header("Accept", "text/event-stream")
-        .call()?
-        .into_body()
-        .into_reader();
-    let stream = events(stream);
+    let stream = client.subscribe()?;
     let mut body = json!({"parts":[{"type":"text","text":request["prompt"]}]});
     if let Some(model) = opencode::model_pair(request["model"].as_str().unwrap_or_default()) {
         body["model"] = model;
@@ -357,7 +380,7 @@ pub fn run(binary: &str) -> Result<u8> {
     let req: Value = serde_json::from_reader(io::stdin().lock())?;
     let mut random = [0u8; 24];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
-    let password = python::b64encode(&random);
+    let password = STANDARD.encode(random);
     let child = Command::new(binary)
         .args(["serve", "--hostname", "127.0.0.1", "--port", "0"])
         .env("OPENCODE_SERVER_PASSWORD", &password)
@@ -372,7 +395,7 @@ pub fn run(binary: &str) -> Result<u8> {
             directory: std::env::current_dir()?.display().to_string(),
             auth: format!(
                 "Basic {}",
-                python::b64encode(format!("opencode:{password}").as_bytes())
+                STANDARD.encode(format!("opencode:{password}").as_bytes())
             ),
         };
         serve(client, &req, &stop)?;
