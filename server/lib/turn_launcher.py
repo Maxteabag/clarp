@@ -307,7 +307,8 @@ class LauncherMixin:
                 try:
                     turn_usage.record(
                         backend=spec.backend or backends.CLAUDE,
-                        agent_id=agent_id, detail=detail, trace_id=trace_id)
+                        agent_id=agent_id, detail=detail, trace_id=trace_id,
+                        reported_cost=event.get("total_cost_usd") is not None)
                 except Exception as e:  # noqa: BLE001
                     log_exception("turnUsageRecordFail", e, detail=trace_id)
                 if spec.origin == "dreaming":

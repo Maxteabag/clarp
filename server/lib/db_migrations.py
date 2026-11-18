@@ -1102,6 +1102,8 @@ def _migrate_to_v128(con: sqlite3.Connection) -> None:
     start = db_schema._SCHEMA_SQL.index("CREATE TABLE usage_cursors")
     end = db_schema._SCHEMA_SQL.index(";", start)
     con.execute(db_schema._SCHEMA_SQL[start:end].replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1))
+    if "cost_kind" not in {row[1] for row in con.execute("PRAGMA table_info(turn_usage)")}:
+        con.execute("ALTER TABLE turn_usage ADD COLUMN cost_kind TEXT NOT NULL DEFAULT 'legacy'")
     stamp = int(time.time() * 1000)
     con.execute("INSERT OR IGNORE INTO settings(key, value, updated_at) VALUES (?, ?, ?)",
                 ("usage.claude_cost_activation_ms", str(stamp), stamp))

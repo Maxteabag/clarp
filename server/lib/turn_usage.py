@@ -76,20 +76,20 @@ def claude_cost_delta(session: str, total: float | None, *, fresh: bool) -> floa
 
 
 def record(*, backend: str, agent_id: str, detail: dict[str, Any],
-           trace_id: str = "") -> None:
-    """Persist one turn's usage. Silently ignores a turn that reported none —
-    agy sends an empty usage dict, and a failed turn may send nothing.
+           trace_id: str = "", reported_cost: bool = False) -> None:
+    """Persist a row if the result supplied tokens or a cost. A session total
+    can be present even when the derived turn cost is unknown.
     """
     tokens_in = detail.get("tokens_in")
     tokens_out = detail.get("tokens_out")
     cost = detail.get("cost_usd")
-    if tokens_in is None and tokens_out is None and "cost_usd" not in detail:
+    if tokens_in is None and tokens_out is None and cost is None and not reported_cost:
         return
     conn().execute(
         """INSERT INTO turn_usage
                (backend, agent_id, trace_id, tokens_in, tokens_out,
-                cost_usd, duration_ms, at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                cost_usd, duration_ms, at, cost_kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'per_turn')""",
         (backend, agent_id, trace_id or detail.get("trace_id") or "",
          int(tokens_in or 0), int(tokens_out or 0),
          float(cost) if cost is not None else None,
@@ -106,20 +106,19 @@ def totals(backend: str, *, now: int | None = None) -> dict[str, Any]:
     """
     now = now_ms() if now is None else now
     out: dict[str, Any] = {"windows": {}, "last_turn_at": None}
-    cutoff = 0
-    if reports_session_cost(backend):
-        cutoff = int(conn().execute(
+    session_cost = reports_session_cost(backend)
+    if session_cost:
+        out["cost_activation_ms"] = int(conn().execute(
             "SELECT value FROM settings WHERE key='usage.claude_cost_activation_ms'").fetchone()[0])
-        out["cost_activation_ms"] = cutoff
     for name, span_ms in WINDOWS.items():
         row = conn().execute(
             """SELECT COUNT(*) AS turns,
                       COALESCE(SUM(tokens_in), 0)  AS tokens_in,
                       COALESCE(SUM(tokens_out), 0) AS tokens_out,
-                      SUM(CASE WHEN at >= ? THEN cost_usd END) AS cost_usd
+                      SUM(CASE WHEN NOT ? OR cost_kind='per_turn' THEN cost_usd END) AS cost_usd
                  FROM turn_usage
                 WHERE backend = ? AND at > ?""",
-            (cutoff, backend, now - span_ms),
+            (session_cost, backend, now - span_ms),
         ).fetchone()
         out["windows"][name] = {
             "turns": int(row["turns"] or 0),

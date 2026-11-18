@@ -2261,7 +2261,8 @@ CREATE TABLE turn_usage (
     tokens_out INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL,
     duration_ms INTEGER,
-    at INTEGER NOT NULL
+    at INTEGER NOT NULL,
+    cost_kind TEXT NOT NULL DEFAULT 'legacy'
 );
 
 -- table turns on turns

@@ -104,7 +104,8 @@ CREATE TABLE turn_usage (
     tokens_out INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL,
     duration_ms INTEGER,
-    at INTEGER NOT NULL
+    at INTEGER NOT NULL,
+    cost_kind TEXT NOT NULL DEFAULT 'legacy'
 );
 CREATE INDEX idx_turn_usage_backend_at ON turn_usage(backend, at);
 
