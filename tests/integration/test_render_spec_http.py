@@ -177,12 +177,30 @@ def test_section_eight_wire_vectors(host, monkeypatch):
         read_path = "/artifacts/" + ident
         for step in case["steps"]:
             before = len(host.events)
+            if step["action"] == "read":
+                # The nested value of the vector's body_text inside a whole publish, read raw.
+                nested = step["body_text"][len('{"x":'):-1]
+                data = {"type": "render_spec", "session": "theo", "artifact_id": ident,
+                        "title": case.get("title", ident), "payload": json.loads(
+                            (Path(__file__).parents[1] / "fixtures/render_spec/build-decision.json").read_text()),
+                        "x": "NESTED"}
+                code, result = _post_raw(host, "/artifacts", json.dumps(data).replace('"NESTED"', nested).encode())
+                assert code == step["http"], case["name"]
+                if code == 400:
+                    assert result == {"error": "json object required"}
+                status = db.conn().execute("SELECT status FROM artifacts WHERE artifact_id=?", (ident,)).fetchone()
+                assert (status[0] if status else None) == step["stored_status"], case["name"]
+                continue
             if step["action"] == "submit":
-                path, data = read_path + "/submit", step["body"]
+                path = read_path + "/submit"
+                data = json.loads(step["body_text"]) if "body_text" in step else step["body"]
+            elif step["action"] == "update":
+                path, data = read_path, {"payload": step["payload"], **step["envelope"]}
             else:
                 path = "/artifacts?validate_only=1" if step["action"] == "validate" else "/artifacts"
                 data = {"type": "render_spec", "session": "theo", "artifact_id": ident,
                         "title": case.get("title", ident), "payload": step["payload"]}
+                data.update(json.loads(step.get("envelope_text", "{}")))
             if "payload_text" in step:
                 text = json.dumps({**data, "payload": "PAYLOAD"}).replace('"PAYLOAD"', step["payload_text"])
                 code, result = _post_raw(host, path, text.encode())  # sends the capable header

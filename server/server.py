@@ -49,6 +49,7 @@ from lib.controller_events import (  # noqa: E402
 )
 from lib.context import ServerContext  # noqa: E402
 from lib import db  # noqa: E402
+from lib import json_depth  # noqa: E402
 from lib import eventlog  # noqa: E402
 
 from lib.outdated_clients import _note_outdated_client  # noqa: E402
@@ -1047,12 +1048,18 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         try:
             n = int(self.headers.get("Content-Length", "0"))
             self._body_consumed = True
+            raw = self.rfile.read(n) if n > 0 else b""
+            if raw and json_depth.too_deep(raw):
+                # Nested deeper than MAX_DEPTH: the reader's 400, before json.loads recurses (R73).
+                log("requestJsonTooDeep", redact_query_secrets(self.path))
+                return None
             if n and self.path.partition("?")[0].split("/", 2)[1:2] == ["artifacts"]:
                 from lib.render_spec import JsonObject
-                data = json.loads(self.rfile.read(n), object_pairs_hook=JsonObject)
+                data = json.loads(raw, object_pairs_hook=JsonObject)
             else:
-                data = json.loads(self.rfile.read(n)) if n > 0 else {}
-        except (ValueError, json.JSONDecodeError) as e:
+                data = json.loads(raw) if n > 0 else {}
+        except (ValueError, json.JSONDecodeError, RecursionError) as e:
+            # RecursionError never leaves the reader, whatever the bound above lets through.
             log_exception("requestJsonParseFail", e, detail=redact_query_secrets(self.path))
             return None
         if not isinstance(data, dict):

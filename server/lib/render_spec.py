@@ -138,18 +138,44 @@ def unique_object(value, path=""):
         raise Refusal("invalid_object", path)
 
 
-def check_unique(value, path="", depth=0, *, reject_on=False):
-    if depth > 64:
-        raise Refusal("invalid_json", path)
+def reject_on(value, path=""):
+    """No key "on" anywhere in the spec. Depth and duplicate keys are canonical()'s, which
+    validate() runs over the whole payload first (R74: check_unique's own were never reached)."""
     if isinstance(value, dict):
-        unique_object(value, path)
-        if reject_on and "on" in value:
+        if "on" in value:
             raise Refusal("unknown_key", _path(path, "on"))
         for key in sorted(value, key=_order):
-            check_unique(value[key], _path(path, key), depth+1, reject_on=reject_on)
+            reject_on(value[key], _path(path, key))
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            check_unique(child, _path(path, index), depth+1, reject_on=reject_on)
+            reject_on(child, _path(path, index))
+
+
+# The texts of a publish or an update besides its payload, by the request's own key.
+ENVELOPE_TEXTS = ("session", "title", "summary", "status", "reference_id", "artifact_id")
+
+
+def text(value, path):
+    """A request text: a string that UTF-8 can carry. json.loads keeps an escaped lone half of a
+    UTF-16 pair, which no database or client can store; it is refused here, never by a codec."""
+    if not isinstance(value, str):
+        raise Refusal("invalid_json", path)
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        raise Refusal("invalid_json", path) from None
+    return value
+
+
+def envelope(texts):
+    """Every envelope text given, checked before anything reaches the database (R71, R72)."""
+    for key in ENVELOPE_TEXTS:
+        if key in texts:
+            text(texts[key], "/" + key)
+
+
+def submission_id_ok(value):
+    return isinstance(value, str) and _SUBMISSION.fullmatch(value) is not None
 
 
 class Refusal(ValueError):
@@ -335,8 +361,8 @@ def _expression(value, shape, path, fields):
         raise Refusal("expression", path) from None
     [operator] = shape["required"]
     pointer = value[operator]
-    if (not isinstance(pointer, str) or not pointer.startswith("/") or not _id(pointer[1:])
-            or pointer[1:] not in fields):
+    # Every key of fields passed _id() in _schema(), so membership is the whole test (R74).
+    if not isinstance(pointer, str) or not pointer.startswith("/") or pointer[1:] not in fields:
         raise Refusal("expression", path)
     return pointer[1:]
 
@@ -358,7 +384,7 @@ def _elements(spec, schema):
     bound, fields = set(), schema["properties"]
     for ident in sorted(nodes, key=_order):
         p = _path(path, ident)
-        if not _id(ident) or ident == "on":
+        if not _id(ident):          # "on" is refused by reject_on() first (R74)
             raise Refusal("element_id", p)
         node = nodes[ident]
         _object(node, p, ("type", "props", "children"), ("type", "props"))
@@ -432,7 +458,7 @@ def validate(payload):
     spec = payload["spec"]
     if len(canonical(spec)) > 32768:
         raise Refusal("spec_size", "/spec")
-    check_unique(spec, "/spec", reject_on=True)
+    reject_on(spec, "/spec")
     _object(spec, "/spec", ("root", "elements", "state"), ("root", "elements", "state"))
     if len(canonical(spec["state"])) > 4096:
         raise Refusal("state_size", "/spec/state")
@@ -453,7 +479,7 @@ def admit(artifact_id, payload, status, data, previous):
     _object(data, "", ("submission_id", "version", "answers", "synthesize_audio"),
             ("submission_id", "version", "answers"))
     ident = data["submission_id"]
-    if not isinstance(ident, str) or not _SUBMISSION.fullmatch(ident):
+    if not submission_id_ok(ident):
         raise Refusal("invalid_submission_id", "/submission_id")
     if not isinstance(data["version"], str):  # before anything hashes it
         raise Refusal("invalid_version", "/version")

@@ -52,11 +52,13 @@ def case(name, *steps, title=None):
     title = ident if title is None else title
     state, submissions = None, 0
     for step in steps:
-        if step["action"] == "submit":
+        if step["action"] == "submit" and "body" in step:
             body = dict(step["body"])
             body["submission_id"] = name.replace("_", "-") + "-" + body["submission_id"]
             step["body"] = body
-        if "error" not in step:
+        if step["action"] == "read":
+            state = "ready" if step["http"] == 201 else state      # read as a whole publish
+        elif "error" not in step:
             if step["action"] == "publish":
                 state = "ready"
             elif step["action"] == "submit":
@@ -196,6 +198,28 @@ def scenarios():
     step["payload_text"] = encoded(payload).decode().replace('"count":0', '"count":-0')
     assert step["payload_text"].count('"count":-0') == 1
     yield case("minus-zero", step)
+
+    # Texts a JSON body can carry and UTF-8 cannot: an escaped lone half of a UTF-16 pair. They
+    # stand only in the raw JSON texts ("body_text", "envelope_text"), which these vectors keep
+    # ASCII. The contract refuses them at their field; nothing reaches storage (R71).
+    half = "\ud800"
+    yield case("half-pair-submission-id", publish(),
+               {"action": "submit", "http": 400, "error": refused("invalid_submission_id", "/submission_id"),
+                "body_text": json.dumps({**good, "submission_id": "a" * 31 + half})})
+    for field in ("session", "title", "summary", "status", "reference_id", "artifact_id"):
+        yield case("half-pair-" + field.replace("_", "-"),
+                   {**publish(error=refused("invalid_json", "/" + field)),
+                    "envelope_text": json.dumps({field: "text " + half})})
+    # An update whose title, summary or status is not text is refused at that field (R72).
+    for field, value in (("title", 7), ("summary", None), ("status", ["ready"])):
+        yield case("update-" + field + "-not-text", publish(),
+                   {"action": "update", "payload": form(), "envelope": {field: value}, "http": 400,
+                    "error": refused("invalid_json", "/" + field)})
+    # A body nested 512 levels deep is read; 513 is the reader's 400 for invalid JSON, on every
+    # route, before anything parses it (R73).
+    for depth, http in ((512, 201), (513, 400)):
+        yield case(f"body-depth-{depth}", {"action": "read", "http": http,
+                   "body_text": '{"x":' + "[" * (depth - 1) + "]" * (depth - 1) + "}"})
 
 
 if __name__ == "__main__":
