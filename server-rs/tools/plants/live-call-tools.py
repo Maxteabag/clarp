@@ -185,5 +185,36 @@ for what,old,new in [
 ]:
     PLANTS.append((O,'openings',what,old,new))
 
+for what,old,new in [
+    ('a foreign waiting turn is intercepted','if w.queue["foreign"] == true {','if false {'),
+    ('a gate accepts a different admission','intent["admission_id"] == id && intent["trace_id"] == trace','intent["trace_id"] == trace'),
+    ('a gate accepts a different trace','intent["admission_id"] == id && intent["trace_id"] == trace','intent["admission_id"] == id'),
+    ('a duplicate claimed launch is replayed','mark_unknown(op, &mut fx.opening);','return json!(true);'),
+    ('claim accepts a parked row','if status != "queued"','if status != "queued" && status != "parked"'),
+    ('claim does not take the queue row','fx.claim = true;','fx.claim = false;'),
+    ('unsent release leaves the slot claimed','fx.release = true;','fx.release = false;'),
+    ('an unprovable launch does not mark the row unknown','fx.launched_unknown = true;','fx.launched_unknown = false;'),
+    ('parked launch ignores a newer Stop','if action == Gate::Parked {\n                if let Some(reason) = w.fence','if action == Gate::Parked {\n                if let Some(reason) = None::<&str>'),
+    ('claim refuses to record an uncertain row','fx.unknown = true;','fx.unknown = false;'),
+    ('release works without a claimed queue row','|| status != "claimed"','|| status == "gone"'),
+    ('an end tag calls a greeting an initiative','"greeting_reply"','"initiative"'),
+    ('a retired opening can still be synthesized','let skip = !op["retired"].is_null()','let skip = false'),
+    ('a later greeting does not stop initiative audio','|| python::truthy(&op["late_greeting"])','|| false'),
+    ('an audio tag identifies the other epoch','"epoch":op["epoch"],"kind":kind','"epoch":0,"kind":kind'),
+    ('an invalid uuid length is accepted','text.len() == 36','text.len() >= 35'),
+    ('uppercase UUID digits identify the Host',"(b'a'..=b'f').contains(&c)","c.is_ascii_hexdigit()"),
+    ('metadata loses its call identity','"call_id":op["call_id"],"opening"','"call_id":"another","opening"'),
+    ('initiative header has another cause','Some("no_mic")=>','Some("another")=>'),
+    ('silence duration is measured in ms','as f64/1000.0','as f64/1.0'),
+]:
+    PLANTS.append((O,'openings',what,old,new))
+for mod,what,old,new in [
+    ('calls/opening','the greeting is never confirmed','rules::greeting_admitted(&mut ring.opening, message, ok, &world, fx)','rules::greeting_admitted(&mut ring.opening, message, !ok, &world, fx)'),
+    ('calls/opening','retire does not look at the revoked phone','r.opening["principal"] == owner','r.opening["principal"] != owner'),
+    ('calls/generation','a full device loses its auth proof','d.device_id == principal','d.device_id != principal'),
+    ('calls/opening_launch','a final check returns no launch','result=="launch"','result=="never-launch"'),
+    ('voice','drop the greeting trace tag','event[k] = v.clone()','event[k] = Value::Null'),
+]:
+    PLANTS.append(('clarp-host/src/'+mod+'.rs','host',what,old,new))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

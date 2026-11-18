@@ -522,13 +522,16 @@ pub fn record(new: Record<'_>, proof: &dyn Proof) -> Value {
 
 /// Validate the older admission and current session without leaking a nonce
 /// in a denial. The newer Stop wins even if the mailbox was already paused.
-pub fn fence(
-    ring: &super::Ring,
+pub fn fence<'a>(
+    ring: &'a super::Ring,
     calls: &crate::calls::Calls,
     host: &str,
     proof: &dyn Proof,
-) -> Option<&'static str> {
+) -> Option<&'a str> {
     let op = &ring.opening;
+    if let Some(reason) = op["retired"]["reason"].as_str() {
+        return Some(reason);
+    }
     if op["server_id"] != host {
         return Some("host_changed");
     }
@@ -694,6 +697,13 @@ pub fn dispatch(
     let intent = &op["intent"];
     let status = &w.queue["status"];
     let exact = intent["admission_id"] == id && intent["trace_id"] == trace;
+    if w.queue["foreign"] == true && action != Gate::Claim {
+        return if action == Gate::Parked {
+            json!("unknown")
+        } else {
+            json!(false)
+        };
+    }
     match action {
         Gate::Claim => {
             if w.queue["foreign"] == true {

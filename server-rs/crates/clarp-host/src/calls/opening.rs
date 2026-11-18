@@ -55,9 +55,9 @@ impl Desk {
             let found = rings.by_opening_token(token);
             let ring = found.map(|ring| ring.ring_id.clone()).unwrap_or_default();
             let fence = found.and_then(|ring| {
-                with.world
-                    .opening
-                    .and_then(|proof| rules::fence(ring, calls, with.at.host_id, proof))
+                with.world.opening.and_then(|proof| {
+                    rules::fence(ring, calls, with.at.host_id, proof).map(str::to_owned)
+                })
             });
             let generation = proven(with);
             let nonce = format!("own_{}", crate::ids::hex(16));
@@ -66,7 +66,7 @@ impl Desk {
                 generation: &generation,
                 now,
                 host: with.at.host_id,
-                fence,
+                fence: fence.as_deref(),
                 queue,
                 nonce: &nonce,
                 trace: &trace,
@@ -349,10 +349,9 @@ impl Desk {
                 let generation = proven(with);
                 rings
                     .change_opening(ring_id, with.at.now_ms, out, |ring, fx| {
-                        let fence = with
-                            .world
-                            .opening
-                            .and_then(|p| rules::fence(ring, calls, with.at.host_id, p));
+                        let fence = with.world.opening.and_then(|p| {
+                            rules::fence(ring, calls, with.at.host_id, p).map(str::to_owned)
+                        });
                         let op = &mut ring.opening;
                         if op["intent"]["admission_id"] != id
                             || op["intent"]["trace_id"] != trace
@@ -371,10 +370,10 @@ impl Desk {
                             queue: &row,
                             nonce: "",
                             trace: "",
-                            fence,
+                            fence: fence.as_deref(),
                         };
-                        if let Some(reason) =
-                            rules::breach(&op["fence"]["host_gen"], &generation).or(fence)
+                        if let Some(reason) = rules::breach(&op["fence"]["host_gen"], &generation)
+                            .or(fence.as_deref())
                         {
                             rules::retire_current(op, reason, &world, fx);
                             fx.announce = fx.dirty;

@@ -183,7 +183,7 @@ def extras(root, op):
                     clips.append(dict(op=opening,trace=trace,tag=op.opening_audio(trace),skip=op.skip_opening_synthesis(trace)))
     uuids=[]
     value='f46bf8e2-4219-4ee5-8d9c-874d36c116ef'
-    for raw in (value,value+'\n',value.upper(),value+'\n\n',' '+value,value+' ',value.replace('-',''),'.'*36,'x'*65,'',value+'x'):
+    for raw in (value,value+'\n',value.upper(),value+'\n\n',' '+value,value+' ',value.replace('-',''),'.'*36,'x'*65,'',value+'x',value+'a',value[:-1]):
         try: canonical=identity._canonical_uuid(raw.encode())
         except ValueError: canonical=None
         except identity._Invalid: canonical=None
@@ -196,12 +196,18 @@ def extras(root, op):
     for action in ('claim','release','parked','failed'):
         for state in ('intended','admitted','started','cancelled','unknown'):
             for status in ('queued','parked','claimed','started','done',None):
-                for breach in ('','stopped_after_answer','reboot'):
+                worlds=['','stopped_after_answer','reboot']
+                if state in ('started','admitted') and status in ('queued','claimed'):
+                    worlds+=['retired','foreign','wrong-id','wrong-trace']
+                for breach in worlds:
                     now=3000
                     generation={'boot':'boot','instance':'instance'}
                     opening={'ring_id':'ring','state':'initiative_started' if state=='started' else 'initiative_queued',
                              'server_id':'test','retired':None,'fence':{'host_gen':generation},
                              'intent':{'admission_id':row_id,'trace_id':trace,'state':state,'kind':'initiative'}}
+                    if breach=='retired': opening['retired']={'reason':'call_ended','at':2000};opening['state']='retired'
+                    if breach=='wrong-id':opening['intent']['admission_id']='call-open:ring:2'
+                    if breach=='wrong-trace':opening['intent']['trace_id']='other-trace'
                     before=copy.deepcopy(opening)
                     row={'status':status,'trace_id':trace,'claimed_at':100 if status=='claimed' else None} if status else None
                     effects=[]
@@ -212,10 +218,10 @@ def extras(root, op):
                     op._opening_txn=transaction
                     op.now_ms=lambda:now
                     op._row=lambda _:row
-                    op._fence_breach=lambda _:breach if breach=='stopped_after_answer' else ''
+                    op._fence_breach=lambda _: 'call_ended' if breach=='retired' else breach if breach=='stopped_after_answer' else ''
                     op._announce_opening=lambda _:None
-                    op.is_initiative=lambda *args:True
-                    op.is_foreign_message=lambda _:False
+                    op.is_initiative=lambda *args:breach not in ('foreign','wrong-trace','wrong-id')
+                    op.is_foreign_message=lambda _:breach=='foreign'
                     op._row_admission=lambda _:row_id
                     def withdraw(_):
                         if status in ('queued','parked'):
