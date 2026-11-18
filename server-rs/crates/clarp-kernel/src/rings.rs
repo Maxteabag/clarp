@@ -91,6 +91,12 @@ pub struct Ring {
     /// The call the answer started.
     #[serde(default)]
     pub call_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub opening_mode: String,
+    #[serde(default, rename = "_host_gen", skip_serializing_if = "Value::is_null")]
+    pub generation: Value,
+    #[serde(default, rename = "_opening", skip_serializing_if = "Value::is_null")]
+    pub opening: Value,
     /// How its conversation is held when not as a call: `agent_live_v1`, live with a voice.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub conversation_mode: String,
@@ -123,6 +129,11 @@ impl Ring {
         let mut told = serde_json::to_value(self).unwrap_or_else(|_| json!({}));
         if let Some(fields) = told.as_object_mut() {
             fields.shift_remove("_live");
+            fields.shift_remove("_host_gen");
+            fields.shift_remove("_opening");
+            if !self.opening.is_null() {
+                fields.insert("opening".into(), opening::public(&self.opening, false));
+            }
             if self.of_the_user().is_some() {
                 fields.insert("origin".to_string(), json!("user_call"));
             }
@@ -141,6 +152,12 @@ impl Ring {
             "ended_at": self.ended_at, "answered_by": self.answered_by, "call_id": self.call_id,
             "server_now": now_ms,
         });
+        if !self.opening_mode.is_empty() {
+            event["opening_mode"] = json!(self.opening_mode);
+        }
+        if !self.opening.is_null() {
+            event["opening"] = opening::public(&self.opening, false);
+        }
         if !self.conversation_mode.is_empty() {
             event["conversation_mode"] = json!(self.conversation_mode);
         }
@@ -188,6 +205,7 @@ pub struct Asked<'a> {
 /// A ring that may be placed: who rings, and what the incoming call says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Admitted {
+    generation: Value,
     caller: Caller,
     reason: String,
     opening: String,
@@ -555,7 +573,7 @@ impl Rings {
         if names_live(asked.conversation_mode) {
             return self.admit_live(asked, people, world, now_ms, out);
         }
-        let admitted = self.admit_ordinary(asked, people, now_ms, out);
+        let admitted = self.admit_ordinary(asked, people, world.opening, now_ms, out);
         admitted.map(Admission::Place)
     }
 
@@ -564,12 +582,14 @@ impl Rings {
         &mut self,
         asked: &Asked,
         people: People,
+        proof: Option<&dyn opening::Proof>,
         now_ms: i64,
         out: &mut Effects,
     ) -> Result<Admitted, Refused> {
         let reason = one_line(asked.reason, REASON_MOST);
         let opening = one_line(asked.opening_line, OPENING_MOST);
         self.settle(now_ms, out);
+        let mut generation = Value::Null;
         let mut who = (
             String::new(),
             String::new(),
@@ -600,16 +620,20 @@ impl Rings {
                 return Err(refused(400, "live_context_invalid"));
             }
             if listens {
-                return Err(refused(
-                    409,
-                    "listen-first opening is unavailable on this Host; ring with opening_mode say",
-                ));
+                generation = proof.map_or(Value::Null, opening::Proof::generation);
+                if generation.is_null() {
+                    return Err(refused(
+                        409,
+                        "listen-first opening is unavailable: host identity unprovable; ring with opening_mode say",
+                    ));
+                }
             }
             self.may_ring(&caller, now_ms)?;
             Ok(caller)
         };
         match admitted() {
             Ok(caller) => Ok(Admitted {
+                generation,
                 caller,
                 reason,
                 opening,
@@ -639,6 +663,7 @@ impl Rings {
         out: &mut Effects,
     ) -> Ring {
         let Admitted {
+            generation,
             caller,
             reason,
             opening,
@@ -646,6 +671,13 @@ impl Rings {
             live,
         } = admitted;
         let ring = Ring {
+            opening_mode: if generation.is_null() {
+                String::new()
+            } else {
+                LISTEN_FIRST.into()
+            },
+            generation,
+            opening: Value::Null,
             ring_id: format!("rng_{new_id}"),
             session: caller.session,
             persona: caller.persona,
@@ -787,6 +819,21 @@ impl Rings {
             if ring.answered_by != asked.principal {
                 return Err(refused(409, "the call was answered elsewhere"));
             }
+            if asked.opening_mode.is_some_and(|m| m == LISTEN_FIRST)
+                && !ring.opening.is_null()
+                && ring.opening["state"] != "fallback"
+            {
+                let generation = world
+                    .opening
+                    .map_or(Value::Null, opening::Proof::generation);
+                if opening::breach(&ring.generation, &generation).is_some()
+                    || opening::breach(&ring.opening["fence"]["host_gen"], &generation).is_some()
+                    || !ring.opening["retired"].is_null()
+                    || !ring.opening["identity_breach"].is_null()
+                {
+                    return Err(over(ring, now_ms));
+                }
+            }
             let call = calls.by_id(&ring.call_id, now_ms).unwrap_or(Value::Null);
             return Ok(Self::answered(
                 ring,
@@ -799,9 +846,40 @@ impl Rings {
         if !ring.rings() {
             return Err(over(ring, now_ms));
         }
-        let placed = json!({
+        let mut placed = json!({
             "ring_id": ring.ring_id, "reason": ring.reason, "opening_line": ring.opening_line,
         });
+        let capable = asked.opening_mode.is_some_and(|mode| mode == LISTEN_FIRST);
+        let listen = ring.opening_mode == LISTEN_FIRST;
+        let generation = if listen {
+            let first = world
+                .opening
+                .map_or(Value::Null, opening::Proof::generation);
+            let second = world
+                .opening
+                .map_or(Value::Null, opening::Proof::generation);
+            let proven = if first == second { first } else { Value::Null };
+            if let Some(cause) = opening::breach(&ring.generation, &proven) {
+                let ring = &mut self.rings[place];
+                ring.state = MISSED.into();
+                ring.ended_at = Some(now_ms);
+                let ring = ring.clone();
+                out.changed.rings = true;
+                self.write(json!({"outcome":"refused","error":"the call is over","ring_id":ring.ring_id,"cause":cause,"by":asked.principal}),now_ms,out);
+                out.events.push(ring.event(now_ms));
+                out.pushes.push(Pushed {
+                    ring: ring.clone(),
+                    kind: "missed",
+                });
+                return Err(over(&ring, now_ms));
+            }
+            if capable {
+                placed["opening_mode"] = json!(LISTEN_FIRST);
+            }
+            proven
+        } else {
+            Value::Null
+        };
         let asker = Asker {
             caller: asked.principal,
             by: &ring.session,
@@ -821,6 +899,30 @@ impl Rings {
         ring.ended_at = Some(now_ms);
         ring.answered_by = asked.principal.to_string();
         ring.call_id = call["call_id"].as_str().unwrap_or("").to_string();
+        if let Some(proof) = world.opening.filter(|_| listen) {
+            let token = if capable {
+                format!("opn_{}", given.minted.ticket)
+            } else {
+                String::new()
+            };
+            let nonce = if capable {
+                format!("own_{}", given.minted.nonce)
+            } else {
+                String::new()
+            };
+            ring.opening = opening::record(
+                opening::Record {
+                    ring,
+                    principal: asked.principal,
+                    host: world.host_id,
+                    token: &token,
+                    nonce: &nonce,
+                    now: now_ms,
+                    generation,
+                },
+                proof,
+            );
+        }
         out.changed.rings = true;
         let ring = ring.clone();
         let entry = json!({
@@ -845,6 +947,12 @@ impl Rings {
         opening_mode: Option<&Value>,
         now_ms: i64,
     ) -> Value {
+        if opening_mode.is_some_and(|m| m == LISTEN_FIRST)
+            && !ring.opening.is_null()
+            && ring.opening["state"] != "fallback"
+        {
+            return json!({"ok":true,"ring":ring.told(now_ms),"call":call,"changed":changed,"opening":opening::public(&ring.opening,true)});
+        }
         let mut opening = json!({
             "text": ring.opening_line, "audio_url": ring.opening_audio_url,
             "session": ring.session, "persona": ring.persona,
@@ -998,6 +1106,7 @@ mod tests {
         World {
             profiles: &Bare,
             android: &[],
+            opening: None,
             can_push_android: false,
             device_ok,
             host_id: "host-1",

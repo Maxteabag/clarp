@@ -476,3 +476,32 @@ pub fn greeting_admitted(op: &mut Value, id: &str, ok: bool, w: &World<'_>, fx: 
         fx.dirty = true;
     }
 }
+
+/// Identity and stop evidence captured by the Host at the answer. A generation
+/// read is side-effect free, including when the instance token is absent.
+pub trait Proof {
+    fn generation(&self) -> Value;
+    fn stop(&self, agent: &str) -> (u64, bool);
+    fn auth(&self, principal: &str) -> Value;
+}
+
+pub struct Record<'a> {
+    pub ring: &'a super::Ring,
+    pub principal: &'a str,
+    pub host: &'a str,
+    pub token: &'a str,
+    pub nonce: &'a str,
+    pub now: i64,
+    pub generation: Value,
+}
+
+pub fn record(new: Record<'_>, proof: &dyn Proof) -> Value {
+    let r = new.ring;
+    let (stop, paused) = proof.stop(&r.agent_id);
+    json!({"ring_id":r.ring_id,"call_id":r.call_id,"principal":new.principal,"server_id":new.host,
+          "agent_id":r.agent_id,"session":r.session,"persona":r.persona,"reason":r.reason,
+          "token":new.token,"owner_nonce":new.nonce,"epoch":1,"state":if new.token.is_empty(){"fallback"}else{"pending"},
+          "silence_ms":1250,"capture":null,"latch":null,"intent":null,"greeting":null,"late_greeting":null,
+          "retired":null,"requests":{},"created_at":new.now,"updated_at":new.now,"fence":{
+            "answered_at":new.now,"stop_generation":stop,"paused_at_answer":paused,"auth":proof.auth(new.principal),"host_gen":new.generation}})
+}

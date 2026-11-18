@@ -307,6 +307,7 @@ impl Desk {
         let world = rings::World {
             profiles: &shelf,
             android: &androids,
+            opening: None,
             can_push_android: app.android.configured(),
             device_ok: &paired,
             host_id: &app.server_id,
