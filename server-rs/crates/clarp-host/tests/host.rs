@@ -27930,7 +27930,12 @@ fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
         (
             &json!("hello there you"),
             &events[0]["trace_id"],
-            &json!(events[4]["vocab_run_id"].as_i64().filter(|id| *id>0).unwrap())
+            &json!(
+                events[4]["vocab_run_id"]
+                    .as_i64()
+                    .filter(|id| *id > 0)
+                    .unwrap()
+            )
         )
     );
     // The phone says that it is done: the last turn, how many ended, and the close with the
@@ -28578,93 +28583,215 @@ fn a_clip_is_heard_by_deepgram_and_its_engine_may_be_set_to_find_the_ends_of_tur
 }
 
 #[test]
-fn vocabulary_packs_are_managed_compiled_recorded_and_heard(){
-    const TOKEN:&str="fixture-admin";
-    let place=Place::new("vocab-packs");
-    let (speech,requests)=scribe_stand_in(r#"{"text":"Okay.","words":[]}"#);
-    let (model,judgments)=answers(vec![("/judge","200 OK",json!({"answers":{"junk":{"noul":0.599}}}).to_string())]);
-    let flux=stand_in_engine();
-    let endpoint=format!("{model}/judge");
-    let world=[("CLARP_SCRIBE_ENDPOINT",speech.as_str()),("CLARP_JUDGE_ENDPOINT",endpoint.as_str()),("CLARP_FLUX_ENDPOINT",flux.address.as_str()),
-        ("ELEVEN_API_KEY","unit"),("DEEPGRAM_API_KEY","unit"),("TYPESAFE_API_KEY","unit")];
-    let host=place.start_in(TOKEN,&[],&world);
-    let fixture:Value=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/vocabulary-packs-vectors.json")).unwrap();
-    let (mut pack,mut profile)=("pk-example".to_string(),"pf-example".to_string());
-    for step in fixture["admin"].as_array().unwrap(){
-        let subst=|v:&Value|->Value{serde_json::from_str(&v.to_string().replace("pk-example",&pack).replace("pf-example",&profile)).unwrap()};
-        let data=subst(&step["data"]);
-        let mut route=format!("/vocab/{}",step["route"].as_str().unwrap());
-        let method=step["method"].as_str().unwrap();
-        let arg=if method=="GET"{
-            let query=data.as_object().unwrap().iter().map(|(k,v)|format!("{k}={}",v.as_str().unwrap())).collect::<Vec<_>>().join("&");
-            if !query.is_empty(){route.push('?');route.push_str(&query);}
+fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
+    const TOKEN: &str = "fixture-admin";
+    let place = Place::new("vocab-packs");
+    let (speech, requests) = scribe_stand_in(r#"{"text":"Okay.","words":[]}"#);
+    let (model, judgments) = answers(vec![(
+        "/judge",
+        "200 OK",
+        json!({"answers":{"junk":{"noul":0.599}}}).to_string(),
+    )]);
+    let flux = stand_in_engine();
+    let endpoint = format!("{model}/judge");
+    let world = [
+        ("CLARP_SCRIBE_ENDPOINT", speech.as_str()),
+        ("CLARP_JUDGE_ENDPOINT", endpoint.as_str()),
+        ("CLARP_FLUX_ENDPOINT", flux.address.as_str()),
+        ("ELEVEN_API_KEY", "unit"),
+        ("DEEPGRAM_API_KEY", "unit"),
+        ("TYPESAFE_API_KEY", "unit"),
+    ];
+    let host = place.start_in(TOKEN, &[], &world);
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/vocabulary-packs-vectors.json"
+    ))
+    .unwrap();
+    let (mut pack, mut profile) = ("pk-example".to_string(), "pf-example".to_string());
+    for step in fixture["admin"].as_array().unwrap() {
+        let subst = |v: &Value| -> Value {
+            serde_json::from_str(
+                &v.to_string()
+                    .replace("pk-example", &pack)
+                    .replace("pf-example", &profile),
+            )
+            .unwrap()
+        };
+        let data = subst(&step["data"]);
+        let mut route = format!("/vocab/{}", step["route"].as_str().unwrap());
+        let method = step["method"].as_str().unwrap();
+        let arg = if method == "GET" {
+            let query = data
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| format!("{k}={}", v.as_str().unwrap()))
+                .collect::<Vec<_>>()
+                .join("&");
+            if !query.is_empty() {
+                route.push('?');
+                route.push_str(&query);
+            }
             None
-        }else{Some(&data)};
-        let (status,mut actual)=host.ask(method,&route,arg);
-        if status==200 && method=="POST" {
-            if step["route"]=="packs" {pack=actual["pack_id"].as_str().unwrap().into();}
-            if step["route"]=="profiles" {profile=actual["profile_id"].as_str().unwrap().into();}
+        } else {
+            Some(&data)
+        };
+        let (status, mut actual) = host.ask(method, &route, arg);
+        if status == 200 && method == "POST" {
+            if step["route"] == "packs" {
+                pack = actual["pack_id"].as_str().unwrap().into();
+            }
+            if step["route"] == "profiles" {
+                profile = actual["profile_id"].as_str().unwrap().into();
+            }
         }
-        if let Some(terms)=actual.get_mut("terms").and_then(Value::as_array_mut) {
-            for t in terms {assert!(t["created_at"].as_i64().unwrap()>0);t["created_at"]=json!(1000);}
+        if let Some(terms) = actual.get_mut("terms").and_then(Value::as_array_mut) {
+            for t in terms {
+                assert!(t["created_at"].as_i64().unwrap() > 0);
+                t["created_at"] = json!(1000);
+            }
         }
-        let expected=step["response"][1].to_string().replace("pk-example",&pack).replace("pf-example",&profile);
-        assert_eq!((json!(status),actual),(step["response"][0].clone(),serde_json::from_str(&expected).unwrap()),"{method} {route}");
+        let expected = step["response"][1]
+            .to_string()
+            .replace("pk-example", &pack)
+            .replace("pf-example", &profile);
+        assert_eq!(
+            (json!(status), actual),
+            (
+                step["response"][0].clone(),
+                serde_json::from_str(&expected).unwrap()
+            ),
+            "{method} {route}"
+        );
     }
-    let session=host.new_agent("Nadia");
-    let snapshot=host.get("/agents/snapshot");
-    let owner=snapshot["agents"].as_array().unwrap().iter().find(|a|a["session"]==session).unwrap()["agent_id"].clone();
-    let pk=host.post("/vocab/packs",json!({"name":"Names","terms":[{"text":"Plover","rarity":0.95}]}))["pack_id"].clone();
-    let pf=host.post("/vocab/profiles",json!({"name":"Calls","pack_ids":[pk]}))["profile_id"].clone();
-    assert_eq!(host.post("/vocab/assign",json!({"profile_id":pf,"agent_id":owner}))["ok"],true);
-    host.post("/select",json!({"session":session}));
-    let meter=host.get(&format!("/vocab/preview?session={session}&model=elevenlabs:scribe_v2&delegated=true"));
-    assert_eq!(meter["profile_id"],pf);
+    let session = host.new_agent("Nadia");
+    let snapshot = host.get("/agents/snapshot");
+    let owner = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["session"] == session)
+        .unwrap()["agent_id"]
+        .clone();
+    let pk = host.post(
+        "/vocab/packs",
+        json!({"name":"Names","terms":[{"text":"Plover","rarity":0.95}]}),
+    )["pack_id"]
+        .clone();
+    let pf =
+        host.post("/vocab/profiles", json!({"name":"Calls","pack_ids":[pk]}))["profile_id"].clone();
+    assert_eq!(
+        host.post("/vocab/assign", json!({"profile_id":pf,"agent_id":owner}))["ok"],
+        true
+    );
+    host.post("/select", json!({"session":session}));
+    let meter = host.get(&format!(
+        "/vocab/preview?session={session}&model=elevenlabs:scribe_v2&delegated=true"
+    ));
+    assert_eq!(meter["profile_id"], pf);
     assert!(meter["payload"].as_str().unwrap().contains("Nadia"));
     assert!(meter["payload"].as_str().unwrap().contains("Plover"));
-    assert_eq!(host.get("/vocab/runs")["runs"],json!([]));
-    assert_eq!(host.get("/vocab/budgets")["budgets"],fixture["declared"]);
-    let hear=|host:&Host,id:&str|{
-        let answer=fetch(host,TOKEN,"POST","/transcribe",&[("Content-Type","audio/wav"),("X-Transcription-Model","elevenlabs:scribe_v2"),("X-Transcription-ID",id)],b"synthetic clip");
-        assert_eq!(answer.status,200,"{}",answer.text());serde_json::from_slice::<Value>(&answer.body).unwrap()
+    assert_eq!(host.get("/vocab/runs")["runs"], json!([]));
+    assert_eq!(host.get("/vocab/budgets")["budgets"], fixture["declared"]);
+    let hear = |host: &Host, id: &str| {
+        let answer = fetch(
+            host,
+            TOKEN,
+            "POST",
+            "/transcribe",
+            &[
+                ("Content-Type", "audio/wav"),
+                ("X-Transcription-Model", "elevenlabs:scribe_v2"),
+                ("X-Transcription-ID", id),
+            ],
+            b"synthetic clip",
+        );
+        assert_eq!(answer.status, 200, "{}", answer.text());
+        serde_json::from_slice::<Value>(&answer.body).unwrap()
     };
-    let unjudged=hear(&host,"unjudged");assert_eq!(unjudged["text"],"");
+    let unjudged = hear(&host, "unjudged");
+    assert_eq!(unjudged["text"], "");
     assert!(judgments.lock().unwrap().is_empty());
-    let first_trace=unjudged["trace_id"].as_str().unwrap();
-    assert_eq!(host.ask("GET",&format!("/transcription-audio?trace_id={first_trace}"),None).0,404);
-    assert_eq!(host.post("/judgments/settings",json!({"enabled":true,"sites":{"junk":true},"timeout_ms":500}))["ok"],true);
-    assert_eq!(host.post("/transcription-providers",json!({"retain_audio":true}))["ok"],true);
-    let line=hear(&host,"judged");
-    assert_eq!(line["text"],"Okay.");
-    assert!(line["vocab_run_id"].as_i64().unwrap()>0);
-    let judge=judgments.lock().unwrap()[0].clone();
-    let asked:Value=serde_json::from_str(judge.split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(asked["questions"]["junk"],fixture["question"]);
-    assert_eq!(asked["state"],json!({"transcript":"Okay."}));
+    let first_trace = unjudged["trace_id"].as_str().unwrap();
+    assert_eq!(
+        host.ask(
+            "GET",
+            &format!("/transcription-audio?trace_id={first_trace}"),
+            None
+        )
+        .0,
+        404
+    );
+    assert_eq!(
+        host.post(
+            "/judgments/settings",
+            json!({"enabled":true,"sites":{"junk":true},"timeout_ms":500})
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        host.post("/transcription-providers", json!({"retain_audio":true}))["ok"],
+        true
+    );
+    let line = hear(&host, "judged");
+    assert_eq!(line["text"], "Okay.");
+    assert!(line["vocab_run_id"].as_i64().unwrap() > 0);
+    let judge = judgments.lock().unwrap()[0].clone();
+    let asked: Value = serde_json::from_str(judge.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(asked["questions"]["junk"], fixture["question"]);
+    assert_eq!(asked["state"], json!({"transcript":"Okay."}));
     assert!(requests.lock().unwrap()[1].contains("name=\"keyterms\"\r\n\r\nPlover"));
-    let trace=line["trace_id"].as_str().unwrap();
-    let path=format!("/vocab/run?trace_id={trace}");
-    let audit=host.get(&path);
-    assert_eq!(audit["run_id"],line["vocab_run_id"]);assert_eq!(audit["transcript"],"Okay.");
-    let saved=fetch(&host,TOKEN,"GET",audit["audio_url"].as_str().unwrap(),&[],b"");
-    assert_eq!(saved.text(),"synthetic clip");assert_eq!(saved.header("content-type"),"audio/wav");
-    assert_eq!(hear(&host,"judged")["cached"],true);
-    assert_eq!(requests.lock().unwrap().len(),2);
-    let (mut stream,ready)=stream_at(&host,TOKEN,&format!("?model=deepgram:nova-3&session={session}"));
-    assert!(ready["keyterms"].as_u64().unwrap()>0);
-    for _ in 0..3 {stream.send(sound_of(3200)).unwrap();}
-    let end=(0..5).map(|_|told_on(&mut stream)).find(|e|e["event"]=="end").unwrap();
-    assert!(end["vocab_run_id"].as_i64().unwrap()>0);
-    let stream_run=host.get(&format!("/vocab/run?trace_id={}",end["trace_id"].as_str().unwrap()));
-    assert_eq!(stream_run["model"],"flux-general-en");
-    assert_eq!(stream_run["transcript"],end["text"]);
-    let audio=fetch(&host,TOKEN,"GET",stream_run["audio_url"].as_str().unwrap(),&[],b"");
+    let trace = line["trace_id"].as_str().unwrap();
+    let path = format!("/vocab/run?trace_id={trace}");
+    let audit = host.get(&path);
+    assert_eq!(audit["run_id"], line["vocab_run_id"]);
+    assert_eq!(audit["transcript"], "Okay.");
+    let saved = fetch(
+        &host,
+        TOKEN,
+        "GET",
+        audit["audio_url"].as_str().unwrap(),
+        &[],
+        b"",
+    );
+    assert_eq!(saved.text(), "synthetic clip");
+    assert_eq!(saved.header("content-type"), "audio/wav");
+    assert_eq!(hear(&host, "judged")["cached"], true);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    let (mut stream, ready) = stream_at(
+        &host,
+        TOKEN,
+        &format!("?model=deepgram:nova-3&session={session}"),
+    );
+    assert!(ready["keyterms"].as_u64().unwrap() > 0);
+    for _ in 0..3 {
+        stream.send(sound_of(3200)).unwrap();
+    }
+    let end = (0..5)
+        .map(|_| told_on(&mut stream))
+        .find(|e| e["event"] == "end")
+        .unwrap();
+    assert!(end["vocab_run_id"].as_i64().unwrap() > 0);
+    let stream_run = host.get(&format!(
+        "/vocab/run?trace_id={}",
+        end["trace_id"].as_str().unwrap()
+    ));
+    assert_eq!(stream_run["model"], "flux-general-en");
+    assert_eq!(stream_run["transcript"], end["text"]);
+    let audio = fetch(
+        &host,
+        TOKEN,
+        "GET",
+        stream_run["audio_url"].as_str().unwrap(),
+        &[],
+        b"",
+    );
     assert!(audio.body.starts_with(b"RIFF"));
     drop(stream);
     host.kill();
-    let host=place.start_in(TOKEN,&[],&world);
-    assert_eq!(host.get(&path),audit);
-    assert_eq!(host.get("/vocab/profiles")["profiles"][0]["profile_id"],pf);
+    let host = place.start_in(TOKEN, &[], &world);
+    assert_eq!(host.get(&path), audit);
+    assert_eq!(host.get("/vocab/profiles")["profiles"][0]["profile_id"], pf);
 }
 
 /// A stand-in for the voice of a live call, on this machine: it takes the key of the tests

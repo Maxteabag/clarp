@@ -54,7 +54,7 @@ const WAITS: Duration = Duration::from_secs(10);
 
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
-    pub(crate) judge:crate::vocabulary::judge::Judge,
+    pub(crate) judge: crate::vocabulary::judge::Judge,
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
     own: Option<(Arc<dyn Listener>, String)>,
@@ -159,7 +159,7 @@ impl Ears {
         };
         Self {
             own,
-            judge:Default::default(),
+            judge: Default::default(),
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
             ink: ink("ink-2"),
@@ -461,12 +461,19 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let directory = app.fleet.directory();
     let (own, language) = spoken_to(&directory, &ears.language);
     let order = ears.order(&requested, &own, &ears.default_engine(&directory));
-    let trace=ids::hex(8);
-    let session=directory.focus.as_deref().and_then(|id|directory.named(id)).map_or("",|m|m.record.session.as_str());
-    let selected=order.first().map_or(requested.as_str(),String::as_str);
-    let began=std::time::Instant::now();
-    let (audit,run_id)=crate::vocabulary::compile(app,session,selected,hands_free,Some(&trace)).await.unwrap_or_default();
-    let listen_for=audit["payload"].as_str().unwrap_or("");
+    let trace = ids::hex(8);
+    let session = directory
+        .focus
+        .as_deref()
+        .and_then(|id| directory.named(id))
+        .map_or("", |m| m.record.session.as_str());
+    let selected = order.first().map_or(requested.as_str(), String::as_str);
+    let began = std::time::Instant::now();
+    let (audit, run_id) =
+        crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
+            .await
+            .unwrap_or_default();
+    let listen_for = audit["payload"].as_str().unwrap_or("");
     let mut said = None;
     for (place, model) in order.iter().enumerate() {
         let heard = ears
@@ -509,17 +516,35 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, nobody));
     };
     // What the engine was sure was speech, unless it is something engines invent on silence.
-    let text = crate::vocabulary::judge::kept(app,heard::joined(&said.segments)).await;
+    let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
     let mut answer = heard::answer(&text, &trace, hands_free);
-    if run_id>0 {
-        crate::vocabulary::finish(app.config.data_dir.clone(),run_id,text.clone(),began.elapsed().as_millis() as i64).await;
-        answer["vocab_run_id"]=json!(run_id);
+    if run_id > 0 {
+        crate::vocabulary::finish(
+            app.config.data_dir.clone(),
+            run_id,
+            text.clone(),
+            began.elapsed().as_millis() as i64,
+        )
+        .await;
+        answer["vocab_run_id"] = json!(run_id);
     }
-    if crate::vocabulary::audio::enabled(&app.fleet.directory()){
-        let root=app.config.data_dir.clone();
-        let (trace,model,session)=(trace.clone(),requested.clone(),session.to_string());
-        let now=app.clock.now_ms();
-        let _=tokio::task::spawn_blocking(move||crate::vocabulary::audio::retain(&root,&trace,&audio,&content_type,&session,run_id,&model,now)).await;
+    if crate::vocabulary::audio::enabled(&app.fleet.directory()) {
+        let root = app.config.data_dir.clone();
+        let (trace, model, session) = (trace.clone(), requested.clone(), session.to_string());
+        let now = app.clock.now_ms();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::vocabulary::audio::retain(
+                &root,
+                &trace,
+                &audio,
+                &content_type,
+                &session,
+                run_id,
+                &model,
+                now,
+            )
+        })
+        .await;
     }
     // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
     // the app is told, and sends nothing.
@@ -779,8 +804,10 @@ async fn set_providers(
         return Err(bad(&format!("unknown turn-taking strategy: {strategy}")));
     }
     match named("retain_audio") {
-        Some(Value::Bool(value))=>settings.push(("transcription.retain_audio".into(),value.to_string())),
-        None=>{}
+        Some(Value::Bool(value)) => {
+            settings.push(("transcription.retain_audio".into(), value.to_string()))
+        }
+        None => {}
         Some(_) => return Err(bad("retain_audio must be boolean")),
     }
     match named("long_form_model") {

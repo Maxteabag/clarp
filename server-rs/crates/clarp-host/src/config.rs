@@ -99,7 +99,7 @@ pub struct Config {
     pub transcription_engine: String,
     /// Another address for ElevenLabs Scribe: a stand-in on this machine. Empty: the real one.
     pub scribe_endpoint: String,
-    pub judge_endpoint:String,
+    pub judge_endpoint: String,
     /// The same for Deepgram's engine that hears clips, and for its engine that finds the
     /// ends of turns on a stream of speech, which is a socket on this machine.
     pub nova_endpoint: String,
@@ -427,11 +427,18 @@ impl Config {
                 Err(format!("{variable} {address}: an address on this machine"))
             }
         };
-        let judge_endpoint=std::env::var("CLARP_JUDGE_ENDPOINT").unwrap_or_default();
+        let judge_endpoint = std::env::var("CLARP_JUDGE_ENDPOINT").unwrap_or_default();
         if !judge_endpoint.is_empty() {
-            let uri=judge_endpoint.parse::<axum::http::Uri>().map_err(|_|"invalid judge endpoint")?;
-            let local=uri.authority().and_then(|a|a.as_str().parse::<std::net::SocketAddr>().ok()).is_some_and(|a|a.ip().is_loopback() && a.port()!=0);
-            if uri.scheme_str()!=Some("http") || !local {return Err("CLARP_JUDGE_ENDPOINT needs a loopback HTTP socket address".into());}
+            let uri = judge_endpoint
+                .parse::<axum::http::Uri>()
+                .map_err(|_| "invalid judge endpoint")?;
+            let local = uri
+                .authority()
+                .and_then(|a| a.as_str().parse::<std::net::SocketAddr>().ok())
+                .is_some_and(|a| a.ip().is_loopback() && a.port() != 0);
+            if uri.scheme_str() != Some("http") || !local {
+                return Err("CLARP_JUDGE_ENDPOINT needs a loopback HTTP socket address".into());
+            }
         }
         let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
         let voice_endpoint = |variable: &str| -> Result<String, String> {
