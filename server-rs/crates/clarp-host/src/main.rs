@@ -166,6 +166,11 @@ async fn serve(config: Config) -> Result<(), String> {
                 Some(limited.clone()),
             ))
         });
+    let direct = Arc::new(clarp_host::direct::Direct::new(
+        OwnerFile::new(config.push_keys.clone()),
+        &config.apns_endpoint,
+        clock.clone(),
+    ));
     to_push.run(pusher::Works {
         relay: relay.clone(),
         fleet: fleet.clone(),
@@ -176,11 +181,7 @@ async fn serve(config: Config) -> Result<(), String> {
         secret: config.auth_token.clone(),
         // The key the owner gave for the push service is named in the file he names for
         // it; without that word nothing is handed to the service.
-        direct: Arc::new(clarp_host::direct::Direct::new(
-            OwnerFile::new(config.push_keys.clone()),
-            &config.apns_endpoint,
-            clock.clone(),
-        )),
+        direct: direct.clone(),
         runtime: tokio::runtime::Handle::current(),
     })?;
     let mouth = to_speak.run(clarp_host::voice::Works {
@@ -203,7 +204,7 @@ async fn serve(config: Config) -> Result<(), String> {
         blobs,
         activity: Arc::default(),
         calls: Arc::default(),
-        chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
+        chip: Arc::new(clarp_host::chip::Chip::new(relay, direct, limited)),
         schedules: Arc::default(),
         heartbeat: Arc::default(),
         janitors: Arc::default(),
