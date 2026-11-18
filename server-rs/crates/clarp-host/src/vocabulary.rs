@@ -1,5 +1,5 @@
-//! The vocabulary managed through the app. Database work runs outside the
-//! request runtime; each change commits its pack, terms and assignments together.
+//! Vocabulary administration publishes the complete kernel book through the fleet.
+//! Compiled clip and stream runs are separate records in the kept store.
 use crate::edge::{ApiError, App};
 use axum::{
     Json, Router,
