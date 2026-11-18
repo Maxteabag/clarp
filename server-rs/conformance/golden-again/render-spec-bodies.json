@@ -1,0 +1,540 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "error": {
+     "code": "invalid_object",
+     "message": "A JSON object with unique keys is required.",
+     "path": ""
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a key twice at the top"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "invalid_object",
+     "message": "A JSON object with unique keys is required.",
+     "path": ""
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a key twice in the payload"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "invalid_object",
+     "message": "A JSON object with unique keys is required.",
+     "path": "/spec/elements/topic/props"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a key twice deep in the spec"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "number_form",
+     "message": "Numbers must be integers without a fraction or exponent.",
+     "path": "/catalog_version"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a version written 1.0"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "number_form",
+     "message": "Numbers must be integers without a fraction or exponent.",
+     "path": "/catalog_version"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a version written 1e0"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "number_form",
+     "message": "Numbers must be integers without a fraction or exponent.",
+     "path": "/catalog_version"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a version written -0.0"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "number_form",
+     "message": "Numbers must be integers without a fraction or exponent.",
+     "path": "/catalog_version"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a version written 9007199254740992"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "number_form",
+     "message": "Numbers must be integers without a fraction or exponent.",
+     "path": "/catalog_version"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a version written NaN"
+  },
+  {
+   "body": {
+    "valid": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "a spec in two bytes a sign"
+  },
+  {
+   "body": {
+    "valid": true
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 200,
+   "step": "a spec after many blanks"
+  },
+  {
+   "body": {
+    "error": "json object required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a body that is no object"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "archived_at": null,
+     "artifact_id": "spec-raw",
+     "catalog": "clarp.form",
+     "catalog_sha256": "c1:c23d64120e6fcdeec9979ce3a08d90d3f785dda1129c6c848aba18b5f33af924",
+     "catalog_version": 1,
+     "completed_at": null,
+     "content_omitted": {
+      "bytes": 730,
+      "sha256": "c1:069377b5b374deeaf6de564c9bb78d9cb655a44fd44dc383e7259c6405244f71",
+      "updated_at": "<time>",
+      "version": "build-1"
+     },
+     "created_at": "<time>",
+     "deleted_at": null,
+     "element_count": 6,
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "status": "ready",
+     "summary": "",
+     "title": "Synthetic decision",
+     "type": "render_spec",
+     "updated_at": "<time>",
+     "version": "build-1"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 201,
+   "step": "publish a spec with minus zero"
+  },
+  {
+   "body": {
+    "artifact": {
+     "agent_id": "<id:1>",
+     "agent_name": "Claire",
+     "answer_schema": {
+      "properties": {
+       "answer": {
+        "maxLength": 2000,
+        "type": "string"
+       },
+       "choice": {
+        "enum": [
+         "send",
+         "review"
+        ],
+        "type": "string"
+       },
+       "count": {
+        "type": "integer"
+       },
+       "notify": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "choice"
+      ],
+      "type": "object"
+     },
+     "archived_at": null,
+     "artifact_id": "spec-raw",
+     "catalog": "clarp.form",
+     "catalog_sha256": "c1:c23d64120e6fcdeec9979ce3a08d90d3f785dda1129c6c848aba18b5f33af924",
+     "catalog_version": 1,
+     "completed_at": null,
+     "content_identity": {
+      "bytes": 730,
+      "sha256": "c1:069377b5b374deeaf6de564c9bb78d9cb655a44fd44dc383e7259c6405244f71",
+      "version": "build-1"
+     },
+     "created_at": "<time>",
+     "deleted_at": null,
+     "element_count": 6,
+     "payload_version": 1,
+     "pinned": false,
+     "pinned_at": null,
+     "reference_id": "",
+     "session": "claire",
+     "source_message_id": "",
+     "source_trace_id": "",
+     "spec": {
+      "elements": {
+       "comment": {
+        "children": [],
+        "props": {
+         "label": "Comment",
+         "value": {
+          "$bindState": "/answer"
+         }
+        },
+        "type": "text_field"
+       },
+       "instructions": {
+        "props": {
+         "text": "Synthetic: choose what happens next."
+        },
+        "type": "text"
+       },
+       "notify": {
+        "children": [],
+        "props": {
+         "label": "Notify",
+         "value": {
+          "$bindState": "/notify"
+         }
+        },
+        "type": "toggle"
+       },
+       "root": {
+        "children": [
+         "topic",
+         "instructions",
+         "selection",
+         "comment",
+         "notify"
+        ],
+        "props": {},
+        "type": "stack"
+       },
+       "selection": {
+        "children": [],
+        "props": {
+         "label": "Next step",
+         "options": [
+          {
+           "label": "Send it",
+           "value": "send"
+          },
+          {
+           "label": "Review first",
+           "value": "review"
+          }
+         ],
+         "value": {
+          "$bindState": "/choice"
+         }
+        },
+        "type": "choice"
+       },
+       "topic": {
+        "children": [],
+        "props": {
+         "level": 1,
+         "text": "Synthetic decision"
+        },
+        "type": "heading"
+       }
+      },
+      "root": "root",
+      "state": {
+       "count": 0
+      }
+     },
+     "status": "ready",
+     "submit": {
+      "intent": "submit_decision",
+      "label": "Submit"
+     },
+     "summary": "",
+     "title": "Synthetic decision",
+     "type": "render_spec",
+     "updated_at": "<time>",
+     "version": "build-1"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/artifacts/spec-raw",
+   "status": 200,
+   "step": "the spec with minus zero"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "element_id",
+     "message": "A valid element identifier is required.",
+     "path": "/spec/elements"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "an element whose id is none"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "schema_shape",
+     "message": "The answer schema is invalid here.",
+     "path": "/answer_schema/properties"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a property whose name is none"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "unknown_key",
+     "message": "This key is not allowed here.",
+     "path": ""
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts",
+   "status": 400,
+   "step": "a payload key whose name is none"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "missing_key",
+     "message": "A required key is missing.",
+     "path": "/answers"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/spec-raw/submit",
+   "status": 400,
+   "step": "answers that are nothing"
+  },
+  {
+   "body": {
+    "error": "JSON object required"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/spec-raw/submit",
+   "status": 400,
+   "step": "answers that are no object"
+  },
+  {
+   "body": {
+    "error": {
+     "code": "invalid_object",
+     "message": "A JSON object with unique keys is required.",
+     "path": "/answers/state"
+    }
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/artifacts/spec-raw/submit",
+   "status": 400,
+   "step": "answers with a key twice"
+  },
+  {
+   "body": {
+    "conversation_id": "",
+    "cwd": "<ROOT>/workspace",
+    "delivery_scope": {
+     "agent_id": "<id:1>",
+     "runtime_instance": "<instance>",
+     "runtime_release": "in-process",
+     "server_id": "<id:2>"
+    },
+    "delivery_stop_generation": 0,
+    "file": null,
+    "has_more": false,
+    "includes_automated": true,
+    "latest_revision": 0,
+    "latest_ts": "",
+    "missing": true,
+    "replace_required": false,
+    "turns": []
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/log",
+   "status": 200,
+   "step": "get /log?session=claire"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "render-spec-bodies",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  },
+  {
+   "data": {
+    "agent_id": "<id:1>",
+    "artifact_id": "spec-raw",
+    "event_id": "<eid:artifact-updated#1@21ac3f>",
+    "session": "claire",
+    "type": "artifact-updated"
+   },
+   "event": null,
+   "id": "<eid:artifact-updated#1@21ac3f>"
+  },
+  {
+   "data": {
+    "attention_count": 0,
+    "event_id": "<eid:attention-updated#1@cf004e>",
+    "type": "attention-updated"
+   },
+   "event": null,
+   "id": "<eid:attention-updated#1@cf004e>"
+  }
+ ]
+}
