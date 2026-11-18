@@ -48,6 +48,14 @@ def _apns_config(tmp_path):
     return config.load(cfgfile)
 
 
+def _turn_end(session, persona, agent_id=None, done_ts=0):
+    """What a turn's end does on the Host: its producer classifies it as a User
+    notification and pushes that (state_watcher, transcript_streamer)."""
+    from lib import user_notifications
+    return apns.send_user_notification(user_notifications.classify_completed_turn(
+        agent_id=agent_id or "", session=session or "", persona=persona, done_ts=done_ts))
+
+
 class _FakeResp:
     def __init__(self, status, reason=None, apns_id=""):
         self.status_code = status
@@ -99,7 +107,7 @@ def test_apns_without_key_or_credential_reaches_only_granted_phones():
     assert cfg.apns_transport() == "grant"
     assert cfg.apns_direct_ready() is False
     # With no registered device, a send is a cheap no-op (never raises).
-    assert apns.send_turn_done("sess", "Mike") == {
+    assert _turn_end("sess", "Mike") == {
         "enabled": True, "sent": 0, "failed": 0, "disabled": 0}
 
 
@@ -294,7 +302,7 @@ def test_decision_payload_always_carries_the_sound_even_when_not_interrupting():
 # --------------------------------------------------------------------------
 # sender
 # --------------------------------------------------------------------------
-def test_send_turn_done_delivers_and_prunes_dead_tokens(tmp_path, monkeypatch):
+def test_turn_end_delivers_and_prunes_dead_tokens(tmp_path, monkeypatch):
     from lib import db
     _apns_config(tmp_path)
     apns.reset_jwt_cache()
@@ -321,7 +329,7 @@ def test_send_turn_done_delivers_and_prunes_dead_tokens(tmp_path, monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient(by_token, calls))
 
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 100)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=now + 100)
     assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 1}
     # Both tokens were attempted; the dead one is now pruned.
     assert len(calls) == 2
@@ -358,7 +366,7 @@ def test_send_after_registration_dedup_hits_one_token(tmp_path, monkeypatch):
     monkeypatch.setattr(httpx, "Client",
                         lambda *a, **k: _FakeClient({"newtoken": _FakeResp(200)}, calls))
 
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 100)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=now + 100)
 
     assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 0}
     assert [c["token"] for c in calls] == ["newtoken"]
@@ -436,9 +444,9 @@ def test_send_result_carries_apns_correlation_fields(tmp_path, monkeypatch):
     assert any("apns_id=apple-request-1" in row["detail"] for row in rows)
 
 
-def test_send_turn_done_no_tokens(tmp_path):
+def test_turn_end_no_tokens(tmp_path):
     _apns_config(tmp_path)
-    assert apns.send_turn_done("mike", "Mike") == {
+    assert _turn_end("mike", "Mike") == {
         "enabled": True, "sent": 0, "failed": 0, "disabled": 0}
 
 
@@ -540,7 +548,7 @@ def test_preview_uses_latest_assistant_message(tmp_path, monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient(by_token, calls))
 
-    apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 1)
+    _turn_end("mike", "Mike", "a1", done_ts=now + 1)
     import json as _json
     payload = _json.loads(calls[0]["content"])
     assert payload["aps"]["alert"]["title"] == "Mike"
@@ -567,7 +575,7 @@ def test_no_push_when_no_spoken_message(tmp_path, monkeypatch):
     monkeypatch.setattr(httpx, "Client",
                         lambda *a, **k: _FakeClient({"tok": _FakeResp(200)}, calls))
     monkeypatch.setattr(apns.time, "sleep", lambda *_: None)  # skip ingestion wait
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 100)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=now + 100)
     assert summary == {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
     assert calls == []
 
@@ -598,7 +606,7 @@ def test_text_only_turn_after_spoken_turn_pushes_current_text(tmp_path, monkeypa
                         lambda *a, **k: _FakeClient({"tok": _FakeResp(200)}, calls))
     monkeypatch.setattr(apns.time, "sleep", lambda *_: None)
 
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=t_done)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=t_done)
 
     assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 0}
     import json as _json
@@ -629,7 +637,7 @@ def test_non_user_origin_with_speak_does_not_push(tmp_path, monkeypatch, origin)
     monkeypatch.setattr(httpx, "Client",
                         lambda *a, **k: _FakeClient({"tok": _FakeResp(200)}, calls))
 
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 100)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=now + 100)
 
     assert summary == {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
     assert calls == []
@@ -655,7 +663,7 @@ def test_user_origin_with_speak_pushes_once(tmp_path, monkeypatch):
     monkeypatch.setattr(httpx, "Client",
                         lambda *a, **k: _FakeClient({"tok": _FakeResp(200)}, calls))
 
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 100)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=now + 100)
 
     assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 0}
     assert [c["token"] for c in calls] == ["tok"]
@@ -681,7 +689,7 @@ def test_muted_user_origin_with_speak_does_not_push(tmp_path, monkeypatch):
     monkeypatch.setattr(httpx, "Client",
                         lambda *a, **k: _FakeClient({"tok": _FakeResp(200)}, calls))
 
-    summary = apns.send_turn_done("mike", "Mike", "a1", done_ts=now + 100)
+    summary = _turn_end("mike", "Mike", "a1", done_ts=now + 100)
     row = db.conn().execute("SELECT * FROM user_notifications").fetchone()
 
     assert summary == {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
@@ -711,7 +719,7 @@ def _msg(mid, seq, text, updated_at):
         " VALUES (?,?,?,?,?,?,?)", (mid, "a1", seq, "assistant", text, "[]", updated_at))
 
 
-def test_send_turn_done_waits_for_this_turns_message(tmp_path, monkeypatch):
+def test_turn_end_waits_for_this_turns_message(tmp_path, monkeypatch):
     """End-to-end: the push body waits for THIS turn's reply to ingest (it lands
     during the settle wait, mimicking the transcript streamer racing DONE) rather
     than sending the previous turn's reply."""
@@ -738,7 +746,7 @@ def test_send_turn_done_waits_for_this_turns_message(tmp_path, monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "Client",
                         lambda *a, **k: _FakeClient({"tok": _FakeResp(200)}, calls))
-    apns.send_turn_done("mike", "Mike", "a1", done_ts=t_done)
+    _turn_end("mike", "Mike", "a1", done_ts=t_done)
     import json as _json
     body = _json.loads(calls[0]["content"])["aps"]["alert"]["body"]
     assert body == "fresh reply landed"   # not "previous reply"
@@ -1054,3 +1062,14 @@ def test_notification_avatar_names_only_an_existing_static_portrait(
         assert url == f"https://host.example/static/avatars/{expected}?v={version}"
         assert payload["avatar_url"] == url
         assert (tmp_path / urlsplit(url).path.lstrip("/")).is_file()
+
+
+def test_a_config_that_still_sets_background_sync_loads_as_before(tmp_path):
+    """R64: the silent sync push is gone; a config that still sets the key starts as before, the key ignored."""
+    plain = _apns_config(tmp_path)
+    path = tmp_path / "config.toml"
+    path.write_text(path.read_text().replace("[apns]\n", "[apns]\nbackground_sync = true\n"))
+    config.reset_cache()
+    old = config.load(path)
+    assert "background_sync = true" in path.read_text()
+    assert old == plain and not hasattr(old, "apns_background_sync")

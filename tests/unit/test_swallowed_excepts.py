@@ -35,7 +35,7 @@ BASELINE: dict[str, int] = {
     'lib/agent_ring_live_socket.py': 5,
     'lib/agent_rings.py': 1,
     'lib/agy_transcript.py': 1,
-    'lib/apns.py': 6,
+    'lib/apns.py': 5,
     'lib/artifacts.py': 1,
     'lib/audio_stream.py': 3,
     'lib/backend/opencode.py': 2,

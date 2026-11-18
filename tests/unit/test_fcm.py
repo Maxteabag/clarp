@@ -389,21 +389,6 @@ def test_a_ring_alert_reaches_android_with_its_ring_fields(fcm_host, google, mon
     assert data["category"] == "agent-call" and data["agent_id"] == "a1"
 
 
-def test_background_sync_is_a_normal_priority_collapsible_hint(tmp_path, rsa_key, google):
-    _config(tmp_path, _service_account(tmp_path, rsa_key[1]),
-            extra="")
-    cfgfile = tmp_path / "config.toml"
-    cfgfile.write_text(cfgfile.read_text().replace('mode = "off"\n', 'mode = "off"\nbackground_sync = true\n'))
-    config.reset_cache()
-    config.load(cfgfile)
-    apns._reset_background_budget()
-    _register_android()
-    assert apns.send_background_sync("mike", "a1")["sent"] == 1
-    message = google.send_calls[0]["json"]["message"]
-    assert message["android"] == {"priority": "NORMAL", "collapse_key": "sync-mike"}
-    assert message["data"]["kind"] == "sync" and message["data"]["agent_id"] == "a1"
-
-
 def test_a_long_preview_is_cut_to_fit_and_identifiers_are_kept():
     payload = apns.turn_done_payload("Mike", "s" * 200, "é\"\n" * 5000, notification_id="pn-" + "9" * 60,
                                      server_instance_id="srv_" + "1" * 40)

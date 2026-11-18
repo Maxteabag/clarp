@@ -574,12 +574,6 @@ class Config:
     apns_team_id: str = ""               # Apple Developer Team ID
     apns_bundle_id: str = "com.maxteabag.clarp"
     apns_environment: str = "production"  # "production" (TestFlight/App Store) | "sandbox"
-    # Send a silent (content-available) push when a turn finishes without an
-    # alert push, so a suspended app can sync its cursor before the user opens
-    # it. Budgeted (iOS throttles >2-3/hour). Requires the app to declare the
-    # remote-notification background mode (networking build #2); iOS drops
-    # background pushes for apps without it.
-    apns_background_sync: bool = False
     # How pushes reach Apple: "auto" (default) relays through Audio Central
     # when this Computer holds an Audio Central credential and otherwise
     # signs directly with the .p8 above; "relay" and "direct" force one path;
@@ -1170,7 +1164,6 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         raw_pcm_sample_rate = raw_pcm_sample_rate,
         apns_key_path   = str(apns.get("key_path", "")),
         apns_key_id     = str(apns.get("key_id", "")),
-        apns_background_sync = bool(apns.get("background_sync", False)),
         apns_team_id    = str(apns.get("team_id", "")),
         apns_bundle_id  = str(apns.get("bundle_id", "com.maxteabag.clarp")),
         apns_environment = str(apns.get("environment", "production")).strip().lower(),

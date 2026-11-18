@@ -80,8 +80,7 @@ batch skips the relay instead of waiting out the timeout again.
   after a restart each token is re-bound once. If the relay has dropped a
   binding, the server binds again and retries once.
 - Each push is `POST /v1/push/send` with the same payload direct mode sends
-  (finished-turn alerts, decisions, and silent `background_sync` pushes with
-  `apns-push-type: background` and priority 5). The relay passes Apple's
+  (finished-turn alerts and decisions). The relay passes Apple's
   status and reason back, so dead tokens are disabled exactly as in direct
   mode.
 - The relay caps payloads at 4096 bytes, fixes the topic to the app's bundle
