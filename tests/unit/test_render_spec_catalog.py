@@ -296,3 +296,18 @@ def test_a_failure_after_the_completion_leaves_no_submission_and_the_spec_open(t
     assert con.execute("SELECT status FROM artifacts WHERE artifact_id=?", (ident,)).fetchone()[0] == "ready"
     assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True
     assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True   # the retry's receipt
+
+
+def test_the_owner_functions_refuse_to_run_outside_a_transaction():
+    from lib import artifacts, db, html_forms
+    con = db.conn()
+    assert not con.in_transaction
+    for call in (lambda: artifacts.complete_in(con, "x", now=1, updated_at=1),
+                 lambda: artifacts.replace_render_spec_in(con, "x", title="t", summary="", status="ready",
+                                                          reference="", payload_json="{}", now=1),
+                 lambda: html_forms.record_submission_in(con, submission_id="s", artifact_id="x", version="v",
+                                                         session="s", answers_json="{}", payload_hash="h",
+                                                         prompt="p", created_at=1, synthesize_audio=1)):
+        with pytest.raises(RuntimeError, match="inside the caller's transaction"):
+            call()
+    assert con.execute("SELECT count(*) FROM form_submissions").fetchone()[0] == 0

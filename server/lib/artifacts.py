@@ -774,10 +774,17 @@ def _apply_update(current, data, *, report_payload=False):
     return get(artifact_id) or {}
 
 
+def _require_transaction(con) -> None:
+    """These writes belong to a caller's transaction; called bare they would autocommit alone."""
+    if not con.in_transaction:
+        raise RuntimeError("must run inside the caller's transaction")
+
+
 def replace_render_spec_in(con, artifact_id: str, *, title: str, summary: str, status: str,
                            reference: str, payload_json: str, now: int) -> None:
     """A render spec's whole new revision, written on the caller's connection inside its
     transaction: render_spec_store holds the one writer lock for publish and submit."""
+    _require_transaction(con)
     con.execute("UPDATE artifacts SET title=?,summary=?,status=?,reference_id=?,payload_json=?,"
                 "updated_at=? WHERE artifact_id=?",
                 (title, summary, status, reference, payload_json, now, artifact_id))
@@ -786,6 +793,7 @@ def replace_render_spec_in(con, artifact_id: str, *, title: str, summary: str, s
 def complete_in(con, artifact_id: str, *, now: int, updated_at: int) -> None:
     """Mark an artifact completed on the caller's connection, in the same transaction
     as what completed it (a render spec's one accepted submission)."""
+    _require_transaction(con)
     con.execute("UPDATE artifacts SET status='completed',completed_at=?,updated_at=? WHERE artifact_id=?",
                 (now, updated_at, artifact_id))
 

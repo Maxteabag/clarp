@@ -190,6 +190,8 @@ def record_submission_in(con, *, submission_id: str, artifact_id: str, version: 
                          synthesize_audio: int) -> None:
     """A form submission row, written on the caller's connection inside its transaction
     (a render spec's submission is one transaction with its completion)."""
+    if not con.in_transaction:
+        raise RuntimeError("must run inside the caller's transaction")
     con.execute("INSERT INTO form_submissions(submission_id,artifact_id,version,session,"
                 "answers_json,payload_hash,prompt,created_at,synthesize_audio) VALUES(?,?,?,?,?,?,?,?,?)",
                 (submission_id, artifact_id, version, session, answers_json, payload_hash, prompt,
