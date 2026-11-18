@@ -58,17 +58,20 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
     if shutil.which(binary) is None:
         raise FileNotFoundError(f"{binary} is not on PATH")
     from .launch_paths import existing_workspace_path
-    proc = subprocess.run(
-        cmd,
-        cwd=str(existing_workspace_path(None)),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=max(0.25, settings.timeout_ms / 1000.0),
-        env={**os.environ, **runner.routing_env()},
-        check=False,
-    )
+    from .routing_input import prepared
+    with prepared(runner.id, cmd, prompt) as call:
+        proc = subprocess.run(
+            call.argv,
+            cwd=str(existing_workspace_path(None)),
+            input=call.input,
+            stdin=None if call.input is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(0.25, settings.timeout_ms / 1000.0),
+            env={**os.environ, **runner.routing_env()},
+            check=False,
+        )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or f"{binary} rc={proc.returncode}")[:1000])
     return _extract_json(runner.routing_text(proc.stdout or ""))
