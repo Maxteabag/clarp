@@ -23,16 +23,21 @@ STUB = textwrap.dedent(f"""\
     #!{sys.executable}
     import json, os, sys, time
     argv = sys.argv[1:]
-    record = {{"argv": argv, "stdin": "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()}}
+    # Bytes as they came, read back the way the command line would give them (surrogateescape).
+    raw = b"" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.buffer.read()
+    record = {{"argv": argv, "stdin": raw.decode("utf-8", "surrogateescape")}}
     for flag in ("--prompt-file",):
         if flag in argv:
             path = argv[argv.index(flag) + 1]
             record["file"] = path
-            record["file_text"] = open(path, encoding="utf-8").read()
+            record["file_text"] = open(path, "rb").read().decode("utf-8", "surrogateescape")
             record["file_mode"] = oct(os.stat(os.path.dirname(path)).st_mode & 0o777)
+            record["file_perm"] = oct(os.stat(path).st_mode & 0o777)
     with open(os.environ["STUB_LOG"], "a", encoding="utf-8") as log:
         log.write(json.dumps(record) + "\\n")
     behaviour = os.environ.get("STUB_BEHAVIOUR", "")
+    if behaviour == "slow":
+        time.sleep(0.6)
     if behaviour == "fail":
         sys.exit(3)
     if behaviour == "hang":
@@ -210,3 +215,105 @@ def test_an_isolated_antigravity_question_too_large_is_refused_before_it_starts(
     assert started == []
     janitor_autonomy.model_json(run, "a small question")
     assert started == ["a small question"]
+
+
+
+# ---- PR 437 review follow-up ----------------------------------------------------------------
+
+def test_a_fallback_model_that_answers_after_the_first_poll_still_answers(stub, monkeypatch):
+    """json_call polls every 0.25 s; the stdin it sent with the first poll is not sent again
+    (communicate keeps its first input), or every slower stdin-fed fallback call would fail."""
+    monkeypatch.setenv("STUB_BEHAVIOUR", "slow")
+    schema = {"type": "object", "properties": {"kind": {"type": "string"}}, "required": ["kind"]}
+    for backend in ("claude", "codex"):
+        try:
+            answer = model_fallbacks.json_call({"backend": backend, "model": ""}, "the secret plan", schema)
+        except Exception as exc:
+            pytest.fail(f"{backend}: a slow answer failed: {exc!r}")
+        assert answer["kind"] == "agent_message"
+    assert [call["stdin"].startswith("the secret plan") for call in stub()] == [True, True]
+
+
+def test_the_heartbeat_keepers_question_takes_its_prompt_off_the_command_line(stub, monkeypatch):
+    from lib import janitor_autonomy
+    answer = janitor_autonomy.decision_model({"agent": "the secret plan"}, _janitor_run(monkeypatch, "claude"))
+    assert answer["kind"] == "agent_message"
+    [call] = stub()
+    assert not any("the secret plan" in value for value in call["argv"])
+    assert "the secret plan" in call["stdin"]
+
+
+SCHEMA = {"type": "object", "properties": {"kind": {"type": "string"}}, "required": ["kind"]}
+
+
+@pytest.mark.parametrize("backend", ["claude", "codex", "grok", "muse", "agy", "opencode"])
+def test_a_byte_kept_as_a_surrogate_reaches_the_cli_as_the_command_line_would_carry_it(stub, backend):
+    """A prompt with raw text (here the fallback model's question) may hold a lone surrogate in
+    the surrogateescape range: a byte a text read from the system kept. On main's argv it went
+    through as that byte; on stdin and in the prompt file it goes through the same way."""
+    prompt = "caf\udce9 au lait"
+    try:
+        model_fallbacks.json_call({"backend": backend, "model": ""}, prompt, SCHEMA)
+    except Exception as exc:
+        pytest.fail(f"{backend}: {exc!r}")
+    [call] = stub()
+    carried = call["stdin"] or call.get("file_text") or " ".join(call["argv"])
+    assert prompt in carried
+
+
+def test_a_keepers_question_with_such_a_byte_goes_through_too(stub, monkeypatch):
+    from lib import janitor_autonomy
+    janitor_autonomy.model_json(_janitor_run(monkeypatch, "claude"), "caf\udce9 au lait")
+    [call] = stub()
+    assert call["stdin"] == "caf\udce9 au lait"
+
+
+@pytest.mark.parametrize("backend", ["claude", "grok", "agy"])
+def test_a_surrogate_no_byte_stands_for_is_one_content_free_failure(stub, backend):
+    """Outside that range no CLI can be handed the prompt, as on main: one failure the fallback
+    chain takes as the provider's, its words naming the backend only, before anything runs."""
+    with pytest.raises(routing_input.PromptNotEncodable) as refused:
+        model_fallbacks.json_call({"backend": backend, "model": ""}, "secret \ud800 words", SCHEMA)
+    assert str(refused.value) == f"prompt cannot be encoded for {backend}"
+    assert model_fallbacks._as_provider_failure(refused.value) is not None
+    assert stub() == []
+
+
+def test_the_prompt_file_is_the_owners_alone(stub):
+    import os
+    previous = os.umask(0o022)      # an ordinary umask: 0600 must come from the code, not the umask
+    try:
+        ask("grok")
+    finally:
+        os.umask(previous)
+    [call] = stub()
+    assert call["file_perm"] == "0o600" and call["file_mode"] == "0o700"
+
+
+def test_the_prompt_file_is_never_written_through_a_name_already_there(tmp_path, monkeypatch):
+    """O_EXCL: a prompt.txt already in the directory (here a link to elsewhere) is not opened."""
+    import tempfile
+    target = tmp_path / "elsewhere.txt"
+    target.write_text("untouched")
+    planted = tmp_path / "planted"
+    planted.mkdir()
+    (planted / "prompt.txt").symlink_to(target)
+    monkeypatch.setattr(tempfile, "mkdtemp", lambda prefix="": str(planted))
+    with pytest.raises(FileExistsError):
+        with routing_input.prepared("grok", ["grok", "-p", "the secret plan"], "the secret plan"):
+            pass
+    assert target.read_text() == "untouched"
+
+
+def test_a_left_behind_prompt_directory_is_swept_once_no_call_can_still_use_it(tmp_path, monkeypatch):
+    import os
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    old, young, other = tmp_path / "clarp-routing-old", tmp_path / "clarp-routing-young", tmp_path / "keep-me"
+    for path in (old, young, other):
+        path.mkdir()
+        (path / "prompt.txt").write_text("x")
+    os.utime(old, (1_000, 1_000))
+    os.utime(other, (1_000, 1_000))
+    assert routing_input.sweep_stale(now=1_000 + 3601) == 1
+    assert not old.exists() and young.exists() and other.exists()
